@@ -1,0 +1,1059 @@
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import '../../models/tile_design.dart';
+import '../../services/data_service.dart';
+import '../../widgets/tile_card.dart';
+import 'stockist_group_screen.dart' show stockistGroups;
+
+const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
+const _filterSurfaces   = ['Matt', 'Glossy', 'Satin', 'Rustic', 'Polished', 'Lappato'];
+const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
+const _filterQualities  = ['Premium', 'Standard'];
+const _filterStockTypes = ['One Time', 'Regular', 'Both'];
+
+const _qualityMeta = {
+  'Premium': (icon: Icons.star_rounded,      bg: Color(0xFFFFF8E1), fg: Color(0xFFF9A825)),
+  'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
+  'Both':     (icon: Icons.layers_outlined,   bg: Color(0xFFE8F5E9), fg: Color(0xFF2E7D32)),
+};
+
+const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+  @override State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final DataService _service = MockDataService();
+  List<TileDesign> _designs = [];
+  bool _loading = true;
+
+  Set<String> _selectedSizes = {};
+  Set<String> _selectedSurfaces = {};
+  Set<String> _selectedColours = {};
+  Set<String> _selectedQualities = {};
+  String _stockType = 'Both';
+  final _minQtyCtrl = TextEditingController();
+  final _maxQtyCtrl = TextEditingController();
+  int _activeGroupIndex = -1;
+
+  final _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+  bool _searchActive = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _minQtyCtrl.dispose();
+    _maxQtyCtrl.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _closeSearch() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    _searchCtrl.clear();
+    setState(() {
+      _searchQuery = '';
+      _searchActive = false;
+    });
+  }
+
+  Future<void> _load() async {
+    final designs = await _service.getAllDesigns();
+    setState(() {
+      _designs = designs;
+      _loading = false;
+    });
+  }
+
+  List<TileDesign> get _filtered {
+    var result = _designs;
+    if (_searchQuery.isNotEmpty) {
+      final q = _searchQuery.toLowerCase();
+      result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
+    }
+    if (_activeGroupIndex >= 0) {
+      final groupIds = stockistGroups[_activeGroupIndex].stockistIds;
+      result = result.where((d) => groupIds.contains(d.stockistId)).toList();
+    }
+    if (_selectedQualities.isNotEmpty) {
+      result = result.where((d) => _selectedQualities.contains(d.quality)).toList();
+    }
+    if (_selectedSizes.isNotEmpty) {
+      result = result.where((d) => _selectedSizes.contains(d.size)).toList();
+    }
+    if (_selectedSurfaces.isNotEmpty) {
+      result = result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
+    }
+    if (_selectedColours.isNotEmpty) {
+      result = result.where((d) => _selectedColours.contains(d.colour)).toList();
+    }
+    if (_stockType != 'Both') {
+      result = result.where((d) => d.stockType == _stockType).toList();
+    }
+    final minQty = int.tryParse(_minQtyCtrl.text);
+    final maxQty = int.tryParse(_maxQtyCtrl.text);
+    if (minQty != null) result = result.where((d) => d.boxQuantity >= minQty).toList();
+    if (maxQty != null) result = result.where((d) => d.boxQuantity <= maxQty).toList();
+    result.sort((a, b) => b.boxQuantity.compareTo(a.boxQuantity));
+    return result;
+  }
+
+  int get _filterCount {
+    int c = 0;
+    if (_selectedSizes.isNotEmpty) c++;
+    if (_selectedSurfaces.isNotEmpty) c++;
+    if (_selectedColours.isNotEmpty) c++;
+    if (_selectedQualities.isNotEmpty) c++;
+    if (_stockType != 'Both') c++;
+    if (_minQtyCtrl.text.isNotEmpty) c++;
+    if (_maxQtyCtrl.text.isNotEmpty) c++;
+    return c;
+  }
+
+  void _showFilterSheet() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    var localSizes     = Set<String>.from(_selectedSizes);
+    var localSurfaces  = Set<String>.from(_selectedSurfaces);
+    var localColours   = Set<String>.from(_selectedColours);
+    var localQualities = Set<String>.from(_selectedQualities);
+    var localStockType = _stockType;
+    final localMinCtrl = TextEditingController(text: _minQtyCtrl.text);
+    final localMaxCtrl = TextEditingController(text: _maxQtyCtrl.text);
+    final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
+    showModalBottomSheet<bool>(
+      context: context,
+      enableDrag: false,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          Widget sectionTitle(String t) => Padding(
+            padding: const EdgeInsets.fromLTRB(0, 14, 0, 8),
+            child: Text(t,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          );
+
+          Widget filterChip(String label, bool sel, VoidCallback onTap) =>
+              GestureDetector(
+                onTap: () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  onTap();
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: sel ? const Color(0xFF1B4F72) : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: sel
+                            ? const Color(0xFF1B4F72)
+                            : Colors.grey.shade400),
+                  ),
+                  child: Text(label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: sel ? Colors.white : Colors.grey.shade700,
+                      )),
+                ),
+              );
+
+          return SizedBox(
+            height: sheetHeight,
+            child: Column(
+              children: [
+                // Drag handle
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                // Header row
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                  child: Row(
+                    children: [
+                      const Text('Filter Designs',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => setSheet(() {
+                          localSizes.clear();
+                          localSurfaces.clear();
+                          localColours.clear();
+                          localQualities.clear();
+                          localStockType = 'Both';
+                          localMinCtrl.clear();
+                          localMaxCtrl.clear();
+                        }),
+                        child: const Text('Reset all',
+                            style: TextStyle(
+                                color: Colors.red, fontSize: 13)),
+                      ),
+                      const SizedBox(width: 4),
+                      ElevatedButton(
+                        onPressed: () {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          Navigator.of(ctx).pop(true);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1B4F72),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text('Apply',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: Colors.grey.shade200),
+                // Scrollable filter content
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    children: [
+                      sectionTitle('Qty (boxes)'),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: localMinCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                hintText: 'Min',
+                                isDense: true,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 10),
+                                border: OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: localMaxCtrl,
+                              keyboardType: TextInputType.number,
+                              decoration: InputDecoration(
+                                hintText: 'Max',
+                                isDense: true,
+                                contentPadding:
+                                    const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 10),
+                                border: OutlineInputBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      sectionTitle('Size'),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _filterSizes
+                            .map((s) => filterChip(
+                                  s,
+                                  localSizes.contains(s),
+                                  () => setSheet(() {
+                                    if (localSizes.contains(s)) {
+                                      localSizes.remove(s);
+                                    } else {
+                                      localSizes.add(s);
+                                    }
+                                  }),
+                                ))
+                            .toList(),
+                      ),
+                      sectionTitle('Finish'),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _filterSurfaces
+                            .map((s) => filterChip(
+                                  s,
+                                  localSurfaces.contains(s),
+                                  () => setSheet(() {
+                                    if (localSurfaces.contains(s)) {
+                                      localSurfaces.remove(s);
+                                    } else {
+                                      localSurfaces.add(s);
+                                    }
+                                  }),
+                                ))
+                            .toList(),
+                      ),
+                      sectionTitle('Colour'),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _filterColours
+                            .map((c) => filterChip(
+                                  c,
+                                  localColours.contains(c),
+                                  () => setSheet(() {
+                                    if (localColours.contains(c)) {
+                                      localColours.remove(c);
+                                    } else {
+                                      localColours.add(c);
+                                    }
+                                  }),
+                                ))
+                            .toList(),
+                      ),
+                      sectionTitle('Quality'),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _filterQualities
+                            .map((q) => filterChip(
+                                  q,
+                                  localQualities.contains(q),
+                                  () => setSheet(() {
+                                    if (localQualities.contains(q)) {
+                                      localQualities.remove(q);
+                                    } else {
+                                      localQualities.add(q);
+                                    }
+                                  }),
+                                ))
+                            .toList(),
+                      ),
+                      sectionTitle('Stock Type'),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _filterStockTypes
+                            .map((t) => filterChip(
+                                  t,
+                                  localStockType == t,
+                                  () => setSheet(() => localStockType = t),
+                                ))
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    ).then((applied) {
+      if (applied == true && mounted) {
+        _minQtyCtrl.text = localMinCtrl.text;
+        _maxQtyCtrl.text = localMaxCtrl.text;
+        setState(() {
+          _selectedSizes     = Set<String>.from(localSizes);
+          _selectedSurfaces  = Set<String>.from(localSurfaces);
+          _selectedColours   = Set<String>.from(localColours);
+          _selectedQualities = Set<String>.from(localQualities);
+          _stockType         = localStockType;
+        });
+      }
+      localMinCtrl.dispose();
+      localMaxCtrl.dispose();
+    });
+  }
+
+  // ── Group filter row ──────────────────────────────────────────────────────
+
+  Widget _groupChip(String label, bool active, VoidCallback? onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: active
+              ? const Color(0xFF1B4F72)
+              : onTap == null
+                  ? Colors.grey.shade50
+                  : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: active
+                ? const Color(0xFF1B4F72)
+                : onTap == null
+                    ? Colors.grey.shade200
+                    : Colors.grey.shade400,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: active
+                ? Colors.white
+                : onTap == null
+                    ? Colors.grey.shade400
+                    : Colors.grey.shade700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupRow() {
+    final chipsRow = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: Row(
+        children: [
+          Text(
+            '${_filtered.length}',
+            style: const TextStyle(
+              color: Color(0xFF1B4F72),
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Container(
+            width: 1,
+            height: 16,
+            margin: const EdgeInsets.symmetric(horizontal: 8),
+            color: Colors.grey.shade300,
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _groupChip(
+                    'All',
+                    _activeGroupIndex == -1,
+                    () => setState(() => _activeGroupIndex = -1),
+                  ),
+                  const SizedBox(width: 6),
+                  for (int i = 0; i < stockistGroups.length; i++) ...[
+                    _groupChip(
+                      stockistGroups[i].stockistIds.isEmpty
+                          ? stockistGroups[i].name
+                          : '${stockistGroups[i].name} (${stockistGroups[i].stockistIds.length})',
+                      _activeGroupIndex == i,
+                      stockistGroups[i].stockistIds.isEmpty
+                          ? null
+                          : () => setState(() => _activeGroupIndex = i),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: () => setState(() => _searchActive = !_searchActive),
+            child: Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: _searchActive
+                    ? const Color(0xFF1565C0)
+                    : const Color(0xFFE3F2FD),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF1565C0), width: 1),
+              ),
+              child: Icon(
+                Icons.search,
+                size: 16,
+                color: _searchActive ? Colors.white : const Color(0xFF1565C0),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!_searchActive) return chipsRow;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        chipsRow,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchCtrl,
+                  autofocus: true,
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                  onSubmitted: (_) => _closeSearch(),
+                  decoration: InputDecoration(
+                    hintText: 'Search design name...',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: _closeSearch,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child:
+                      const Icon(Icons.close, size: 20, color: Colors.grey),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Design detail modal ───────────────────────────────────────────────────
+
+  void _openDesign(int startIndex) {
+    final list = _filtered;
+    final sheetHeight = MediaQuery.sizeOf(context).height * 0.70;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        int idx = startIndex;
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            final d = list[idx];
+            final imageUrl = d.faceImageUrls.isNotEmpty
+                ? d.faceImageUrls.first
+                : 'https://picsum.photos/seed/${d.id}/400/400';
+
+            return Container(
+              height: sheetHeight,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius:
+                    BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Drag handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  // Image
+                  SizedBox(
+                    height: 200,
+                    width: double.infinity,
+                    child: CachedNetworkImage(
+                      imageUrl: imageUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) =>
+                          Container(color: Colors.grey[200]),
+                      errorWidget: (_, __, ___) => Container(
+                        color: Colors.grey[200],
+                        child: const Icon(Icons.image_not_supported,
+                            size: 48),
+                      ),
+                    ),
+                  ),
+                  // Details
+                  Expanded(
+                    child: Padding(
+                      padding:
+                          const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  d.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '${idx + 1} / ${list.length}',
+                                style: const TextStyle(
+                                    color: Colors.grey, fontSize: 12),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '${d.boxQuantity} boxes',
+                                style: const TextStyle(
+                                  color: Color(0xFF1B4F72),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              _infoChip(d.size.replaceAll(' mm', '')),
+                              _infoChip(d.surfaceType),
+                              _infoChip(d.quality),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              GestureDetector(
+                                onTap: () {
+                                  final stockistId = d.stockistId;
+                                  Navigator.of(ctx).pop();
+                                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                                    if (mounted) context.push('/stockist/$stockistId/portfolio');
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 7),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1B4F72)
+                                        .withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: const Color(0xFF1B4F72)
+                                            .withValues(alpha: 0.25)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.storefront_outlined,
+                                          size: 14,
+                                          color: Color(0xFF1B4F72)),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Stockist ID: ${d.stockistId}',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF1B4F72),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Icon(Icons.arrow_forward_ios,
+                                          size: 12,
+                                          color: Color(0xFF1B4F72)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              ...List.generate(stockistGroups.length, (i) {
+                                final color = _groupColors[i % _groupColors.length];
+                                final inGroup = stockistGroups[i].stockistIds
+                                    .contains(d.stockistId);
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 5),
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      if (inGroup) {
+                                        stockistGroups[i].stockistIds.remove(d.stockistId);
+                                      } else {
+                                        stockistGroups[i].stockistIds.add(d.stockistId);
+                                      }
+                                      setSheet(() {});
+                                      setState(() {});
+                                    },
+                                    child: Tooltip(
+                                      message: stockistGroups[i].name,
+                                      child: Container(
+                                        width: 28,
+                                        height: 28,
+                                        decoration: BoxDecoration(
+                                          color: inGroup
+                                              ? color
+                                              : color.withValues(alpha: 0.1),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                              color: color, width: 1.5),
+                                        ),
+                                        child: Center(
+                                          child: Text(
+                                            '${i + 1}',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: inGroup
+                                                  ? Colors.white
+                                                  : color,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: idx > 0
+                                      ? () => setSheet(() => idx--)
+                                      : null,
+                                  icon: const Icon(Icons.arrow_back_ios,
+                                      size: 14),
+                                  label: const Text('Prev'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor:
+                                        const Color(0xFF1B4F72),
+                                    side: const BorderSide(
+                                        color: Color(0xFF1B4F72)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: idx < list.length - 1
+                                      ? () => setSheet(() => idx++)
+                                      : null,
+                                  icon: const Icon(
+                                      Icons.arrow_forward_ios,
+                                      size: 14),
+                                  label: const Text('Next'),
+                                  iconAlignment: IconAlignment.end,
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor:
+                                        const Color(0xFF1B4F72),
+                                    side: const BorderSide(
+                                        color: Color(0xFF1B4F72)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _infoChip(String label) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B4F72).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+              color: const Color(0xFF1B4F72).withValues(alpha: 0.25)),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: Color(0xFF1B4F72),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      );
+
+  // ── Nav button (top bar) ──────────────────────────────────────────────────
+
+  Widget _topNavBtn(BuildContext context, String label, IconData icon,
+      VoidCallback? onTap, {bool active = false}) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          decoration: BoxDecoration(
+            color: active ? Colors.white : Colors.white.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14,
+                  color: active ? const Color(0xFF1B4F72) : Colors.white),
+              const SizedBox(width: 5),
+              Text(label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: active ? const Color(0xFF1B4F72) : Colors.white,
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final fc = _filterCount;
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go('/home'),
+        ),
+        title: const Text('All Designs'),
+        actions: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_outlined),
+                onPressed: () {},
+              ),
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Text('3',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => context.go('/login'),
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(46),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: Row(
+              children: [
+                _topNavBtn(context, 'Manage Group', Icons.group_outlined,
+                    () => context.push('/stockist-groups')),
+                const SizedBox(width: 8),
+                _topNavBtn(context, 'Stock', Icons.inventory_2_outlined,
+                    () => context.go('/home')),
+                const SizedBox(width: 8),
+                _topNavBtn(context, 'All Design', Icons.grid_view_rounded,
+                    null, active: true),
+              ],
+            ),
+          ),
+        ),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                // Row 1: quality chips + filter button + clear chip
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: Row(
+                    children: [
+                      ..._filterQualities.map((q) {
+                        final m = _qualityMeta[q]!;
+                        final sel = _selectedQualities.contains(q);
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () => setState(() {
+                              if (sel) { _selectedQualities.remove(q); } else { _selectedQualities.add(q); }
+                            }),
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 6),
+                              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                              decoration: BoxDecoration(
+                                color: sel ? m.fg : m.bg,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: m.fg, width: sel ? 2 : 1),
+                                boxShadow: sel
+                                    ? [BoxShadow(color: m.fg.withValues(alpha: 0.22), blurRadius: 4, offset: const Offset(0, 2))]
+                                    : [],
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(m.icon, size: 12, color: sel ? Colors.white : m.fg),
+                                  const SizedBox(width: 3),
+                                  Text(q, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: sel ? Colors.white : m.fg)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+                      Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _showFilterSheet,
+                            icon: const Icon(Icons.tune, size: 16),
+                            label: const Text('Filter'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF1B4F72),
+                              side: BorderSide(
+                                color: fc > 0
+                                    ? const Color(0xFF1B4F72)
+                                    : Colors.grey.shade400,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 7),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                          if (fc > 0)
+                            Positioned(
+                              top: -6,
+                              right: -6,
+                              child: Container(
+                                width: 18,
+                                height: 18,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF1B4F72),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '$fc',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (fc > 0) ...[
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => setState(() {
+                            _selectedSizes.clear();
+                            _selectedSurfaces.clear();
+                            _selectedColours.clear();
+                            _selectedQualities = {};
+                            _stockType = 'Both';
+                            _minQtyCtrl.clear();
+                            _maxQtyCtrl.clear();
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.red.shade300),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.close,
+                                    size: 13, color: Colors.red.shade700),
+                                const SizedBox(width: 4),
+                                Text('Clear',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.red.shade700)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                _buildGroupRow(),
+                Expanded(
+                  child: _filtered.isEmpty
+                      ? const Center(
+                          child: Text('No designs found',
+                              style: TextStyle(color: Colors.grey)))
+                      : MasonryGridView.count(
+                          padding:
+                              const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          itemCount: _filtered.length,
+                          itemBuilder: (_, i) => TileCard(
+                            design: _filtered[i],
+                            onTap: () => _openDesign(i),
+                            onStockistTap: () => context.push(
+                              '/stockist/${_filtered[i].stockistId}/portfolio',
+                              extra: _filtered[i].id,
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+    );
+  }
+}
