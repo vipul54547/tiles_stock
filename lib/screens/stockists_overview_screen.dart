@@ -209,6 +209,11 @@ class _State extends State<StockistsOverviewScreen> {
       final groupIds = stockistGroups[_activeGroupIndex].stockistIds;
       result = result.where((d) => groupIds.contains(d.stockist.id)).toList();
     }
+    if (_selectedQualities.isNotEmpty) {
+      result = result
+          .where((d) => d.designs.any((t) => _selectedQualities.contains(t.quality)))
+          .toList();
+    }
     if (_selectedSizes.isNotEmpty) {
       result = result
           .where((d) => d.designs.any((t) => _selectedSizes.contains(t.size)))
