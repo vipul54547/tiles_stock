@@ -379,8 +379,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _stockType         = localStockType;
         });
       }
-      localMinCtrl.dispose();
-      localMaxCtrl.dispose();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        localMinCtrl.dispose();
+        localMaxCtrl.dispose();
+      });
     });
   }
 

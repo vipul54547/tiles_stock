@@ -559,8 +559,10 @@ class _State extends State<StockistPortfolioScreen> {
           },
         ),
     ).then((_) {
-      localMinCtrl.dispose();
-      localMaxCtrl.dispose();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        localMinCtrl.dispose();
+        localMaxCtrl.dispose();
+      });
     });
   }
 
