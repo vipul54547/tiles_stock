@@ -50,8 +50,9 @@ class _State extends State<StockistsOverviewScreen> {
   bool _viewDesigns = false;
 
   final _searchCtrl = TextEditingController();
-  String _searchQuery = '';
-  bool _searchActive = false;
+  String _searchQuery  = '';
+  bool _searchActive   = false;
+  bool _searchByDesign = true; // true = design name, false = stockist
 
   // Mock notification count
   int _notificationCount = 3;
@@ -129,8 +130,9 @@ class _State extends State<StockistsOverviewScreen> {
     _dismissKeyboard();
     _searchCtrl.clear();
     setState(() {
-      _searchQuery = '';
-      _searchActive = false;
+      _searchQuery    = '';
+      _searchActive   = false;
+      _searchByDesign = true;
     });
   }
 
@@ -260,7 +262,17 @@ class _State extends State<StockistsOverviewScreen> {
     var result = _allDesigns;
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
+      if (_searchByDesign) {
+        result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
+      } else {
+        final matchingIds = _allData
+            .where((sd) =>
+                sd.stockist.name.toLowerCase().contains(q) ||
+                sd.stockist.id.toLowerCase().contains(q))
+            .map((sd) => sd.stockist.id)
+            .toSet();
+        result = result.where((d) => matchingIds.contains(d.stockistId)).toList();
+      }
     }
     if (_activeGroupIndex >= 0) {
       final groupIds = stockistGroups[_activeGroupIndex].stockistIds;
@@ -1250,6 +1262,42 @@ class _State extends State<StockistsOverviewScreen> {
 
   // ── Group filter row ─────────────────────────────────────────────────────
 
+  Widget _searchToggleChip({
+    required String label,
+    required IconData icon,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFF1B4F72) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: active ? const Color(0xFF1B4F72) : Colors.grey.shade400,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 13,
+                color: active ? Colors.white : Colors.grey.shade600),
+            const SizedBox(width: 5),
+            Text(label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: active ? Colors.white : Colors.grey.shade700,
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _groupChip(String label, bool active, VoidCallback? onTap) {
     return GestureDetector(
       onTap: onTap,
@@ -1363,39 +1411,89 @@ class _State extends State<StockistsOverviewScreen> {
 
   Widget _buildQualityRow() {
     if (_searchActive) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                onChanged: (v) => setState(() => _searchQuery = v),
-                onSubmitted: (_) => _closeSearch(),
-                decoration: InputDecoration(
-                  hintText: _viewDesigns ? 'Search design name...' : 'Search stockist name or ID...',
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+      final hint = !_viewDesigns || !_searchByDesign
+          ? 'Search stockist name or ID...'
+          : 'Search design name...';
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Search field row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    onChanged: (v) => setState(() => _searchQuery = v),
+                    onSubmitted: (_) => _closeSearch(),
+                    decoration: InputDecoration(
+                      hintText: hint,
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      isDense: true,
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
                 ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _closeSearch,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child:
+                        const Icon(Icons.close, size: 20, color: Colors.grey),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Toggle chips — only in All Design view
+          if (_viewDesigns)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              child: Row(
+                children: [
+                  _searchToggleChip(
+                    label: 'Design Name',
+                    icon: Icons.grid_view_rounded,
+                    active: _searchByDesign,
+                    onTap: () {
+                      if (!_searchByDesign) {
+                        _searchCtrl.clear();
+                        setState(() {
+                          _searchByDesign = true;
+                          _searchQuery    = '';
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  _searchToggleChip(
+                    label: 'Stockist',
+                    icon: Icons.storefront_outlined,
+                    active: !_searchByDesign,
+                    onTap: () {
+                      if (_searchByDesign) {
+                        _searchCtrl.clear();
+                        setState(() {
+                          _searchByDesign = false;
+                          _searchQuery    = '';
+                        });
+                      }
+                    },
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: _closeSearch,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade200,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.close, size: 20, color: Colors.grey),
-              ),
-            ),
-          ],
-        ),
+        ],
       );
     }
 
