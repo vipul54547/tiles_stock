@@ -6,6 +6,7 @@ import '../../models/tile_design.dart';
 import '../../services/data_service.dart';
 import '../../widgets/tile_card.dart';
 import 'stockist_group_screen.dart' show stockistGroups;
+import '../../models/choice_state.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
 const _filterSurfaces   = ['Matt', 'Glossy', 'Satin', 'Rustic', 'Polished', 'Lappato'];
@@ -122,16 +123,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showFilterSheet() {
     FocusManager.instance.primaryFocus?.unfocus();
+    // Save current qty values so we can restore them if the user cancels.
+    final savedMin = _minQtyCtrl.text;
+    final savedMax = _maxQtyCtrl.text;
     var localSizes     = Set<String>.from(_selectedSizes);
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
     var localColours   = Set<String>.from(_selectedColours);
-    var localQualities = Set<String>.from(_selectedQualities);
     var localStockType = _stockType;
-    final localMinCtrl = TextEditingController(text: _minQtyCtrl.text);
-    final localMaxCtrl = TextEditingController(text: _maxQtyCtrl.text);
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     showModalBottomSheet<bool>(
       context: context,
+      isScrollControlled: true,
       enableDrag: false,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -200,10 +202,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           localSizes.clear();
                           localSurfaces.clear();
                           localColours.clear();
-                          localQualities.clear();
                           localStockType = 'Both';
-                          localMinCtrl.clear();
-                          localMaxCtrl.clear();
+                          _minQtyCtrl.clear();
+                          _maxQtyCtrl.clear();
                         }),
                         child: const Text('Reset all',
                             style: TextStyle(
@@ -242,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Expanded(
                             child: TextField(
-                              controller: localMinCtrl,
+                              controller: _minQtyCtrl,
                               keyboardType: TextInputType.number,
                               decoration: InputDecoration(
                                 hintText: 'Min',
@@ -259,7 +260,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: TextField(
-                              controller: localMaxCtrl,
+                              controller: _maxQtyCtrl,
                               keyboardType: TextInputType.number,
                               decoration: InputDecoration(
                                 hintText: 'Max',
@@ -275,7 +276,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ],
                       ),
-                      sectionTitle('Size'),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -293,7 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ))
                             .toList(),
                       ),
-                      sectionTitle('Finish'),
+                      const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -311,7 +311,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ))
                             .toList(),
                       ),
-                      sectionTitle('Colour'),
+                      const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -324,24 +324,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                       localColours.remove(c);
                                     } else {
                                       localColours.add(c);
-                                    }
-                                  }),
-                                ))
-                            .toList(),
-                      ),
-                      sectionTitle('Quality'),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _filterQualities
-                            .map((q) => filterChip(
-                                  q,
-                                  localQualities.contains(q),
-                                  () => setSheet(() {
-                                    if (localQualities.contains(q)) {
-                                      localQualities.remove(q);
-                                    } else {
-                                      localQualities.add(q);
                                     }
                                   }),
                                 ))
@@ -368,21 +350,19 @@ class _HomeScreenState extends State<HomeScreen> {
         },
       ),
     ).then((applied) {
-      if (applied == true && mounted) {
-        _minQtyCtrl.text = localMinCtrl.text;
-        _maxQtyCtrl.text = localMaxCtrl.text;
+      if (!mounted) return;
+      if (applied == true) {
         setState(() {
           _selectedSizes     = Set<String>.from(localSizes);
           _selectedSurfaces  = Set<String>.from(localSurfaces);
           _selectedColours   = Set<String>.from(localColours);
-          _selectedQualities = Set<String>.from(localQualities);
           _stockType         = localStockType;
         });
+      } else {
+        // User dismissed without applying — restore qty values.
+        _minQtyCtrl.text = savedMin;
+        _maxQtyCtrl.text = savedMax;
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        localMinCtrl.dispose();
-        localMaxCtrl.dispose();
-      });
     });
   }
 
@@ -1047,6 +1027,17 @@ class _HomeScreenState extends State<HomeScreen> {
                           itemBuilder: (_, i) => TileCard(
                             design: _filtered[i],
                             onTap: () => _openDesign(i),
+                            isChosen: myChoiceQuantities
+                                .containsKey(_filtered[i].id),
+                            onChoiceTap: () => setState(() {
+                              final id = _filtered[i].id;
+                              if (myChoiceQuantities.containsKey(id)) {
+                                myChoiceQuantities.remove(id);
+                              } else {
+                                myChoiceQuantities[id] =
+                                    _filtered[i].boxQuantity;
+                              }
+                            }),
                             onStockistTap: () => context.push(
                               '/stockist/${_filtered[i].stockistId}/portfolio',
                               extra: _filtered[i].id,

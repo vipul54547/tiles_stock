@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:go_router/go_router.dart';
+import '../models/choice_state.dart';
 
 
 
@@ -31,9 +32,15 @@ class _LoginScreenState extends State<LoginScreen> {
     await Future.delayed(const Duration(seconds: 1));
 
     if (mounted) {
-      if (_emailCtrl.text.contains('stockist')) {
+      final email = _emailCtrl.text.trim().toLowerCase();
+      final mappedId = stockistTestAccounts[email];
+      if (mappedId != null) {
+        currentStockistId = mappedId;
         context.go('/stockist/dashboard');
-      } else if (_emailCtrl.text.contains('admin')) {
+      } else if (email.contains('stockist')) {
+        currentStockistId = '001';
+        context.go('/stockist/dashboard');
+      } else if (email.contains('admin')) {
         context.go('/admin');
       } else {
         context.go('/home');

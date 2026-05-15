@@ -26,10 +26,17 @@ class TileCard extends StatelessWidget {
   final VoidCallback onTap;
 
   final VoidCallback? onStockistTap;
+  final bool isChosen;
+  final VoidCallback? onChoiceTap;
 
-
-
-  const TileCard({super.key, required this.design, required this.onTap, this.onStockistTap});
+  const TileCard({
+    super.key,
+    required this.design,
+    required this.onTap,
+    this.onStockistTap,
+    this.isChosen = false,
+    this.onChoiceTap,
+  });
 
 
 
@@ -53,34 +60,63 @@ class TileCard extends StatelessWidget {
 
           children: [
 
-            AspectRatio(
+            Stack(
+              children: [
+                AspectRatio(
 
-              aspectRatio: _aspectRatioFromSize(design.size),
+                  aspectRatio: _aspectRatioFromSize(design.size),
 
-              child: CachedNetworkImage(
+                  child: CachedNetworkImage(
 
-                imageUrl: design.faceImageUrls.isNotEmpty
+                    imageUrl: design.faceImageUrls.isNotEmpty
 
-                    ? design.faceImageUrls.first
+                        ? design.faceImageUrls.first
 
-                    : 'https://picsum.photos/seed/${design.id}/${design.size.contains('1200') ? '800/400' : design.size.contains('300') ? '400/800' : '400/400'}',
+                        : 'https://picsum.photos/seed/${design.id}/${design.size.contains('1200') ? '800/400' : design.size.contains('300') ? '400/800' : '400/400'}',
 
-                fit: BoxFit.cover,
+                    fit: BoxFit.cover,
 
-                width: double.infinity,
+                    width: double.infinity,
 
-                placeholder: (_, __) => Container(color: Colors.grey[200]),
+                    placeholder: (_, __) => Container(color: Colors.grey[200]),
 
-                errorWidget: (_, __, ___) => Container(
+                    errorWidget: (_, __, ___) => Container(
 
-                  color: Colors.grey[200],
+                      color: Colors.grey[200],
 
-                  child: const Icon(Icons.image_not_supported),
+                      child: const Icon(Icons.image_not_supported),
+
+                    ),
+
+                  ),
 
                 ),
-
-              ),
-
+                if (onChoiceTap != null)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onChoiceTap,
+                      child: Container(
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                          color: isChosen
+                              ? const Color(0xFF1B4F72)
+                              : Colors.black.withValues(alpha: 0.35),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          isChosen
+                              ? Icons.bookmark_rounded
+                              : Icons.bookmark_outline_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
 
             Padding(

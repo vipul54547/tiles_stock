@@ -26,6 +26,7 @@ import 'screens/stockist/received_inquiries_screen.dart';
 import 'screens/admin/admin_panel_screen.dart';
 import 'screens/stockists_overview_screen.dart';
 import 'screens/end_user/stockist_group_screen.dart';
+import 'screens/end_user/my_choice_screen.dart';
 
 
 
@@ -113,6 +114,7 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/admin', builder: (_, __) => const AdminPanelScreen()),
     GoRoute(path: '/stockists-overview', builder: (_, __) => const StockistsOverviewScreen()), // legacy alias
     GoRoute(path: '/stockist-groups', builder: (_, __) => const StockistGroupScreen()),
+    GoRoute(path: '/my-choices', builder: (_, __) => const MyChoiceScreen()),
 
   ],
 
