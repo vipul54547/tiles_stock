@@ -34,6 +34,12 @@ dependencies:
 
   flutter_staggered_grid_view: ^0.7.0
   url_launcher: ^6.3.1
+  supabase_flutter: ^2.5.0
+  file_picker: ^8.0.0
+  http: ^1.2.0
+  excel: ^4.0.6
+  syncfusion_flutter_pdf: ^28.1.33
+  image: ^4.3.0
 
 
 
@@ -51,4 +57,20 @@ flutter:
 
   uses-material-design: true
 
- 
+  assets:
+    - assets/images/600x600/Matt/
+    - assets/images/600x600/Glossy/
+    - assets/images/600x600/Satin/
+    - assets/images/600x600/Carving/
+    - assets/images/400x400/Matt/
+    - assets/images/400x400/Glossy/
+    - assets/images/400x400/Satin/
+    - assets/images/400x400/Carving/
+    - assets/images/300x600/Matt/
+    - assets/images/300x600/Glossy/
+    - assets/images/300x600/Satin/
+    - assets/images/300x600/Carving/
+    - assets/images/600x1200/Matt/
+    - assets/images/600x1200/Glossy/
+    - assets/images/600x1200/Satin/
+    - assets/images/600x1200/Carving/
