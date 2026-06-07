@@ -4,6 +4,9 @@ class TileDesign {
   final String size;
   final int boxQuantity;
   final String surfaceType;
+  /// Original finish text from the PDF when it isn't one of [kFinishes]
+  /// (e.g. "Punch Ghr", "Lustra"). Null for standard finishes. Shown as a badge.
+  final String? finishLabel;
   final int piecesPerBox;
   final double boxWeightKg;
   final double thicknessMm;
@@ -21,6 +24,7 @@ class TileDesign {
     required this.size,
     required this.boxQuantity,
     required this.surfaceType,
+    this.finishLabel,
     required this.piecesPerBox,
     required this.boxWeightKg,
     required this.thicknessMm,
@@ -39,6 +43,7 @@ class TileDesign {
         size: json['size'],
         boxQuantity: json['box_quantity'],
         surfaceType: json['surface_type'],
+        finishLabel: json['finish_label'],
         piecesPerBox: json['pieces_per_box'],
         boxWeightKg: (json['box_weight_kg'] as num).toDouble(),
         thicknessMm: (json['thickness_mm'] as num).toDouble(),
@@ -57,6 +62,7 @@ class TileDesign {
         'size': size,
         'box_quantity': boxQuantity,
         'surface_type': surfaceType,
+        'finish_label': finishLabel,
         'pieces_per_box': piecesPerBox,
         'box_weight_kg': boxWeightKg,
         'thickness_mm': thicknessMm,

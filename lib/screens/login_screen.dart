@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-
 import 'package:go_router/go_router.dart';
-import '../models/choice_state.dart';
+import '../services/supabase_auth_service.dart';
 
 
 
@@ -26,29 +25,49 @@ class _LoginScreenState extends State<LoginScreen> {
 
 
   void _login() async {
+    if (_emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter email and password')));
+      return;
+    }
 
     setState(() => _loading = true);
 
-    await Future.delayed(const Duration(seconds: 1));
-
-    if (mounted) {
-      final email = _emailCtrl.text.trim().toLowerCase();
-      final mappedId = stockistTestAccounts[email];
-      if (mappedId != null) {
-        currentStockistId = mappedId;
-        context.go('/stockist/dashboard');
-      } else if (email.contains('stockist')) {
-        currentStockistId = '001';
-        context.go('/stockist/dashboard');
-      } else if (email.contains('admin')) {
-        context.go('/admin');
-      } else {
-        context.go('/home');
-      }
+    UserRole? role;
+    try {
+      role = await SupabaseAuthService().login(
+        _emailCtrl.text.trim(),
+        _passCtrl.text,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('$e'),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 8),
+      ));
+      return;
     }
 
+    if (!mounted) return;
     setState(() => _loading = false);
 
+    if (role == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Invalid email or password'),
+        backgroundColor: Colors.red,
+      ));
+      return;
+    }
+
+    if (role == UserRole.admin) {
+      context.go('/admin');
+    } else if (role == UserRole.stockist) {
+      context.go('/stockist/dashboard');
+    } else {
+      context.go('/home');
+    }
   }
 
 
@@ -171,7 +190,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
             ],
 
+
+
           ),
+
 
         ),
 

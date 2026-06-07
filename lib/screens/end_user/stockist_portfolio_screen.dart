@@ -5,9 +5,10 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
-import '../../services/data_service.dart';
+import '../../services/supabase_data_service.dart';
 import '../../widgets/tile_card.dart';
 import '../../models/choice_state.dart';
+import '../../utils/finishes.dart';
 
 class StockistPortfolioScreen extends StatefulWidget {
   final String stockistId;
@@ -26,12 +27,12 @@ const _qualityMeta = {
 };
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-const _filterSurfaces   = ['Matt', 'Glossy', 'Satin', 'Rustic', 'Polished', 'Lappato'];
+const _filterSurfaces   = kFinishes;
 const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
 const _filterStockTypes = ['One Time', 'Regular', 'Both'];
 
 class _State extends State<StockistPortfolioScreen> {
-  final DataService _service = MockDataService();
+  final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs  = [];
   Stockist?        _stockist;
   bool             _loading  = true;
@@ -114,7 +115,7 @@ class _State extends State<StockistPortfolioScreen> {
 
   Future<void> _load() async {
     final results = await Future.wait([
-      _service.getDesignsByStockist(widget.stockistId),
+      _service.getDesignsByStockistSeqId(widget.stockistId),
       _service.getAllStockists(),
     ]);
     if (!mounted) return;
@@ -353,7 +354,7 @@ class _State extends State<StockistPortfolioScreen> {
             final d = list[idx];
             final imageUrl = d.faceImageUrls.isNotEmpty
                 ? d.faceImageUrls.first
-                : 'https://picsum.photos/seed/${d.id}/400/400';
+                : '';
             final isFirst  = idx == 0;
             final isLast   = idx == list.length - 1;
             final isChosen = myChoiceQuantities.containsKey(d.id);

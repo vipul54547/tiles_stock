@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../services/supabase_auth_service.dart';
 
 
 
@@ -22,11 +23,11 @@ class AdminPanelScreen extends StatelessWidget {
         actions: [
 
           IconButton(
-
             icon: const Icon(Icons.logout),
-
-            onPressed: () => context.go('/login'),
-
+            onPressed: () async {
+              await SupabaseAuthService().logout();
+              if (context.mounted) context.go('/login');
+            },
           ),
 
         ],
@@ -46,25 +47,29 @@ class AdminPanelScreen extends StatelessWidget {
             const Color(0xFF1B4F72),
             onTap: () => context.push('/home'),
           ),
-
+          _adminCard(
+            Icons.upload_file_rounded,
+            'Import Users from Excel',
+            'Bulk-create admins, stockists & end users via .xlsx',
+            const Color(0xFF6A1B9A),
+            onTap: () => context.push('/admin/import-users'),
+          ),
+          _adminCard(
+            Icons.texture_rounded,
+            'Manage Finishes',
+            'Master list of tile surfaces stockists align to',
+            const Color(0xFF00897B),
+            onTap: () => context.push('/admin/surfaces'),
+          ),
           _adminCard(Icons.storefront_outlined, 'Manage Stockists',
-
               'Create, view & assign sequential IDs', Colors.blue),
-
           _adminCard(Icons.grid_view_rounded, 'Tile Master Data',
-
               'Sync designs from TilesFinders.com', Colors.green),
-
           _adminCard(Icons.people_outline, 'End Users',
-
               'View registered companies', Colors.orange),
-
           _adminCard(Icons.bar_chart_outlined, 'Inquiry Reports',
-
               'All inquiries across stockists', Colors.purple),
-
           _adminCard(Icons.sort_outlined, 'Listing Order',
-
               'Reorder stockists by sequence', Colors.red),
 
         ],

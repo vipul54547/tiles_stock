@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:convert' show latin1; // byte→marker scanning of PDF image dicts
+import 'dart:ui' show Offset; // page-template placement during per-page split
 import 'package:flutter/foundation.dart'; // compute() + Uint8List
 import 'package:image/image.dart' as img;
 import 'package:syncfusion_flutter_pdf/pdf.dart';
@@ -67,7 +69,7 @@ class PdfDesignRow {
 //   2. Extract text  → design names, quantities, surface types
 //   3. Extract JPEGs → raw image bytes for each tile design
 //
-Map<String, dynamic> _parsePdfTask(Map<String, dynamic> args) {
+Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
   final Uint8List bytes    = args['bytes']    as Uint8List;
   final String    filename = args['filename'] as String;
 
@@ -102,15 +104,21 @@ Map<String, dynamic> _parsePdfTask(Map<String, dynamic> args) {
   // Parse by word geometry so the table is read by where each value sits and
   // what it contains — not by a fixed column order. Falls back to the legacy
   // flat-text parser only if positional extraction yields nothing.
+  const int minImageBytes = 5 * 1024;
+
   List<Map<String, dynamic>> designMaps = [];
   int dbgTotalLines = 0;
+  List<List<Uint8List?>>? imagesPerPage; // image slots per page (null = N/A)
   try {
     final doc = PdfDocument(inputBytes: bytes);
     final lines = PdfTextExtractor(doc).extractTextLines();
     dbgTotalLines = lines.length;
-    designMaps = _parseDesignsAdaptive(lines);
+    designMaps = _parseDesignsAdaptive(lines); // each map carries its 'page'
     if (designMaps.isEmpty) {
+      // Flat-text fallback has no page geometry; per-page matching is skipped.
       designMaps = _parseDesignsToMaps(PdfTextExtractor(doc).extractText());
+    } else {
+      imagesPerPage = await _extractImageSlotsPerPage(doc);
     }
     doc.dispose();
   } catch (e, st) {
@@ -118,39 +126,29 @@ Map<String, dynamic> _parsePdfTask(Map<String, dynamic> args) {
   }
   final dbgDigitLines = designMaps.length; // designs found (debug stat)
 
-  // ── 3. Raw JPEG extraction from PDF bytes ─────────────────────────────────
+  // ── 3. Match tile photos to designs ───────────────────────────────────────
   //
-  // PDFs store JPEG images as raw JPEG byte streams (DCTDecode filter).
-  // Every JPEG starts with the SOI marker  FF D8 FF
-  // and ends   with the EOI marker         FF D9
+  // Preferred path: every image XObject on a page becomes an ordered *slot* —
+  // the raw JPEG bytes for DCTDecode photos, or null for photos we can't
+  // byte-extract (PNG/FlateDecode). Keeping null placeholders preserves the
+  // 1:1 order between images and design rows, so a non-JPEG photo no longer
+  // shifts every photo beneath it, and matching stays scoped per page so one
+  // page's miscount can't cascade onto the next. Falls back to a whole-document
+  // JPEG scan when per-page extraction is unavailable (flat-text parser ran).
   //
-  // We scan the entire PDF byte array, find every embedded JPEG, and
-  // filter out small thumbnails/logos (< 20 KB) to keep only tile photos.
-  //
-  final images = _extractJpegsFromBytes(bytes, minSizeBytes: 5 * 1024);
-
-  // Attach images to designs by position.
-  // Only assign if counts match — if the PDF has extra logos etc. the size
-  // filter above should have removed them, but if it didn't we skip images
-  // to avoid showing wrong photos.
-  if (images.length != designMaps.length) {
-    debugPrint('PDF image/design count mismatch: '
-        '${images.length} images vs ${designMaps.length} designs — '
-        'photos may be misaligned.');
-  }
-
   List<Uint8List?> imagesByDesign;
-  if (images.length == designMaps.length) {
-    imagesByDesign = images;
-  } else if (images.length > designMaps.length) {
-    // More images than designs: take the last N (logos tend to appear first)
-    imagesByDesign = images.sublist(images.length - designMaps.length);
+  int imageCount;
+  final perPageUsable = imagesPerPage != null &&
+      designMaps.every((m) => (m['page'] as int? ?? -1) >= 0);
+
+  if (perPageUsable) {
+    imageCount =
+        imagesPerPage.fold(0, (a, b) => a + b.where((x) => x != null).length);
+    imagesByDesign = _matchImagesPerPage(designMaps, imagesPerPage);
   } else {
-    // Fewer images: pad with nulls
-    imagesByDesign = List<Uint8List?>.filled(designMaps.length, null);
-    for (int i = 0; i < images.length; i++) {
-      imagesByDesign[i] = images[i];
-    }
+    final images = _extractJpegsFromBytes(bytes, minSizeBytes: minImageBytes);
+    imageCount = images.length;
+    imagesByDesign = _matchImagesGlobally(images, designMaps.length);
   }
 
   // Rotate any photo whose orientation disagrees with the tile's real shape
@@ -162,10 +160,151 @@ Map<String, dynamic> _parsePdfTask(Map<String, dynamic> args) {
     'quality':        quality,
     'designs':        designMaps,
     'images':         orientedImages,
-    'imageCount':     images.length,
+    'imageCount':     imageCount,
     'dbgTotalLines':  dbgTotalLines,
     'dbgDigitLines':  dbgDigitLines,
   };
+}
+
+// ── Image → design matching ─────────────────────────────────────────────────
+//
+// Alignment rule (shared by both paths): when there are more image slots than
+// designs the extras drop from the front (page/section logos appear first);
+// when there are fewer, the trailing designs pad with null. Per-page slots
+// already carry null placeholders for non-JPEG photos, so equal counts map 1:1.
+
+// Whole-document fallback: one ordered photo list against the full design list.
+List<Uint8List?> _matchImagesGlobally(List<Uint8List> images, int designCount) {
+  if (images.length != designCount) {
+    debugPrint('PDF image/design count mismatch: '
+        '${images.length} images vs $designCount designs — '
+        'photos may be misaligned.');
+  }
+  if (images.length == designCount) {
+    return List<Uint8List?>.from(images);
+  } else if (images.length > designCount) {
+    return List<Uint8List?>.from(images.sublist(images.length - designCount));
+  }
+  final out = List<Uint8List?>.filled(designCount, null);
+  for (var i = 0; i < images.length; i++) {
+    out[i] = images[i];
+  }
+  return out;
+}
+
+// Per-page: align each page's photos to that page's designs in isolation, so a
+// miscount on one page cannot cascade onto the pages that follow it.
+List<Uint8List?> _matchImagesPerPage(
+  List<Map<String, dynamic>> designMaps,
+  List<List<Uint8List?>> imagesPerPage,
+) {
+  final out = List<Uint8List?>.filled(designMaps.length, null);
+
+  // Bucket design indices by their page, preserving document order.
+  final idxByPage = <int, List<int>>{};
+  for (var i = 0; i < designMaps.length; i++) {
+    final p = designMaps[i]['page'] as int;
+    (idxByPage[p] ??= <int>[]).add(i);
+  }
+
+  idxByPage.forEach((page, idxs) {
+    final imgs = (page >= 0 && page < imagesPerPage.length)
+        ? imagesPerPage[page]
+        : const <Uint8List?>[];
+    if (imgs.length != idxs.length) {
+      debugPrint('PDF page ${page + 1}: ${imgs.length} images vs '
+          '${idxs.length} designs — matched within page.');
+    }
+
+    List<Uint8List?> aligned;
+    if (imgs.length == idxs.length) {
+      aligned = List<Uint8List?>.from(imgs);
+    } else if (imgs.length > idxs.length) {
+      aligned = List<Uint8List?>.from(imgs.sublist(imgs.length - idxs.length));
+    } else {
+      aligned = List<Uint8List?>.filled(idxs.length, null);
+      for (var k = 0; k < imgs.length; k++) {
+        aligned[k] = imgs[k];
+      }
+    }
+    for (var k = 0; k < idxs.length; k++) {
+      out[idxs[k]] = aligned[k];
+    }
+  });
+
+  return out;
+}
+
+// Split each page into its own single-page PDF and read that page's image
+// XObjects in order. createTemplate()/drawPdfTemplate() copy the page's images
+// by reference, so DCTDecode JPEG streams survive the round trip intact while
+// the leading image dictionaries stay as plaintext (PDF stream objects are
+// never packed into compressed object streams). Returns one ordered slot per
+// image: JPEG bytes for DCTDecode photos, null for everything else.
+Future<List<List<Uint8List?>>> _extractImageSlotsPerPage(PdfDocument doc) async {
+  final perPage = <List<Uint8List?>>[];
+  final pageCount = doc.pages.count;
+  for (var i = 0; i < pageCount; i++) {
+    final single = PdfDocument();
+    try {
+      final src = doc.pages[i];
+      single.pageSettings.margins.all = 0;
+      single.pageSettings.size = src.size;
+      single.pages.add().graphics.drawPdfTemplate(
+            src.createTemplate(),
+            const Offset(0, 0),
+          );
+      final pageBytes = Uint8List.fromList(await single.save());
+      perPage.add(_extractImageSlotsFromBytes(pageBytes));
+    } finally {
+      single.dispose();
+    }
+  }
+  return perPage;
+}
+
+// Walk a single-page PDF's bytes, finding every image XObject in file order
+// (which follows top-to-bottom draw order in these reports). For each image we
+// read its /Filter from the leading dictionary: DCTDecode photos yield their
+// raw JPEG bytes (located by the SOI marker right after the dict); any other
+// encoding (PNG/FlateDecode etc.) yields a null slot, holding the design row's
+// place so the JPEGs around it stay aligned.
+List<Uint8List?> _extractImageSlotsFromBytes(Uint8List bytes) {
+  final slots = <Uint8List?>[];
+  // 1 char == 1 byte under latin1, so string indices map straight onto bytes.
+  final text = latin1.decode(bytes, allowInvalid: true);
+  final imageRe = RegExp(r'/Subtype\s*/Image');
+
+  for (final m in imageRe.allMatches(text)) {
+    final dictStart = m.start;
+    final streamKw = text.indexOf('stream', dictStart);
+    final dictEnd =
+        streamKw < 0 ? (dictStart + 800).clamp(0, text.length) : streamKw;
+    final dict = text.substring(dictStart, dictEnd);
+
+    if (!dict.contains('DCTDecode')) {
+      slots.add(null); // non-JPEG photo — keep the slot, no bytes to extract
+      continue;
+    }
+
+    // The JPEG body is the first SOI marker after this image's dictionary.
+    final searchFrom = streamKw < 0 ? dictStart : streamKw;
+    int soi = -1;
+    for (var i = searchFrom; i < bytes.length - 2; i++) {
+      if (bytes[i] == 0xFF && bytes[i + 1] == 0xD8 && bytes[i + 2] == 0xFF) {
+        soi = i;
+        break;
+      }
+    }
+    if (soi < 0) {
+      slots.add(null);
+      continue;
+    }
+    final end = _findJpegEnd(bytes, soi);
+    slots.add(end > soi ? bytes.sublist(soi, end) : null);
+  }
+
+  return slots;
 }
 
 // ── Orientation correction ─────────────────────────────────────────────────────
@@ -521,7 +660,7 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
     if (c.qty == null) continue;
     final parts = <_Tok>[...c.name, ...extraNames[i]!]
       ..sort((a, b) => a.yc != b.yc ? a.yc.compareTo(b.yc) : a.x0.compareTo(b.x0));
-    final name = _cleanName(parts.map((t) => t.text).join(' '));
+    final name = _cleanName(parts.map((t) => t.text).join(' '), allowNumeric: true);
     if (name.isEmpty) continue;
 
     // Resolve finish:
@@ -551,6 +690,7 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
       'quantity': c.qty!,
       'surface': surfaceType,
       'finishLabel': finishLabel,
+      'page': c.page, // drives per-page image↔design matching
     });
   }
 
@@ -562,7 +702,11 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
 // Tidy a joined name: collapse spaces, strip a trailing surface word the layout
 // merged in, reject pure-number / junk names. The leading "CR" on carving
 // designs is part of the real name and is kept.
-String _cleanName(String raw) {
+//
+// [allowNumeric] keeps all-digit names (tile design codes like "9305"). The
+// adaptive path sets this because the quantity already sits in its own column,
+// so a number left in the name cell is a genuine code, not a leaked quantity.
+String _cleanName(String raw, {bool allowNumeric = false}) {
   final s0 = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
   final parts = s0.split(' ');
   while (parts.length > 1 && _surfaceOf(parts.last) != null) {
@@ -570,7 +714,7 @@ String _cleanName(String raw) {
   }
   final s = parts.join(' ').trim();
   if (s.isEmpty) return '';
-  if (RegExp(r'^\d+$').hasMatch(s)) return '';
+  if (!allowNumeric && RegExp(r'^\d+$').hasMatch(s)) return '';
   if (_isJunkNameToken(s)) return '';
   return s;
 }

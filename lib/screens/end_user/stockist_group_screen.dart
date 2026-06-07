@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/stockist.dart';
-import '../../services/data_service.dart';
+import '../../services/supabase_data_service.dart';
 
 // ── Shared state — persists across navigation within a session ────────────────
 
@@ -27,7 +27,7 @@ class StockistGroupScreen extends StatefulWidget {
 const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
 
 class _State extends State<StockistGroupScreen> {
-  final DataService _service = MockDataService();
+  final SupabaseDataService _service = SupabaseDataService();
   List<Stockist> _stockists = [];
   bool _loading = true;
   int _expanded = 0;

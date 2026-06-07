@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../models/tile_design.dart';
-import '../../services/data_service.dart';
+import '../../services/supabase_data_service.dart';
+import '../../widgets/tile_card.dart';
 
 class DesignDetailScreen extends StatefulWidget {
   final String designId;
@@ -12,7 +13,7 @@ class DesignDetailScreen extends StatefulWidget {
 }
 
 class _DesignDetailScreenState extends State<DesignDetailScreen> {
-  final DataService _service = MockDataService();
+  final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
   int _currentIndex = 0;
   bool _loading = true;
@@ -71,17 +72,16 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
         },
         child: ListView(
           children: [
-            SizedBox(
-              height: 280,
+            AspectRatio(
+              aspectRatio: aspectRatioFromSize(design.size),
               child: PageView.builder(
                 itemCount: design.faceImageUrls.isNotEmpty
                     ? design.faceImageUrls.length
                     : 1,
-                itemBuilder: (_, i) => Image.network(
-                  design.faceImageUrls.isNotEmpty
+                itemBuilder: (_, i) => TileImage(
+                  url: design.faceImageUrls.isNotEmpty
                       ? design.faceImageUrls[i]
-                      : 'https://picsum.photos/seed/${design.id}/800/600',
-                  fit: BoxFit.cover,
+                      : '',
                 ),
               ),
             ),
@@ -158,6 +158,14 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                         bg: const Color(0xFFF3E5F5),
                         fg: const Color(0xFF6A1B9A),
                       ),
+                      if (design.finishLabel != null &&
+                          design.finishLabel!.isNotEmpty)
+                        _Chip(
+                          icon: Icons.label_outline_rounded,
+                          label: design.finishLabel!,
+                          bg: const Color(0xFFFFF3E0),
+                          fg: const Color(0xFFE65100),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 16),

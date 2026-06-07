@@ -4,7 +4,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import '../models/stockist.dart';
 import '../models/tile_design.dart';
-import '../services/data_service.dart';
+import '../services/supabase_data_service.dart';
+import '../services/supabase_auth_service.dart';
 import '../widgets/tile_card.dart';
 import 'end_user/stockist_group_screen.dart' show stockistGroups;
 import '../models/choice_state.dart';
@@ -41,7 +42,7 @@ class StockistsOverviewScreen extends StatefulWidget {
 }
 
 class _State extends State<StockistsOverviewScreen> {
-  final DataService _service = MockDataService();
+  final SupabaseDataService _service = SupabaseDataService();
   List<_StockistData> _allData = [];
   List<TileDesign> _allDesigns = [];
   List<String> _allSizes = [];
@@ -690,7 +691,7 @@ class _State extends State<StockistsOverviewScreen> {
             final d = list[idx];
             final imageUrl = d.faceImageUrls.isNotEmpty
                 ? d.faceImageUrls.first
-                : 'https://picsum.photos/seed/${d.id}/400/400';
+                : '';
             final isFirst = idx == 0;
             final isLast = idx == list.length - 1;
 
@@ -1088,7 +1089,10 @@ class _State extends State<StockistsOverviewScreen> {
       leading: IconButton(
         icon: const Icon(Icons.logout),
         tooltip: 'Logout',
-        onPressed: () => context.go('/login'),
+        onPressed: () async {
+          await SupabaseAuthService().logout();
+          if (context.mounted) context.go('/login');
+        },
       ),
       title: const Text('Tiles Stock'),
       actions: [

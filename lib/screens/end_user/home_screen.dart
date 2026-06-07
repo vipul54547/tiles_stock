@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/tile_design.dart';
-import '../../services/data_service.dart';
+import '../../services/supabase_data_service.dart';
+import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
 import 'stockist_group_screen.dart' show stockistGroups;
 import '../../models/choice_state.dart';
+import '../../utils/finishes.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-const _filterSurfaces   = ['Matt', 'Glossy', 'Satin', 'Rustic', 'Polished', 'Lappato'];
+const _filterSurfaces   = kFinishes;
 const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
 const _filterQualities  = ['Premium', 'Standard'];
 const _filterStockTypes = ['One Time', 'Regular', 'Both'];
@@ -28,7 +29,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final DataService _service = MockDataService();
+  final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
   bool _loading = true;
 
@@ -537,7 +538,7 @@ class _HomeScreenState extends State<HomeScreen> {
             final d = list[idx];
             final imageUrl = d.faceImageUrls.isNotEmpty
                 ? d.faceImageUrls.first
-                : 'https://picsum.photos/seed/${d.id}/400/400';
+                : '';
 
             return Container(
               height: sheetHeight,
@@ -563,20 +564,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   // Image
-                  SizedBox(
-                    height: 200,
-                    width: double.infinity,
-                    child: CachedNetworkImage(
-                      imageUrl: imageUrl,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) =>
-                          Container(color: Colors.grey[200]),
-                      errorWidget: (_, __, ___) => Container(
-                        color: Colors.grey[200],
-                        child: const Icon(Icons.image_not_supported,
-                            size: 48),
-                      ),
-                    ),
+                  AspectRatio(
+                    aspectRatio: aspectRatioFromSize(d.size),
+                    child: TileImage(url: imageUrl),
                   ),
                   // Details
                   Expanded(
@@ -864,7 +854,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: () => context.go('/login'),
+            onPressed: () async {
+              await SupabaseAuthService().logout();
+              if (context.mounted) context.go('/login');
+            },
           ),
         ],
         bottom: PreferredSize(

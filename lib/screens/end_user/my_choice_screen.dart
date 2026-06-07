@@ -3,7 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
-import '../../services/data_service.dart';
+import '../../services/supabase_data_service.dart';
 import '../../models/choice_state.dart';
 
 class MyChoiceScreen extends StatefulWidget {
@@ -13,7 +13,7 @@ class MyChoiceScreen extends StatefulWidget {
 }
 
 class _MyChoiceScreenState extends State<MyChoiceScreen> {
-  final DataService _service = MockDataService();
+  final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _allDesigns = [];
   List<Stockist> _allStockists = [];
   bool _loading = true;
@@ -470,20 +470,26 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: CachedNetworkImage(
-              imageUrl: d.faceImageUrls.isNotEmpty
-                  ? d.faceImageUrls.first
-                  : 'https://picsum.photos/seed/${d.id}/200/200',
-              width: 64,
-              height: 64,
-              fit: BoxFit.cover,
-              placeholder: (_, __) =>
-                  Container(color: Colors.grey.shade200),
-              errorWidget: (_, __, ___) => Container(
-                  color: Colors.grey.shade200,
-                  child: const Icon(Icons.image_not_supported,
-                      size: 24)),
-            ),
+            child: d.faceImageUrls.isNotEmpty
+                ? CachedNetworkImage(
+                    imageUrl: d.faceImageUrls.first,
+                    width: 64,
+                    height: 64,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) =>
+                        Container(color: Colors.grey.shade200),
+                    errorWidget: (_, __, ___) => Container(
+                        color: Colors.grey.shade200,
+                        child: const Icon(Icons.image_not_supported,
+                            size: 24)),
+                  )
+                : Container(
+                    width: 64,
+                    height: 64,
+                    color: Colors.grey.shade100,
+                    child: Icon(Icons.add_photo_alternate_outlined,
+                        size: 24, color: Colors.grey.shade400),
+                  ),
           ),
           const SizedBox(width: 12),
           Expanded(

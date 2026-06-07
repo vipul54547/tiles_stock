@@ -3,7 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/tile_design.dart';
-import '../../services/data_service.dart';
+import '../../services/supabase_data_service.dart';
+import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
 import '../../models/choice_state.dart';
 
@@ -31,13 +32,17 @@ const _sortOptions = [
 const int _lowStockThreshold = 10;
 
 class _State extends State<StockistDashboardScreen> {
-  final DataService _service = MockDataService();
+  final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
   bool _loading = true;
-  String get _myStockistId => currentStockistId;
+  String get _myStockistId => currentStockistUUID;
 
   // Tab
   int _activeTab = 0; // 0 = My Stock, 1 = Buyer Interest
+
+  // Multi-select / delete mode
+  bool _selectMode = false;
+  final Set<String> _selectedIds = {};
 
   // My Stock filters
   final Set<String> _selectedQualities = {};
@@ -55,6 +60,38 @@ class _State extends State<StockistDashboardScreen> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _confirmDeleteSelected() async {
+    final count = _selectedIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete Designs'),
+        content: Text(
+            'Delete $count design${count == 1 ? '' : 's'}? '
+            'This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete',
+                style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _loading = true);
+    for (final id in List<String>.from(_selectedIds)) {
+      await _service.deleteDesign(id);
+    }
+    _selectMode = false;
+    _selectedIds.clear();
+    await _load();
   }
 
   Future<void> _load() async {
@@ -104,26 +141,86 @@ class _State extends State<StockistDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Stock Dashboard'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () => context.push('/stockist/inquiries'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => context.go('/login'),
-          ),
-        ],
-      ),
-      floatingActionButton: _activeTab == 0
-          ? FloatingActionButton.extended(
-              onPressed: () => context.push('/stockist/stock/add'),
-              icon: const Icon(Icons.add),
-              label: const Text('Add Stock'),
-              backgroundColor: const Color(0xFF1B4F72),
-              foregroundColor: Colors.white,
+      appBar: _selectMode
+          ? AppBar(
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => setState(() {
+                  _selectMode = false;
+                  _selectedIds.clear();
+                }),
+              ),
+              title: Text(_selectedIds.isEmpty
+                  ? 'Select designs'
+                  : '${_selectedIds.length} selected'),
+              actions: [
+                if (_selectedIds.length < _filteredAndSorted.length)
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _selectedIds.addAll(
+                          _filteredAndSorted.map((d) => d.id));
+                    }),
+                    child: const Text('All',
+                        style: TextStyle(color: Colors.white)),
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  onPressed:
+                      _selectedIds.isEmpty ? null : _confirmDeleteSelected,
+                ),
+              ],
+            )
+          : AppBar(
+              title: const Text('My Stock Dashboard'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.notifications_outlined),
+                  onPressed: () => context.push('/stockist/inquiries'),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.logout),
+                  onPressed: () async {
+                    await SupabaseAuthService().logout();
+                    if (!context.mounted) return;
+                    context.go('/login');
+                  },
+                ),
+              ],
+            ),
+      floatingActionButton: _activeTab == 0 && !_selectMode
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton.extended(
+                  heroTag: 'dispatch',
+                  onPressed: () => context.push('/stockist/stock/dispatch'),
+                  icon: const Icon(Icons.remove_circle_outline),
+                  label: const Text('Dispatch'),
+                  backgroundColor: Colors.red[700],
+                  foregroundColor: Colors.white,
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton.extended(
+                  heroTag: 'upload',
+                  onPressed: () => context.push('/stockist/stock/upload'),
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Upload PDF'),
+                  backgroundColor: const Color(0xFF1B4F72),
+                  foregroundColor: Colors.white,
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton.extended(
+                  heroTag: 'add',
+                  onPressed: () async {
+                    await context.push('/stockist/stock/add');
+                    _load(); // refresh after adding
+                  },
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Design'),
+                  backgroundColor: const Color(0xFF2E7D32),
+                  foregroundColor: Colors.white,
+                ),
+              ],
             )
           : null,
       body: _loading
@@ -333,38 +430,79 @@ class _State extends State<StockistDashboardScreen> {
                     final outOfStock = d.boxQuantity == 0;
                     final lowStock = !outOfStock &&
                         d.boxQuantity < _lowStockThreshold;
-                    return Stack(
-                      children: [
-                        TileCard(
-                          design: d,
-                          onTap: () => context
-                              .push('/stockist/stock/edit/${d.id}'),
-                        ),
-                        if (outOfStock || lowStock)
-                          Positioned(
-                            top: 6,
-                            left: 6,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 7, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: outOfStock
-                                    ? Colors.red
-                                    : Colors.orange.shade700,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                outOfStock
-                                    ? 'Out of Stock'
-                                    : 'Low Stock',
-                                style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold),
+                    final isSelected = _selectedIds.contains(d.id);
+                    return GestureDetector(
+                      onLongPress: () => setState(() {
+                        _selectMode = true;
+                        _selectedIds.add(d.id);
+                      }),
+                      onTap: _selectMode
+                          ? () => setState(() {
+                                if (isSelected) {
+                                  _selectedIds.remove(d.id);
+                                } else {
+                                  _selectedIds.add(d.id);
+                                }
+                              })
+                          : null,
+                      child: Stack(
+                        children: [
+                          TileCard(
+                            design: d,
+                            onTap: _selectMode
+                                ? () {}
+                                : () => context
+                                    .push('/stockist/stock/edit/${d.id}'),
+                          ),
+                          if (outOfStock || lowStock)
+                            Positioned(
+                              top: 6,
+                              left: 6,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: outOfStock
+                                      ? Colors.red
+                                      : Colors.orange.shade700,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  outOfStock ? 'Out of Stock' : 'Low Stock',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                          // Selection checkbox overlay
+                          if (_selectMode)
+                            Positioned(
+                              top: 6,
+                              right: 6,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? const Color(0xFF1B4F72)
+                                      : Colors.white.withValues(alpha: 0.85),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xFF1B4F72),
+                                    width: 2,
+                                  ),
+                                ),
+                                child: isSelected
+                                    ? const Icon(Icons.check,
+                                        size: 14, color: Colors.white)
+                                    : null,
+                              ),
+                            ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -639,9 +777,7 @@ class _State extends State<StockistDashboardScreen> {
     final buyerQty = myChoiceQuantities[d.id] ?? 0;
     final available = d.boxQuantity;
     final canFulfill = available >= buyerQty;
-    final imageUrl = d.faceImageUrls.isNotEmpty
-        ? d.faceImageUrls.first
-        : 'https://picsum.photos/seed/${d.id}/200/200';
+    final imageUrl = d.faceImageUrls.isNotEmpty ? d.faceImageUrls.first : '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -660,18 +796,25 @@ class _State extends State<StockistDashboardScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: CachedNetworkImage(
-              imageUrl: imageUrl,
-              width: 68,
-              height: 68,
-              fit: BoxFit.cover,
-              placeholder: (_, __) =>
-                  Container(color: Colors.grey.shade200),
-              errorWidget: (_, __, ___) => Container(
-                  color: Colors.grey.shade200,
-                  child: const Icon(Icons.image_not_supported,
-                      size: 28)),
-            ),
+            child: imageUrl.isEmpty
+                ? Container(
+                    width: 68, height: 68,
+                    color: Colors.grey.shade100,
+                    child: Icon(Icons.add_photo_alternate_outlined,
+                        size: 28, color: Colors.grey.shade400),
+                  )
+                : CachedNetworkImage(
+                    imageUrl: imageUrl,
+                    width: 68,
+                    height: 68,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) =>
+                        Container(color: Colors.grey.shade200),
+                    errorWidget: (_, __, ___) => Container(
+                        color: Colors.grey.shade200,
+                        child: const Icon(Icons.image_not_supported,
+                            size: 28)),
+                  ),
           ),
           const SizedBox(width: 12),
           Expanded(

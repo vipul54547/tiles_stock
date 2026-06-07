@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import '../models/tile_design.dart';
 import '../models/stockist.dart';
 import '../models/end_user.dart';
@@ -29,78 +30,144 @@ abstract class DataService {
 }
 
 class MockDataService implements DataService {
-  // Each profile drives design generation for one stockist.
-  // (id, count, avg) where avg = target boxes per design.
-  //
-  // Actual platform averages after generation:
-  //   Avg1 (boxes/design)    ≈ 65.7
-  //   Avg2 (boxes/stockist)  ≈ 10692
-  //
-  // Tier 1 — avg > Avg1 AND total > Avg2 : S001–S005  (deep stock, large range)
-  // Tier 2 — avg < Avg1 AND total > Avg2 : S006–S008  (shallow per design, large total)
-  // Tier 3 — avg > Avg1 AND total < Avg2 : S009–S012  (deep per design, small total)
-  // Tier 4 — avg < Avg1 AND total < Avg2 : S013–S020
-  static const _stockistProfiles = [
-    (id: '001', count: 150, avg: 150), // total ≈ 22320
-    (id: '002', count: 120, avg: 170), // total ≈ 20298
-    (id: '003', count: 200, avg: 120), // total ≈ 23856
-    (id: '004', count: 100, avg: 200), // total ≈ 19800
-    (id: '005', count: 180, avg: 130), // total ≈ 23270
-    (id: '006', count: 600, avg:  35), // total ≈ 20965
-    (id: '007', count: 500, avg:  40), // total ≈ 19952
-    (id: '008', count: 450, avg:  45), // total ≈ 20205
-    (id: '009', count:  50, avg:  70), // total ≈  3458
-    (id: '010', count:  60, avg:  80), // total ≈  4704
-    (id: '011', count:  70, avg:  70), // total ≈  4900
-    (id: '012', count:  55, avg:  90), // total ≈  4896
-    (id: '013', count: 100, avg:  32), // total ≈  3170
-    (id: '014', count: 120, avg:  26), // total ≈  3105
-    (id: '015', count: 150, avg:  21), // total ≈  3126
-    (id: '016', count:  80, avg:  40), // total ≈  3152
-    (id: '017', count:  90, avg:  38), // total ≈  3396
-    (id: '018', count:  70, avg:  45), // total ≈  3150
-    (id: '019', count:  60, avg:  52), // total ≈  3060
-    (id: '020', count:  50, avg:  62), // total ≈  3064
-  ];
+  static const _sizeMap = {
+    '600x600':  '600x600 mm',
+    '400x400':  '400x400 mm',
+    '300x600':  '300x600 mm',
+    '600x1200': '600x1200 mm',
+  };
 
-  static const _sizes     = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-  static const _surfaces  = ['Matt', 'Glossy', 'Satin', 'Rustic', 'Polished', 'Lappato'];
+  static const _piecesPerBox = {
+    '600x600 mm':  4,
+    '400x400 mm':  6,
+    '300x600 mm':  8,
+    '600x1200 mm': 2,
+  };
+
   static const _colours   = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
   static const _qualities = ['Premium', 'Standard'];
   static const _stocks    = ['One Time', 'Regular'];
-  static const _series    = ['Marble', 'Granite', 'Ceramic', 'Porcelain', 'Travertine', 'Slate'];
-  static const _grades    = ['Elite', 'Classic', 'Premium', 'Royal', 'Standard', 'Prime', 'Luxury', 'Urban'];
 
-  // Varies box qty around avg using 7 symmetric offsets (mean = 0).
+  // ── fallback mock data (used when no asset images found) ──────────────────
+  static const _stockistProfiles = [
+    (id: '001', count: 150, avg: 150),
+    (id: '002', count: 120, avg: 170),
+    (id: '003', count: 200, avg: 120),
+    (id: '004', count: 100, avg: 200),
+    (id: '005', count: 180, avg: 130),
+    (id: '006', count: 600, avg:  35),
+    (id: '007', count: 500, avg:  40),
+    (id: '008', count: 450, avg:  45),
+    (id: '009', count:  50, avg:  70),
+    (id: '010', count:  60, avg:  80),
+    (id: '011', count:  70, avg:  70),
+    (id: '012', count:  55, avg:  90),
+    (id: '013', count: 100, avg:  32),
+    (id: '014', count: 120, avg:  26),
+    (id: '015', count: 150, avg:  21),
+    (id: '016', count:  80, avg:  40),
+    (id: '017', count:  90, avg:  38),
+    (id: '018', count:  70, avg:  45),
+    (id: '019', count:  60, avg:  52),
+    (id: '020', count:  50, avg:  62),
+  ];
+  static const _sizes    = ['600x600 mm', '400x400 mm', '300x600 mm', '600x1200 mm'];
+  static const _surfaces = ['Matt', 'Glossy', 'Satin', 'Carving'];
+  static const _series   = ['Marble', 'Granite', 'Ceramic', 'Porcelain', 'Travertine', 'Slate'];
+  static const _grades   = ['Elite', 'Classic', 'Premium', 'Royal', 'Standard', 'Prime', 'Luxury', 'Urban'];
+
+  static const _stockistIds = [
+    '001','002','003','004','005','006','007','008','009','010',
+    '011','012','013','014','015','016','017','018','019','020',
+  ];
+
+  // ── cached future ─────────────────────────────────────────────────────────
+  Future<List<TileDesign>>? _designsFuture;
+
+  Future<List<TileDesign>> _getDesigns() {
+    _designsFuture ??= _loadDesigns();
+    return _designsFuture!;
+  }
+
+  Future<List<TileDesign>> _loadDesigns() async {
+    try {
+      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+      final imagePaths = manifest.listAssets().where((p) =>
+          p.startsWith('assets/images/') &&
+          (p.endsWith('.jpg') || p.endsWith('.jpeg') ||
+           p.endsWith('.png') || p.endsWith('.webp'))).toList();
+
+      if (imagePaths.isNotEmpty) return _buildFromAssets(imagePaths);
+    } catch (_) {}
+    return _buildMockDesigns();
+  }
+
+  // path format: assets/images/{size}/{finish}/{Design Name}.jpg
+  List<TileDesign> _buildFromAssets(List<String> paths) {
+    final designs = <TileDesign>[];
+    var i = 0;
+    for (final path in paths) {
+      final parts = path.split('/');
+      if (parts.length < 5) continue;
+
+      final size = _sizeMap[parts[2]];
+      if (size == null) continue;
+
+      final finish   = parts[3];
+      final fileName = parts[4];
+      final name     = fileName.contains('.')
+          ? fileName.substring(0, fileName.lastIndexOf('.'))
+          : fileName;
+
+      designs.add(TileDesign(
+        id:           'design_$i',
+        name:         name,
+        size:         size,
+        surfaceType:  finish,
+        faceImageUrls: [path],
+        stockistId:   _stockistIds[i % _stockistIds.length],
+        colour:       _colours[i % _colours.length],
+        quality:      _qualities[i % _qualities.length],
+        stockType:    _stocks[i % _stocks.length],
+        boxQuantity:  20 + (i * 7) % 180,
+        piecesPerBox: _piecesPerBox[size] ?? 4,
+        boxWeightKg:  18.0 + (i % 10) * 0.5,
+        thicknessMm:  8.0 + (i % 3),
+        boxPrice:     800.0 + (i % 20) * 50.0,
+        updatedAt:    DateTime.now().subtract(Duration(days: i % 60)),
+      ));
+      i++;
+    }
+    return designs;
+  }
+
   static int _boxQty(int avg, int localIdx) {
     const offsets = [-3, -2, -1, 0, 1, 2, 3];
     final step = (avg / 5).round().clamp(1, avg);
     return (avg + offsets[localIdx % offsets.length] * step).clamp(1, 999999);
   }
 
-  late final List<TileDesign> _mockDesigns = _buildDesigns();
-
-  List<TileDesign> _buildDesigns() {
+  List<TileDesign> _buildMockDesigns() {
     final designs = <TileDesign>[];
-    var g = 0; // global design index
+    var g = 0;
     for (final p in _stockistProfiles) {
       for (var j = 0; j < p.count; j++) {
         designs.add(TileDesign(
-          id: 'design_$g',
-          name: '${_series[g % _series.length]} ${_grades[g % _grades.length]}',
-          size: _sizes[g % _sizes.length],
-          boxQuantity: _boxQty(p.avg, j),
-          surfaceType: _surfaces[g % _surfaces.length],
+          id:           'design_$g',
+          name:         '${_series[g % _series.length]} ${_grades[g % _grades.length]}',
+          size:         _sizes[g % _sizes.length],
+          surfaceType:  _surfaces[g % _surfaces.length],
+          faceImageUrls: [],
+          stockistId:   p.id,
+          colour:       _colours[g % _colours.length],
+          quality:      _qualities[g % _qualities.length],
+          stockType:    _stocks[g % _stocks.length],
+          boxQuantity:  _boxQty(p.avg, j),
           piecesPerBox: [4, 6, 8][g % 3],
-          boxWeightKg: 18.5 + (g % 10) * 0.5,
-          thicknessMm: 8.0 + (g % 3),
-          colour: _colours[g % _colours.length],
-          boxPrice: 800 + (g % 20) * 50.0,
-          faceImageUrls: ['https://picsum.photos/seed/$g/400/400'],
-          stockistId: p.id,
-          updatedAt: DateTime.now().subtract(Duration(days: g % 60)),
-          quality: _qualities[g % _qualities.length],
-          stockType: _stocks[g % _stocks.length],
+          boxWeightKg:  18.5 + (g % 10) * 0.5,
+          thicknessMm:  8.0 + (g % 3),
+          boxPrice:     800.0 + (g % 20) * 50.0,
+          updatedAt:    DateTime.now().subtract(Duration(days: g % 60)),
         ));
         g++;
       }
@@ -109,14 +176,12 @@ class MockDataService implements DataService {
   }
 
   @override
-  Future<List<TileDesign>> getAllDesigns() async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    return _mockDesigns;
-  }
+  Future<List<TileDesign>> getAllDesigns() async => _getDesigns();
 
   @override
   Future<List<TileDesign>> getDesignsByStockist(String stockistId) async {
-    return _mockDesigns.where((d) => d.stockistId == stockistId).toList();
+    final all = await _getDesigns();
+    return all.where((d) => d.stockistId == stockistId).toList();
   }
 
   @override
@@ -130,8 +195,8 @@ class MockDataService implements DataService {
     int? minQty,
     int? maxQty,
   }) async {
-    await Future.delayed(const Duration(milliseconds: 300));
-    return _mockDesigns.where((d) {
+    final all = await _getDesigns();
+    return all.where((d) {
       if (stockistId != null && d.stockistId != stockistId) return false;
       if (sizes != null && sizes.isNotEmpty && !sizes.contains(d.size)) return false;
       if (surfaceTypes != null && surfaceTypes.isNotEmpty && !surfaceTypes.contains(d.surfaceType)) return false;
