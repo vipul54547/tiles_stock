@@ -193,7 +193,10 @@ class _State extends State<StockistDashboardScreen> {
               children: [
                 FloatingActionButton.extended(
                   heroTag: 'dispatch',
-                  onPressed: () => context.push('/stockist/stock/dispatch'),
+                  onPressed: () async {
+                    await context.push('/stockist/stock/dispatch');
+                    _load(); // refresh after dispatching
+                  },
                   icon: const Icon(Icons.remove_circle_outline),
                   label: const Text('Dispatch'),
                   backgroundColor: Colors.red[700],
@@ -202,7 +205,10 @@ class _State extends State<StockistDashboardScreen> {
                 const SizedBox(height: 12),
                 FloatingActionButton.extended(
                   heroTag: 'upload',
-                  onPressed: () => context.push('/stockist/stock/upload'),
+                  onPressed: () async {
+                    await context.push('/stockist/stock/upload');
+                    _load(); // refresh after importing a PDF
+                  },
                   icon: const Icon(Icons.upload_file),
                   label: const Text('Upload PDF'),
                   backgroundColor: const Color(0xFF1B4F72),

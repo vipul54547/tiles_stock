@@ -32,9 +32,14 @@ class PdfDesignRow {
   /// Original finish text from the PDF when it isn't a standard finish
   /// (e.g. "Punch Ghr", "Lustra"). Null for standard finishes.
   final String? finishLabel;
-  /// Raw JPEG bytes extracted from the PDF for this design.
-  /// Null if the PDF had no matching image or image count didn't align.
-  final Uint8List? imageBytes;
+  /// The FULL finish text exactly as written in the stockist's PDF
+  /// (e.g. "Endless Glossy"), kept verbatim for display + alias matching.
+  /// Unlike finishLabel this is never nulled for standard finishes.
+  final String? surfaceRaw;
+  /// Raw JPEG bytes for this design's photo. From the PDF when one was matched,
+  /// or set later when the stockist picks/takes a photo in the import preview.
+  /// Null when the PDF had no photo for this design and none was added yet.
+  Uint8List? imageBytes;
 
   bool isNew;
   int currentQuantity;
@@ -48,6 +53,7 @@ class PdfDesignRow {
     required this.quantity,
     required this.surface,
     this.finishLabel,
+    this.surfaceRaw,
     this.imageBytes,
     this.isNew = true,
     this.currentQuantity = 0,
@@ -81,7 +87,7 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
   final sizeRaw = parts[0]
       .replaceAll(RegExp(r'[xX]'), 'x')
       .toLowerCase();
-  final size  = '$sizeRaw mm';
+  var size  = '$sizeRaw mm';
 
   // Tile WxH (mm) drives image orientation correction below.
   int? tileW, tileH;
@@ -113,11 +119,47 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
     final doc = PdfDocument(inputBytes: bytes);
     final lines = PdfTextExtractor(doc).extractTextLines();
     dbgTotalLines = lines.length;
-    designMaps = _parseDesignsAdaptive(lines); // each map carries its 'page'
-    if (designMaps.isEmpty) {
-      // Flat-text fallback has no page geometry; per-page matching is skipped.
-      designMaps = _parseDesignsToMaps(PdfTextExtractor(doc).extractText());
+
+    // Pick a parser by layout. The 'PRM' card layout (no header row; each tile
+    // is a stacked name / size / surface block closed by a brand·quality·qty
+    // line) carries its size + quality in the data, so those override the
+    // filename-derived defaults. Everything else uses the column-adaptive parser
+    // (header-based, e.g. 800X1600 STD) with the flat-text fallback.
+    final geo = _buildGeoRows(lines);
+    final lineRows = _buildLineRows(lines); // Syncfusion line grouping (STOCK)
+    final stockFooters = lineRows.rows
+        .where((r) => _stockFooterRe.hasMatch(r.map((t) => t.text).join(' ')))
+        .length;
+    if (stockFooters >= 2) {
+      designMaps = _parseDesignsStock(lineRows); // DESIGN/GRADE/QTY/IMAGE + footers
+    } else if (_looksLikePrm(geo)) {
+      designMaps = _parseDesignsPrm(geo); // vertical card blocks
     } else {
+      designMaps = _parseDesignsAdaptive(lines); // header table, each carries 'page'
+      if (designMaps.isEmpty) {
+        // Flat-text fallback has no page geometry; per-page matching is skipped.
+        designMaps = _parseDesignsToMaps(PdfTextExtractor(doc).extractText());
+      }
+    }
+
+    // PRM + STOCK carry their size/quality in the data — lift the dominant value
+    // up to override the filename-derived defaults (and re-derive tile W/H for
+    // orientation). Adaptive/flat maps have no sizeData, so this is a no-op there.
+    final sd = _modeString(designMaps, 'sizeData');
+    if (sd != null) {
+      size = sd;
+      final dp = sd.replaceAll(' mm', '').split('x');
+      if (dp.length == 2) {
+        tileW = int.tryParse(dp[0].replaceAll(RegExp(r'[^0-9]'), ''));
+        tileH = int.tryParse(dp[1].replaceAll(RegExp(r'[^0-9]'), ''));
+      }
+    }
+    final qd = _modeString(designMaps, 'qualityData');
+    if (qd != null) quality = qd;
+    // Per-page image matching needs page geometry on every design (adaptive &
+    // PRM carry it; the flat fallback does not).
+    if (designMaps.isNotEmpty &&
+        designMaps.every((m) => (m['page'] as int? ?? -1) >= 0)) {
       imagesPerPage = await _extractImageSlotsPerPage(doc);
     }
     doc.dispose();
@@ -136,19 +178,58 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
   // page's miscount can't cascade onto the next. Falls back to a whole-document
   // JPEG scan when per-page extraction is unavailable (flat-text parser ran).
   //
+  // Safety net: some PDFs don't survive the single-page re-save, so per-page
+  // extraction can come back with no photos at all. Detect that and fall back
+  // to the whole-document JPEG scan so photos still appear.
+  if (imagesPerPage != null) {
+    final nonNull = imagesPerPage.fold<int>(
+        0, (a, b) => a + b.where((x) => x != null).length);
+    debugPrint('PDF per-page images: ${imagesPerPage.length} pages, '
+        '$nonNull photos for ${designMaps.length} designs');
+    if (nonNull == 0) {
+      debugPrint('Per-page extraction yielded no photos — '
+          'falling back to whole-document JPEG scan.');
+      imagesPerPage = null;
+    }
+  }
+
   List<Uint8List?> imagesByDesign;
   int imageCount;
+
+  // Position-based matching: when every design carries a 'yc' (currently the PRM
+  // card parser), read each photo's real position from the PDF and attach it to
+  // the design it sits next to — correct even when some tiles have no photo.
+  final positional = designMaps.isNotEmpty &&
+      designMaps.every((m) => m.containsKey('yc') && (m['page'] as int? ?? -1) >= 0);
+
   final perPageUsable = imagesPerPage != null &&
       designMaps.every((m) => (m['page'] as int? ?? -1) >= 0);
 
-  if (perPageUsable) {
+  if (positional) {
+    imagesByDesign = _matchImagesByPosition(bytes, designMaps);
+    imageCount = imagesByDesign.where((x) => x != null).length;
+    debugPrint('Position-based match: $imageCount photos placed for '
+        '${designMaps.length} designs.');
+  } else if (perPageUsable) {
     imageCount =
         imagesPerPage.fold(0, (a, b) => a + b.where((x) => x != null).length);
     imagesByDesign = _matchImagesPerPage(designMaps, imagesPerPage);
   } else {
     final images = _extractJpegsFromBytes(bytes, minSizeBytes: minImageBytes);
     imageCount = images.length;
-    imagesByDesign = _matchImagesGlobally(images, designMaps.length);
+    if (images.length == designMaps.length) {
+      // Exact 1:1 — safe to place every photo in document order.
+      imagesByDesign = _matchImagesGlobally(images, designMaps.length);
+    } else {
+      // Counts differ — some designs simply have no photo in the PDF. Without
+      // per-page geometry we can't tell which, and guessing misplaces every
+      // photo after the gap. Leave them all blank rather than show wrong photos;
+      // the stockist fills them in manually / via camera.
+      debugPrint('Whole-document scan: ${images.length} photos vs '
+          '${designMaps.length} designs — leaving photos blank to avoid '
+          'mismatches (stockist adds them manually).');
+      imagesByDesign = List<Uint8List?>.filled(designMaps.length, null);
+    }
   }
 
   // Rotate any photo whose orientation disagrees with the tile's real shape
@@ -255,7 +336,7 @@ Future<List<List<Uint8List?>>> _extractImageSlotsPerPage(PdfDocument doc) async 
             const Offset(0, 0),
           );
       final pageBytes = Uint8List.fromList(await single.save());
-      perPage.add(_extractImageSlotsFromBytes(pageBytes));
+      perPage.add(_mergeStripSlots(_extractImageSlotsFromBytes(pageBytes)));
     } finally {
       single.dispose();
     }
@@ -305,6 +386,58 @@ List<Uint8List?> _extractImageSlotsFromBytes(Uint8List bytes) {
   }
 
   return slots;
+}
+
+// Some layouts (e.g. the PRM card report) store a single tile photo as several
+// equal horizontal strips — separate image XObjects stacked one above the other.
+// That inflates a page's image count past its design count and shifts matching.
+// Here we stitch a run of consecutive JPEG slots that share the EXACT same pixel
+// width AND height (the signature of an evenly-tiled image) back into one photo,
+// top-to-bottom in document order. Distinct designs almost never share both
+// dimensions, so single photos are left untouched.
+List<Uint8List?> _mergeStripSlots(List<Uint8List?> slots) {
+  final out = <Uint8List?>[];
+  var i = 0;
+  while (i < slots.length) {
+    final cur = slots[i];
+    if (cur == null) {
+      out.add(null);
+      i++;
+      continue;
+    }
+    final base = img.decodeJpg(cur);
+    if (base == null) {
+      out.add(cur);
+      i++;
+      continue;
+    }
+    final parts = <img.Image>[base];
+    var j = i + 1;
+    while (j < slots.length && slots[j] != null) {
+      final next = img.decodeJpg(slots[j]!);
+      if (next == null ||
+          next.width != base.width ||
+          next.height != base.height) {
+        break;
+      }
+      parts.add(next);
+      j++;
+    }
+    if (parts.length == 1) {
+      out.add(cur); // no equal-size run — keep the original bytes
+    } else {
+      final totalH = parts.fold<int>(0, (a, b) => a + b.height);
+      final canvas = img.Image(width: base.width, height: totalH);
+      var y = 0;
+      for (final p in parts) {
+        img.compositeImage(canvas, p, dstY: y);
+        y += p.height;
+      }
+      out.add(img.encodeJpg(canvas, quality: 90));
+    }
+    i = j;
+  }
+  return out;
 }
 
 // ── Orientation correction ─────────────────────────────────────────────────────
@@ -402,6 +535,402 @@ int _findJpegEnd(Uint8List bytes, int start) {
   return -1; // EOI not found
 }
 
+// ── Position-based image → design matching ─────────────────────────────────────
+//
+// When a report has fewer photos than designs (some tiles simply have none),
+// count-based matching can't tell which design is photo-less and misplaces
+// everything below the gap. This matcher reads each photo's real position from
+// the PDF page content streams and attaches it to the design whose vertical band
+// it sits in; designs with no photo in their band stay blank.
+//
+// It parses the PDF directly (these reports use top-level objects, no object
+// streams): scan `N 0 obj … endobj`, walk the /Pages → /Kids tree for page order,
+// decompress each page's content stream, track the CTM through q/Q/cm and read
+// `/Name Do` image placements, then map names → image XObjects → JPEG bytes.
+// Requires each design map to carry 'page' and 'yc'. Falls back to all-null on
+// any parse error (the caller then leaves photos blank).
+
+class _PdfObj {
+  final String dict;
+  final int? streamStart; // byte offset of stream data (null if no stream)
+  final int? streamEnd;
+  _PdfObj(this.dict, this.streamStart, this.streamEnd);
+}
+
+class _PlacedImg {
+  double top;     // top edge in top-left page coords
+  double height;
+  final double width;
+  final List<int> refs; // image XObject numbers (>1 when a tile is tiled strips)
+  _PlacedImg(this.top, this.height, this.width, this.refs);
+  double get centerY => top + height / 2;
+}
+
+Map<int, _PdfObj> _parsePdfObjects(Uint8List bytes, String s) {
+  final objs = <int, _PdfObj>{};
+  for (final m in RegExp(r'(\d+)\s+0\s+obj').allMatches(s)) {
+    final num = int.parse(m.group(1)!);
+    final start = m.end;
+    final endobj = s.indexOf('endobj', start);
+    if (endobj < 0) continue;
+    final sidx = s.indexOf('stream', start);
+    if (sidx >= 0 && sidx < endobj) {
+      var so = sidx + 6; // past 'stream'
+      if (s.startsWith('\r\n', so)) {
+        so += 2;
+      } else if (so < s.length && (s[so] == '\n' || s[so] == '\r')) {
+        so += 1;
+      }
+      var eidx = s.indexOf('endstream', so);
+      if (eidx < 0 || eidx > endobj + 9) eidx = endobj;
+      objs[num] = _PdfObj(s.substring(start, sidx), so, eidx);
+    } else {
+      objs[num] = _PdfObj(s.substring(start, endobj), null, null);
+    }
+  }
+  return objs;
+}
+
+List<int> _inflate(Uint8List data) {
+  try {
+    return zlib.decode(data);
+  } catch (_) {
+    try {
+      return ZLibDecoder(raw: true).convert(data);
+    } catch (_) {
+      return const [];
+    }
+  }
+}
+
+List<double> _mulCtm(List<double> m1, List<double> m2) {
+  final a = m1[0], b = m1[1], c = m1[2], d = m1[3], e = m1[4], f = m1[5];
+  final a2 = m2[0], b2 = m2[1], c2 = m2[2], d2 = m2[3], e2 = m2[4], f2 = m2[5];
+  return [
+    a * a2 + b * c2,
+    a * b2 + b * d2,
+    c * a2 + d * c2,
+    c * b2 + d * d2,
+    e * a2 + f * c2 + e2,
+    e * b2 + f * d2 + f2,
+  ];
+}
+
+double _mediaBoxH(String pageDict) {
+  final m = RegExp(r'/MediaBox\s*\[([^\]]+)\]').firstMatch(pageDict);
+  if (m != null) {
+    final v = m.group(1)!.trim().split(RegExp(r'\s+')).map(double.tryParse).toList();
+    if (v.length == 4 && v.every((e) => e != null)) return v[3]! - v[1]!;
+  }
+  return 792.0;
+}
+
+Map<String, int> _xobjectMap(Map<int, _PdfObj> objs, String pageDict) {
+  var rdict = pageDict;
+  final rref = RegExp(r'/Resources\s+(\d+)\s+0\s+R').firstMatch(pageDict);
+  if (rref != null) rdict = objs[int.parse(rref.group(1)!)]?.dict ?? pageDict;
+  String? xbody =
+      RegExp(r'/XObject\s*<<(.*?)>>', dotAll: true).firstMatch(rdict)?.group(1);
+  if (xbody == null) {
+    final xref = RegExp(r'/XObject\s+(\d+)\s+0\s+R').firstMatch(rdict);
+    if (xref != null) {
+      final xd = objs[int.parse(xref.group(1)!)]?.dict ?? '';
+      xbody = RegExp(r'<<(.*?)>>', dotAll: true).firstMatch(xd)?.group(1);
+    }
+  }
+  final map = <String, int>{};
+  if (xbody != null) {
+    for (final m in RegExp(r'/([A-Za-z0-9_.]+)\s+(\d+)\s+0\s+R').allMatches(xbody)) {
+      map[m.group(1)!] = int.parse(m.group(2)!);
+    }
+  }
+  return map;
+}
+
+String _contentText(Uint8List bytes, Map<int, _PdfObj> objs, String pageDict) {
+  final refs = <int>[];
+  final single = RegExp(r'/Contents\s+(\d+)\s+0\s+R').firstMatch(pageDict);
+  if (single != null) {
+    refs.add(int.parse(single.group(1)!));
+  } else {
+    final arr =
+        RegExp(r'/Contents\s*\[(.*?)\]', dotAll: true).firstMatch(pageDict);
+    if (arr != null) {
+      for (final r in RegExp(r'(\d+)\s+0\s+R').allMatches(arr.group(1)!)) {
+        refs.add(int.parse(r.group(1)!));
+      }
+    }
+  }
+  final acc = <int>[];
+  for (final r in refs) {
+    final o = objs[r];
+    if (o?.streamStart != null) {
+      acc.addAll(_inflate(
+          Uint8List.fromList(bytes.sublist(o!.streamStart!, o.streamEnd!))));
+    }
+  }
+  return latin1.decode(Uint8List.fromList(acc), allowInvalid: true);
+}
+
+List<int> _pageObjectsInOrder(Map<int, _PdfObj> objs) {
+  int? root;
+  objs.forEach((n, o) {
+    if (root == null &&
+        RegExp(r'/Type\s*/Pages\b').hasMatch(o.dict) &&
+        o.dict.contains('/Kids')) {
+      root = n;
+    }
+  });
+  final pages = <int>[];
+  void walk(int n, Set<int> seen) {
+    if (seen.contains(n)) return;
+    seen.add(n);
+    final d = objs[n]?.dict ?? '';
+    if (RegExp(r'/Type\s*/Page\b').hasMatch(d)) {
+      pages.add(n);
+      return;
+    }
+    final km = RegExp(r'/Kids\s*\[(.*?)\]', dotAll: true).firstMatch(d);
+    if (km != null) {
+      for (final k in RegExp(r'(\d+)\s+0\s+R').allMatches(km.group(1)!)) {
+        walk(int.parse(k.group(1)!), seen);
+      }
+    }
+  }
+
+  if (root != null) walk(root!, {});
+  if (pages.isEmpty) {
+    final ks = objs.keys.toList()..sort();
+    for (final n in ks) {
+      if (RegExp(r'/Type\s*/Page\b').hasMatch(objs[n]!.dict)) pages.add(n);
+    }
+  }
+  return pages;
+}
+
+Uint8List? _imageJpeg(Uint8List bytes, _PdfObj o) {
+  if (o.streamStart == null || !o.dict.contains('DCTDecode')) return null;
+  final end0 = o.streamEnd!.clamp(0, bytes.length);
+  for (var i = o.streamStart!; i < end0 - 2; i++) {
+    if (bytes[i] == 0xFF && bytes[i + 1] == 0xD8 && bytes[i + 2] == 0xFF) {
+      final end = _findJpegEnd(bytes, i);
+      return end > i ? bytes.sublist(i, end) : null;
+    }
+  }
+  return null;
+}
+
+int? _intField(String dict, String key) {
+  final m = RegExp('/$key\\s+(\\d+)').firstMatch(dict);
+  return m != null ? int.parse(m.group(1)!) : null;
+}
+
+// PNG-predictor un-filtering (predictors 10–15) for FlateDecode rasters that use
+// it. [colors] = samples per pixel (== bytes-per-pixel at 8 bits).
+List<int> _pngUnpredict(List<int> data, int columns, int colors) {
+  final bpp = colors;
+  final rowLen = columns * colors;
+  if (rowLen <= 0) return const [];
+  final out = <int>[];
+  final prev = List<int>.filled(rowLen, 0);
+  var pos = 0;
+  while (pos + 1 + rowLen <= data.length) {
+    final ft = data[pos++];
+    final row = data.sublist(pos, pos + rowLen);
+    pos += rowLen;
+    for (var i = 0; i < rowLen; i++) {
+      final a = i >= bpp ? row[i - bpp] : 0;
+      final b = prev[i];
+      final c = i >= bpp ? prev[i - bpp] : 0;
+      int v;
+      switch (ft) {
+        case 1:
+          v = row[i] + a;
+        case 2:
+          v = row[i] + b;
+        case 3:
+          v = row[i] + ((a + b) >> 1);
+        case 4:
+          final p = a + b - c;
+          final pa = (p - a).abs(), pb = (p - b).abs(), pc = (p - c).abs();
+          final pr = (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+          v = row[i] + pr;
+        default:
+          v = row[i];
+      }
+      row[i] = v & 0xFF;
+    }
+    out.addAll(row);
+    for (var i = 0; i < rowLen; i++) {
+      prev[i] = row[i];
+    }
+  }
+  return out;
+}
+
+// Returns JPEG bytes for an image XObject, decoding the two encodings these
+// reports use: DCTDecode (already JPEG) and FlateDecode 8-bit RGB/Gray rasters
+// (e.g. PNG-sourced photos) which we inflate and re-encode. CMYK / other
+// colour spaces / bit depths are skipped (left blank for manual fill).
+Uint8List? _decodeImageXObject(Uint8List bytes, _PdfObj o) {
+  if (o.streamStart == null) return null;
+  final d = o.dict;
+  if (d.contains('DCTDecode')) return _imageJpeg(bytes, o);
+  if (!d.contains('FlateDecode')) return null;
+  final w = _intField(d, 'Width');
+  final h = _intField(d, 'Height');
+  final bpc = _intField(d, 'BitsPerComponent') ?? 8;
+  if (w == null || h == null || bpc != 8) return null;
+  if (d.contains('/DeviceCMYK')) return null;
+  final channels = d.contains('/DeviceGray') ? 1 : 3;
+
+  var raw = _inflate(Uint8List.fromList(bytes.sublist(o.streamStart!, o.streamEnd!)));
+  final predM = RegExp(r'/Predictor\s+(\d+)').firstMatch(d);
+  if (predM != null && int.parse(predM.group(1)!) >= 10) {
+    raw = _pngUnpredict(raw, w, channels);
+  }
+  final need = w * h * channels;
+  if (raw.length < need) return null;
+  final pix = Uint8List.fromList(raw.sublist(0, need));
+  final im = channels == 1
+      ? img.Image.fromBytes(width: w, height: h, bytes: pix.buffer, numChannels: 1)
+      : img.Image.fromBytes(
+          width: w,
+          height: h,
+          bytes: pix.buffer,
+          numChannels: 3,
+          order: img.ChannelOrder.rgb);
+  return img.encodeJpg(im, quality: 85);
+}
+
+// Bytes for a placement: a single image, or vertically stitched strips.
+Uint8List? _placedBytes(Uint8List bytes, Map<int, _PdfObj> objs, _PlacedImg p) {
+  if (p.refs.length == 1) return _decodeImageXObject(bytes, objs[p.refs.first]!);
+  final parts = <img.Image>[];
+  for (final r in p.refs) {
+    final jb = _decodeImageXObject(bytes, objs[r]!);
+    if (jb == null) return null;
+    final im = img.decodeJpg(jb);
+    if (im == null) return null;
+    parts.add(im);
+  }
+  final w = parts.first.width;
+  final totalH = parts.fold<int>(0, (a, b) => a + b.height);
+  final canvas = img.Image(width: w, height: totalH);
+  var y = 0;
+  for (final part in parts) {
+    img.compositeImage(canvas, part, dstY: y);
+    y += part.height;
+  }
+  return img.encodeJpg(canvas, quality: 90);
+}
+
+List<_PlacedImg> _imagesOnPage(
+    Uint8List bytes, Map<int, _PdfObj> objs, int pageObj) {
+  final pd = objs[pageObj]!.dict;
+  final h = _mediaBoxH(pd);
+  final xo = _xobjectMap(objs, pd);
+  final ct = _contentText(bytes, objs, pd);
+
+  var ctm = <double>[1, 0, 0, 1, 0, 0];
+  final st = <List<double>>[];
+  final raw = <_PlacedImg>[];
+  // q/Q only as standalone operators (not the 'q'/'Q' inside text strings like
+  // "AQUA"), plus 6-number cm matrices and `/Name Do` image draws.
+  final tokRe = RegExp(
+      r'(?<![A-Za-z0-9])[qQ](?![A-Za-z0-9])|(?:[-\d.]+\s+){6}cm|/[A-Za-z0-9_.]+\s+Do');
+  for (final m in tokRe.allMatches(ct)) {
+    final t = m.group(0)!;
+    if (t == 'q') {
+      st.add(List.of(ctm));
+    } else if (t == 'Q') {
+      if (st.isNotEmpty) ctm = st.removeLast();
+    } else if (t.endsWith('cm')) {
+      final n = t
+          .split(RegExp(r'\s+'))
+          .where((x) => x.isNotEmpty)
+          .take(6)
+          .map((x) => double.tryParse(x) ?? 0)
+          .toList();
+      if (n.length == 6) ctm = _mulCtm(n, ctm);
+    } else {
+      final nm = t.split(RegExp(r'\s+')).first.substring(1);
+      final ref = xo[nm];
+      if (ref != null &&
+          RegExp(r'/Subtype\s*/Image').hasMatch(objs[ref]?.dict ?? '')) {
+        final wdt = ctm[0].abs();
+        final hh = ctm[3].abs();
+        final top = h - (ctm[5] + hh);
+        raw.add(_PlacedImg(top, hh, wdt, [ref]));
+      }
+    }
+  }
+  raw.sort((a, b) => a.top.compareTo(b.top));
+
+  // Merge vertically-contiguous strips of the same width (a tiled single photo).
+  final merged = <_PlacedImg>[];
+  for (final p in raw) {
+    if (merged.isNotEmpty &&
+        (merged.last.width - p.width).abs() < 3 &&
+        ((merged.last.top + merged.last.height) - p.top).abs() < 4) {
+      merged.last.height += p.height;
+      merged.last.refs.add(p.refs.first);
+    } else {
+      merged.add(p);
+    }
+  }
+  return merged;
+}
+
+List<Uint8List?> _matchImagesByPosition(
+    Uint8List bytes, List<Map<String, dynamic>> designMaps) {
+  final out = List<Uint8List?>.filled(designMaps.length, null);
+  try {
+    final s = latin1.decode(bytes, allowInvalid: true);
+    final objs = _parsePdfObjects(bytes, s);
+    final pageObjs = _pageObjectsInOrder(objs);
+
+    final byPage = <int, List<int>>{};
+    for (var i = 0; i < designMaps.length; i++) {
+      (byPage[designMaps[i]['page'] as int] ??= <int>[]).add(i);
+    }
+    final cache = <int, List<_PlacedImg>>{};
+    byPage.forEach((page, idxs) {
+      if (page < 0 || page >= pageObjs.length) return;
+      final imgs = cache[page] ??= _imagesOnPage(bytes, objs, pageObjs[page]);
+      final used = List<bool>.filled(imgs.length, false);
+      for (final di in idxs) {
+        final dy = (designMaps[di]['yc'] as num?)?.toDouble();
+        if (dy == null) continue;
+        var best = -1;
+        var bestDist = 1e9;
+        var bestContains = false;
+        for (var k = 0; k < imgs.length; k++) {
+          if (used[k]) continue;
+          final im = imgs[k];
+          final contains = dy >= im.top - 6 && dy <= im.top + im.height + 6;
+          final dist = (im.centerY - dy).abs();
+          if (contains && !bestContains) {
+            bestContains = true;
+            best = k;
+            bestDist = dist;
+          } else if (contains == bestContains && dist < bestDist) {
+            best = k;
+            bestDist = dist;
+          }
+        }
+        if (best >= 0 && (bestContains || bestDist <= 40)) {
+          used[best] = true;
+          out[di] = _placedBytes(bytes, objs, imgs[best]);
+        }
+      }
+    });
+  } catch (e, st) {
+    debugPrint('position-based image match failed: $e\n$st');
+  }
+  return out;
+}
+
 // ── Column-adaptive positional parser ─────────────────────────────────────────
 //
 // Tile stock reports vary between suppliers: the NAME / IMAGE / SIZE / SURFACE /
@@ -487,6 +1016,13 @@ bool _isJunkRow(String joined) {
   if (_dateRe.hasMatch(u)) return true;
   if (_pageRe.hasMatch(u)) return true;
   if (RegExp(r'^stock\s+report\b', caseSensitive: false).hasMatch(u)) return true;
+  // Document summary lines (e.g. "WEIGHT (TON) : 43.336  GRAND TOTAL : 1670") —
+  // never a tile design.
+  if (RegExp(r'grand\s+total|weight\s*\(?\s*ton|order[- ]?confirm',
+          caseSensitive: false)
+      .hasMatch(u)) {
+    return true;
+  }
   return false;
 }
 
@@ -562,6 +1098,41 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
     return 'name';
   }
 
+  // 3b. Re-join vertically-wrapped surface cells. A narrow surface column can
+  // wrap a finish onto two stacked lines (e.g. "ENDLESS" then "GLOSSY"); the Y
+  // row-grouping then splits them, so the design keeps only "ENDLESS" and the
+  // leftover "GLOSSY" becomes a phantom row. Move such orphan surface-column
+  // tokens onto the design row just above — close in Y (a wrap, not the ~design
+  // spacing) and already carrying a surface token — so the full finish
+  // ("Endless Glossy") is preserved.
+  if (hasHeader && anchors.containsKey('surface')) {
+    bool hasQty(List<_Tok> r) =>
+        r.any((t) => _isQtyToken(t.text) && roleForX(t.xc) == 'qty');
+    bool hasSurf(List<_Tok> r) => r.any((t) => roleForX(t.xc) == 'surface');
+    final designRows = [
+      for (var i = 0; i < rows.length; i++)
+        if (hasQty(rows[i]) && hasSurf(rows[i])) i
+    ];
+    for (var i = 0; i < rows.length; i++) {
+      if (hasQty(rows[i])) continue; // a real design row keeps its own surface
+      final orphan =
+          rows[i].where((t) => roleForX(t.xc) == 'surface').toList();
+      if (orphan.isEmpty) continue;
+      int? tgt;
+      for (final j in designRows) {
+        if (rows[j].first.page != rows[i].first.page) continue;
+        final gap = rows[i].first.yc - rows[j].first.yc;
+        if (gap > 0 && gap <= medH * 2.2) {
+          if (tgt == null || rows[j].first.yc > rows[tgt].first.yc) tgt = j;
+        }
+      }
+      final target = tgt;
+      if (target == null) continue;
+      rows[target].addAll(orphan);
+      rows[i].removeWhere((t) => roleForX(t.xc) == 'surface');
+    }
+  }
+
   // 4. Reduce each row to cells.
   final cells = <_RowCells>[];
   for (var i = 0; i < rows.length; i++) {
@@ -609,6 +1180,10 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
       }
     }
 
+    // Order surface tokens top-to-bottom then left-to-right so a wrapped cell
+    // joins as "ENDLESS GLOSSY", not "GLOSSY ENDLESS".
+    surfToks.sort((a, b) =>
+        a.yc != b.yc ? a.yc.compareTo(b.yc) : a.x0.compareTo(b.x0));
     final surfaceRaw = surfToks.isEmpty
         ? null
         : surfToks.map((t) => t.text).join(' ').trim();
@@ -685,17 +1260,352 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
           runningRaw == null ? null : _finishLabelFor(runningRaw, surfaceType);
     }
 
+    // Full original finish text as written in the stockist's PDF (own cell, else
+    // the inherited section header). Kept verbatim — unlike finishLabel it is
+    // never nulled — so the stockist sees their exact wording ("Endless Glossy")
+    // next to the mapped admin finish, and can confirm/correct the mapping.
+    final rawForDisplay = (raw != null && raw.isNotEmpty) ? raw : runningRaw;
+
     result.add({
       'name': name,
       'quantity': c.qty!,
       'surface': surfaceType,
       'finishLabel': finishLabel,
+      'surfaceRaw': rawForDisplay == null ? null : _titleCaseFinish(rawForDisplay),
       'page': c.page, // drives per-page image↔design matching
     });
   }
 
   debugPrint('Adaptive PDF parse: ${result.length} designs '
       '(header=$hasHeader, rows=${rows.length})');
+  return result;
+}
+
+// ── 'PRM' card-layout parser ───────────────────────────────────────────────────
+//
+// Some suppliers export a vertical "card" layout instead of a table: there is no
+// NAME/IMAGE/BOX/SURFACE header. Each tile is a stacked block —
+//
+//     6003 (SV)                    ← name (one or more lines)
+//     600X1200                     ← size
+//     END MATCH GLOSSY             ← surface (one or more lines)
+//     GRACIAS   Premium   13       ← brand · quality · box-qty  (closes the block)
+//
+// with the tile photo on the left. Size and quality live in the data here (not
+// in the filename). We read by geometry: group words into visual rows, then walk
+// rows accumulating a block until the brand·quality·qty line closes it.
+
+const Set<String> _kQualityWords = {'PREMIUM', 'STANDARD', 'ECONOMY'};
+
+class _GeoRows {
+  final List<List<_Tok>> rows; // visual rows, sorted by (page, y) then x
+  final double medH;
+  _GeoRows(this.rows, this.medH);
+}
+
+// Group every word into visual rows by vertical proximity (per page). Shared by
+// the PRM parser and its detector; the adaptive parser builds its own rows.
+_GeoRows _buildGeoRows(List<TextLine> lines) {
+  final toks = <_Tok>[];
+  for (final line in lines) {
+    for (final w in line.wordCollection) {
+      final t = w.text.trim();
+      if (t.isEmpty) continue;
+      final b = w.bounds;
+      toks.add(_Tok(line.pageIndex, b.left, b.right,
+          b.top + b.height / 2, b.height, t));
+    }
+  }
+  if (toks.isEmpty) return _GeoRows(const [], 10);
+
+  final hs = toks.map((t) => t.h).where((h) => h > 0).toList()..sort();
+  final medH = hs.isEmpty ? 10.0 : hs[hs.length ~/ 2];
+  final rowTol = medH * 0.6;
+
+  toks.sort((a, b) =>
+      a.page != b.page ? a.page.compareTo(b.page) : a.yc.compareTo(b.yc));
+  final rows = <List<_Tok>>[];
+  for (final t in toks) {
+    if (rows.isNotEmpty &&
+        t.page == rows.last.first.page &&
+        (t.yc - rows.last.first.yc).abs() <= rowTol) {
+      rows.last.add(t);
+    } else {
+      rows.add([t]);
+    }
+  }
+  for (final r in rows) {
+    r.sort((a, b) => a.x0.compareTo(b.x0));
+  }
+  return _GeoRows(rows, medH);
+}
+
+// Like _buildGeoRows but keeps Syncfusion's own line grouping (one row per
+// TextLine) instead of re-grouping by Y. Used by the STOCK parser because its
+// footer subtotal lines (e.g. "600X1200 - MATT - PRE : 270") must stay on a
+// single row to be recognised — Y re-grouping can split them.
+_GeoRows _buildLineRows(List<TextLine> lines) {
+  final rows = <List<_Tok>>[];
+  final heights = <double>[];
+  for (final line in lines) {
+    final row = <_Tok>[];
+    for (final w in line.wordCollection) {
+      final t = w.text.trim();
+      if (t.isEmpty) continue;
+      final b = w.bounds;
+      row.add(_Tok(line.pageIndex, b.left, b.right, b.top + b.height / 2,
+          b.height, t));
+      if (b.height > 0) heights.add(b.height);
+    }
+    if (row.isNotEmpty) {
+      row.sort((a, b) => a.x0.compareTo(b.x0));
+      rows.add(row);
+    }
+  }
+  rows.sort((a, b) => a.first.page != b.first.page
+      ? a.first.page.compareTo(b.first.page)
+      : a.first.yc.compareTo(b.first.yc));
+  heights.sort();
+  final medH = heights.isEmpty ? 10.0 : heights[heights.length ~/ 2];
+  return _GeoRows(rows, medH);
+}
+
+// True when the document looks like the PRM card layout: no recognisable column
+// header anywhere, but several "… <Quality> <qty>" closing lines.
+bool _looksLikePrm(_GeoRows g) {
+  if (g.rows.isEmpty) return false;
+  final hasHeader = g.rows.any((r) {
+    var roles = 0;
+    for (final t in r) {
+      if (_headerRole(t.text) != null) roles++;
+    }
+    return roles >= 2;
+  });
+  if (hasHeader) return false;
+
+  var dataLines = 0;
+  for (final r in g.rows) {
+    final hasQual = r.any((t) => _kQualityWords.contains(t.text.toUpperCase()));
+    final hasInt = r.any((t) => _isQtyToken(t.text));
+    if (hasQual && hasInt) dataLines++;
+  }
+  return dataLines >= 3;
+}
+
+List<Map<String, dynamic>> _parseDesignsPrm(_GeoRows g) {
+  final result = <Map<String, dynamic>>[];
+  var buf = <List<_Tok>>[]; // name / size / surface rows awaiting their closer
+  int? curPage;
+
+  String joinRows(Iterable<List<_Tok>> rs) =>
+      rs.map((r) => r.map((t) => t.text).join(' ')).join(' ').trim();
+
+  void flush(List<_Tok> dataRow, int page) {
+    final ints = dataRow.where((t) => _isQtyToken(t.text)).toList()
+      ..sort((a, b) => a.x0.compareTo(b.x0));
+    if (ints.isEmpty || buf.isEmpty) {
+      buf = [];
+      return;
+    }
+    final qty = int.tryParse(ints.last.text) ?? 0;
+    final qualTok = dataRow.firstWhere(
+        (t) => _kQualityWords.contains(t.text.toUpperCase()),
+        orElse: () => dataRow.first);
+    final quality = _titleCaseFinish(qualTok.text);
+
+    // Split the buffered rows on the size line: rows above are the name, rows
+    // below are the surface (handles multi-line names and multi-word surfaces).
+    var sizeIdx = -1;
+    for (var i = 0; i < buf.length; i++) {
+      if (buf[i].any((t) => _sizeRe.hasMatch(t.text))) {
+        sizeIdx = i;
+        break;
+      }
+    }
+    final String name;
+    String sizeStr = '';
+    final String surfaceRaw;
+    if (sizeIdx >= 0) {
+      name = joinRows(buf.sublist(0, sizeIdx));
+      sizeStr = buf[sizeIdx]
+          .firstWhere((t) => _sizeRe.hasMatch(t.text))
+          .text;
+      surfaceRaw = joinRows(buf.sublist(sizeIdx + 1));
+    } else {
+      name = buf.isNotEmpty ? joinRows([buf.first]) : '';
+      surfaceRaw = joinRows(buf.skip(1));
+    }
+
+    final cleanName = _cleanName(name, allowNumeric: true);
+    if (cleanName.isEmpty) {
+      buf = [];
+      return;
+    }
+
+    final surface = surfaceRaw.isEmpty ? 'None' : (_surfaceOf(surfaceRaw) ?? 'None');
+    final finishLabel = surfaceRaw.isEmpty
+        ? null
+        : (surface == 'None'
+            ? _titleCaseFinish(surfaceRaw)
+            : _finishLabelFor(surfaceRaw, surface));
+
+    result.add({
+      'name': cleanName,
+      'quantity': qty,
+      'surface': surface,
+      'finishLabel': finishLabel,
+      'surfaceRaw': surfaceRaw.isEmpty ? null : _titleCaseFinish(surfaceRaw),
+      'page': page,
+      'yc': buf.first.first.yc, // block top — for position-based photo matching
+      'sizeData': sizeStr.isEmpty ? null : '${sizeStr.toLowerCase()} mm',
+      'qualityData': quality,
+    });
+    buf = [];
+  }
+
+  for (final r in g.rows) {
+    final page = r.first.page;
+    if (curPage != null && page != curPage) buf = []; // blocks never span pages
+    curPage = page;
+
+    final joined = r.map((t) => t.text).join(' ');
+    if (_isJunkRow(joined)) continue; // page footers / dates / report titles
+
+    final hasQual = r.any((t) => _kQualityWords.contains(t.text.toUpperCase()));
+    final hasInt = r.any((t) => _isQtyToken(t.text));
+    final hasSize = r.any((t) => _sizeRe.hasMatch(t.text));
+
+    if (hasQual && hasInt) {
+      flush(r, page); // closing line for the current block
+    } else if (hasSize && hasInt) {
+      continue; // page-title line ("600X1200  1360") — size + total, no quality
+    } else {
+      buf.add(r);
+    }
+  }
+  return result;
+}
+
+// Most common non-empty value of [key] across [maps] (used to lift the
+// data-carried size / quality up to the top-level result).
+String? _modeString(List<Map<String, dynamic>> maps, String key) {
+  final counts = <String, int>{};
+  for (final m in maps) {
+    final v = m[key] as String?;
+    if (v != null && v.isNotEmpty) counts[v] = (counts[v] ?? 0) + 1;
+  }
+  if (counts.isEmpty) return null;
+  return counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+}
+
+// ── 'STOCK' footer-surface parser ──────────────────────────────────────────────
+//
+// Another layout: a DESIGN / GRADE / QTY / IMAGE table whose surface lives in
+// section FOOTER lines, e.g. `600X1200 - MARBLE RANDOM - PRE : 234`. The footer
+// closes a group: its surface (the middle field), size and grade apply to every
+// design row ABOVE it since the previous footer — and groups can span pages.
+
+// Captures: (1) size — allowing spaces around the X, e.g. "600 X 1200" as
+// Syncfusion renders it; (2) the surface (middle field, may be empty/dashes);
+// (3) the grade keyword. Matches the footer subtotal lines.
+final _stockFooterRe = RegExp(
+    r'(\d{2,4}\s*[xX]\s*\d{2,4})\s*-(.*)-\s*(PRE|STD|ECO|PREMIUM|STANDARD|ECONOMY)\b\s*:',
+    caseSensitive: false);
+
+const Map<String, String> _kGradeQuality = {
+  'PRE': 'Premium', 'PREMIUM': 'Premium',
+  'STD': 'Standard', 'STANDARD': 'Standard',
+  'ECO': 'Economy', 'ECONOMY': 'Economy',
+};
+
+List<Map<String, dynamic>> _parseDesignsStock(_GeoRows g) {
+  // Learn column x-anchors from the header rows (DESIGN→name, QTY→qty, IMAGE).
+  final acc = <String, List<double>>{};
+  for (final r in g.rows) {
+    final found = <String, double>{};
+    for (final t in r) {
+      final role = _headerRole(t.text);
+      if (role != null) found[role] = t.xc;
+    }
+    if (found.length >= 2) found.forEach((k, x) => (acc[k] ??= []).add(x));
+  }
+  double anchor(String k, double dflt) => acc.containsKey(k)
+      ? acc[k]!.reduce((a, b) => a + b) / acc[k]!.length
+      : dflt;
+  final nameX = anchor('name', 42);
+  final qtyX = anchor('qty', 368);
+  final imageX = anchor('image', 467);
+  final nameHi = (nameX + qtyX) / 2; // design column upper bound
+  final qtyHi = (qtyX + imageX) / 2; // qty column upper bound
+
+  final result = <Map<String, dynamic>>[];
+  final pending = <Map<String, dynamic>>[];
+
+  for (final r in g.rows) {
+    final joined = r.map((t) => t.text).join(' ');
+
+    final fm = _stockFooterRe.firstMatch(joined);
+    if (fm != null) {
+      // size: strip the spaces Syncfusion inserts ("600 X 1200" → "600x1200").
+      final sizeData = '${fm.group(1)!.replaceAll(RegExp(r'\s+'), '').toLowerCase()} mm';
+      // surface: the middle field, with stray dashes/extra spaces cleaned.
+      final surfaceRaw = fm
+          .group(2)!
+          .replaceAll('-', ' ')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      final grade = _kGradeQuality[fm.group(3)!.toUpperCase()] ?? 'Premium';
+      final surface =
+          surfaceRaw.isEmpty ? 'None' : (_surfaceOf(surfaceRaw) ?? 'None');
+      for (final d in pending) {
+        d['surface'] = surface;
+        d['finishLabel'] = surfaceRaw.isEmpty
+            ? null
+            : (surface == 'None'
+                ? _titleCaseFinish(surfaceRaw)
+                : _finishLabelFor(surfaceRaw, surface));
+        d['surfaceRaw'] =
+            surfaceRaw.isEmpty ? null : _titleCaseFinish(surfaceRaw);
+        d['sizeData'] = sizeData;
+        d['qualityData'] = grade;
+      }
+      pending.clear();
+      continue;
+    }
+
+    // Design row: name token(s) in the design column + a qty number in the qty
+    // column. Header / junk rows fail this and are skipped.
+    final nameToks = <_Tok>[];
+    int? qty;
+    for (final t in r) {
+      if (_sizeRe.hasMatch(t.text)) continue;
+      if (t.xc < nameHi) {
+        if (!_isJunkNameToken(t.text)) nameToks.add(t);
+      } else if (t.xc < qtyHi && _isQtyToken(t.text)) {
+        qty ??= int.tryParse(t.text);
+      }
+    }
+    if (qty == null || nameToks.isEmpty) continue;
+    if (_isJunkRow(joined)) continue;
+    nameToks.sort((a, b) => a.x0.compareTo(b.x0));
+    final name =
+        _cleanName(nameToks.map((t) => t.text).join(' '), allowNumeric: true);
+    if (name.isEmpty) continue;
+
+    final m = <String, dynamic>{
+      'name': name,
+      'quantity': qty,
+      'surface': 'None', // filled by the next footer
+      'finishLabel': null,
+      'surfaceRaw': null,
+      'page': r.first.page,
+      'yc': r.first.yc,
+      'sizeData': null,
+      'qualityData': 'Premium',
+    };
+    result.add(m);
+    pending.add(m);
+  }
   return result;
 }
 
@@ -962,6 +1872,7 @@ class PdfImportService {
         quantity:    m['quantity']    as int,
         surface:     m['surface']     as String,
         finishLabel: m['finishLabel'] as String?,
+        surfaceRaw:  m['surfaceRaw']  as String?,
         imageBytes:  i < imageList.length ? imageList[i] as Uint8List? : null,
       );
     });

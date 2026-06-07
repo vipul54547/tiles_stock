@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
@@ -120,6 +121,53 @@ class _State extends State<AddEditStockScreen> {
   }
 
   // ── Image picker ──────────────────────────────────────────────────────────
+
+  final _picker = ImagePicker();
+
+  // Ask the stockist whether to take a photo or pick from the gallery, then
+  // run the matching picker. This is where a stockist adds a tile photo for a
+  // design that came from a PDF without one.
+  Future<void> _chooseImageSource() async {
+    final src = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera, color: Color(0xFF1B4F72)),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Color(0xFF1B4F72)),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (src == 'camera') {
+      await _takePhoto();
+    } else if (src == 'gallery') {
+      await _pickImages();
+    }
+  }
+
+  Future<void> _takePhoto() async {
+    try {
+      final x = await _picker.pickImage(
+          source: ImageSource.camera, maxWidth: 2000, imageQuality: 85);
+      if (x == null || !mounted) return;
+      setState(() {
+        _pickedPaths = [x.path];
+        _existingImageUrls = []; // replace existing with the new photo
+      });
+    } catch (e) {
+      if (mounted) _snack('Could not open camera: $e', Colors.red);
+    }
+  }
 
   Future<void> _pickImages() async {
     final res = await FilePicker.platform.pickFiles(
@@ -317,70 +365,79 @@ class _State extends State<AddEditStockScreen> {
 
   Widget _buildImagePicker() {
     final hasImages = _existingImageUrls.isNotEmpty || _pickedPaths.isNotEmpty;
+    final ratio = aspectRatioFromSize(_size); // width / height (0.5 = 1:2)
+    final portrait = ratio < 0.95;
     return GestureDetector(
-      onTap: _pickImages,
-      child: Container(
-        height: 160,
-        decoration: BoxDecoration(
-          border: Border.all(
-              color: hasImages ? const Color(0xFF1B4F72) : Colors.grey),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: hasImages
-            ? Stack(
-                children: [
-                  ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.all(8),
-                    itemCount: _pickedPaths.isNotEmpty
-                        ? _pickedPaths.length
-                        : _existingImageUrls.length,
-                    itemBuilder: (_, i) {
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8),
+      onTap: _chooseImageSource,
+      child: LayoutBuilder(
+        builder: (ctx, c) {
+          final w = c.maxWidth - 16; // minus padding
+          // Portrait tiles are rotated to landscape so the wide preview area is
+          // used instead of leaving large empty side margins.
+          var imgH = portrait ? w * ratio : w / ratio;
+          imgH = imgH.clamp(140.0, 260.0);
+          final imgW = portrait ? w : imgH * ratio;
+          return Container(
+            width: double.infinity,
+            height: hasImages ? imgH + 16 : 160,
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              border: Border.all(
+                  color: hasImages ? const Color(0xFF1B4F72) : Colors.grey),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: hasImages
+                ? Stack(
+                    children: [
+                      Center(
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: _pickedPaths.isNotEmpty
-                              ? Image.file(File(_pickedPaths[i]),
-                                  width: 120, height: 144,
-                                  fit: BoxFit.cover)
-                              : Image.network(_existingImageUrls[i],
-                                  width: 120, height: 144,
-                                  fit: BoxFit.cover),
+                          child: SizedBox(
+                            width: imgW,
+                            height: imgH,
+                            child: _previewImage(portrait),
+                          ),
                         ),
-                      );
-                    },
-                  ),
-                  Positioned(
-                    bottom: 8,
-                    right: 8,
-                    child: TextButton.icon(
-                      onPressed: _pickImages,
-                      icon: const Icon(Icons.edit, size: 14),
-                      label: const Text('Change'),
-                      style: TextButton.styleFrom(
-                        backgroundColor:
-                            Colors.black.withValues(alpha: 0.5),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
                       ),
-                    ),
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: TextButton.icon(
+                          onPressed: _chooseImageSource,
+                          icon: const Icon(Icons.edit, size: 14),
+                          label: const Text('Change'),
+                          style: TextButton.styleFrom(
+                            backgroundColor: Colors.black.withValues(alpha: 0.5),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_photo_alternate_outlined,
+                          size: 48, color: Colors.grey),
+                      SizedBox(height: 8),
+                      Text('Tap to add a photo — camera or gallery',
+                          style: TextStyle(color: Colors.grey)),
+                    ],
                   ),
-                ],
-              )
-            : const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.add_photo_alternate_outlined,
-                      size: 48, color: Colors.grey),
-                  SizedBox(height: 8),
-                  Text('Tap to add design images',
-                      style: TextStyle(color: Colors.grey)),
-                ],
-              ),
+          );
+        },
       ),
     );
+  }
+
+  // First image, rotated 90° for portrait tiles so it shows horizontally.
+  Widget _previewImage(bool portrait) {
+    final image = _pickedPaths.isNotEmpty
+        ? Image.file(File(_pickedPaths.first), fit: BoxFit.cover)
+        : Image.network(_existingImageUrls.first, fit: BoxFit.cover);
+    return portrait ? RotatedBox(quarterTurns: 1, child: image) : image;
   }
 
   // ── Size picker ───────────────────────────────────────────────────────────

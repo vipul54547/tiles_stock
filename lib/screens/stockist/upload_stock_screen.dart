@@ -100,7 +100,8 @@ class _State extends State<UploadStockScreen> {
   //   3. otherwise fall back to 'None'
   // Returns the normalised raw key so the caller can later learn from it.
   String _alignSurface(PdfDesignRow row) {
-    final rawKey = normalizeSurfaceRaw(row.finishLabel ?? row.surface);
+    final rawKey = normalizeSurfaceRaw(
+        row.surfaceRaw ?? row.finishLabel ?? row.surface);
     final aliased = _aliases[rawKey];
     if (aliased != null && _finishes.contains(aliased)) {
       row.surface = aliased;
@@ -108,6 +109,13 @@ class _State extends State<UploadStockScreen> {
       row.surface = _finishes.contains('None') ? 'None' : row.surface;
     }
     return rawKey;
+  }
+
+  // The stockist's own finish wording from the PDF (full raw text preferred),
+  // for display next to the mapped admin finish. Null if the PDF had none.
+  String? _pdfFinishOf(PdfDesignRow row) {
+    final raw = row.surfaceRaw ?? row.finishLabel;
+    return (raw != null && raw.isNotEmpty) ? raw : null;
   }
 
   // ── Pick file + auto-process ──────────────────────────────────────────────
@@ -177,9 +185,13 @@ class _State extends State<UploadStockScreen> {
     // Group by raw key; remember a display label, the current choice and count.
     final groups = <String, _FinishGroup>{};
     for (final r in rows) {
-      final label = (r.row.finishLabel != null && r.row.finishLabel!.isNotEmpty)
-          ? r.row.finishLabel!
-          : r.row.surface;
+      // Show the stockist's full PDF finish wording (e.g. "Endless Glossy"),
+      // not the truncated/mapped name, so they recognise their own naming.
+      final label = (r.row.surfaceRaw != null && r.row.surfaceRaw!.isNotEmpty)
+          ? r.row.surfaceRaw!
+          : (r.row.finishLabel != null && r.row.finishLabel!.isNotEmpty)
+              ? r.row.finishLabel!
+              : r.row.surface;
       final g = groups.putIfAbsent(
           r.rawKey, () => _FinishGroup(label: label, choice: r.row.surface));
       g.count++;
@@ -822,6 +834,30 @@ class _State extends State<UploadStockScreen> {
       );
 
   // Update row: existing stock + incoming boxes = new total
+  // Tile photo extracted from the PDF, shown for visual verification only.
+  // Photo management (add/replace via gallery or camera) happens inside the
+  // design on the edit screen — not here. A plain placeholder means the PDF had
+  // no photo for this tile; the stockist adds one later from the design.
+  Widget _thumb(PdfDesignRow row) => ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: 46,
+          height: 46,
+          child: row.imageBytes != null
+              ? Image.memory(row.imageBytes!,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) => _thumbPlaceholder())
+              : _thumbPlaceholder(),
+        ),
+      );
+
+  Widget _thumbPlaceholder() => Container(
+        color: Colors.grey.shade100,
+        alignment: Alignment.center,
+        child: Icon(Icons.image_outlined, size: 18, color: Colors.grey.shade400),
+      );
+
   Widget _buildUpdateRow(_Resolved r) => Container(
         margin: const EdgeInsets.only(bottom: 6),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -832,6 +868,8 @@ class _State extends State<UploadStockScreen> {
         ),
         child: Row(
           children: [
+            _thumb(r.row),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(r.row.name,
                   style: const TextStyle(
@@ -875,6 +913,8 @@ class _State extends State<UploadStockScreen> {
         ),
         child: Row(
           children: [
+            _thumb(r.row),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -887,35 +927,55 @@ class _State extends State<UploadStockScreen> {
                   Text('${r.row.quantity} boxes',
                       style: TextStyle(
                           fontSize: 11, color: Colors.grey.shade600)),
+                  // The stockist's own finish wording straight from the PDF, so
+                  // they can compare it against the mapped admin finish (chip).
+                  if (_pdfFinishOf(r.row) != null) ...[
+                    const SizedBox(height: 2),
+                    Text('PDF finish: ${_pdfFinishOf(r.row)}',
+                        style: const TextStyle(
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                            color: Color(0xFF6A1B9A)),
+                        overflow: TextOverflow.ellipsis),
+                  ],
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            // Editable surface chip
-            GestureDetector(
-              onTap: () => _pickSurface(r.row),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6A1B9A).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                      color: const Color(0xFF6A1B9A).withValues(alpha: 0.4)),
+            // Mapped admin finish — tap to change.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                const Text('Standard finish',
+                    style: TextStyle(fontSize: 9, color: Colors.grey)),
+                const SizedBox(height: 2),
+                GestureDetector(
+                  onTap: () => _pickSurface(r.row),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6A1B9A).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: const Color(0xFF6A1B9A).withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(r.row.surface,
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF6A1B9A),
+                                fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.edit,
+                            size: 10, color: Color(0xFF6A1B9A)),
+                      ],
+                    ),
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(r.row.surface,
-                        style: const TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF6A1B9A),
-                            fontWeight: FontWeight.w600)),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.edit, size: 10, color: Color(0xFF6A1B9A)),
-                  ],
-                ),
-              ),
+              ],
             ),
           ],
         ),
