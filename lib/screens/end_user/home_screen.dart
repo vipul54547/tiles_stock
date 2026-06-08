@@ -8,6 +8,7 @@ import '../../widgets/tile_card.dart';
 import 'stockist_group_screen.dart' show stockistGroups;
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
+import '../../utils/guest_gate.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
 const _filterSurfaces   = kFinishes;
@@ -866,12 +867,19 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Row(
               children: [
-                _topNavBtn(context, 'Manage Group', Icons.group_outlined,
-                    () => context.push('/stockist-groups')),
-                const SizedBox(width: 8),
-                _topNavBtn(context, 'Stock', Icons.inventory_2_outlined,
-                    () => context.go('/home')),
-                const SizedBox(width: 8),
+                // Group & Stock are stockist-based — hidden for guests.
+                if (!isGuest) ...[
+                  _topNavBtn(context, 'Manage Group', Icons.group_outlined,
+                      () {
+                    if (!blockIfGuest(context, feature: 'Groups')) {
+                      context.push('/stockist-groups');
+                    }
+                  }),
+                  const SizedBox(width: 8),
+                  _topNavBtn(context, 'Stock', Icons.inventory_2_outlined,
+                      () => context.go('/home')),
+                  const SizedBox(width: 8),
+                ],
                 _topNavBtn(context, 'All Design', Icons.grid_view_rounded,
                     null, active: true),
               ],
@@ -883,6 +891,34 @@ class _HomeScreenState extends State<HomeScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                if (isGuest)
+                  Container(
+                    width: double.infinity,
+                    color: const Color(0xFF1B4F72).withValues(alpha: 0.08),
+                    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline,
+                            size: 16, color: Color(0xFF1B4F72)),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Browsing as guest — register to view stockists, '
+                            'contact them and place orders.',
+                            style: TextStyle(
+                                fontSize: 11.5, color: Color(0xFF1B4F72)),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => context.push('/register'),
+                          style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              minimumSize: const Size(0, 32)),
+                          child: const Text('Register'),
+                        ),
+                      ],
+                    ),
+                  ),
                 // Row 1: quality chips + filter button + clear chip
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),

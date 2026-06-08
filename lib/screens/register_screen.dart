@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '../services/supabase_auth_service.dart';
+import '../services/supabase_data_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -35,29 +35,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    final auth   = SupabaseAuthService();
-    final result = await auth.registerEndUser(
-      email:         _emailCtrl.text.trim(),
-      password:      _passCtrl.text,
-      companyName:   _companyCtrl.text.trim(),
-      contactPerson: _contactCtrl.text.trim(),
-      phone:         _phoneCtrl.text.trim(),
-      city:          _cityCtrl.text.trim(),
-      gstNumber:     _gstCtrl.text.trim().isEmpty ? null : _gstCtrl.text.trim(),
-    );
-
-    setState(() => _loading = false);
-    if (!mounted) return;
-
-    if (result != null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Account created! Please login.'),
-        backgroundColor: Colors.green,
-      ));
-      context.go('/login');
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Registration failed. Email may already exist.'),
+    try {
+      await SupabaseDataService().submitRegistrationRequest(
+        email:         _emailCtrl.text.trim(),
+        password:      _passCtrl.text,
+        companyName:   _companyCtrl.text.trim(),
+        contactPerson: _contactCtrl.text.trim(),
+        phone:         _phoneCtrl.text.trim(),
+        city:          _cityCtrl.text.trim(),
+        gstNumber:     _gstCtrl.text.trim().isEmpty ? null : _gstCtrl.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() => _loading = false);
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Request submitted'),
+          content: const Text(
+              'Your registration has been sent for approval. Once an admin '
+              'approves it, you can log in with this email and password.\n\n'
+              'Meanwhile you can keep browsing as a guest.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK')),
+          ],
+        ),
+      );
+      if (mounted) context.go('/login');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('$e'.replaceAll('PostgrestException:', '').trim()),
         backgroundColor: Colors.red,
       ));
     }

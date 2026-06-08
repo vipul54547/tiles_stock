@@ -12,6 +12,10 @@ const String kSuperAdminEmail = 'vipul54547@gmail.com';
 bool get isSuperAdmin =>
     (supabase.auth.currentUser?.email ?? '').toLowerCase() == kSuperAdminEmail;
 
+/// True for an anonymous "browse as guest" session. Guests can browse designs
+/// but cannot inquire, see stockist IDs/contacts, or create groups.
+bool get isGuest => supabase.auth.currentUser?.isAnonymous ?? false;
+
 class SupabaseAuthService {
   UserRole? _role;
   UserRole? get currentRole => _role;
@@ -25,10 +29,24 @@ class SupabaseAuthService {
     return _loadProfile(res.user!.id);
   }
 
+  /// Anonymous "browse as guest" sign-in. No profile/end_user row exists for
+  /// guests — they're treated as a limited end user.
+  Future<UserRole> loginAsGuest() async {
+    await supabase.auth.signInAnonymously();
+    _role = UserRole.endUser;
+    currentEndUserId = '';
+    return UserRole.endUser;
+  }
+
   // Called on app start to restore an existing session
   Future<UserRole?> checkExistingSession() async {
     final user = supabase.auth.currentUser;
     if (user == null) return null;
+    if (user.isAnonymous) {
+      _role = UserRole.endUser; // restored guest session
+      currentEndUserId = '';
+      return UserRole.endUser;
+    }
     try {
       return await _loadProfile(user.id);
     } catch (_) {

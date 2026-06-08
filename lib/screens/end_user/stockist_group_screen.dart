@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
+import '../../utils/guest_gate.dart';
 
 // ── Shared state — persists across navigation within a session ────────────────
 
@@ -48,6 +49,7 @@ class _State extends State<StockistGroupScreen> {
   }
 
   void _renameGroup(int index) async {
+    if (blockIfGuest(context, feature: 'Groups')) return;
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => _RenameGroupDialog(initialName: stockistGroups[index].name),
@@ -258,6 +260,7 @@ class _State extends State<StockistGroupScreen> {
   }
 
   void _showAddMemberSheet(int groupIndex) {
+    if (blockIfGuest(context, feature: 'Groups')) return;
     final group = stockistGroups[groupIndex];
     final color = _groupColors[groupIndex];
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.65;

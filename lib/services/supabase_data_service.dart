@@ -3,6 +3,7 @@ import '../models/tile_design.dart';
 import '../models/stockist.dart';
 import '../models/end_user.dart';
 import '../models/surface_type.dart';
+import 'supabase_auth_service.dart';
 import '../models/choice_state.dart';
 import '../main.dart';
 
@@ -41,9 +42,20 @@ class SupabaseDataService {
 
   Future<List<TileDesign>> getAllDesigns() async {
     try {
+      // Guests read the stockist-free `public_designs` view (they can't read the
+      // stockists table). Members get the normal join (drops deactivated
+      // stockists via the inner-join is_active filter).
+      if (isGuest) {
+        final data = await supabase
+            .from('public_designs')
+            .select()
+            .order('created_at', ascending: false);
+        return data.map<TileDesign>((d) => _toDesign(d)).toList();
+      }
       final data = await supabase
           .from('designs')
-          .select('*, stockists(sequential_id)')
+          .select('*, stockists!inner(sequential_id, is_active)')
+          .eq('stockists.is_active', true)
           .neq('status', 'out_of_stock')
           .order('created_at', ascending: false);
       return data.map<TileDesign>((d) => _toDesign(d)).toList();
@@ -54,10 +66,12 @@ class SupabaseDataService {
 
   Future<List<TileDesign>> getDesignsByStockistSeqId(String seqId) async {
     try {
+      // Deactivated stockist → no portfolio for buyers.
       final s = await supabase
           .from('stockists')
           .select('id')
           .eq('sequential_id', seqId)
+          .eq('is_active', true)
           .single();
       return getDesignsByStockist(s['id'] as String);
     } catch (_) {
@@ -90,13 +104,18 @@ class SupabaseDataService {
     int? maxQty,
   }) async {
     try {
-      var query = supabase
-          .from('designs')
-          .select('*, stockists(sequential_id)')
-          .neq('status', 'out_of_stock');
+      // Guests query the stockist-free view; members get the active-stockist
+      // join. (Guests can't filter by stockist — they have no stockist info.)
+      var query = isGuest
+          ? supabase.from('public_designs').select()
+          : supabase
+              .from('designs')
+              .select('*, stockists!inner(sequential_id, is_active)')
+              .eq('stockists.is_active', true)
+              .neq('status', 'out_of_stock');
 
-      // If filtering by stockist, look up UUID first
-      if (stockistSequentialId != null) {
+      // If filtering by stockist, look up UUID first (members only).
+      if (!isGuest && stockistSequentialId != null) {
         final s = await supabase
             .from('stockists')
             .select('id')
@@ -196,6 +215,7 @@ class SupabaseDataService {
   /// All stockists. [activeOnly] true (the default) keeps the public/portfolio
   /// behaviour; admin management passes false to also see deactivated ones.
   Future<List<Stockist>> getAllStockists({bool activeOnly = true}) async {
+    if (isGuest) return []; // guests never receive stockist data
     try {
       var query = supabase.from('stockists').select();
       if (activeOnly) query = query.eq('is_active', true);
@@ -350,6 +370,71 @@ class SupabaseDataService {
       return true;
     } catch (e, st) {
       debugPrint('setEndUserActive failed ($uuid): $e\n$st');
+      return false;
+    }
+  }
+
+  // ── registration requests (self-signup → admin approval) ───────────────────
+
+  /// Public: submit a self-registration request (creates NO login). Throws the
+  /// server message on failure (e.g. email already exists / pending).
+  Future<void> submitRegistrationRequest({
+    required String email,
+    required String password,
+    required String companyName,
+    required String contactPerson,
+    String phone = '',
+    String city = '',
+    String? gstNumber,
+  }) async {
+    await supabase.rpc('submit_registration_request', params: {
+      'p_email':          email,
+      'p_password':       password,
+      'p_company_name':   companyName,
+      'p_contact_person': contactPerson,
+      'p_phone':          phone,
+      'p_city':           city,
+      'p_gst_number':     (gstNumber == null || gstNumber.trim().isEmpty)
+          ? null
+          : gstNumber.trim(),
+    });
+  }
+
+  /// Admin: list pending registration requests.
+  Future<List<Map<String, dynamic>>> getRegistrationRequests() async {
+    try {
+      final res = await supabase.rpc('admin_list_registration_requests');
+      final list = (res as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e, st) {
+      debugPrint('getRegistrationRequests failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Admin: approve a request → creates the end-user account (auto ID). Returns
+  /// the new sequential ID. Throws the server message on failure.
+  Future<String> approveRegistrationRequest(
+    String id, {
+    double priority = 0,
+    String endUserType = '',
+  }) async {
+    final res = await supabase.rpc('approve_registration_request', params: {
+      'p_id':           id,
+      'p_priority':     priority,
+      'p_enduser_type': endUserType.trim().isEmpty ? null : endUserType.trim(),
+    });
+    final map = res is Map ? res : <String, dynamic>{};
+    return (map['sequential_id'] as String?) ?? '';
+  }
+
+  /// Admin: reject (delete) a request.
+  Future<bool> rejectRegistrationRequest(String id) async {
+    try {
+      await supabase.rpc('reject_registration_request', params: {'p_id': id});
+      return true;
+    } catch (e, st) {
+      debugPrint('rejectRegistrationRequest failed ($id): $e\n$st');
       return false;
     }
   }

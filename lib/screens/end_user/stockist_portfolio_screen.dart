@@ -9,6 +9,7 @@ import '../../services/supabase_data_service.dart';
 import '../../widgets/tile_card.dart';
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
+import '../../utils/guest_gate.dart';
 
 class StockistPortfolioScreen extends StatefulWidget {
   final String stockistId;
@@ -626,6 +627,7 @@ class _State extends State<StockistPortfolioScreen> {
   }
 
   void _showSendSheet() {
+    if (blockIfGuest(context, feature: 'Placing orders')) return;
     final chosen = _chosenFromThisStockist;
     if (chosen.isEmpty) return;
     final message = _buildMessage(chosen);

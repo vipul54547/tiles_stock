@@ -70,6 +70,26 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  // Anonymous "browse as guest" — limited end-user view (no inquiry / stockist
+  // contact / groups). Requires Anonymous sign-ins enabled in Supabase Auth.
+  void _browseAsGuest() async {
+    setState(() => _loading = true);
+    try {
+      await SupabaseAuthService().loginAsGuest();
+      if (!mounted) return;
+      setState(() => _loading = false);
+      context.go('/all-designs'); // guests land on the design catalog
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Guest browsing unavailable: $e'),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 6),
+      ));
+    }
+  }
+
 
 
   @override
@@ -183,6 +203,22 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () => context.push('/register'),
 
                   child: const Text('New company? Register here'),
+
+                ),
+
+              ),
+
+              const SizedBox(height: 4),
+
+              Center(
+
+                child: OutlinedButton.icon(
+
+                  onPressed: _loading ? null : _browseAsGuest,
+
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+
+                  label: const Text('Browse as guest'),
 
                 ),
 

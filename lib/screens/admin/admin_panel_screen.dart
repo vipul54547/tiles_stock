@@ -62,6 +62,9 @@ class AdminPanelScreen extends StatelessWidget {
           _adminCard(Icons.people_outline, 'End Users',
               'Create, view & manage companies', Colors.orange,
               onTap: () => context.push('/admin/end-users')),
+          _adminCard(Icons.how_to_reg_outlined, 'Registration Requests',
+              'Approve or reject new company signups', const Color(0xFF00838F),
+              onTap: () => context.push('/admin/registration-requests')),
           // Only the super admin can create / manage sub-admins.
           if (isSuperAdmin)
             _adminCard(Icons.admin_panel_settings_outlined, 'Manage Admins',

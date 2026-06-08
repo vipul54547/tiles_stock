@@ -28,6 +28,7 @@ import 'screens/admin/manage_surfaces_screen.dart';
 import 'screens/admin/manage_stockists_screen.dart';
 import 'screens/admin/manage_end_users_screen.dart';
 import 'screens/admin/manage_admins_screen.dart';
+import 'screens/admin/manage_registration_requests_screen.dart';
 import 'screens/stockists_overview_screen.dart';
 import 'screens/end_user/stockist_group_screen.dart';
 import 'screens/end_user/my_choice_screen.dart';
@@ -122,6 +123,7 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/admin/surfaces', builder: (_, __) => const ManageSurfacesScreen()),
     GoRoute(path: '/admin/stockists', builder: (_, __) => const ManageStockistsScreen()),
     GoRoute(path: '/admin/end-users', builder: (_, __) => const ManageEndUsersScreen()),
+    GoRoute(path: '/admin/registration-requests', builder: (_, __) => const ManageRegistrationRequestsScreen()),
     GoRoute(path: '/admin/admins', builder: (_, __) => const ManageAdminsScreen()),
     GoRoute(path: '/stockists-overview', builder: (_, __) => const StockistsOverviewScreen()), // legacy alias
     GoRoute(path: '/stockist-groups', builder: (_, __) => const StockistGroupScreen()),

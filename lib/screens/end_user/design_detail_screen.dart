@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
+import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
 
 class DesignDetailScreen extends StatefulWidget {
@@ -224,26 +225,56 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                           label: 'Colour',
                           value: design.colour,
                         ),
-                        _divider(),
-                        _DetailRow(
-                          icon: Icons.storefront_outlined,
-                          label: 'Stockist ID',
-                          value: design.stockistId,
-                        ),
+                        // Stockist ID is hidden from guests.
+                        if (!isGuest) ...[
+                          _divider(),
+                          _DetailRow(
+                            icon: Icons.storefront_outlined,
+                            label: 'Stockist ID',
+                            value: design.stockistId,
+                          ),
+                        ],
                       ],
                     ),
                   ),
                   const SizedBox(height: 24),
 
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () => context
-                          .push('/stockist/${design.stockistId}/portfolio'),
-                      icon: const Icon(Icons.storefront_outlined),
-                      label: const Text('View Stockist Portfolio'),
+                  // Guests can't reach the stockist (ID, contact, portfolio).
+                  if (isGuest)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1B4F72).withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: const Color(0xFF1B4F72).withValues(alpha: 0.2)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.lock_outline,
+                              size: 18, color: Color(0xFF1B4F72)),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                                'Register and get approved to view the stockist, '
+                                'contact them, and place orders.',
+                                style: TextStyle(
+                                    fontSize: 12.5, color: Color(0xFF1B4F72))),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => context
+                            .push('/stockist/${design.stockistId}/portfolio'),
+                        icon: const Icon(Icons.storefront_outlined),
+                        label: const Text('View Stockist Portfolio'),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

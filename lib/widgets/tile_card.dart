@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/tile_design.dart';
 import '../utils/tile_sizes.dart';
+import '../services/supabase_auth_service.dart';
 
 export '../utils/tile_sizes.dart' show aspectRatioFromSize, kAllowedSizes;
 
@@ -129,6 +130,10 @@ class TileCard extends StatelessWidget {
                               color: Color(0xFF1B4F72),
                               fontWeight: FontWeight.w600,
                               fontSize: 11)),
+                      // Stockist ID is hidden from guests.
+                      if (isGuest)
+                        const SizedBox.shrink()
+                      else
                       GestureDetector(
                         onTap: onStockistTap,
                         child: Container(

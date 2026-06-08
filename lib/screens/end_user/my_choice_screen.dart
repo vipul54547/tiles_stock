@@ -5,6 +5,7 @@ import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
 import '../../models/choice_state.dart';
+import '../../utils/guest_gate.dart';
 
 class MyChoiceScreen extends StatefulWidget {
   const MyChoiceScreen({super.key});
@@ -81,6 +82,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   }
 
   void _showSendSheet(Stockist stockist, List<TileDesign> designs) {
+    if (blockIfGuest(context, feature: 'Placing orders')) return;
     final message = _buildMessage(stockist, designs);
     showModalBottomSheet(
       context: context,
@@ -185,6 +187,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   }
 
   void _sendAllNotifications() {
+    if (blockIfGuest(context, feature: 'Placing orders')) return;
     final stockistIds =
         _chosenDesigns.map((d) => d.stockistId).toSet();
     ScaffoldMessenger.of(context).showSnackBar(
