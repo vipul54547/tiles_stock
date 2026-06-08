@@ -66,6 +66,7 @@ class SupabaseDataService {
           .select('*, stockists!inner(sequential_id, is_active, priority)')
           .eq('stockists.is_active', true)
           .neq('status', 'out_of_stock')
+          .gt('box_quantity', 0) // never show 0-stock to buyers
           .order('created_at', ascending: false);
       return data.map<TileDesign>((d) => _toDesign(d)).toList();
     } catch (_) {
@@ -82,19 +83,26 @@ class SupabaseDataService {
           .eq('sequential_id', seqId)
           .eq('is_active', true)
           .single();
-      return getDesignsByStockist(s['id'] as String);
+      // Buyer portfolio → only in-stock designs.
+      return getDesignsByStockist(s['id'] as String, inStockOnly: true);
     } catch (_) {
       return [];
     }
   }
 
-  Future<List<TileDesign>> getDesignsByStockist(String stockistUUID) async {
+  /// [inStockOnly] true hides out-of-stock / 0-box designs (buyer portfolio).
+  /// The stockist's own dashboard leaves it false so they can see & restock them.
+  Future<List<TileDesign>> getDesignsByStockist(String stockistUUID,
+      {bool inStockOnly = false}) async {
     try {
-      final data = await supabase
+      var query = supabase
           .from('designs')
           .select('*, stockists(sequential_id)')
-          .eq('stockist_id', stockistUUID)
-          .order('created_at', ascending: false);
+          .eq('stockist_id', stockistUUID);
+      if (inStockOnly) {
+        query = query.neq('status', 'out_of_stock').gt('box_quantity', 0);
+      }
+      final data = await query.order('created_at', ascending: false);
       return data.map<TileDesign>((d) => _toDesign(d)).toList();
     } catch (e, st) {
       debugPrint('SupabaseDataService.getDesignsByStockist failed ($stockistUUID): $e\n$st');
@@ -121,7 +129,8 @@ class SupabaseDataService {
               .from('designs')
               .select('*, stockists!inner(sequential_id, is_active, priority)')
               .eq('stockists.is_active', true)
-              .neq('status', 'out_of_stock');
+              .neq('status', 'out_of_stock')
+              .gt('box_quantity', 0); // never show 0-stock to buyers
 
       // If filtering by stockist, look up UUID first (members only).
       if (!isGuest && stockistSequentialId != null) {

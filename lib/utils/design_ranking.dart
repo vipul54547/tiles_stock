@@ -1,6 +1,11 @@
 import 'dart:math';
 import '../models/tile_design.dart';
 
+/// Designs with fewer than this many boxes are demoted to a "low stock" tier at
+/// the bottom of buyer listings (still shown + mixed, just below well-stocked
+/// designs). Tune here if your typical order size changes.
+const int kLowStockThreshold = 20;
+
 // ── Catalog ranking ────────────────────────────────────────────────────────
 //
 // Re-orders the All-Designs catalog with a blended, fair-looking ranking that
@@ -89,12 +94,23 @@ List<TileDesign> rankDesigns(List<TileDesign> designs, {int? seed}) {
         w.rn * rnd;
   }
 
-  final pool = List.of(designs)
-    ..sort((a, b) => scoreOf(b).compareTo(scoreOf(a)));
+  // ── two-tier: well-stocked on top, low-stock (< threshold) at the bottom ──
+  // Each tier is scored + diversity-interleaved independently, so low-stock is
+  // guaranteed below well-stocked but is still shuffled/mixed (not a dead block).
+  final high = <TileDesign>[];
+  final low = <TileDesign>[];
+  for (final d in designs) {
+    (d.boxQuantity >= kLowStockThreshold ? high : low).add(d);
+  }
+  return [..._interleave(high, scoreOf), ..._interleave(low, scoreOf)];
+}
 
-  // ── diversity interleave ──
-  // Greedily emit the best-scoring candidate that doesn't repeat a stockist or
-  // size seen in the last [window] placements; relax if none qualifies.
+// Sort a tier by score, then greedily emit the best candidate that doesn't
+// repeat a stockist or size within the last [window] placements (relax if none
+// qualifies), giving the per-page stockist/size mix.
+List<TileDesign> _interleave(
+    List<TileDesign> tier, double Function(TileDesign) scoreOf) {
+  final pool = List.of(tier)..sort((a, b) => scoreOf(b).compareTo(scoreOf(a)));
   const window = 2;
   final out = <TileDesign>[];
   final recentStockists = <String>[];
@@ -106,11 +122,10 @@ List<TileDesign> rankDesigns(List<TileDesign> designs, {int? seed}) {
   while (pool.isNotEmpty) {
     var pick = pool.indexWhere(ok);
     if (pick < 0) {
-      // relax the size rule, keep stockists apart where possible
       pick = pool.indexWhere((d) =>
           d.stockistId.isEmpty || !recentStockists.contains(d.stockistId));
     }
-    if (pick < 0) pick = 0; // give up: take the best remaining
+    if (pick < 0) pick = 0;
     final d = pool.removeAt(pick);
     out.add(d);
     recentStockists.add(d.stockistId);
