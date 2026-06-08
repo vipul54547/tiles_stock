@@ -19,7 +19,9 @@ const List<String> kQualities = ['Standard', 'Premium', 'Economy'];
 class _Resolved {
   final PdfDesignRow row;
   final TileDesign? match; // non-null → update existing; null → create new
-  final String rawKey;     // normalised original PDF finish word (for learning)
+  String rawKey;           // normalised original PDF finish word (for learning).
+  // Mutable: a single-surface PDF carries no finish word, so the stockist may
+  // type their own in the Map-Finishes step, which becomes the key to learn.
 
   _Resolved(this.row, this.match, {this.rawKey = ''});
 
@@ -33,6 +35,10 @@ class _Resolved {
 class _FinishGroup {
   final String label;  // raw finish word from the PDF (display)
   String choice;       // chosen standard finish (admin surface_type)
+  // The stockist's own finish wording, typed via "Add manually" when the PDF
+  // carried no finish (single-surface layout). Null = manual entry not in use.
+  // When set, it becomes the stockist-side label + the alias-learning key.
+  String? manualLabel;
   int count = 0;
   _FinishGroup({required this.label, required this.choice});
 }
@@ -187,18 +193,35 @@ class _State extends State<UploadStockScreen> {
     for (final r in rows) {
       // Show the stockist's full PDF finish wording (e.g. "Endless Glossy"),
       // not the truncated/mapped name, so they recognise their own naming.
-      final label = (r.row.surfaceRaw != null && r.row.surfaceRaw!.isNotEmpty)
+      final raw = (r.row.surfaceRaw != null && r.row.surfaceRaw!.isNotEmpty)
           ? r.row.surfaceRaw!
           : (r.row.finishLabel != null && r.row.finishLabel!.isNotEmpty)
               ? r.row.finishLabel!
               : r.row.surface;
+      // A single-surface PDF carried no finish word, so the raw label is just
+      // 'None'. Show a clearer prompt instead, since this one group sets the
+      // finish for the whole document.
+      final label =
+          raw.trim().toLowerCase() == 'none' ? 'All designs (no finish in PDF)' : raw;
+      // Keep the initial choice in sync with what the dropdown can display:
+      // if the row's finish isn't in the admin list (e.g. 'None' on a
+      // single-surface PDF), fall back to the first admin finish so an untouched
+      // dropdown applies exactly what the stockist sees.
+      final initialChoice = _finishes.contains(r.row.surface)
+          ? r.row.surface
+          : (_finishes.isNotEmpty ? _finishes.first : r.row.surface);
       final g = groups.putIfAbsent(
-          r.rawKey, () => _FinishGroup(label: label, choice: r.row.surface));
+          r.rawKey, () => _FinishGroup(label: label, choice: initialChoice));
       g.count++;
     }
     if (groups.isEmpty) return true;
 
     final keys = groups.keys.toList();
+    // One text field per group for the "Add manually" path (stockist's own
+    // finish wording). Disposed after the dialog closes.
+    final manualCtrls = {
+      for (final k in keys) k: TextEditingController(text: groups[k]!.manualLabel ?? ''),
+    };
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -241,46 +264,85 @@ class _State extends State<UploadStockScreen> {
                     child: Column(
                       children: keys.map((k) {
                         final g = groups[k]!;
+                        final showManual = g.manualLabel != null;
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                flex: 5,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(g.label,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13)),
-                                    Text(
-                                        '${g.count} tile${g.count == 1 ? '' : 's'}',
-                                        style: const TextStyle(
-                                            fontSize: 11, color: Colors.grey)),
-                                  ],
-                                ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    flex: 5,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(showManual ? 'Your finish name' : g.label,
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13)),
+                                        if (showManual)
+                                          TextField(
+                                            controller: manualCtrls[k],
+                                            style: const TextStyle(fontSize: 13),
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              hintText: 'e.g. Endless Glossy',
+                                            ),
+                                            onChanged: (v) => g.manualLabel = v,
+                                          )
+                                        else
+                                          Text(
+                                              '${g.count} tile${g.count == 1 ? '' : 's'}',
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.grey)),
+                                      ],
+                                    ),
+                                  ),
+                                  const Icon(Icons.arrow_forward,
+                                      size: 14, color: Colors.grey),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    flex: 5,
+                                    child: DropdownButton<String>(
+                                      value: _finishes.contains(g.choice)
+                                          ? g.choice
+                                          : _finishes.first,
+                                      isExpanded: true,
+                                      underline: const SizedBox.shrink(),
+                                      items: _finishes
+                                          .map((f) => DropdownMenuItem(
+                                              value: f, child: Text(f)))
+                                          .toList(),
+                                      onChanged: (v) {
+                                        if (v != null) {
+                                          setLocal(() => g.choice = v);
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const Icon(Icons.arrow_forward,
-                                  size: 14, color: Colors.grey),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                flex: 5,
-                                child: DropdownButton<String>(
-                                  value: _finishes.contains(g.choice)
-                                      ? g.choice
-                                      : _finishes.first,
-                                  isExpanded: true,
-                                  underline: const SizedBox.shrink(),
-                                  items: _finishes
-                                      .map((f) => DropdownMenuItem(
-                                          value: f, child: Text(f)))
-                                      .toList(),
-                                  onChanged: (v) {
-                                    if (v != null) {
-                                      setLocal(() => g.choice = v);
-                                    }
-                                  },
+                              // Toggle the free-text entry so a stockist can name
+                              // a finish their PDF didn't carry, then align it to
+                              // a standard finish via the dropdown above.
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton.icon(
+                                  style: TextButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(0, 28),
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap),
+                                  onPressed: () => setLocal(() => g.manualLabel =
+                                      showManual ? null : manualCtrls[k]!.text),
+                                  icon: Icon(showManual ? Icons.close : Icons.edit,
+                                      size: 14),
+                                  label: Text(
+                                      showManual ? 'Cancel' : 'Add manually',
+                                      style: const TextStyle(fontSize: 11)),
                                 ),
                               ),
                             ],
@@ -309,12 +371,22 @@ class _State extends State<UploadStockScreen> {
       ),
     );
 
+    disposeAfterFrame(manualCtrls.values.toList());
     if (result != true) return false;
 
     // Apply each group's chosen finish to every row that shares its raw key.
+    // When the stockist typed their own wording ("Add manually"), record it as
+    // the row's finish text and re-key the row so that wording → chosen finish
+    // is what gets learned for next time.
     for (final r in rows) {
       final g = groups[r.rawKey];
-      if (g != null) r.row.surface = g.choice;
+      if (g == null) continue;
+      r.row.surface = g.choice;
+      final manual = g.manualLabel?.trim() ?? '';
+      if (manual.isNotEmpty) {
+        r.row.surfaceRaw = manual;
+        r.rawKey = normalizeSurfaceRaw(manual);
+      }
     }
     return true;
   }
@@ -919,10 +991,23 @@ class _State extends State<UploadStockScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(r.row.name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 13),
-                      overflow: TextOverflow.ellipsis),
+                  // Tap the name to correct a mis-extracted design name.
+                  GestureDetector(
+                    onTap: () => _editName(r.row),
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(r.row.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 13),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.edit,
+                            size: 11, color: Colors.grey.shade500),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 3),
                   Text('${r.row.quantity} boxes',
                       style: TextStyle(
@@ -1021,6 +1106,36 @@ class _State extends State<UploadStockScreen> {
         ),
       ),
     );
+  }
+
+  // Edit a new design's name before import (corrects mis-extracted names).
+  Future<void> _editName(PdfDesignRow row) async {
+    final ctrl = TextEditingController(text: row.name);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit design name'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(isDense: true),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    disposeAfterFrame([ctrl]);
+    final name = result?.trim();
+    if (name != null && name.isNotEmpty) setState(() => row.name = name);
   }
 
   // ── Bottom bar ────────────────────────────────────────────────────────────

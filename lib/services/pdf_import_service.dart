@@ -26,7 +26,9 @@ class PdfImportResult {
 }
 
 class PdfDesignRow {
-  final String name;
+  // Mutable so the stockist can correct a mis-extracted name in the import
+  // preview before it's saved as a new design.
+  String name;
   final int quantity;
   String surface;
   /// Original finish text from the PDF when it isn't a standard finish
@@ -34,8 +36,10 @@ class PdfDesignRow {
   final String? finishLabel;
   /// The FULL finish text exactly as written in the stockist's PDF
   /// (e.g. "Endless Glossy"), kept verbatim for display + alias matching.
-  /// Unlike finishLabel this is never nulled for standard finishes.
-  final String? surfaceRaw;
+  /// Unlike finishLabel this is never nulled for standard finishes. Mutable so
+  /// the import UI can record the stockist's own wording for a single-surface
+  /// PDF (one that carried no finish text of its own).
+  String? surfaceRaw;
   /// Raw JPEG bytes for this design's photo. From the PDF when one was matched,
   /// or set later when the stockist picks/takes a photo in the import preview.
   /// Null when the PDF had no photo for this design and none was added yet.
@@ -106,6 +110,16 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
     quality = 'Standard';
   }
 
+  // Optional finish in the filename (e.g. "600x1200_PRE_Glossy.pdf"). Scanned
+  // across every part so its position doesn't matter. Used only for a
+  // single-surface PDF — one whose table carries no finish at all — to seed the
+  // one document-wide finish; ignored for layouts that already carry finishes.
+  String? fileFinish;
+  for (final p in parts) {
+    final f = _surfaceOf(p);
+    if (f != null) { fileFinish = f; break; }
+  }
+
   // ── 2. PDF → design list (column-adaptive, position based) ────────────────
   // Parse by word geometry so the table is read by where each value sits and
   // what it contains — not by a fixed column order. Falls back to the legacy
@@ -156,6 +170,44 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
     }
     final qd = _modeString(designMaps, 'qualityData');
     if (qd != null) quality = qd;
+
+    // Global banner size/grade: some layouts print one size/grade for the whole
+    // document (e.g. "SIZE : 600X1200" and a title "(GRADE: PRE)") instead of
+    // per row or in the filename. Authoritative when the data didn't carry them.
+    final bannerText = lines.map((l) => l.text).join('\n');
+    if (sd == null) {
+      final m = RegExp(r'SIZE\s*:?\s*(\d{2,4})\s*[xX]\s*(\d{2,4})',
+              caseSensitive: false)
+          .firstMatch(bannerText);
+      if (m != null) {
+        size = '${m.group(1)}x${m.group(2)} mm';
+        tileW = int.tryParse(m.group(1)!);
+        tileH = int.tryParse(m.group(2)!);
+      }
+    }
+    if (qd == null) {
+      final m = RegExp(r'GRADE\s*:?\s*(PRE|STD|ECO|PREMIUM|STANDARD|ECONOMY)\b',
+              caseSensitive: false)
+          .firstMatch(bannerText);
+      if (m != null) {
+        quality = _kGradeQuality[m.group(1)!.toUpperCase()] ?? quality;
+      }
+    }
+
+    // Single-surface PDF: a "size + name + image (+ qty)" table with no finish
+    // anywhere — every design came back 'None' with no raw finish text. The
+    // finish is a property of the whole document, so adopt it from the filename
+    // when present; otherwise leave 'None' for the stockist to set once in the
+    // import preview (it then applies to every row).
+    final singleSurface = designMaps.isNotEmpty &&
+        designMaps.every(
+            (m) => m['surfaceRaw'] == null && m['surface'] == 'None');
+    if (singleSurface && fileFinish != null) {
+      for (final m in designMaps) {
+        m['surface'] = fileFinish;
+        m['surfaceRaw'] = fileFinish; // stockist-side wording → alias learning
+      }
+    }
     // Per-page image matching needs page geometry on every design (adaptive &
     // PRM carry it; the flat fallback does not).
     if (designMaps.isNotEmpty &&
@@ -210,6 +262,16 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
     imageCount = imagesByDesign.where((x) => x != null).length;
     debugPrint('Position-based match: $imageCount photos placed for '
         '${designMaps.length} designs.');
+    // Safety net: position parsing can come back empty for a PDF whose images
+    // live inside Form XObjects (not the page content stream). Fall back to
+    // per-page slot matching so those formats keep their photos.
+    if (imageCount == 0 && perPageUsable) {
+      debugPrint('Position-based match found nothing — '
+          'falling back to per-page slot matching.');
+      imageCount =
+          imagesPerPage.fold(0, (a, b) => a + b.where((x) => x != null).length);
+      imagesByDesign = _matchImagesPerPage(designMaps, imagesPerPage);
+    }
   } else if (perPageUsable) {
     imageCount =
         imagesPerPage.fold(0, (a, b) => a + b.where((x) => x != null).length);
@@ -336,7 +398,7 @@ Future<List<List<Uint8List?>>> _extractImageSlotsPerPage(PdfDocument doc) async 
             const Offset(0, 0),
           );
       final pageBytes = Uint8List.fromList(await single.save());
-      perPage.add(_mergeStripSlots(_extractImageSlotsFromBytes(pageBytes)));
+      perPage.add(_extractImageSlotsFromBytes(pageBytes));
     } finally {
       single.dispose();
     }
@@ -386,58 +448,6 @@ List<Uint8List?> _extractImageSlotsFromBytes(Uint8List bytes) {
   }
 
   return slots;
-}
-
-// Some layouts (e.g. the PRM card report) store a single tile photo as several
-// equal horizontal strips — separate image XObjects stacked one above the other.
-// That inflates a page's image count past its design count and shifts matching.
-// Here we stitch a run of consecutive JPEG slots that share the EXACT same pixel
-// width AND height (the signature of an evenly-tiled image) back into one photo,
-// top-to-bottom in document order. Distinct designs almost never share both
-// dimensions, so single photos are left untouched.
-List<Uint8List?> _mergeStripSlots(List<Uint8List?> slots) {
-  final out = <Uint8List?>[];
-  var i = 0;
-  while (i < slots.length) {
-    final cur = slots[i];
-    if (cur == null) {
-      out.add(null);
-      i++;
-      continue;
-    }
-    final base = img.decodeJpg(cur);
-    if (base == null) {
-      out.add(cur);
-      i++;
-      continue;
-    }
-    final parts = <img.Image>[base];
-    var j = i + 1;
-    while (j < slots.length && slots[j] != null) {
-      final next = img.decodeJpg(slots[j]!);
-      if (next == null ||
-          next.width != base.width ||
-          next.height != base.height) {
-        break;
-      }
-      parts.add(next);
-      j++;
-    }
-    if (parts.length == 1) {
-      out.add(cur); // no equal-size run — keep the original bytes
-    } else {
-      final totalH = parts.fold<int>(0, (a, b) => a + b.height);
-      final canvas = img.Image(width: base.width, height: totalH);
-      var y = 0;
-      for (final p in parts) {
-        img.compositeImage(canvas, p, dstY: y);
-        y += p.height;
-      }
-      out.add(img.encodeJpg(canvas, quality: 90));
-    }
-    i = j;
-  }
-  return out;
 }
 
 // ── Orientation correction ─────────────────────────────────────────────────────
@@ -972,6 +982,8 @@ String? _headerRole(String word) {
     case 'NAME': case 'DESIGN': case 'DESIGNNAME': case 'PRODUCT':
     case 'ITEM': case 'ARTICLE': case 'PARTICULARS':
       return 'name';
+    case 'BRAND': case 'BRND': case 'COMPANY': case 'MAKE': case 'MFR':
+      return 'brand';
     case 'IMAGE': case 'PHOTO': case 'PICTURE': case 'PIC': case 'IMG':
       return 'image';
     case 'BOX': case 'BOXES': case 'QTY': case 'QNTY': case 'QUANTITY':
@@ -1016,9 +1028,13 @@ bool _isJunkRow(String joined) {
   if (_dateRe.hasMatch(u)) return true;
   if (_pageRe.hasMatch(u)) return true;
   if (RegExp(r'^stock\s+report\b', caseSensitive: false).hasMatch(u)) return true;
+  // Global size banner (e.g. "SIZE : 600 X 1200") — captured separately as the
+  // document size; never a tile design. Without this the spaced "1200" leaks
+  // into the nearest design name.
+  if (RegExp(r'^\s*size\s*:', caseSensitive: false).hasMatch(u)) return true;
   // Document summary lines (e.g. "WEIGHT (TON) : 43.336  GRAND TOTAL : 1670") —
   // never a tile design.
-  if (RegExp(r'grand\s+total|weight\s*\(?\s*ton|order[- ]?confirm',
+  if (RegExp(r'grand\s+total|\btotal\s*:|weight\s*\(?\s*ton|order[- ]?confirm',
           caseSensitive: false)
       .hasMatch(u)) {
     return true;
@@ -1085,6 +1101,11 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
   final ordered = anchors.entries.toList()
     ..sort((a, b) => a.value.compareTo(b.value));
   final hasHeader = anchors.containsKey('qty') && ordered.length >= 2;
+  // No SURFACE column → the table carries no per-row finish. Don't invent
+  // 'Glossy'; default such rows to 'None' so the import UI can ask the stockist
+  // for the single document-wide finish (the single-surface PDF layout). A
+  // content-sniffed section header, if any appears, still overrides this below.
+  final hasSurfaceColumn = anchors.containsKey('surface');
 
   // Column role for an x-centre, using midpoints between header anchors.
   String roleForX(double x) {
@@ -1153,6 +1174,8 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
           case 'qty':
             if (_isQtyToken(t.text)) qty ??= int.tryParse(t.text);
             continue;
+          case 'brand':
+            continue; // brand/maker column — not part of the design name
           case 'surface':
             surfToks.add(t);
             continue;
@@ -1221,7 +1244,7 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
 
   // 6. Emit designs in document order, inheriting the running section surface.
   final result = <Map<String, dynamic>>[];
-  String runningSurface = 'Glossy';
+  String runningSurface = hasSurfaceColumn ? 'Glossy' : 'None';
   String? runningRaw;
   bool sectionSeen = false;
   for (var i = 0; i < cells.length; i++) {
@@ -1273,6 +1296,8 @@ List<Map<String, dynamic>> _parseDesignsAdaptive(List<TextLine> lines) {
       'finishLabel': finishLabel,
       'surfaceRaw': rawForDisplay == null ? null : _titleCaseFinish(rawForDisplay),
       'page': c.page, // drives per-page image↔design matching
+      'yc': c.yc,     // row centre → position-based photo matching (handles
+                      // reused image XObjects + photo-less rows correctly)
     });
   }
 
