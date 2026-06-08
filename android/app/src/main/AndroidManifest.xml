@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for all network access (Supabase auth/DB, Cloudinary uploads).
+         Debug builds get this from the debug manifest automatically, but release
+         builds use only this manifest — without it the app can't resolve any host
+         (DNS fails with errno=7) and login/uploads break. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="tiles_stock"
         android:name="${applicationName}"
