@@ -6,16 +6,28 @@ import '../../utils/guest_gate.dart';
 // ── Shared state — persists across navigation within a session ────────────────
 
 class StockistGroup {
+  String? id; // DB row id; null until persisted
   String name;
   final Set<String> stockistIds;
-  StockistGroup(this.name) : stockistIds = {};
+  StockistGroup(this.name, {this.id}) : stockistIds = {};
 }
 
-final List<StockistGroup> stockistGroups = [
-  StockistGroup('Group 1'),
-  StockistGroup('Group 2'),
-  StockistGroup('Group 3'),
-];
+// Loaded per end user from the database (empty until loaded / for guests).
+final List<StockistGroup> stockistGroups = [];
+
+/// Loads the signed-in end user's saved groups into [stockistGroups]. Call from
+/// any buyer screen before using the group filter. No-op for guests.
+Future<void> loadStockistGroupsFromDb() async {
+  final rows = await SupabaseDataService().getMyGroups();
+  stockistGroups
+    ..clear()
+    ..addAll(rows.map((r) {
+      final g = StockistGroup(r['name'] as String? ?? 'Group',
+          id: r['id'] as String?);
+      g.stockistIds.addAll(List<String>.from(r['stockist_ids'] ?? const []));
+      return g;
+    }));
+}
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +53,7 @@ class _State extends State<StockistGroupScreen> {
 
   Future<void> _load() async {
     final stockists = await _service.getAllStockists();
+    await loadStockistGroupsFromDb();
     if (!mounted) return;
     setState(() {
       _stockists = stockists;
@@ -48,27 +61,81 @@ class _State extends State<StockistGroupScreen> {
     });
   }
 
+  Color _colorFor(int i) => _groupColors[i % _groupColors.length];
+
+  // Persist a group's members to the DB (after any add/remove/clear/toggle).
+  void _persistMembers(StockistGroup g) {
+    if (g.id != null) _service.setGroupMembers(g.id!, g.stockistIds.toList());
+  }
+
+  Future<void> _createGroup() async {
+    if (blockIfGuest(context, feature: 'Groups')) return;
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) =>
+          const _RenameGroupDialog(initialName: '', title: 'New Group'),
+    );
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    final id = await _service.createGroup(name.trim());
+    if (!mounted) return;
+    setState(() {
+      stockistGroups.add(StockistGroup(name.trim(), id: id));
+      _expanded = stockistGroups.length - 1;
+    });
+  }
+
+  Future<void> _deleteGroup(int index) async {
+    final g = stockistGroups[index];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete group?'),
+        content: Text('Delete "${g.name}"? This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (g.id != null) await _service.deleteGroup(g.id!);
+    if (!mounted) return;
+    setState(() {
+      stockistGroups.removeAt(index);
+      if (_expanded >= stockistGroups.length) _expanded = -1;
+    });
+  }
+
   void _renameGroup(int index) async {
     if (blockIfGuest(context, feature: 'Groups')) return;
+    final g = stockistGroups[index];
     final newName = await showDialog<String>(
       context: context,
-      builder: (ctx) => _RenameGroupDialog(initialName: stockistGroups[index].name),
+      builder: (ctx) => _RenameGroupDialog(initialName: g.name),
     );
     if (!mounted) return;
     if (newName != null && newName.isNotEmpty) {
-      setState(() => stockistGroups[index].name = newName);
+      setState(() => g.name = newName);
+      if (g.id != null) _service.renameGroup(g.id!, newName);
     }
   }
 
   void _toggleStockist(int groupIndex, String stockistId) {
+    final g = stockistGroups[groupIndex];
     setState(() {
-      final ids = stockistGroups[groupIndex].stockistIds;
-      if (ids.contains(stockistId)) {
-        ids.remove(stockistId);
+      if (g.stockistIds.contains(stockistId)) {
+        g.stockistIds.remove(stockistId);
       } else {
-        ids.add(stockistId);
+        g.stockistIds.add(stockistId);
       }
     });
+    _persistMembers(g);
   }
 
   @override
@@ -104,8 +171,9 @@ class _State extends State<StockistGroupScreen> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Organise stockists into up to 3 groups. '
-                          'Use these groups to quickly filter across all screens.',
+                          'Create your own groups of stockists and use them to '
+                          'quickly filter designs across screens. Your groups are '
+                          'saved to your account.',
                           style: TextStyle(
                               fontSize: 12, color: Color(0xFF1B4F72)),
                         ),
@@ -114,7 +182,27 @@ class _State extends State<StockistGroupScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                for (int i = 0; i < 3; i++) _buildGroupCard(i),
+                if (stockistGroups.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Center(
+                      child: Text('No groups yet. Tap "Create group" to start.',
+                          style: TextStyle(color: Colors.grey.shade500)),
+                    ),
+                  ),
+                for (int i = 0; i < stockistGroups.length; i++)
+                  _buildGroupCard(i),
+                const SizedBox(height: 4),
+                OutlinedButton.icon(
+                  onPressed: _createGroup,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Create group'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF1B4F72),
+                    side: const BorderSide(color: Color(0xFF1B4F72)),
+                    minimumSize: const Size.fromHeight(46),
+                  ),
+                ),
               ],
             ),
     );
@@ -122,7 +210,7 @@ class _State extends State<StockistGroupScreen> {
 
   void _showViewSheet(int groupIndex) {
     final group = stockistGroups[groupIndex];
-    final color = _groupColors[groupIndex];
+    final color = _colorFor(groupIndex);
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.65;
 
     showModalBottomSheet<void>(
@@ -243,6 +331,7 @@ class _State extends State<StockistGroupScreen> {
                                   onPressed: () {
                                     setState(() =>
                                         group.stockistIds.remove(s.id));
+                                    _persistMembers(group);
                                     setSheet(() {});
                                   },
                                 ),
@@ -262,7 +351,7 @@ class _State extends State<StockistGroupScreen> {
   void _showAddMemberSheet(int groupIndex) {
     if (blockIfGuest(context, feature: 'Groups')) return;
     final group = stockistGroups[groupIndex];
-    final color = _groupColors[groupIndex];
+    final color = _colorFor(groupIndex);
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.65;
 
     showModalBottomSheet<void>(
@@ -369,6 +458,7 @@ class _State extends State<StockistGroupScreen> {
                                   onPressed: () {
                                     setState(() =>
                                         group.stockistIds.add(s.id));
+                                    _persistMembers(group);
                                     setSheet(() {});
                                   },
                                 ),
@@ -389,7 +479,7 @@ class _State extends State<StockistGroupScreen> {
     final group = stockistGroups[index];
     final isExpanded = _expanded == index;
     final count = group.stockistIds.length;
-    final color = _groupColors[index];
+    final color = _colorFor(index);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -473,6 +563,13 @@ class _State extends State<StockistGroupScreen> {
                     tooltip: 'Add members',
                     visualDensity: VisualDensity.compact,
                   ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    onPressed: () => _deleteGroup(index),
+                    color: Colors.red.shade400,
+                    tooltip: 'Delete group',
+                    visualDensity: VisualDensity.compact,
+                  ),
                   Icon(
                     isExpanded ? Icons.expand_less : Icons.expand_more,
                     color: Colors.grey.shade500,
@@ -548,8 +645,10 @@ class _State extends State<StockistGroupScreen> {
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: TextButton.icon(
-                    onPressed: () =>
-                        setState(() => group.stockistIds.clear()),
+                    onPressed: () {
+                      setState(() => group.stockistIds.clear());
+                      _persistMembers(group);
+                    },
                     icon: const Icon(Icons.clear_all, size: 15),
                     label: const Text('Clear group',
                         style: TextStyle(fontSize: 12)),
@@ -567,7 +666,9 @@ class _State extends State<StockistGroupScreen> {
 
 class _RenameGroupDialog extends StatefulWidget {
   final String initialName;
-  const _RenameGroupDialog({required this.initialName});
+  final String title;
+  const _RenameGroupDialog(
+      {required this.initialName, this.title = 'Rename Group'});
 
   @override
   State<_RenameGroupDialog> createState() => _RenameGroupDialogState();
@@ -591,7 +692,7 @@ class _RenameGroupDialogState extends State<_RenameGroupDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Rename Group'),
+      title: Text(widget.title),
       content: TextField(
         controller: _ctrl,
         autofocus: true,

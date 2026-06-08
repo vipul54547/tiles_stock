@@ -383,6 +383,76 @@ class SupabaseDataService {
     }
   }
 
+  // ── stockist groups (per end user) ─────────────────────────────────────────
+
+  /// This end user's saved groups (empty for guests / not-logged-in).
+  Future<List<Map<String, dynamic>>> getMyGroups() async {
+    if (currentEndUserId.isEmpty) return [];
+    try {
+      final data = await supabase
+          .from('stockist_groups')
+          .select()
+          .eq('end_user_id', currentEndUserId)
+          .order('created_at');
+      return data.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e, st) {
+      debugPrint('getMyGroups failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Creates an empty group; returns its new id (or null on failure).
+  Future<String?> createGroup(String name) async {
+    if (currentEndUserId.isEmpty) return null;
+    try {
+      final row = await supabase.from('stockist_groups').insert({
+        'end_user_id':  currentEndUserId,
+        'name':         name,
+        'stockist_ids': <String>[],
+      }).select().single();
+      return row['id'] as String?;
+    } catch (e, st) {
+      debugPrint('createGroup failed: $e\n$st');
+      return null;
+    }
+  }
+
+  Future<bool> renameGroup(String id, String name) async {
+    try {
+      await supabase.from('stockist_groups').update({
+        'name': name,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', id);
+      return true;
+    } catch (e, st) {
+      debugPrint('renameGroup failed ($id): $e\n$st');
+      return false;
+    }
+  }
+
+  Future<bool> setGroupMembers(String id, List<String> stockistIds) async {
+    try {
+      await supabase.from('stockist_groups').update({
+        'stockist_ids': stockistIds,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', id);
+      return true;
+    } catch (e, st) {
+      debugPrint('setGroupMembers failed ($id): $e\n$st');
+      return false;
+    }
+  }
+
+  Future<bool> deleteGroup(String id) async {
+    try {
+      await supabase.from('stockist_groups').delete().eq('id', id);
+      return true;
+    } catch (e, st) {
+      debugPrint('deleteGroup failed ($id): $e\n$st');
+      return false;
+    }
+  }
+
   // ── registration requests (self-signup → admin approval) ───────────────────
 
   /// Public: submit a self-registration request (creates NO login). Throws the

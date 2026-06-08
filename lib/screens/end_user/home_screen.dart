@@ -5,7 +5,8 @@ import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
-import 'stockist_group_screen.dart' show stockistGroups;
+import 'stockist_group_screen.dart'
+    show stockistGroups, loadStockistGroupsFromDb;
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
@@ -73,6 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _load() async {
     final designs = await _service.getAllDesigns();
+    await loadStockistGroupsFromDb(); // refresh the user's saved group filters
     // Blended catalog ranking with a fresh per-session seed, so the order
     // varies each time the screen loads (app open / pull-to-refresh).
     final ranked =

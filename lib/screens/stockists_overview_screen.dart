@@ -7,7 +7,8 @@ import '../models/tile_design.dart';
 import '../services/supabase_data_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../widgets/tile_card.dart';
-import 'end_user/stockist_group_screen.dart' show stockistGroups;
+import 'end_user/stockist_group_screen.dart'
+    show stockistGroups, loadStockistGroupsFromDb;
 import '../models/choice_state.dart';
 import '../utils/design_ranking.dart';
 
@@ -149,6 +150,7 @@ class _State extends State<StockistsOverviewScreen> {
 
     final stockists = results[0] as List<Stockist>;
     final designs = results[1] as List<TileDesign>;
+    await loadStockistGroupsFromDb(); // the user's saved group filters
 
     final sizes = designs.map((d) => d.size).toSet().toList()..sort();
     final surfaces = designs.map((d) => d.surfaceType).toSet().toList()..sort();
