@@ -10,6 +10,7 @@ import '../../widgets/tile_card.dart';
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
+import '../../utils/my_choice.dart';
 
 class StockistPortfolioScreen extends StatefulWidget {
   final String stockistId;
@@ -483,9 +484,9 @@ class _State extends State<StockistPortfolioScreen> {
                                 onTap: () {
                                   final id = d.id;
                                   if (myChoiceQuantities.containsKey(id)) {
-                                    myChoiceQuantities.remove(id);
+                                    setMyChoiceQty(id, 0);
                                   } else {
-                                    myChoiceQuantities[id] = d.boxQuantity;
+                                    setMyChoiceQty(id, d.boxQuantity);
                                   }
                                   setSheet(() {});
                                   setState(() {});
@@ -1092,10 +1093,9 @@ class _State extends State<StockistPortfolioScreen> {
                                   final id = d.id;
                                   if (myChoiceQuantities
                                       .containsKey(id)) {
-                                    myChoiceQuantities.remove(id);
+                                    setMyChoiceQty(id, 0);
                                   } else {
-                                    myChoiceQuantities[id] =
-                                        d.boxQuantity;
+                                    setMyChoiceQty(id, d.boxQuantity);
                                   }
                                 }),
                               );

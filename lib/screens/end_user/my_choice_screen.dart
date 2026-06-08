@@ -6,6 +6,7 @@ import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
 import '../../models/choice_state.dart';
 import '../../utils/guest_gate.dart';
+import '../../utils/my_choice.dart';
 
 class MyChoiceScreen extends StatefulWidget {
   const MyChoiceScreen({super.key});
@@ -31,6 +32,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
       _service.getAllDesigns(),
       _service.getAllStockists(),
     ]);
+    await loadMyChoices(); // restore saved selections
     if (!mounted) return;
     setState(() {
       _allDesigns = results[0] as List<TileDesign>;
@@ -248,7 +250,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
           TextButton(
             onPressed: () {
               setState(() {
-                myChoiceQuantities.clear();
+                clearMyChoices();
                 _filterStockistId = null;
               });
               Navigator.pop(context);
@@ -510,8 +512,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                         fontSize: 11, color: Colors.grey)),
                 const SizedBox(height: 4),
                 GestureDetector(
-                  onTap: () =>
-                      setState(() => myChoiceQuantities.remove(d.id)),
+                  onTap: () => setState(() => removeMyChoice(d.id)),
                   child: Text('Remove',
                       style: TextStyle(
                           fontSize: 10,
@@ -534,8 +535,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                 children: [
                   _qtyBtn(Icons.remove, color, () {
                     if (qty > 1) {
-                      setState(() =>
-                          myChoiceQuantities[d.id] = qty - 1);
+                      setState(() => setMyChoiceQty(d.id, qty - 1));
                     }
                   }),
                   Padding(
@@ -547,8 +547,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                             fontSize: 15)),
                   ),
                   _qtyBtn(Icons.add, color, () {
-                    setState(
-                        () => myChoiceQuantities[d.id] = qty + 1);
+                    setState(() => setMyChoiceQty(d.id, qty + 1));
                   }),
                 ],
               ),

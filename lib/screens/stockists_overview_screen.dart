@@ -11,6 +11,7 @@ import 'end_user/stockist_group_screen.dart'
     show stockistGroups, loadStockistGroupsFromDb;
 import '../models/choice_state.dart';
 import '../utils/design_ranking.dart';
+import '../utils/my_choice.dart';
 
 const _qualities = ['Premium', 'Standard'];
 const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
@@ -151,6 +152,7 @@ class _State extends State<StockistsOverviewScreen> {
     final stockists = results[0] as List<Stockist>;
     final designs = results[1] as List<TileDesign>;
     await loadStockistGroupsFromDb(); // the user's saved group filters
+    await loadMyChoices();            // restore saved My Choice selections
 
     final sizes = designs.map((d) => d.size).toSet().toList()..sort();
     final surfaces = designs.map((d) => d.surfaceType).toSet().toList()..sort();
@@ -819,9 +821,9 @@ class _State extends State<StockistsOverviewScreen> {
                                 onTap: () {
                                   final id = d.id;
                                   if (myChoiceQuantities.containsKey(id)) {
-                                    myChoiceQuantities.remove(id);
+                                    setMyChoiceQty(id, 0);
                                   } else {
-                                    myChoiceQuantities[id] = d.boxQuantity;
+                                    setMyChoiceQty(id, d.boxQuantity);
                                   }
                                   setSheet(() {});
                                   setState(() {});
@@ -1220,10 +1222,9 @@ class _State extends State<StockistsOverviewScreen> {
                           onChoiceTap: () => setState(() {
                             final id = filteredDesigns[i].id;
                             if (myChoiceQuantities.containsKey(id)) {
-                              myChoiceQuantities.remove(id);
+                              setMyChoiceQty(id, 0);
                             } else {
-                              myChoiceQuantities[id] =
-                                  filteredDesigns[i].boxQuantity;
+                              setMyChoiceQty(id, filteredDesigns[i].boxQuantity);
                             }
                           }),
                           onStockistTap: () => context.push(

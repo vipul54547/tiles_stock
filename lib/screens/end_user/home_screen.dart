@@ -11,6 +11,7 @@ import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/design_ranking.dart';
+import '../../utils/my_choice.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
 const _filterSurfaces   = kFinishes;
@@ -75,6 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _load() async {
     final designs = await _service.getAllDesigns();
     await loadStockistGroupsFromDb(); // refresh the user's saved group filters
+    await loadMyChoices();            // restore saved My Choice selections
     // Blended catalog ranking with a fresh per-session seed, so the order
     // varies each time the screen loads (app open / pull-to-refresh).
     final ranked =
@@ -1069,10 +1071,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             onChoiceTap: () => setState(() {
                               final id = _filtered[i].id;
                               if (myChoiceQuantities.containsKey(id)) {
-                                myChoiceQuantities.remove(id);
+                                setMyChoiceQty(id, 0);
                               } else {
-                                myChoiceQuantities[id] =
-                                    _filtered[i].boxQuantity;
+                                setMyChoiceQty(id, _filtered[i].boxQuantity);
                               }
                             }),
                             onStockistTap: () => context.push(

@@ -383,6 +383,61 @@ class SupabaseDataService {
     }
   }
 
+  // ── my choices (per end user) ──────────────────────────────────────────────
+
+  /// This end user's saved choices as { designId : quantity }.
+  Future<Map<String, int>> getMyChoices() async {
+    if (currentEndUserId.isEmpty) return {};
+    try {
+      final data = await supabase
+          .from('my_choices')
+          .select('design_id, quantity')
+          .eq('end_user_id', currentEndUserId);
+      return {
+        for (final r in data) r['design_id'] as String: (r['quantity'] as int)
+      };
+    } catch (e, st) {
+      debugPrint('getMyChoices failed: $e\n$st');
+      return {};
+    }
+  }
+
+  /// Upserts a chosen quantity, or removes the row when [quantity] <= 0.
+  Future<void> upsertChoice(String designId, int quantity) async {
+    if (currentEndUserId.isEmpty) return;
+    try {
+      if (quantity <= 0) {
+        await supabase
+            .from('my_choices')
+            .delete()
+            .eq('end_user_id', currentEndUserId)
+            .eq('design_id', designId);
+      } else {
+        await supabase.from('my_choices').upsert({
+          'end_user_id': currentEndUserId,
+          'design_id':   designId,
+          'quantity':    quantity,
+          'updated_at':  DateTime.now().toIso8601String(),
+        }, onConflict: 'end_user_id,design_id');
+      }
+    } catch (e, st) {
+      debugPrint('upsertChoice failed ($designId): $e\n$st');
+    }
+  }
+
+  /// Clears all of this end user's saved choices.
+  Future<void> clearChoices() async {
+    if (currentEndUserId.isEmpty) return;
+    try {
+      await supabase
+          .from('my_choices')
+          .delete()
+          .eq('end_user_id', currentEndUserId);
+    } catch (e, st) {
+      debugPrint('clearChoices failed: $e\n$st');
+    }
+  }
+
   // ── stockist groups (per end user) ─────────────────────────────────────────
 
   /// This end user's saved groups (empty for guests / not-logged-in).
