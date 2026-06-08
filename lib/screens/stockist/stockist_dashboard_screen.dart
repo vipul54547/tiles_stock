@@ -46,9 +46,13 @@ class _State extends State<StockistDashboardScreen> {
 
   // My Stock filters
   final Set<String> _selectedQualities = {};
+  final Set<String> _selectedSizes = {};
+  final Set<String> _selectedSurfaces = {};
   String _sortBy = 'default';
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
+
+  int get _filterCount => _selectedSizes.length + _selectedSurfaces.length;
 
   @override
   void initState() {
@@ -112,6 +116,14 @@ class _State extends State<StockistDashboardScreen> {
             .where((d) => _selectedQualities.contains(d.quality))
             .toList();
 
+    if (_selectedSizes.isNotEmpty) {
+      result = result.where((d) => _selectedSizes.contains(d.size)).toList();
+    }
+    if (_selectedSurfaces.isNotEmpty) {
+      result =
+          result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
+    }
+
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
@@ -171,7 +183,7 @@ class _State extends State<StockistDashboardScreen> {
               ],
             )
           : AppBar(
-              title: const Text('My Stock Dashboard'),
+              title: const Text('Stock Dashboard'),
               actions: [
                 IconButton(
                   icon: const Icon(Icons.notifications_outlined),
@@ -187,57 +199,17 @@ class _State extends State<StockistDashboardScreen> {
                 ),
               ],
             ),
-      floatingActionButton: _activeTab == 0 && !_selectMode
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton.extended(
-                  heroTag: 'dispatch',
-                  onPressed: () async {
-                    await context.push('/stockist/stock/dispatch');
-                    _load(); // refresh after dispatching
-                  },
-                  icon: const Icon(Icons.remove_circle_outline),
-                  label: const Text('Dispatch'),
-                  backgroundColor: Colors.red[700],
-                  foregroundColor: Colors.white,
-                ),
-                const SizedBox(height: 12),
-                FloatingActionButton.extended(
-                  heroTag: 'upload',
-                  onPressed: () async {
-                    await context.push('/stockist/stock/upload');
-                    _load(); // refresh after importing a PDF
-                  },
-                  icon: const Icon(Icons.upload_file),
-                  label: const Text('Upload PDF'),
-                  backgroundColor: const Color(0xFF1B4F72),
-                  foregroundColor: Colors.white,
-                ),
-                const SizedBox(height: 12),
-                FloatingActionButton.extended(
-                  heroTag: 'add',
-                  onPressed: () async {
-                    await context.push('/stockist/stock/add');
-                    _load(); // refresh after adding
-                  },
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Design'),
-                  backgroundColor: const Color(0xFF2E7D32),
-                  foregroundColor: Colors.white,
-                ),
-              ],
-            )
-          : null,
+      // Action buttons moved into the collapsing header (Dispatch / Upload /
+      // Add Design row) — no floating buttons.
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                _buildStatsBar(),
-                _buildTabRow(),
+                _buildStatsBar(),  // pinned, slim
+                _buildChipRow(),   // pinned: tabs + quality chips
                 Expanded(
                   child: _activeTab == 0
-                      ? _buildMyStockTab()
+                      ? _buildMyStockScroll() // buttons + search/filter collapse
                       : _buildBuyerInterestTab(),
                 ),
               ],
@@ -252,14 +224,14 @@ class _State extends State<StockistDashboardScreen> {
     final estValue = _estimatedOrderValue;
     return Container(
       color: const Color(0xFF1B4F72).withValues(alpha: 0.05),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _statItem('${_designs.length}', 'Total Designs',
+          _statItem('${_designs.length}', 'Designs',
               Icons.grid_view_rounded, const Color(0xFF1B4F72)),
           _divider(),
-          _statItem('$interest', 'Buyer Interest',
+          _statItem('$interest', 'Inquiry',
               Icons.bookmark_rounded,
               interest > 0 ? const Color(0xFF2E7D32) : Colors.grey),
           _divider(),
@@ -274,19 +246,20 @@ class _State extends State<StockistDashboardScreen> {
   }
 
   Widget _divider() =>
-      Container(width: 1, height: 36, color: Colors.grey.shade300);
+      Container(width: 1, height: 22, color: Colors.grey.shade300);
 
+  // Slim single-line stat: icon · value · label.
   Widget _statItem(
       String value, String label, IconData icon, Color color) =>
-      Column(
+      Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(height: 2),
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 4),
           Text(value,
               style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: color)),
+                  fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+          const SizedBox(width: 3),
           Text(label,
               style: const TextStyle(fontSize: 10, color: Colors.grey)),
         ],
@@ -294,10 +267,12 @@ class _State extends State<StockistDashboardScreen> {
 
   // ── Tab row ───────────────────────────────────────────────────────────────
 
-  Widget _buildTabRow() {
+  // Row 2 (pinned): My Stock / Buyer Interest tabs + quality chips in one
+  // horizontally-scrollable row (All-Design chip style).
+  Widget _buildChipRow() {
     final interestCount = _buyerInterestDesigns.length;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -307,33 +282,74 @@ class _State extends State<StockistDashboardScreen> {
               offset: const Offset(0, 2))
         ],
       ),
-      child: Row(
-        children: [
-          _tabButton('My Stock', Icons.inventory_2_outlined, 0),
-          const SizedBox(width: 8),
-          _tabButtonBadge(
-              'Buyer Interest', Icons.bookmark_outlined, 1, interestCount),
-        ],
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _tabPill('Stock', Icons.inventory_2_outlined, _activeTab == 0,
+                () => setState(() => _activeTab = 0)),
+            const SizedBox(width: 6),
+            _tabPill('Inquiry', Icons.bookmark_outlined, _activeTab == 1,
+                () => setState(() => _activeTab = 1), badge: interestCount),
+            Container(
+                width: 1,
+                height: 22,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                color: Colors.grey.shade300),
+            ..._qualities.map((q) {
+              final m = _qualityMeta[q]!;
+              final sel = _selectedQualities.contains(q);
+              return Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: GestureDetector(
+                  onTap: () => setState(() {
+                    if (sel) {
+                      _selectedQualities.remove(q);
+                    } else {
+                      _selectedQualities.add(q);
+                    }
+                  }),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: sel ? m.fg : m.bg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: m.fg, width: sel ? 2 : 1),
+                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(m.icon, size: 13, color: sel ? Colors.white : m.fg),
+                      const SizedBox(width: 4),
+                      Text(q,
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: sel ? Colors.white : m.fg)),
+                    ]),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _tabButton(String label, IconData icon, int index) {
-    final active = _activeTab == index;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _activeTab = index),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          decoration: BoxDecoration(
-            color: active
-                ? const Color(0xFF1B4F72)
-                : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
+  Widget _tabPill(String label, IconData icon, bool active, VoidCallback onTap,
+      {int badge = 0}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: active ? const Color(0xFF1B4F72) : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(icon,
                   size: 15,
                   color: active ? Colors.white : Colors.grey.shade600),
@@ -342,251 +358,206 @@ class _State extends State<StockistDashboardScreen> {
                   style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color:
-                          active ? Colors.white : Colors.grey.shade600)),
-            ],
+                      color: active ? Colors.white : Colors.grey.shade600)),
+            ]),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _tabButtonBadge(
-      String label, IconData icon, int index, int badgeCount) {
-    final active = _activeTab == index;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _activeTab = index),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 9),
-              decoration: BoxDecoration(
-                color: active
-                    ? const Color(0xFF1B4F72)
-                    : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon,
-                      size: 15,
-                      color: active
-                          ? Colors.white
-                          : Colors.grey.shade600),
-                  const SizedBox(width: 6),
-                  Text(label,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: active
-                              ? Colors.white
-                              : Colors.grey.shade600)),
-                ],
+          if (badge > 0)
+            Positioned(
+              top: -6,
+              right: -4,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF2E7D32),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Text('$badge',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold)),
               ),
             ),
-            if (badgeCount > 0)
-              Positioned(
-                top: -6,
-                right: 4,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2E7D32),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text('$badgeCount',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold)),
-                ),
-              ),
-          ],
-        ),
+        ],
       ),
     );
   }
 
   // ── My Stock tab ──────────────────────────────────────────────────────────
 
-  Widget _buildMyStockTab() {
+  // My Stock: collapsing header (action buttons + search/filter) over the grid.
+  Widget _buildMyStockScroll() {
     final designs = _filteredAndSorted;
-    return Column(
-      children: [
-        _buildQualityFilter(),
-        _buildSearchSortRow(),
-        Expanded(
-          child: designs.isEmpty
-              ? const Center(
-                  child: Text('No designs found',
-                      style: TextStyle(color: Colors.grey)))
-              : MasonryGridView.count(
-                  padding: const EdgeInsets.all(12),
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  itemCount: designs.length,
-                  itemBuilder: (_, i) {
-                    final d = designs[i];
-                    final outOfStock = d.boxQuantity == 0;
-                    final lowStock = !outOfStock &&
-                        d.boxQuantity < _lowStockThreshold;
-                    final isSelected = _selectedIds.contains(d.id);
-                    return GestureDetector(
-                      onLongPress: () => setState(() {
-                        _selectMode = true;
-                        _selectedIds.add(d.id);
-                      }),
-                      onTap: _selectMode
-                          ? () => setState(() {
-                                if (isSelected) {
-                                  _selectedIds.remove(d.id);
-                                } else {
-                                  _selectedIds.add(d.id);
-                                }
-                              })
-                          : null,
-                      child: Stack(
-                        children: [
-                          TileCard(
-                            design: d,
-                            onTap: _selectMode
-                                ? () {}
-                                : () => context
-                                    .push('/stockist/stock/edit/${d.id}'),
-                          ),
-                          if (outOfStock || lowStock)
-                            Positioned(
-                              top: 6,
-                              left: 6,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: outOfStock
-                                      ? Colors.red
-                                      : Colors.orange.shade700,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  outOfStock ? 'Out of Stock' : 'Low Stock',
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                          // Selection checkbox overlay
-                          if (_selectMode)
-                            Positioned(
-                              top: 6,
-                              right: 6,
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 150),
-                                width: 22,
-                                height: 22,
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? const Color(0xFF1B4F72)
-                                      : Colors.white.withValues(alpha: 0.85),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: const Color(0xFF1B4F72),
-                                    width: 2,
-                                  ),
-                                ),
-                                child: isSelected
-                                    ? const Icon(Icons.check,
-                                        size: 14, color: Colors.white)
-                                    : null,
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Column(
+            children: [
+              _buildActionButtonRow(),
+              _buildSearchFilterRow(),
+            ],
+          ),
         ),
+        if (designs.isEmpty)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+                child: Text('No designs found',
+                    style: TextStyle(color: Colors.grey))),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.all(12),
+            sliver: SliverMasonryGrid.count(
+              crossAxisCount: 2,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childCount: designs.length,
+              itemBuilder: (_, i) => _designTile(designs[i]),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _buildQualityFilter() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 4,
-              offset: const Offset(0, 2))
-        ],
-      ),
-      child: Row(
-        children: _qualities.map((q) {
-          final m = _qualityMeta[q]!;
-          final selected = _selectedQualities.contains(q);
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => setState(() {
-                if (selected) {
-                  _selectedQualities.remove(q);
+  Widget _designTile(TileDesign d) {
+    final outOfStock = d.boxQuantity == 0;
+    final lowStock = !outOfStock && d.boxQuantity < _lowStockThreshold;
+    final isSelected = _selectedIds.contains(d.id);
+    return GestureDetector(
+      onLongPress: () => setState(() {
+        _selectMode = true;
+        _selectedIds.add(d.id);
+      }),
+      onTap: _selectMode
+          ? () => setState(() {
+                if (isSelected) {
+                  _selectedIds.remove(d.id);
                 } else {
-                  _selectedQualities.add(q);
+                  _selectedIds.add(d.id);
                 }
-              }),
+              })
+          : null,
+      child: Stack(
+        children: [
+          TileCard(
+            design: d,
+            onTap: _selectMode
+                ? () {}
+                : () => context.push('/stockist/stock/edit/${d.id}'),
+          ),
+          if (outOfStock || lowStock)
+            Positioned(
+              top: 6,
+              left: 6,
               child: Container(
-                margin: const EdgeInsets.only(right: 6),
-                padding: const EdgeInsets.symmetric(
-                    vertical: 6, horizontal: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
-                  color: selected ? m.fg : m.bg,
-                  borderRadius: BorderRadius.circular(8),
-                  border:
-                      Border.all(color: m.fg, width: selected ? 2 : 1),
-                  boxShadow: selected
-                      ? [
-                          BoxShadow(
-                              color: m.fg.withValues(alpha: 0.22),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2))
-                        ]
-                      : [],
+                  color: outOfStock ? Colors.red : Colors.orange.shade700,
+                  borderRadius: BorderRadius.circular(6),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(m.icon,
-                        size: 12,
-                        color: selected ? Colors.white : m.fg),
-                    const SizedBox(width: 3),
-                    Text(q,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: selected ? Colors.white : m.fg,
-                        )),
-                  ],
+                child: Text(
+                  outOfStock ? 'Out of Stock' : 'Low Stock',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
             ),
-          );
-        }).toList(),
+          if (_selectMode)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF1B4F72)
+                      : Colors.white.withValues(alpha: 0.85),
+                  shape: BoxShape.circle,
+                  border:
+                      Border.all(color: const Color(0xFF1B4F72), width: 2),
+                ),
+                child: isSelected
+                    ? const Icon(Icons.check, size: 14, color: Colors.white)
+                    : null,
+              ),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _buildSearchSortRow() {
+  // Row 3: Dispatch · Upload PDF · Add Design · spare (compact buttons).
+  Widget _buildActionButtonRow() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 2),
+      child: Row(
+        children: [
+          _actionBtn('Dispatch', Icons.remove_circle_outline, Colors.red[700]!,
+              () async {
+            await context.push('/stockist/stock/dispatch');
+            _load();
+          }),
+          const SizedBox(width: 6),
+          _actionBtn('Upload', Icons.upload_file, const Color(0xFF1B4F72),
+              () async {
+            await context.push('/stockist/stock/upload');
+            _load();
+          }),
+          const SizedBox(width: 6),
+          _actionBtn('Add', Icons.add, const Color(0xFF2E7D32), () async {
+            await context.push('/stockist/stock/add');
+            _load();
+          }),
+          const SizedBox(width: 6),
+          // Spare button — reserved for future use.
+          _actionBtn('•', Icons.more_horiz, Colors.grey, null),
+        ],
+      ),
+    );
+  }
+
+  Widget _actionBtn(
+      String label, IconData icon, Color color, VoidCallback? onTap) {
+    final enabled = onTap != null;
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Opacity(
+          opacity: enabled ? 1 : 0.4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: color.withValues(alpha: 0.4)),
+            ),
+            child: Column(
+              children: [
+                Icon(icon, size: 18, color: color),
+                const SizedBox(height: 2),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: color)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Always-visible search bar + Filter (All-Design sheet) + Sort.
+  Widget _buildSearchFilterRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
       child: Row(
         children: [
           Expanded(
@@ -606,40 +577,206 @@ class _State extends State<StockistDashboardScreen> {
                       )
                     : null,
                 isDense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8)),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          GestureDetector(
-            onTap: _showSortSheet,
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: _sortBy != 'default'
-                    ? const Color(0xFF1B4F72)
-                    : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: _sortBy != 'default'
-                      ? const Color(0xFF1B4F72)
-                      : Colors.grey.shade300,
+          // Filter (All-Design style) with a count badge.
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _showFilterSheet,
+                icon: const Icon(Icons.tune, size: 16),
+                label: const Text('Filter'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1B4F72),
+                  side: BorderSide(
+                      color: _filterCount > 0
+                          ? const Color(0xFF1B4F72)
+                          : Colors.grey.shade400),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
-              child: Icon(Icons.sort_rounded,
-                  size: 20,
-                  color: _sortBy != 'default'
-                      ? Colors.white
-                      : Colors.grey.shade600),
-            ),
+              if (_filterCount > 0)
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: const BoxDecoration(
+                        color: Color(0xFF1B4F72), shape: BoxShape.circle),
+                    child: Center(
+                      child: Text('$_filterCount',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ),
+            ],
           ),
+          const SizedBox(width: 8),
+          _iconBox(Icons.sort_rounded, _sortBy != 'default', _showSortSheet),
         ],
       ),
     );
   }
+
+  Widget _iconBox(IconData icon, bool active, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(9),
+          decoration: BoxDecoration(
+            color: active ? const Color(0xFF1B4F72) : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+                color: active
+                    ? const Color(0xFF1B4F72)
+                    : Colors.grey.shade300),
+          ),
+          child: Icon(icon,
+              size: 20,
+              color: active ? Colors.white : Colors.grey.shade600),
+        ),
+      );
+
+  // Filter sheet (size + surface), All-Design style.
+  void _showFilterSheet() {
+    final sizes = _designs.map((d) => d.size).toSet().toList()..sort();
+    final surfaces = _designs.map((d) => d.surfaceType).toSet().toList()..sort();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Filter',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  if (_filterCount > 0)
+                    TextButton(
+                      onPressed: () {
+                        setSheet(() {
+                          _selectedSizes.clear();
+                          _selectedSurfaces.clear();
+                        });
+                        setState(() {});
+                      },
+                      child: const Text('Clear all'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              const Text('Size',
+                  style:
+                      TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: sizes
+                    .map((s) => _filterChip(s, _selectedSizes.contains(s), () {
+                          setSheet(() {
+                            if (_selectedSizes.contains(s)) {
+                              _selectedSizes.remove(s);
+                            } else {
+                              _selectedSizes.add(s);
+                            }
+                          });
+                          setState(() {});
+                        }))
+                    .toList(),
+              ),
+              const SizedBox(height: 14),
+              const Text('Surface',
+                  style:
+                      TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: surfaces
+                    .map((s) =>
+                        _filterChip(s, _selectedSurfaces.contains(s), () {
+                          setSheet(() {
+                            if (_selectedSurfaces.contains(s)) {
+                              _selectedSurfaces.remove(s);
+                            } else {
+                              _selectedSurfaces.add(s);
+                            }
+                          });
+                          setState(() {});
+                        }))
+                    .toList(),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B4F72),
+                      foregroundColor: Colors.white),
+                  child: const Text('Done'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _filterChip(String label, bool selected, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFF1B4F72)
+                : Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: selected
+                    ? const Color(0xFF1B4F72)
+                    : Colors.grey.shade300),
+          ),
+          child: Text(label.replaceAll(' mm', ''),
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: selected ? Colors.white : Colors.grey.shade700)),
+        ),
+      );
 
   void _showSortSheet() {
     showModalBottomSheet(
@@ -703,7 +840,7 @@ class _State extends State<StockistDashboardScreen> {
             Icon(Icons.bookmark_outline_rounded,
                 size: 72, color: Colors.grey.shade300),
             const SizedBox(height: 16),
-            Text('No buyer interest yet',
+            Text('No inquiries yet',
                 style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
