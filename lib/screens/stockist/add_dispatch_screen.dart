@@ -5,7 +5,9 @@ import '../../models/tile_design.dart';
 import '../../models/choice_state.dart';
 
 class AddDispatchScreen extends StatefulWidget {
-  const AddDispatchScreen({super.key});
+  /// Optional design to pre-select (e.g. from the Inquiry tab's Dispatch button).
+  final String? initialDesignId;
+  const AddDispatchScreen({super.key, this.initialDesignId});
   @override
   State<AddDispatchScreen> createState() => _State();
 }
@@ -38,7 +40,14 @@ class _State extends State<AddDispatchScreen> {
 
   Future<void> _loadDesigns() async {
     final all = await _dataSvc.getDesignsByStockist(currentStockistUUID);
-    setState(() => _designs = all.where((d) => d.boxQuantity > 0).toList());
+    final inStock = all.where((d) => d.boxQuantity > 0).toList();
+    final pre = widget.initialDesignId == null
+        ? <TileDesign>[]
+        : inStock.where((d) => d.id == widget.initialDesignId).toList();
+    setState(() {
+      _designs = inStock;
+      _selected = pre.isEmpty ? null : pre.first;
+    });
   }
 
   Future<void> _submit() async {

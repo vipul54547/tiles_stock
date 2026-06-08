@@ -135,7 +135,8 @@ final GoRouter _router = GoRouter(
     ),
     GoRoute(
       path: '/stockist/stock/dispatch',
-      builder: (_, __) => const AddDispatchScreen(),
+      builder: (_, state) =>
+          AddDispatchScreen(initialDesignId: state.extra as String?),
     ),
     GoRoute(
       path: '/stockist/stock/history/:designId/:designName',

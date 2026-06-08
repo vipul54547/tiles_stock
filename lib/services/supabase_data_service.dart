@@ -392,6 +392,41 @@ class SupabaseDataService {
     }
   }
 
+  // ── stockist inquiries (buyer My-Choice interest in own designs) ───────────
+
+  /// For the logged-in stockist: aggregated buyer interest in their designs,
+  /// as { designId : (buyers, boxes) }. Empty unless the caller is a stockist.
+  Future<Map<String, ({int buyers, int boxes})>> getMyDesignInquiries() async {
+    try {
+      final res = await supabase.rpc('my_design_inquiries');
+      final list = (res as List?) ?? const [];
+      return {
+        for (final e in list)
+          (e['design_id'] as String): (
+            buyers: (e['buyers'] as num).toInt(),
+            boxes: (e['total_boxes'] as num).toInt(),
+          )
+      };
+    } catch (e, st) {
+      debugPrint('getMyDesignInquiries failed: $e\n$st');
+      return {};
+    }
+  }
+
+  /// Per-buyer breakdown for one of the stockist's designs: each entry has
+  /// company, contact, phone, boxes. Empty unless the design belongs to caller.
+  Future<List<Map<String, dynamic>>> getDesignBuyers(String designId) async {
+    try {
+      final res = await supabase
+          .rpc('my_design_buyers', params: {'p_design_id': designId});
+      final list = (res as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e, st) {
+      debugPrint('getDesignBuyers failed ($designId): $e\n$st');
+      return [];
+    }
+  }
+
   // ── my choices (per end user) ──────────────────────────────────────────────
 
   /// This end user's saved choices as { designId : quantity }.

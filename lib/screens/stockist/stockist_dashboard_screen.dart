@@ -34,6 +34,8 @@ const int _lowStockThreshold = 10;
 class _State extends State<StockistDashboardScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
+  // Buyer My-Choice interest in this stockist's designs: designId → (buyers, boxes).
+  Map<String, ({int buyers, int boxes})> _inquiries = {};
   bool _loading = true;
   String get _myStockistId => currentStockistUUID;
 
@@ -100,9 +102,11 @@ class _State extends State<StockistDashboardScreen> {
 
   Future<void> _load() async {
     final data = await _service.getDesignsByStockist(_myStockistId);
+    final inquiries = await _service.getMyDesignInquiries();
     if (!mounted) return;
     setState(() {
       _designs = data;
+      _inquiries = inquiries;
       _loading = false;
     });
   }
@@ -143,10 +147,10 @@ class _State extends State<StockistDashboardScreen> {
   }
 
   List<TileDesign> get _buyerInterestDesigns =>
-      _designs.where((d) => myChoiceQuantities.containsKey(d.id)).toList();
+      _designs.where((d) => _inquiries.containsKey(d.id)).toList();
 
   double get _estimatedOrderValue => _buyerInterestDesigns.fold(
-      0.0, (sum, d) => sum + d.boxPrice * (myChoiceQuantities[d.id] ?? 0));
+      0.0, (sum, d) => sum + d.boxPrice * (_inquiries[d.id]?.boxes ?? 0));
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
@@ -858,7 +862,7 @@ class _State extends State<StockistDashboardScreen> {
     }
 
     final totalBuyerBoxes = interests.fold(
-        0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0));
+        0, (sum, d) => sum + (_inquiries[d.id]?.boxes ?? 0));
 
     return Column(
       children: [
@@ -917,7 +921,9 @@ class _State extends State<StockistDashboardScreen> {
       );
 
   Widget _buildInterestCard(TileDesign d) {
-    final buyerQty = myChoiceQuantities[d.id] ?? 0;
+    final inq = _inquiries[d.id];
+    final buyerQty = inq?.boxes ?? 0;
+    final buyers = inq?.buyers ?? 0;
     final available = d.boxQuantity;
     final canFulfill = available >= buyerQty;
     final imageUrl = d.faceImageUrls.isNotEmpty ? d.faceImageUrls.first : '';
@@ -978,6 +984,9 @@ class _State extends State<StockistDashboardScreen> {
                   spacing: 6,
                   runSpacing: 4,
                   children: [
+                    _badge('$buyers buyer${buyers == 1 ? '' : 's'}',
+                        const Color(0xFF6A1B9A),
+                        const Color(0xFFF3E5F5)),
                     _badge('Wants: $buyerQty boxes',
                         const Color(0xFF1565C0),
                         const Color(0xFFE3F2FD)),
@@ -995,23 +1004,168 @@ class _State extends State<StockistDashboardScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () =>
-                context.push('/stockist/stock/edit/${d.id}'),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1B4F72).withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: const Color(0xFF1B4F72)
-                        .withValues(alpha: 0.25)),
-              ),
-              child: const Icon(Icons.edit_outlined,
-                  size: 18, color: Color(0xFF1B4F72)),
-            ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _interestAction('Buyers', Icons.people_alt_outlined,
+                  const Color(0xFF6A1B9A), () => _showBuyersSheet(d)),
+              const SizedBox(height: 6),
+              _interestAction(
+                  'Dispatch', Icons.local_shipping_outlined, Colors.red.shade700,
+                  () async {
+                await context.push('/stockist/stock/dispatch', extra: d.id);
+                _load();
+              }),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _interestAction(
+          String label, IconData icon, Color color, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 78,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(height: 1),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+            ],
+          ),
+        ),
+      );
+
+  // Bottom sheet: which companies want this design and how many boxes.
+  void _showBuyersSheet(TileDesign d) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.5,
+        maxChildSize: 0.85,
+        builder: (ctx, scrollCtrl) => FutureBuilder<List<Map<String, dynamic>>>(
+          future: _service.getDesignBuyers(d.id),
+          builder: (ctx, snap) {
+            return Column(
+              children: [
+                Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.people_alt_outlined,
+                          color: Color(0xFF6A1B9A), size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Buyers for ${d.name}',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 15),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: snap.connectionState != ConnectionState.done
+                      ? const Center(child: CircularProgressIndicator())
+                      : (snap.data ?? []).isEmpty
+                          ? const Center(
+                              child: Text('No buyers yet',
+                                  style: TextStyle(color: Colors.grey)))
+                          : ListView.separated(
+                              controller: scrollCtrl,
+                              padding: const EdgeInsets.all(12),
+                              itemCount: snap.data!.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 6),
+                              itemBuilder: (_, i) {
+                                final b = snap.data![i];
+                                final contact =
+                                    (b['contact'] ?? '').toString();
+                                final phone = (b['phone'] ?? '').toString();
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border:
+                                        Border.all(color: Colors.grey.shade200),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                                (b['company'] ?? '').toString(),
+                                                style: const TextStyle(
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: 14)),
+                                            if (contact.isNotEmpty ||
+                                                phone.isNotEmpty)
+                                              Text(
+                                                  [contact, phone]
+                                                      .where((x) => x.isNotEmpty)
+                                                      .join('  ·  '),
+                                                  style: TextStyle(
+                                                      fontSize: 11,
+                                                      color:
+                                                          Colors.grey.shade600)),
+                                          ],
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 10, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF1565C0)
+                                              .withValues(alpha: 0.1),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Text('${b['boxes']} boxes',
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFF1565C0))),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
