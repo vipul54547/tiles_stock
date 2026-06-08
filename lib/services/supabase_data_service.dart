@@ -36,6 +36,15 @@ class SupabaseDataService {
         updatedAt:  DateTime.parse(d['updated_at']),
         quality:    d['quality']    ?? 'Standard',
         stockType:  d['stock_type'] ?? 'Regular',
+        createdAt:  d['created_at'] != null
+            ? DateTime.tryParse(d['created_at'].toString())
+            : null,
+        // priority comes from the stockists join (members) or the
+        // public_designs view's stockist_priority column (guests).
+        stockistPriority: ((d['stockists']?['priority'] ??
+                d['stockist_priority'] ??
+                0) as num)
+            .toDouble(),
       );
 
   // ── designs ───────────────────────────────────────────────────────────────
@@ -54,7 +63,7 @@ class SupabaseDataService {
       }
       final data = await supabase
           .from('designs')
-          .select('*, stockists!inner(sequential_id, is_active)')
+          .select('*, stockists!inner(sequential_id, is_active, priority)')
           .eq('stockists.is_active', true)
           .neq('status', 'out_of_stock')
           .order('created_at', ascending: false);
@@ -110,7 +119,7 @@ class SupabaseDataService {
           ? supabase.from('public_designs').select()
           : supabase
               .from('designs')
-              .select('*, stockists!inner(sequential_id, is_active)')
+              .select('*, stockists!inner(sequential_id, is_active, priority)')
               .eq('stockists.is_active', true)
               .neq('status', 'out_of_stock');
 

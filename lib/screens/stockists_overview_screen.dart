@@ -9,6 +9,7 @@ import '../services/supabase_auth_service.dart';
 import '../widgets/tile_card.dart';
 import 'end_user/stockist_group_screen.dart' show stockistGroups;
 import '../models/choice_state.dart';
+import '../utils/design_ranking.dart';
 
 const _qualities = ['Premium', 'Standard'];
 const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
@@ -180,7 +181,9 @@ class _State extends State<StockistsOverviewScreen> {
 
     setState(() {
       _allData = data;
-      _allDesigns = designs;
+      // Blended catalog ranking (fresh per-session seed) for the All-Design grid.
+      _allDesigns =
+          rankDesigns(designs, seed: DateTime.now().microsecondsSinceEpoch);
       _allSizes = sizes;
       _allSurfaces = surfaces;
       _loading = false;
@@ -298,7 +301,7 @@ class _State extends State<StockistsOverviewScreen> {
     final maxQty = int.tryParse(_maxQtyCtrl.text);
     if (minQty != null) result = result.where((d) => d.boxQuantity >= minQty).toList();
     if (maxQty != null) result = result.where((d) => d.boxQuantity <= maxQty).toList();
-    result.sort((a, b) => b.boxQuantity.compareTo(a.boxQuantity));
+    // Preserve the blended ranking order from _load (no quantity re-sort).
     return result;
   }
 

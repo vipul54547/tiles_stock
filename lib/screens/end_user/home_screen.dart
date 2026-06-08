@@ -9,6 +9,7 @@ import 'stockist_group_screen.dart' show stockistGroups;
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
+import '../../utils/design_ranking.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
 const _filterSurfaces   = kFinishes;
@@ -72,8 +73,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _load() async {
     final designs = await _service.getAllDesigns();
+    // Blended catalog ranking with a fresh per-session seed, so the order
+    // varies each time the screen loads (app open / pull-to-refresh).
+    final ranked =
+        rankDesigns(designs, seed: DateTime.now().microsecondsSinceEpoch);
     setState(() {
-      _designs = designs;
+      _designs = ranked;
       _loading = false;
     });
   }
@@ -107,7 +112,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final maxQty = int.tryParse(_maxQtyCtrl.text);
     if (minQty != null) result = result.where((d) => d.boxQuantity >= minQty).toList();
     if (maxQty != null) result = result.where((d) => d.boxQuantity <= maxQty).toList();
-    result.sort((a, b) => b.boxQuantity.compareTo(a.boxQuantity));
+    // Keep the blended ranking order from _load (was previously overridden by a
+    // box-quantity sort, which clumped one stockist and never reshuffled).
     return result;
   }
 

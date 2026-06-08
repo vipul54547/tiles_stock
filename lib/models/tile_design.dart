@@ -17,6 +17,12 @@ class TileDesign {
   final DateTime updatedAt;
   final String quality;
   final String stockType;
+  /// When the design was first listed — drives the "new designs first" signal
+  /// in the catalog ranking. Falls back to [updatedAt] when absent.
+  final DateTime createdAt;
+  /// The owning stockist's priority (0.00 default). One ingredient of the
+  /// catalog ranking; never shown to buyers.
+  final double stockistPriority;
 
   TileDesign({
     required this.id,
@@ -35,7 +41,9 @@ class TileDesign {
     required this.updatedAt,
     required this.quality,
     required this.stockType,
-  });
+    DateTime? createdAt,
+    this.stockistPriority = 0,
+  }) : createdAt = createdAt ?? updatedAt;
 
   factory TileDesign.fromJson(Map<String, dynamic> json) => TileDesign(
         id: json['id'],
@@ -54,6 +62,11 @@ class TileDesign {
         updatedAt: DateTime.parse(json['updated_at']),
         quality: json['quality'] ?? 'Standard',
         stockType: json['stock_type'] ?? 'Regular',
+        createdAt: json['created_at'] != null
+            ? DateTime.tryParse(json['created_at'].toString())
+            : null,
+        stockistPriority:
+            (json['stockist_priority'] as num?)?.toDouble() ?? 0,
       );
 
   Map<String, dynamic> toJson() => {
