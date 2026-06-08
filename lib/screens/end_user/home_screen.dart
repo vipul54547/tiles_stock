@@ -12,6 +12,8 @@ import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/design_ranking.dart';
 import '../../utils/my_choice.dart';
+import '../../utils/tile_types.dart';
+import '../../widgets/filter_section.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
 const _filterSurfaces   = kFinishes;
@@ -40,6 +42,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _selectedSizes = {};
   Set<String> _selectedSurfaces = {};
   Set<String> _selectedColours = {};
+  Set<String> _selectedTypes = {};
+  Set<String> _selectedThickness = {};
   Set<String> _selectedQualities = {};
   String _stockType = 'Both';
   final _minQtyCtrl = TextEditingController();
@@ -109,8 +113,18 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_selectedColours.isNotEmpty) {
       result = result.where((d) => _selectedColours.contains(d.colour)).toList();
     }
+    if (_selectedTypes.isNotEmpty) {
+      result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
+    }
+    if (_selectedThickness.isNotEmpty) {
+      result = result
+          .where((d) => _selectedThickness.contains(thicknessBandOf(d)))
+          .toList();
+    }
     if (_stockType != 'Both') {
-      result = result.where((d) => d.stockType == _stockType).toList();
+      result = result
+          .where((d) => d.stockType == _stockType || d.stockType == 'Both')
+          .toList();
     }
     final minQty = int.tryParse(_minQtyCtrl.text);
     final maxQty = int.tryParse(_maxQtyCtrl.text);
@@ -121,11 +135,57 @@ class _HomeScreenState extends State<HomeScreen> {
     return result;
   }
 
+  // Removable chips for the active-filter bar above the grid.
+  List<ActiveFilter> _activeFilters() {
+    final out = <ActiveFilter>[];
+    void addSet(Set<String> set, [String Function(String)? fmt]) {
+      for (final v in set.toList()) {
+        out.add(ActiveFilter(
+            fmt == null ? v : fmt(v), () => setState(() => set.remove(v))));
+      }
+    }
+    addSet(_selectedSizes, (v) => v.replaceAll(' mm', ''));
+    addSet(_selectedSurfaces);
+    addSet(_selectedColours);
+    addSet(_selectedTypes);
+    addSet(_selectedThickness);
+    addSet(_selectedQualities);
+    if (_stockType != 'Both') {
+      out.add(ActiveFilter(
+          _stockType, () => setState(() => _stockType = 'Both')));
+    }
+    final mn = _minQtyCtrl.text.trim();
+    final mx = _maxQtyCtrl.text.trim();
+    if (mn.isNotEmpty || mx.isNotEmpty) {
+      out.add(ActiveFilter(
+          'Qty ${mn.isEmpty ? '0' : mn}–${mx.isEmpty ? '∞' : mx}',
+          () => setState(() {
+                _minQtyCtrl.clear();
+                _maxQtyCtrl.clear();
+              })));
+    }
+    return out;
+  }
+
+  void _clearAllFilters() => setState(() {
+        _selectedSizes.clear();
+        _selectedSurfaces.clear();
+        _selectedColours.clear();
+        _selectedTypes.clear();
+        _selectedThickness.clear();
+        _selectedQualities.clear();
+        _stockType = 'Both';
+        _minQtyCtrl.clear();
+        _maxQtyCtrl.clear();
+      });
+
   int get _filterCount {
     int c = 0;
     if (_selectedSizes.isNotEmpty) c++;
     if (_selectedSurfaces.isNotEmpty) c++;
     if (_selectedColours.isNotEmpty) c++;
+    if (_selectedTypes.isNotEmpty) c++;
+    if (_selectedThickness.isNotEmpty) c++;
     if (_selectedQualities.isNotEmpty) c++;
     if (_stockType != 'Both') c++;
     if (_minQtyCtrl.text.isNotEmpty) c++;
@@ -141,6 +201,9 @@ class _HomeScreenState extends State<HomeScreen> {
     var localSizes     = Set<String>.from(_selectedSizes);
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
     var localColours   = Set<String>.from(_selectedColours);
+    var localTypes     = Set<String>.from(_selectedTypes);
+    var localThickness = Set<String>.from(_selectedThickness);
+    final thicknessBands = availableThicknessBands(_designs);
     var localStockType = _stockType;
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     showModalBottomSheet<bool>(
@@ -152,12 +215,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       builder: (_) => StatefulBuilder(
         builder: (ctx, setSheet) {
-          Widget sectionTitle(String t) => Padding(
-            padding: const EdgeInsets.fromLTRB(0, 14, 0, 8),
-            child: Text(t,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-          );
-
           Widget filterChip(String label, bool sel, VoidCallback onTap) =>
               GestureDetector(
                 onTap: () {
@@ -183,6 +240,88 @@ class _HomeScreenState extends State<HomeScreen> {
                       )),
                 ),
               );
+
+          // Multi-select chip group bound to a local set.
+          Widget chipWrap(List<String> options, Set<String> sel) => Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: options
+                    .map((o) => filterChip(o, sel.contains(o), () => setSheet(() {
+                          if (sel.contains(o)) {
+                            sel.remove(o);
+                          } else {
+                            sel.add(o);
+                          }
+                        })))
+                    .toList(),
+              );
+
+          // Live count of designs that the current (local) selections would show.
+          int previewCount() {
+            var r = _designs;
+            if (_searchQuery.isNotEmpty) {
+              final q = _searchQuery.toLowerCase();
+              r = r.where((d) => d.name.toLowerCase().contains(q)).toList();
+            }
+            if (_activeGroupIndex >= 0) {
+              final g = stockistGroups[_activeGroupIndex].stockistIds;
+              r = r.where((d) => g.contains(d.stockistId)).toList();
+            }
+            if (_selectedQualities.isNotEmpty) {
+              r = r.where((d) => _selectedQualities.contains(d.quality)).toList();
+            }
+            if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
+            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
+            if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
+            if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
+            if (localThickness.isNotEmpty) {
+              r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
+            }
+            if (localStockType != 'Both') {
+              r = r.where((d) => d.stockType == localStockType || d.stockType == 'Both').toList();
+            }
+            final mn = int.tryParse(_minQtyCtrl.text);
+            final mx = int.tryParse(_maxQtyCtrl.text);
+            if (mn != null) r = r.where((d) => d.boxQuantity >= mn).toList();
+            if (mx != null) r = r.where((d) => d.boxQuantity <= mx).toList();
+            return r.length;
+          }
+
+          final qtyRow = Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _minQtyCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setSheet(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'Min',
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _maxQtyCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setSheet(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'Max',
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+            ],
+          );
 
           return SizedBox(
             height: sheetHeight,
@@ -214,6 +353,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           localSizes.clear();
                           localSurfaces.clear();
                           localColours.clear();
+                          localTypes.clear();
+                          localThickness.clear();
                           localStockType = 'Both';
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
@@ -222,25 +363,21 @@ class _HomeScreenState extends State<HomeScreen> {
                             style: TextStyle(
                                 color: Colors.red, fontSize: 13)),
                       ),
-                      const SizedBox(width: 4),
-                      ElevatedButton(
-                        onPressed: () {
-                          FocusManager.instance.primaryFocus?.unfocus();
-                          Navigator.of(ctx).pop(true);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1B4F72),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: const Text('Apply',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 13)),
-                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: Colors.grey.shade200),
+                // Pinned Quantity — always visible at the top.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Quantity (boxes)',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      qtyRow,
                     ],
                   ),
                 ),
@@ -250,110 +387,71 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
-                      sectionTitle('Qty (boxes)'),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _minQtyCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                hintText: 'Min',
-                                isDense: true,
-                                contentPadding:
-                                    const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 10),
-                                border: OutlineInputBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(8)),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _maxQtyCtrl,
-                              keyboardType: TextInputType.number,
-                              decoration: InputDecoration(
-                                hintText: 'Max',
-                                isDense: true,
-                                contentPadding:
-                                    const EdgeInsets.symmetric(
-                                        horizontal: 12, vertical: 10),
-                                border: OutlineInputBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(8)),
-                              ),
-                            ),
-                          ),
-                        ],
+                      FilterSection(
+                        title: 'Size',
+                        summary: filterSummary(localSizes),
+                        child: chipWrap(_filterSizes, localSizes),
                       ),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _filterSizes
-                            .map((s) => filterChip(
-                                  s,
-                                  localSizes.contains(s),
-                                  () => setSheet(() {
-                                    if (localSizes.contains(s)) {
-                                      localSizes.remove(s);
-                                    } else {
-                                      localSizes.add(s);
-                                    }
-                                  }),
-                                ))
-                            .toList(),
+                      FilterSection(
+                        title: 'Finish',
+                        summary: filterSummary(localSurfaces),
+                        child: chipWrap(_filterSurfaces, localSurfaces),
                       ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _filterSurfaces
-                            .map((s) => filterChip(
-                                  s,
-                                  localSurfaces.contains(s),
-                                  () => setSheet(() {
-                                    if (localSurfaces.contains(s)) {
-                                      localSurfaces.remove(s);
-                                    } else {
-                                      localSurfaces.add(s);
-                                    }
-                                  }),
-                                ))
-                            .toList(),
+                      FilterSection(
+                        title: 'Tile Type',
+                        summary: filterSummary(localTypes),
+                        child: chipWrap(kTileTypes, localTypes),
                       ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _filterColours
-                            .map((c) => filterChip(
-                                  c,
-                                  localColours.contains(c),
-                                  () => setSheet(() {
-                                    if (localColours.contains(c)) {
-                                      localColours.remove(c);
-                                    } else {
-                                      localColours.add(c);
-                                    }
-                                  }),
-                                ))
-                            .toList(),
+                      if (thicknessBands.isNotEmpty)
+                        FilterSection(
+                          title: 'Thickness (approx)',
+                          summary: filterSummary(localThickness),
+                          child: chipWrap(thicknessBands, localThickness),
+                        ),
+                      FilterSection(
+                        title: 'Colour',
+                        summary: filterSummary(localColours),
+                        child: chipWrap(_filterColours, localColours),
                       ),
-                      sectionTitle('Stock Type'),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _filterStockTypes
-                            .map((t) => filterChip(
-                                  t,
-                                  localStockType == t,
-                                  () => setSheet(() => localStockType = t),
-                                ))
-                            .toList(),
+                      FilterSection(
+                        title: 'Stock Type',
+                        summary: localStockType,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _filterStockTypes
+                              .map((t) => filterChip(t, localStockType == t,
+                                  () => setSheet(() => localStockType = t)))
+                              .toList(),
+                        ),
                       ),
                     ],
+                  ),
+                ),
+                // Footer — apply, showing the live result count.
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          FocusManager.instance.primaryFocus?.unfocus();
+                          Navigator.of(ctx).pop(true);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1B4F72),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: Text('Show ${previewCount()} designs',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 15)),
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -368,6 +466,8 @@ class _HomeScreenState extends State<HomeScreen> {
           _selectedSizes     = Set<String>.from(localSizes);
           _selectedSurfaces  = Set<String>.from(localSurfaces);
           _selectedColours   = Set<String>.from(localColours);
+          _selectedTypes     = Set<String>.from(localTypes);
+          _selectedThickness = Set<String>.from(localThickness);
           _stockType         = localStockType;
         });
       } else {
@@ -1018,6 +1118,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             _selectedSizes.clear();
                             _selectedSurfaces.clear();
                             _selectedColours.clear();
+                            _selectedTypes.clear();
+                            _selectedThickness.clear();
                             _selectedQualities = {};
                             _stockType = 'Both';
                             _minQtyCtrl.clear();
@@ -1051,6 +1153,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 _buildGroupRow(),
+                ActiveFilterBar(
+                    filters: _activeFilters(), onClearAll: _clearAllFilters),
                 Expanded(
                   child: _filtered.isEmpty
                       ? const Center(

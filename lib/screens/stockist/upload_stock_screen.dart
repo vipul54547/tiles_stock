@@ -7,11 +7,16 @@ import '../../services/cloudinary_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_sizes.dart';
+import '../../utils/tile_types.dart';
 import '../../utils/finishes.dart';
 import '../../utils/dispose_after_frame.dart';
 
 // Quality grades a stockist can assign to an uploaded batch.
 const List<String> kQualities = ['Standard', 'Premium', 'Economy'];
+
+// Stock types a stockist can assign to an uploaded batch. 'Both' = the designs
+// are sold as regular AND one-time stock (shows under either buyer filter).
+const List<String> kUploadStockTypes = ['Both', 'Regular', 'One Time'];
 
 // ── Resolved row ─────────────────────────────────────────────────────────────
 // Produced after matching PDF rows to existing designs.
@@ -66,6 +71,12 @@ class _State extends State<UploadStockScreen> {
   String _size     = kAllowedSizes.first;
   String _quality  = 'Standard';
   int?   _expectedCount; // designs the stockist expects → checksum vs parsed
+  // Body type + per-box weight/pieces the stockist confirms for the whole batch
+  // (constant per size). Used to save real values and derive sqft + thickness.
+  String _tileType     = kTileTypes.first;
+  double _boxWeightKg  = 0;
+  int    _piecesPerBox = 0;
+  String _stockType    = 'Both'; // One Time / Regular / Both (whole batch)
 
   // Admin's live master finish list + this stockist's learned aliases. Loaded
   // once so every parsed row can be aligned to an official finish (and the
@@ -400,6 +411,10 @@ class _State extends State<UploadStockScreen> {
     _quality = kQualities.contains(parsed.quality) ? parsed.quality : 'Standard';
     final countCtrl =
         TextEditingController(text: parsed.designs.length.toString());
+    final weightCtrl =
+        TextEditingController(text: _boxWeightKg > 0 ? '$_boxWeightKg' : '');
+    final piecesCtrl =
+        TextEditingController(text: _piecesPerBox > 0 ? '$_piecesPerBox' : '');
 
     final result = await showDialog<bool>(
       context: context,
@@ -450,6 +465,107 @@ class _State extends State<UploadStockScreen> {
                     onChanged: (v) => setLocal(() => _quality = v ?? _quality),
                   ),
                   const SizedBox(height: 12),
+                  // Tile type (body)
+                  const Text('Tile type',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    value: _tileType,
+                    items: kTileTypes
+                        .map((t) =>
+                            DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (v) => setLocal(() => _tileType = v ?? _tileType),
+                  ),
+                  const SizedBox(height: 12),
+                  // Stock type
+                  const Text('Stock type',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    value: _stockType,
+                    items: kUploadStockTypes
+                        .map((t) =>
+                            DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (v) => setLocal(() => _stockType = v ?? _stockType),
+                  ),
+                  const SizedBox(height: 12),
+                  // Box weight + pieces/box (numbers)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Box weight (kg)',
+                                style: TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.w600)),
+                            TextField(
+                              controller: weightCtrl,
+                              keyboardType: const TextInputType.numberWithOptions(
+                                  decimal: true),
+                              onChanged: (_) => setLocal(() {}),
+                              decoration: const InputDecoration(isDense: true),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Pieces / box',
+                                style: TextStyle(
+                                    fontSize: 12, fontWeight: FontWeight.w600)),
+                            TextField(
+                              controller: piecesCtrl,
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setLocal(() {}),
+                              decoration: const InputDecoration(isDense: true),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  // Live derived sqft/box + thickness range preview.
+                  Builder(builder: (_) {
+                    final pcs = int.tryParse(piecesCtrl.text.trim()) ?? 0;
+                    final wt = double.tryParse(weightCtrl.text.trim()) ?? 0;
+                    final sqft = sqftPerBox(_size, pcs);
+                    final tRange = thicknessRangeLabel(_size, pcs, wt, _tileType);
+                    if (sqft == null && tRange == null) {
+                      return const SizedBox(height: 6);
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (sqft != null)
+                            Text('Sq.ft / box: ${sqft.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade700)),
+                          if (tRange != null) ...[
+                            Text('Thickness: $tRange (approx)',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade700)),
+                            Text(kEmbossThicknessNote,
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontStyle: FontStyle.italic,
+                                    color: Colors.grey.shade500)),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 12),
                   // Expected design count (checksum)
                   const Text('Number of designs (expected)',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
@@ -482,6 +598,8 @@ class _State extends State<UploadStockScreen> {
               ElevatedButton(
                 onPressed: () {
                   _expectedCount = int.tryParse(countCtrl.text.trim());
+                  _boxWeightKg = double.tryParse(weightCtrl.text.trim()) ?? 0;
+                  _piecesPerBox = int.tryParse(piecesCtrl.text.trim()) ?? 0;
                   Navigator.pop(ctx, true);
                 },
                 child: const Text('Continue'),
@@ -491,7 +609,7 @@ class _State extends State<UploadStockScreen> {
         },
       ),
     );
-    disposeAfterFrame([countCtrl]);
+    disposeAfterFrame([countCtrl, weightCtrl, piecesCtrl]);
     return result ?? false;
   }
 
@@ -574,12 +692,14 @@ class _State extends State<UploadStockScreen> {
           surfaceType:   r.row.surface,
           quality:       _quality,
           colour:        '',
-          stockType:     'Regular',
+          stockType:     _stockType,
           boxQuantity:   0,
-          piecesPerBox:  0,
-          boxWeightKg:   0,
-          thicknessMm:   0,
+          piecesPerBox:  _piecesPerBox,
+          boxWeightKg:   _boxWeightKg,
+          thicknessMm:
+              approxThicknessMm(_size, _piecesPerBox, _boxWeightKg, _tileType) ?? 0,
           boxPrice:      0,
+          tileType:      _tileType,
           faceImageUrls: imageUrls,
           finishLabel:   r.row.finishLabel,
         );

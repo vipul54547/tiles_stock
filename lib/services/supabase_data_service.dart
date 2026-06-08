@@ -29,6 +29,7 @@ class SupabaseDataService {
         thicknessMm:  (d['thickness_mm']   ?? 0).toDouble(),
         colour:       d['colour']    ?? '',
         boxPrice:     (d['box_price'] ?? 0).toDouble(),
+        tileType:     d['tile_type'] ?? '',
         faceImageUrls: List<String>.from(d['face_image_urls'] ?? []),
         stockistId:   d['stockists'] != null
             ? (d['stockists']['sequential_id'] ?? seqId ?? '')
@@ -116,6 +117,7 @@ class SupabaseDataService {
     List<String>? surfaceTypes,
     List<String>? colours,
     List<String>? qualities,
+    List<String>? tileTypes,
     String? stockType,
     int? minQty,
     int? maxQty,
@@ -145,6 +147,7 @@ class SupabaseDataService {
       if (surfaceTypes != null && surfaceTypes.isNotEmpty) query = query.inFilter('surface_type',  surfaceTypes);
       if (colours      != null && colours.isNotEmpty)      query = query.inFilter('colour',        colours);
       if (qualities    != null && qualities.isNotEmpty)    query = query.inFilter('quality',       qualities);
+      if (tileTypes    != null && tileTypes.isNotEmpty)    query = query.inFilter('tile_type',     tileTypes);
       if (stockType    != null && stockType != 'Both')     query = query.eq('stock_type',          stockType);
       if (minQty       != null)                            query = query.gte('box_quantity',        minQty);
       if (maxQty       != null)                            query = query.lte('box_quantity',        maxQty);
@@ -169,6 +172,7 @@ class SupabaseDataService {
     required double boxWeightKg,
     required double thicknessMm,
     required double boxPrice,
+    String tileType = '',
     required List<String> faceImageUrls,
     String? finishLabel,
   }) async {
@@ -187,6 +191,7 @@ class SupabaseDataService {
         'box_weight_kg': boxWeightKg,
         'thickness_mm':  thicknessMm,
         'box_price':     boxPrice,
+        'tile_type':     tileType,
         'face_image_urls': faceImageUrls,
       }).select().single();
       return row['id'] as String?;

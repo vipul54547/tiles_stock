@@ -8,6 +8,7 @@ import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
 import '../../models/tile_design.dart';
 import '../../utils/tile_sizes.dart';
+import '../../utils/tile_types.dart';
 import '../../utils/finishes.dart';
 
 class AddEditStockScreen extends StatefulWidget {
@@ -32,12 +33,13 @@ class _State extends State<AddEditStockScreen> {
 
   String _size      = kAllowedSizes.first;
   String _surface   = 'Matt';
+  String _tileType  = kTileTypes.first;
   String _quality   = 'Premium';
   String _stockType = 'Regular';
 
   List<String> _surfaces = kFinishes;   // replaced by admin master list on load
   final _qualities  = ['Premium', 'Standard'];
-  final _stockTypes = ['Regular', 'One Time'];
+  final _stockTypes = ['Both', 'Regular', 'One Time'];
 
   List<String> _existingImageUrls = []; // loaded from DB in edit mode
   List<String> _pickedPaths       = []; // newly picked local files
@@ -106,6 +108,7 @@ class _State extends State<AddEditStockScreen> {
     _thicknessCtrl.text = d.thicknessMm.toString();
     _colourCtrl.text    = d.colour;
     _surface            = _surfaces.contains(d.surfaceType) ? d.surfaceType : _surfaces.first;
+    _tileType           = kTileTypes.contains(d.tileType)   ? d.tileType   : kTileTypes.first;
     _quality            = _qualities.contains(d.quality)    ? d.quality    : _qualities.first;
     _stockType          = _stockTypes.contains(d.stockType) ? d.stockType  : _stockTypes.first;
     _existingImageUrls  = List.from(d.faceImageUrls);
@@ -210,13 +213,16 @@ class _State extends State<AddEditStockScreen> {
         'name':          _nameCtrl.text.trim(),
         'size':          _size,
         'surface_type':  _surface,
+        'tile_type':     _tileType,
         'quality':       _quality,
         'colour':        _colourCtrl.text.trim(),
         'stock_type':    _stockType,
         'box_quantity':  int.tryParse(_qtyCtrl.text)       ?? 0,
         'pieces_per_box': int.tryParse(_piecesCtrl.text)   ?? 0,
         'box_weight_kg': double.tryParse(_weightCtrl.text)    ?? 0,
-        'thickness_mm':  double.tryParse(_thicknessCtrl.text) ?? 0,
+        'thickness_mm':  approxThicknessMm(_size,
+                int.tryParse(_piecesCtrl.text) ?? 0,
+                double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
         'box_price':     double.tryParse(_priceCtrl.text)     ?? 0,
         'face_image_urls': finalUrls,
       });
@@ -226,13 +232,16 @@ class _State extends State<AddEditStockScreen> {
         name:          _nameCtrl.text.trim(),
         size:          _size,
         surfaceType:   _surface,
+        tileType:      _tileType,
         quality:       _quality,
         colour:        _colourCtrl.text.trim(),
         stockType:     _stockType,
         boxQuantity:   int.tryParse(_qtyCtrl.text)       ?? 0,
         piecesPerBox:  int.tryParse(_piecesCtrl.text)    ?? 0,
         boxWeightKg:   double.tryParse(_weightCtrl.text)    ?? 0,
-        thicknessMm:   double.tryParse(_thicknessCtrl.text) ?? 0,
+        thicknessMm:   approxThicknessMm(_size,
+                int.tryParse(_piecesCtrl.text) ?? 0,
+                double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
         boxPrice:      double.tryParse(_priceCtrl.text)     ?? 0,
         faceImageUrls: finalUrls,
       );
@@ -319,6 +328,9 @@ class _State extends State<AddEditStockScreen> {
                   _buildDropdown('Surface Type', _surfaces, _surface,
                       (v) => setState(() => _surface = v!)),
                   const SizedBox(height: 16),
+                  _buildDropdown('Tile Type', kTileTypes, _tileType,
+                      (v) => setState(() => _tileType = v!)),
+                  const SizedBox(height: 16),
                   _buildQualityPicker(),
                   const SizedBox(height: 16),
                   _buildStockTypePicker(),
@@ -335,8 +347,7 @@ class _State extends State<AddEditStockScreen> {
                     Expanded(child: _field(_weightCtrl, 'Box Weight (kg)',
                         numeric: true, required: true)),
                     const SizedBox(width: 12),
-                    Expanded(child: _field(_thicknessCtrl, 'Thickness (mm)',
-                        numeric: true, required: true)),
+                    Expanded(child: _buildThicknessField()),
                   ]),
                   _field(_priceCtrl, 'Box Price (₹)', numeric: true, required: true),
                   const SizedBox(height: 24),
@@ -665,6 +676,34 @@ class _State extends State<AddEditStockScreen> {
             .map((s) => DropdownMenuItem(value: s, child: Text(s)))
             .toList(),
         onChanged: onChange,
+      ),
+    );
+  }
+
+  // Thickness is DERIVED (not entered): a 0.5 mm band computed from size,
+  // pieces/box, box weight and tile type. Read-only, and recomputes live as the
+  // weight/pieces fields (and tile-type/size, via setState) change.
+  Widget _buildThicknessField() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: ListenableBuilder(
+        listenable: Listenable.merge([_weightCtrl, _piecesCtrl]),
+        builder: (_, __) {
+          final pcs = int.tryParse(_piecesCtrl.text.trim()) ?? 0;
+          final wt = double.tryParse(_weightCtrl.text.trim()) ?? 0;
+          final range = thicknessRangeLabel(_size, pcs, wt, _tileType);
+          return InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Thickness (approx)',
+              border: OutlineInputBorder(),
+            ),
+            child: Text(
+              range ?? 'enter weight & pieces',
+              style: TextStyle(
+                  color: range == null ? Colors.grey : Colors.black87),
+            ),
+          );
+        },
       ),
     );
   }

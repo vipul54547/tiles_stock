@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
+import '../../utils/tile_types.dart';
 import '../../widgets/tile_card.dart';
 
 class DesignDetailScreen extends StatefulWidget {
@@ -159,6 +160,13 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                         bg: const Color(0xFFF3E5F5),
                         fg: const Color(0xFF6A1B9A),
                       ),
+                      if (design.tileType.isNotEmpty)
+                        _Chip(
+                          icon: Icons.category_outlined,
+                          label: design.tileType,
+                          bg: const Color(0xFFE8F5E9),
+                          fg: const Color(0xFF2E7D32),
+                        ),
                       if (design.finishLabel != null &&
                           design.finishLabel!.isNotEmpty)
                         _Chip(
@@ -199,44 +207,54 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                   _QualityRow(quality: design.quality),
                   const SizedBox(height: 16),
 
-                  // ── Secondary details grid ───────────────────────────────
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: Column(
+                  // ── Grouped spec sections ────────────────────────────────
+                  Builder(builder: (_) {
+                    final sqft = sqftPerBox(design.size, design.piecesPerBox);
+                    final tRange = thicknessRangeLabel(design.size,
+                        design.piecesPerBox, design.boxWeightKg, design.tileType);
+                    // Key specs are ALWAYS shown — '—' when the stockist hasn't
+                    // entered weight/pieces yet (so the field never disappears).
+                    final dimensions = <_Spec>[
+                      _Spec(Icons.crop_free_rounded, 'Size', design.size),
+                      _Spec(Icons.straighten_outlined, 'Thickness (approx)',
+                          tRange ?? '—',
+                          note: tRange != null ? kEmbossThicknessNote : null),
+                      _Spec(Icons.square_foot_outlined, 'Sq.ft / Box',
+                          sqft != null ? sqft.toStringAsFixed(2) : '—'),
+                      _Spec(Icons.grid_view_rounded, 'Pieces / Box',
+                          design.piecesPerBox > 0
+                              ? '${design.piecesPerBox} pcs'
+                              : '—'),
+                      _Spec(Icons.scale_outlined, 'Box Weight',
+                          design.boxWeightKg > 0
+                              ? '${design.boxWeightKg} kg'
+                              : '—'),
+                    ];
+                    final material = <_Spec>[
+                      _Spec(Icons.category_outlined, 'Tile Type',
+                          design.tileType.isNotEmpty ? design.tileType : '—'),
+                      _Spec(Icons.texture_rounded, 'Finish',
+                          design.surfaceType),
+                      _Spec(Icons.palette_outlined, 'Colour',
+                          design.colour.isNotEmpty ? design.colour : '—'),
+                    ];
+                    final commercial = <_Spec>[
+                      _Spec(Icons.sell_outlined, 'Stock Type', design.stockType),
+                      if (!isGuest)
+                        _Spec(Icons.storefront_outlined, 'Stockist ID',
+                            design.stockistId),
+                    ];
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _DetailRow(
-                          icon: Icons.scale_outlined,
-                          label: 'Box Weight',
-                          value: '${design.boxWeightKg} kg',
-                        ),
-                        _divider(),
-                        _DetailRow(
-                          icon: Icons.grid_view_rounded,
-                          label: 'Pieces / Box',
-                          value: '${design.piecesPerBox} pcs',
-                        ),
-                        _divider(),
-                        _DetailRow(
-                          icon: Icons.palette_outlined,
-                          label: 'Colour',
-                          value: design.colour,
-                        ),
-                        // Stockist ID is hidden from guests.
-                        if (!isGuest) ...[
-                          _divider(),
-                          _DetailRow(
-                            icon: Icons.storefront_outlined,
-                            label: 'Stockist ID',
-                            value: design.stockistId,
-                          ),
-                        ],
+                        _specGroup('DIMENSIONS', dimensions),
+                        const SizedBox(height: 16),
+                        _specGroup('MATERIAL', material),
+                        const SizedBox(height: 16),
+                        _specGroup('COMMERCIAL', commercial),
                       ],
-                    ),
-                  ),
+                    );
+                  }),
                   const SizedBox(height: 24),
 
                   // Guests can't reach the stockist (ID, contact, portfolio).
@@ -417,3 +435,57 @@ class _DetailRow extends StatelessWidget {
 }
 
 Widget _divider() => Divider(height: 1, indent: 44, endIndent: 0, color: Colors.grey.shade200);
+
+// One spec line for a grouped section. [note] renders a small italic caption
+// under the row (used for the emboss thickness caveat).
+class _Spec {
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? note;
+  const _Spec(this.icon, this.label, this.value, {this.note});
+}
+
+// A titled spec group: an UPPERCASE section header above a card of _DetailRows
+// (dividers auto-inserted). Empty groups render nothing.
+Widget _specGroup(String title, List<_Spec> specs) {
+  if (specs.isEmpty) return const SizedBox.shrink();
+  final rows = <Widget>[];
+  for (var i = 0; i < specs.length; i++) {
+    if (i > 0) rows.add(_divider());
+    final s = specs[i];
+    rows.add(_DetailRow(icon: s.icon, label: s.label, value: s.value));
+    if (s.note != null) {
+      rows.add(Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        child: Text(s.note!,
+            style: TextStyle(
+                fontSize: 10,
+                fontStyle: FontStyle.italic,
+                color: Colors.grey.shade500)),
+      ));
+    }
+  }
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
+        child: Text(title,
+            style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+                color: Colors.grey.shade600)),
+      ),
+      Container(
+        decoration: BoxDecoration(
+          color: Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(children: rows),
+      ),
+    ],
+  );
+}

@@ -11,6 +11,8 @@ import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/my_choice.dart';
+import '../../utils/tile_types.dart';
+import '../../widgets/filter_section.dart';
 
 class StockistPortfolioScreen extends StatefulWidget {
   final String stockistId;
@@ -43,6 +45,8 @@ class _State extends State<StockistPortfolioScreen> {
   Set<String> _selectedSizes    = {};
   Set<String> _selectedSurfaces = {};
   Set<String> _selectedColours  = {};
+  Set<String> _selectedTypes    = {};
+  Set<String> _selectedThickness = {};
   String      _stockType        = 'Both';
   final _minQtyCtrl  = TextEditingController();
   final _maxQtyCtrl  = TextEditingController();
@@ -56,6 +60,8 @@ class _State extends State<StockistPortfolioScreen> {
     if (_selectedSizes.isNotEmpty)    n++;
     if (_selectedSurfaces.isNotEmpty) n++;
     if (_selectedColours.isNotEmpty)  n++;
+    if (_selectedTypes.isNotEmpty)    n++;
+    if (_selectedThickness.isNotEmpty) n++;
     if (_stockType != 'Both')         n++;
     if (_minQtyCtrl.text.trim().isNotEmpty || _maxQtyCtrl.text.trim().isNotEmpty) n++;
     return n;
@@ -78,8 +84,18 @@ class _State extends State<StockistPortfolioScreen> {
     if (_selectedColours.isNotEmpty) {
       result = result.where((d) => _selectedColours.contains(d.colour)).toList();
     }
+    if (_selectedTypes.isNotEmpty) {
+      result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
+    }
+    if (_selectedThickness.isNotEmpty) {
+      result = result
+          .where((d) => _selectedThickness.contains(thicknessBandOf(d)))
+          .toList();
+    }
     if (_stockType != 'Both') {
-      result = result.where((d) => d.stockType == _stockType).toList();
+      result = result
+          .where((d) => d.stockType == _stockType || d.stockType == 'Both')
+          .toList();
     }
     final minQty = int.tryParse(_minQtyCtrl.text.trim());
     final maxQty = int.tryParse(_maxQtyCtrl.text.trim());
@@ -87,6 +103,49 @@ class _State extends State<StockistPortfolioScreen> {
     if (maxQty != null) result = result.where((d) => d.boxQuantity <= maxQty).toList();
     return result;
   }
+
+  List<ActiveFilter> _activeFilters() {
+    final out = <ActiveFilter>[];
+    void addSet(Set<String> set, [String Function(String)? fmt]) {
+      for (final v in set.toList()) {
+        out.add(ActiveFilter(
+            fmt == null ? v : fmt(v), () => setState(() => set.remove(v))));
+      }
+    }
+    addSet(_selectedSizes, (v) => v.replaceAll(' mm', ''));
+    addSet(_selectedSurfaces);
+    addSet(_selectedColours);
+    addSet(_selectedTypes);
+    addSet(_selectedThickness);
+    addSet(_selectedQualities);
+    if (_stockType != 'Both') {
+      out.add(ActiveFilter(
+          _stockType, () => setState(() => _stockType = 'Both')));
+    }
+    final mn = _minQtyCtrl.text.trim();
+    final mx = _maxQtyCtrl.text.trim();
+    if (mn.isNotEmpty || mx.isNotEmpty) {
+      out.add(ActiveFilter(
+          'Qty ${mn.isEmpty ? '0' : mn}–${mx.isEmpty ? '∞' : mx}',
+          () => setState(() {
+                _minQtyCtrl.clear();
+                _maxQtyCtrl.clear();
+              })));
+    }
+    return out;
+  }
+
+  void _clearAllFilters() => setState(() {
+        _selectedSizes.clear();
+        _selectedSurfaces.clear();
+        _selectedColours.clear();
+        _selectedTypes.clear();
+        _selectedThickness.clear();
+        _selectedQualities.clear();
+        _stockType = 'Both';
+        _minQtyCtrl.clear();
+        _maxQtyCtrl.clear();
+      });
 
   List<TileDesign> get _chosenFromThisStockist =>
       _designs.where((d) => myChoiceQuantities.containsKey(d.id)).toList();
@@ -312,6 +371,8 @@ class _State extends State<StockistPortfolioScreen> {
         _selectedSizes.clear();
         _selectedSurfaces.clear();
         _selectedColours.clear();
+        _selectedTypes.clear();
+        _selectedThickness.clear();
         _stockType = 'Both';
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
@@ -808,6 +869,9 @@ class _State extends State<StockistPortfolioScreen> {
     var localSizes     = Set<String>.from(_selectedSizes);
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
     var localColours   = Set<String>.from(_selectedColours);
+    var localTypes     = Set<String>.from(_selectedTypes);
+    var localThickness = Set<String>.from(_selectedThickness);
+    final thicknessBands = availableThicknessBands(_designs);
     var localStockType = _stockType;
     final savedMin     = _minQtyCtrl.text;
     final savedMax     = _maxQtyCtrl.text;
@@ -908,6 +972,81 @@ class _State extends State<StockistPortfolioScreen> {
             );
           }
 
+          int previewCount() {
+            var r = _selectedQualities.isEmpty
+                ? _designs
+                : _designs
+                    .where((d) => _selectedQualities.contains(d.quality))
+                    .toList();
+            if (_searchQuery.isNotEmpty) {
+              final q = _searchQuery.toLowerCase();
+              r = r.where((d) => d.name.toLowerCase().contains(q)).toList();
+            }
+            if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
+            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
+            if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
+            if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
+            if (localThickness.isNotEmpty) {
+              r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
+            }
+            if (localStockType != 'Both') {
+              r = r.where((d) => d.stockType == localStockType || d.stockType == 'Both').toList();
+            }
+            final mn = int.tryParse(_minQtyCtrl.text.trim());
+            final mx = int.tryParse(_maxQtyCtrl.text.trim());
+            if (mn != null) r = r.where((d) => d.boxQuantity >= mn).toList();
+            if (mx != null) r = r.where((d) => d.boxQuantity <= mx).toList();
+            return r.length;
+          }
+
+          final qtyRow = Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _minQtyCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setSheet(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Min boxes',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text('–',
+                    style: TextStyle(color: Colors.grey, fontSize: 18)),
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _maxQtyCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setSheet(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Max boxes',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
+          );
+
+          void applyAndClose() {
+            FocusManager.instance.primaryFocus?.unfocus();
+            setState(() {
+              _selectedSizes     = Set<String>.from(localSizes);
+              _selectedSurfaces  = Set<String>.from(localSurfaces);
+              _selectedColours   = Set<String>.from(localColours);
+              _selectedTypes     = Set<String>.from(localTypes);
+              _selectedThickness = Set<String>.from(localThickness);
+              _stockType         = localStockType;
+            });
+            applied = true;
+            Navigator.of(ctx).pop();
+          }
+
           return Container(
             height: sheetHeight,
             decoration: const BoxDecoration(
@@ -940,6 +1079,8 @@ class _State extends State<StockistPortfolioScreen> {
                           localSizes.clear();
                           localSurfaces.clear();
                           localColours.clear();
+                          localTypes.clear();
+                          localThickness.clear();
                           localStockType = 'Both';
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
@@ -948,89 +1089,85 @@ class _State extends State<StockistPortfolioScreen> {
                             foregroundColor: Colors.red),
                         child: const Text('Reset'),
                       ),
-                      const SizedBox(width: 4),
-                      ElevatedButton(
-                        onPressed: () {
-                          FocusManager.instance.primaryFocus?.unfocus();
-                          setState(() {
-                            _selectedSizes    = Set<String>.from(localSizes);
-                            _selectedSurfaces = Set<String>.from(localSurfaces);
-                            _selectedColours  = Set<String>.from(localColours);
-                            _stockType        = localStockType;
-                          });
-                          applied = true;
-                          Navigator.of(ctx).pop();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1B4F72),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        child: const Text('Apply',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 13)),
-                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                // Pinned Quantity — always visible at the top.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Quantity (boxes)',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      qtyRow,
                     ],
                   ),
                 ),
                 const Divider(height: 1),
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _minQtyCtrl,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'Min boxes',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 12),
-                              child: Text('–',
-                                  style: TextStyle(
-                                      color: Colors.grey, fontSize: 18)),
-                            ),
-                            Expanded(
-                              child: TextField(
-                                controller: _maxQtyCtrl,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'Max boxes',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                              ),
-                            ),
-                          ],
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    children: [
+                      FilterSection(
+                        title: 'Size',
+                        summary: filterSummary(localSizes),
+                        child: chipRow(_filterSizes, localSizes, stripMm: true),
+                      ),
+                      FilterSection(
+                        title: 'Finish',
+                        summary: filterSummary(localSurfaces),
+                        child: chipRow(_filterSurfaces, localSurfaces),
+                      ),
+                      FilterSection(
+                        title: 'Tile Type',
+                        summary: filterSummary(localTypes),
+                        child: chipRow(kTileTypes, localTypes),
+                      ),
+                      if (thicknessBands.isNotEmpty)
+                        FilterSection(
+                          title: 'Thickness (approx)',
+                          summary: filterSummary(localThickness),
+                          child: chipRow(thicknessBands, localThickness),
                         ),
-                        const Divider(height: 24),
-                        chipRow(_filterSizes, localSizes, stripMm: true),
-                        const Divider(height: 24),
-                        chipRow(_filterSurfaces, localSurfaces),
-                        const Divider(height: 24),
-                        chipRow(_filterColours, localColours),
-                        const Divider(height: 24),
-                        stockTypeRow(),
-                        const SizedBox(height: 4),
-                      ],
+                      FilterSection(
+                        title: 'Colour',
+                        summary: filterSummary(localColours),
+                        child: chipRow(_filterColours, localColours),
+                      ),
+                      FilterSection(
+                        title: 'Stock Type',
+                        summary: localStockType,
+                        child: stockTypeRow(),
+                      ),
+                    ],
+                  ),
+                ),
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(16, 8, 16, 12 + bottomPad),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: applyAndClose,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1B4F72),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        child: Text('Show ${previewCount()} designs',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 15)),
+                      ),
                     ),
                   ),
                 ),
-                SizedBox(height: bottomPad),
               ],
             ),
           );
@@ -1060,6 +1197,8 @@ class _State extends State<StockistPortfolioScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [
               _buildQualityFilter(),
+              ActiveFilterBar(
+                  filters: _activeFilters(), onClearAll: _clearAllFilters),
               Expanded(
                 child: CustomScrollView(
                   slivers: [
