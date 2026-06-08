@@ -426,7 +426,10 @@ List<Uint8List?> _extractImageSlotsFromBytes(Uint8List bytes) {
     final dict = text.substring(dictStart, dictEnd);
 
     if (!dict.contains('DCTDecode')) {
-      slots.add(null); // non-JPEG photo — keep the slot, no bytes to extract
+      // Non-JPEG photo (PNG-sourced → FlateDecode raster). Inflate + re-encode
+      // so it shows like the JPEGs; falls back to a null slot (place held) when
+      // the encoding/colour space isn't one we can decode.
+      slots.add(_decodeFlateSlot(bytes, text, dict, streamKw));
       continue;
     }
 
@@ -796,6 +799,48 @@ Uint8List? _decodeImageXObject(Uint8List bytes, _PdfObj o) {
 
   var raw = _inflate(Uint8List.fromList(bytes.sublist(o.streamStart!, o.streamEnd!)));
   final predM = RegExp(r'/Predictor\s+(\d+)').firstMatch(d);
+  if (predM != null && int.parse(predM.group(1)!) >= 10) {
+    raw = _pngUnpredict(raw, w, channels);
+  }
+  final need = w * h * channels;
+  if (raw.length < need) return null;
+  final pix = Uint8List.fromList(raw.sublist(0, need));
+  final im = channels == 1
+      ? img.Image.fromBytes(width: w, height: h, bytes: pix.buffer, numChannels: 1)
+      : img.Image.fromBytes(
+          width: w,
+          height: h,
+          bytes: pix.buffer,
+          numChannels: 3,
+          order: img.ChannelOrder.rgb);
+  return img.encodeJpg(im, quality: 85);
+}
+
+// Per-page slot variant of _decodeImageXObject: decode a FlateDecode 8-bit
+// RGB/Gray raster (PNG-sourced photo) located by regex in a single-page PDF's
+// text, given its image dictionary and the offset of its 'stream' keyword. CMYK
+// / other colour spaces / bit depths / non-Flate encodings return null (slot
+// stays empty for manual fill). Mirrors _decodeImageXObject's decode path.
+Uint8List? _decodeFlateSlot(
+    Uint8List bytes, String text, String dict, int streamKw) {
+  if (streamKw < 0 || !dict.contains('FlateDecode')) return null;
+  final w = _intField(dict, 'Width');
+  final h = _intField(dict, 'Height');
+  final bpc = _intField(dict, 'BitsPerComponent') ?? 8;
+  if (w == null || h == null || bpc != 8) return null;
+  if (dict.contains('/DeviceCMYK')) return null;
+  final channels = dict.contains('/DeviceGray') ? 1 : 3;
+
+  // Stream data starts just after the 'stream' keyword + its CR?LF, and runs to
+  // 'endstream'. latin1 made text indices == byte indices, so reuse them.
+  var dataStart = streamKw + 'stream'.length;
+  if (dataStart < bytes.length && bytes[dataStart] == 0x0D) dataStart++;
+  if (dataStart < bytes.length && bytes[dataStart] == 0x0A) dataStart++;
+  final endIdx = text.indexOf('endstream', dataStart);
+  if (endIdx < 0 || endIdx <= dataStart) return null;
+
+  var raw = _inflate(Uint8List.fromList(bytes.sublist(dataStart, endIdx)));
+  final predM = RegExp(r'/Predictor\s+(\d+)').firstMatch(dict);
   if (predM != null && int.parse(predM.group(1)!) >= 10) {
     raw = _pngUnpredict(raw, w, channels);
   }
@@ -1573,12 +1618,14 @@ List<Map<String, dynamic>> _parseDesignsStock(_GeoRows g) {
     if (fm != null) {
       // size: strip the spaces Syncfusion inserts ("600 X 1200" → "600x1200").
       final sizeData = '${fm.group(1)!.replaceAll(RegExp(r'\s+'), '').toLowerCase()} mm';
-      // surface: the middle field, with stray dashes/extra spaces cleaned.
-      final surfaceRaw = fm
+      // surface: the middle field, with stray dashes/extra spaces cleaned and
+      // single-character fragments re-joined (Syncfusion splits short codes like
+      // "3D" → "3 D", "DC" → "D C"; multi-word finishes are left untouched).
+      final surfaceRaw = _joinShortFragments(fm
           .group(2)!
           .replaceAll('-', ' ')
           .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
+          .trim());
       final grade = _kGradeQuality[fm.group(3)!.toUpperCase()] ?? 'Premium';
       final surface =
           surfaceRaw.isEmpty ? 'None' : (_surfaceOf(surfaceRaw) ?? 'None');
@@ -1673,6 +1720,29 @@ String _titleCaseFinish(String s) => s
     .where((w) => w.isNotEmpty)
     .map((w) => w[0].toUpperCase() + w.substring(1))
     .join(' ');
+
+// Glue runs of consecutive single-character tokens back into one word, undoing
+// Syncfusion's habit of splitting short surface codes ("3D" → "3 D", "DC" →
+// "D C"). Multi-character tokens (real words like "Endless Glossy") are kept as
+// separate words, so genuine multi-word finishes are unaffected.
+String _joinShortFragments(String s) {
+  final toks = s.split(RegExp(r'\s+')).where((t) => t.isNotEmpty).toList();
+  final out = <String>[];
+  final buf = StringBuffer();
+  for (final t in toks) {
+    if (t.length == 1) {
+      buf.write(t);
+    } else {
+      if (buf.isNotEmpty) {
+        out.add(buf.toString());
+        buf.clear();
+      }
+      out.add(t);
+    }
+  }
+  if (buf.isNotEmpty) out.add(buf.toString());
+  return out.join(' ');
+}
 
 // ── PDF text parser ───────────────────────────────────────────────────────────
 //
