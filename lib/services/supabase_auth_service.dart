@@ -3,6 +3,15 @@ import '../models/choice_state.dart';
 
 enum UserRole { admin, stockist, endUser }
 
+/// The single super admin (final authority). Only this account can create or
+/// manage sub-admins, and it can never be deactivated. Kept lowercase for
+/// case-insensitive comparison.
+const String kSuperAdminEmail = 'vipul54547@gmail.com';
+
+/// True when the currently signed-in user is the super admin.
+bool get isSuperAdmin =>
+    (supabase.auth.currentUser?.email ?? '').toLowerCase() == kSuperAdminEmail;
+
 class SupabaseAuthService {
   UserRole? _role;
   UserRole? get currentRole => _role;
@@ -27,39 +36,62 @@ class SupabaseAuthService {
     }
   }
 
+  /// Message thrown (and surfaced on the login screen) when a deactivated user
+  /// tries to sign in. They are signed back out before this is thrown.
+  static const deactivatedMessage =
+      'Your account has been deactivated. Please contact the administrator.';
+
   Future<UserRole?> _loadProfile(String userId) async {
+    final String roleStr;
+    final dynamic adminActive;
     try {
       final profile = await supabase
           .from('profiles')
-          .select('role')
+          .select('role, is_active')
           .eq('id', userId)
           .single();
-
-      final roleStr = profile['role'] as String;
-
-      if (roleStr == 'admin') {
-        _role = UserRole.admin;
-      } else if (roleStr == 'stockist') {
-        _role = UserRole.stockist;
-        final stockist = await supabase
-            .from('stockists')
-            .select('id, sequential_id')
-            .eq('user_id', userId)
-            .single();
-        currentStockistId   = stockist['sequential_id'] as String;
-        currentStockistUUID = stockist['id']            as String;
-      } else {
-        _role = UserRole.endUser;
-        final eu = await supabase
-            .from('end_users')
-            .select('id')
-            .eq('user_id', userId)
-            .single();
-        currentEndUserId = eu['id'] as String;
-      }
-      return _role;
+      roleStr = profile['role'] as String;
+      adminActive = profile['is_active'];
     } catch (e) {
       throw 'Profile load failed: $e';
+    }
+
+    if (roleStr == 'admin') {
+      // The super admin is never blocked; a deactivated sub-admin is.
+      if (!isSuperAdmin) await _ensureActive(adminActive);
+      _role = UserRole.admin;
+      return _role;
+    }
+
+    if (roleStr == 'stockist') {
+      final stockist = await supabase
+          .from('stockists')
+          .select('id, sequential_id, is_active')
+          .eq('user_id', userId)
+          .single();
+      await _ensureActive(stockist['is_active']);
+      currentStockistId   = stockist['sequential_id'] as String;
+      currentStockistUUID = stockist['id']            as String;
+      _role = UserRole.stockist;
+      return _role;
+    }
+
+    final eu = await supabase
+        .from('end_users')
+        .select('id, is_active')
+        .eq('user_id', userId)
+        .single();
+    await _ensureActive(eu['is_active']);
+    currentEndUserId = eu['id'] as String;
+    _role = UserRole.endUser;
+    return _role;
+  }
+
+  // Blocks a deactivated account: sign back out and throw the friendly message.
+  Future<void> _ensureActive(dynamic isActive) async {
+    if (isActive == false) {
+      await supabase.auth.signOut();
+      throw deactivatedMessage;
     }
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart'; // debugPrint
 import '../models/tile_design.dart';
 import '../models/stockist.dart';
+import '../models/end_user.dart';
 import '../models/surface_type.dart';
 import '../models/choice_state.dart';
 import '../main.dart';
@@ -192,16 +193,30 @@ class SupabaseDataService {
 
   // ── stockists ─────────────────────────────────────────────────────────────
 
-  Future<List<Stockist>> getAllStockists() async {
+  /// All stockists. [activeOnly] true (the default) keeps the public/portfolio
+  /// behaviour; admin management passes false to also see deactivated ones.
+  Future<List<Stockist>> getAllStockists({bool activeOnly = true}) async {
     try {
-      final data = await supabase
-          .from('stockists')
-          .select()
-          .eq('is_active', true)
-          .order('sequential_id');
+      var query = supabase.from('stockists').select();
+      if (activeOnly) query = query.eq('is_active', true);
+      final data = await query.order('sequential_id');
       return data.map<Stockist>((s) => _toStockist(s)).toList();
     } catch (_) {
       return [];
+    }
+  }
+
+  /// Activate / deactivate a stockist by its display (sequential) ID.
+  Future<bool> setStockistActive(String sequentialId, bool active) async {
+    try {
+      await supabase
+          .from('stockists')
+          .update({'is_active': active})
+          .eq('sequential_id', sequentialId);
+      return true;
+    } catch (e, st) {
+      debugPrint('setStockistActive failed ($sequentialId): $e\n$st');
+      return false;
     }
   }
 
@@ -226,8 +241,161 @@ class SupabaseDataService {
         city:      s['city'],
         state:     s['state'],
         address:   s['address'] ?? '',
+        priority:  (s['priority'] as num?)?.toDouble() ?? 0,
+        gstNumber: s['gst_number'] ?? '',
+        stockistType: s['stockist_type'] ?? '',
+        isActive:  s['is_active'] ?? true,
         createdAt: DateTime.parse(s['created_at']),
       );
+
+  /// Creates a single stockist (auth login + profile + stockist row) via the
+  /// admin-only RPC. The sequential ID is auto-generated (A01, A02, …) when
+  /// [sequentialId] is left null/blank. Returns the generated/used sequential
+  /// ID on success, or throws with the server message on failure.
+  Future<String> addStockist({
+    required String name,
+    required String email,
+    required String password,
+    String phone = '',
+    String city = '',
+    String state = '',
+    String address = '',
+    double priority = 0,
+    String gstNumber = '',
+    String stockistType = '',
+    String? sequentialId,
+  }) async {
+    final res = await supabase.rpc('create_user_from_excel', params: {
+      'p_email':         email,
+      'p_password':      password,
+      'p_role':          'stockist',
+      'p_sequential_id': (sequentialId == null || sequentialId.trim().isEmpty)
+          ? null
+          : sequentialId.trim(),
+      'p_name':          name,
+      'p_phone':         phone,
+      'p_city':          city,
+      'p_state':         state,
+      'p_address':       address,
+      'p_priority':      priority,
+      'p_gst_number':    gstNumber.trim().isEmpty ? null : gstNumber.trim(),
+      'p_stockist_type': stockistType.trim().isEmpty ? null : stockistType.trim(),
+    });
+    // RPC returns jsonb { id, email, role, sequential_id }.
+    final map = res is Map ? res : <String, dynamic>{};
+    return (map['sequential_id'] as String?) ?? '';
+  }
+
+  // ── end users ─────────────────────────────────────────────────────────────
+
+  /// All end users (admin view), including their login email. [activeOnly]
+  /// false includes deactivated. Uses an admin-only RPC because the email
+  /// lives in auth.users, which the client can't read directly.
+  Future<List<EndUser>> getAllEndUsers({bool activeOnly = false}) async {
+    try {
+      final res = await supabase.rpc('admin_list_end_users');
+      final list = (res as List?) ?? const [];
+      var users = list
+          .map<EndUser>((e) => EndUser.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+      if (activeOnly) users = users.where((u) => u.isActive).toList();
+      return users;
+    } catch (e, st) {
+      debugPrint('getAllEndUsers failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Creates a single end user (auth login + profile + end_users row) via the
+  /// admin-only RPC. The unique ID is auto-generated (01A, 02A, …) when
+  /// [sequentialId] is null/blank. Returns the generated/used ID.
+  Future<String> addEndUser({
+    required String companyName,
+    required String email,
+    required String password,
+    String contactPerson = '',
+    String phone = '',
+    String city = '',
+    String gstNumber = '',
+    double priority = 0,
+    String endUserType = '',
+    String? sequentialId,
+  }) async {
+    final res = await supabase.rpc('create_user_from_excel', params: {
+      'p_email':         email,
+      'p_password':      password,
+      'p_role':          'end_user',
+      'p_sequential_id': (sequentialId == null || sequentialId.trim().isEmpty)
+          ? null
+          : sequentialId.trim(),
+      'p_company_name':  companyName,
+      'p_contact_person': contactPerson,
+      'p_phone':         phone,
+      'p_city':          city,
+      'p_priority':      priority,
+      'p_gst_number':    gstNumber.trim().isEmpty ? null : gstNumber.trim(),
+      'p_enduser_type':  endUserType.trim().isEmpty ? null : endUserType.trim(),
+    });
+    final map = res is Map ? res : <String, dynamic>{};
+    return (map['sequential_id'] as String?) ?? '';
+  }
+
+  /// Activate / deactivate an end user by its row UUID.
+  Future<bool> setEndUserActive(String uuid, bool active) async {
+    try {
+      await supabase
+          .from('end_users')
+          .update({'is_active': active})
+          .eq('id', uuid);
+      return true;
+    } catch (e, st) {
+      debugPrint('setEndUserActive failed ($uuid): $e\n$st');
+      return false;
+    }
+  }
+
+  // ── admins (super-admin only) ──────────────────────────────────────────────
+
+  /// Lists admin accounts (email + active + super flag). Returns [] unless the
+  /// caller is the super admin (enforced server-side).
+  Future<List<Map<String, dynamic>>> getAllAdmins() async {
+    try {
+      final res = await supabase.rpc('admin_list_admins');
+      final list = (res as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e, st) {
+      debugPrint('getAllAdmins failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Creates a sub-admin (super-admin only; enforced server-side). Returns the
+  /// new user's email on success; throws the server message on failure.
+  Future<String> addAdmin({
+    required String email,
+    required String password,
+  }) async {
+    final res = await supabase.rpc('create_user_from_excel', params: {
+      'p_email':    email,
+      'p_password': password,
+      'p_role':     'admin',
+    });
+    final map = res is Map ? res : <String, dynamic>{};
+    return (map['email'] as String?) ?? '';
+  }
+
+  /// Activate / deactivate a sub-admin by UUID (super-admin only; the super
+  /// admin itself cannot be deactivated — enforced server-side).
+  Future<bool> setAdminActive(String uuid, bool active) async {
+    try {
+      await supabase.rpc('set_admin_active',
+          params: {'p_uuid': uuid, 'p_active': active});
+      return true;
+    } catch (e, st) {
+      debugPrint('setAdminActive failed ($uuid): $e\n$st');
+      return false;
+    }
+  }
 
   // ── inquiries ─────────────────────────────────────────────────────────────
 
