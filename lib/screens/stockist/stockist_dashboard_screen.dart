@@ -113,10 +113,17 @@ class _State extends State<StockistDashboardScreen> {
 
   // ── Computed ──────────────────────────────────────────────────────────────
 
+  // Out-of-stock (0-box) designs are hidden from the dashboard's stock list,
+  // its counts and filters. They still surface in the Inquiry tab if a buyer
+  // wants them, so the stockist knows what to restock.
+  List<TileDesign> get _inStockDesigns =>
+      _designs.where((d) => d.boxQuantity > 0).toList();
+
   List<TileDesign> get _filteredAndSorted {
+    final base = _inStockDesigns;
     var result = _selectedQualities.isEmpty
-        ? List<TileDesign>.from(_designs)
-        : _designs
+        ? base
+        : base
             .where((d) => _selectedQualities.contains(d.quality))
             .toList();
 
@@ -224,20 +231,23 @@ class _State extends State<StockistDashboardScreen> {
   // ── Stats bar ─────────────────────────────────────────────────────────────
 
   Widget _buildStatsBar() {
-    final interest = _buyerInterestDesigns.length;
     final estValue = _estimatedOrderValue;
+    // Counts reflect in-stock designs only (out-of-stock are hidden here).
+    // Inquiry count already lives on the Inquiry tab badge, so the stats bar
+    // shows total boxes in stock instead (a number not surfaced elsewhere).
+    final inStock = _inStockDesigns;
+    final totalBoxes = inStock.fold(0, (s, d) => s + d.boxQuantity);
     return Container(
       color: const Color(0xFF1B4F72).withValues(alpha: 0.05),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _statItem('${_designs.length}', 'Designs',
+          _statItem('${inStock.length}', 'Designs',
               Icons.grid_view_rounded, const Color(0xFF1B4F72)),
           _divider(),
-          _statItem('$interest', 'Inquiry',
-              Icons.bookmark_rounded,
-              interest > 0 ? const Color(0xFF2E7D32) : Colors.grey),
+          _statItem('$totalBoxes', 'Boxes',
+              Icons.inventory_2_rounded, const Color(0xFF2E7D32)),
           _divider(),
           _statItem(
               '₹${estValue >= 1000 ? '${(estValue / 1000).toStringAsFixed(1)}k' : estValue.toStringAsFixed(0)}',
@@ -656,8 +666,9 @@ class _State extends State<StockistDashboardScreen> {
 
   // Filter sheet (size + surface), All-Design style.
   void _showFilterSheet() {
-    final sizes = _designs.map((d) => d.size).toSet().toList()..sort();
-    final surfaces = _designs.map((d) => d.surfaceType).toSet().toList()..sort();
+    final inStock = _inStockDesigns;
+    final sizes = inStock.map((d) => d.size).toSet().toList()..sort();
+    final surfaces = inStock.map((d) => d.surfaceType).toSet().toList()..sort();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
