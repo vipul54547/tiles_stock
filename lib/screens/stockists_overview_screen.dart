@@ -26,14 +26,12 @@ const _qualityMeta = {
 class _StockistData {
   final Stockist stockist;
   final int totalBoxes;
-  final Map<String, Map<String, int>> sizeTable;
   final Set<String> qualities;
   final List<TileDesign> designs;
 
   _StockistData({
     required this.stockist,
     required this.totalBoxes,
-    required this.sizeTable,
     required this.qualities,
     required this.designs,
   });
@@ -196,22 +194,9 @@ class _State extends State<StockistsOverviewScreen> {
       final totalBoxes = myDesigns.fold(0, (sum, d) => sum + d.boxQuantity);
       final quals = myDesigns.map((d) => d.quality).toSet();
 
-      final sizeTable = <String, Map<String, int>>{};
-      for (final size in sizes) {
-        sizeTable[size] = {};
-        for (final surface in surfaces) {
-          // Total boxes across ALL designs of this size+surface (a stockist
-          // usually has many designs per cell — not just one).
-          sizeTable[size]![surface] = myDesigns
-              .where((d) => d.size == size && d.surfaceType == surface)
-              .fold(0, (sum, d) => sum + d.boxQuantity);
-        }
-      }
-
       return _StockistData(
         stockist: s,
         totalBoxes: totalBoxes,
-        sizeTable: sizeTable,
         qualities: quals,
         designs: myDesigns,
       );
