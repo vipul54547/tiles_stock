@@ -200,10 +200,11 @@ class _State extends State<StockistsOverviewScreen> {
       for (final size in sizes) {
         sizeTable[size] = {};
         for (final surface in surfaces) {
-          final matches =
-              myDesigns.where((d) => d.size == size && d.surfaceType == surface);
-          sizeTable[size]![surface] =
-              matches.isEmpty ? 0 : matches.first.boxQuantity;
+          // Total boxes across ALL designs of this size+surface (a stockist
+          // usually has many designs per cell — not just one).
+          sizeTable[size]![surface] = myDesigns
+              .where((d) => d.size == size && d.surfaceType == surface)
+              .fold(0, (sum, d) => sum + d.boxQuantity);
         }
       }
 
