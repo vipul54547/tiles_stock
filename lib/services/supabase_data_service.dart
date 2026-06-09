@@ -253,6 +253,68 @@ class SupabaseDataService {
     }
   }
 
+  /// Admin: update a stockist's editable fields (keyed by sequential id).
+  Future<void> updateStockist({
+    required String sequentialId,
+    required String name,
+    String phone = '',
+    String countryCode = '+91',
+    String city = '',
+    String state = '',
+    String address = '',
+    String gstNumber = '',
+    String stockistType = '',
+    double priority = 0,
+  }) async {
+    await supabase.rpc('admin_update_stockist', params: {
+      'p_seq':           sequentialId,
+      'p_name':          name,
+      'p_phone':         phone,
+      'p_country_code':  countryCode,
+      'p_city':          city,
+      'p_state':         state,
+      'p_address':       address,
+      'p_gst':           gstNumber,
+      'p_stockist_type': stockistType,
+      'p_priority':      priority,
+    });
+  }
+
+  /// Admin: hard-delete a stockist (must be deactivated first).
+  Future<void> deleteStockist(String sequentialId) async {
+    await supabase.rpc('admin_delete_stockist', params: {'p_seq': sequentialId});
+  }
+
+  /// Admin: update an end user's editable fields (keyed by row uuid).
+  Future<void> updateEndUser({
+    required String uuid,
+    required String companyName,
+    String contactPerson = '',
+    String phone = '',
+    String countryCode = '+91',
+    String city = '',
+    String gstNumber = '',
+    String endUserType = '',
+    double priority = 0,
+  }) async {
+    await supabase.rpc('admin_update_end_user', params: {
+      'p_id':           uuid,
+      'p_company':      companyName,
+      'p_contact':      contactPerson,
+      'p_phone':        phone,
+      'p_country_code': countryCode,
+      'p_city':         city,
+      'p_gst':          gstNumber,
+      'p_enduser_type': endUserType,
+      'p_priority':     priority,
+    });
+  }
+
+  /// Admin: hard-delete an end user (must be deactivated first).
+  Future<void> deleteEndUser(String uuid) async {
+    await supabase.rpc('admin_delete_end_user', params: {'p_id': uuid});
+  }
+
   /// Admin: set a stockist's listing controls — priority (in-tier order) and
   /// tier (Platinum/Gold/Silver). Keyed by sequential id. Drives buyer order.
   Future<void> updateStockistListing(

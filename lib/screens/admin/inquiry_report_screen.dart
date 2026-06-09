@@ -12,11 +12,26 @@ class InquiryReportScreen extends StatefulWidget {
 class _State extends State<InquiryReportScreen> {
   final _svc = SupabaseDataService();
   late Future<List<Map<String, dynamic>>> _future;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _future = _svc.getInquiryReport();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _matches(Map<String, dynamic> r) {
+    if (_query.isEmpty) return true;
+    final q = _query.toLowerCase();
+    return [r['stockist'], r['stockist_seq'], r['design'], r['buyer'], r['city']]
+        .any((v) => (v ?? '').toString().toLowerCase().contains(q));
   }
 
   Future<void> _reload() async {
@@ -29,13 +44,45 @@ class _State extends State<InquiryReportScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Inquiry Reports')),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _query = v),
+              decoration: InputDecoration(
+                hintText: 'Search stockist, design, buyer, city…',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                isDense: true,
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _query = '');
+                        }),
+              ),
+            ),
+          ),
+          Expanded(child: _buildList()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
         future: _future,
         builder: (_, snap) {
           if (snap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-          final rows = snap.data ?? [];
+          final rows =
+              (snap.data ?? []).where(_matches).toList();
           if (rows.isEmpty) {
             return Center(
               child: Column(
@@ -90,8 +137,7 @@ class _State extends State<InquiryReportScreen> {
             ),
           );
         },
-      ),
-    );
+      );
   }
 
   Widget _group(String title, List<Map<String, dynamic>> items) {

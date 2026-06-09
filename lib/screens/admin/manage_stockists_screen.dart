@@ -19,11 +19,89 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
 
   List<Stockist> _stockists = [];
   bool _loading = true;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // Search + listing order (tier → priority → name), so this screen also shows
+  // the buyer-facing order (Listing Order is merged in here).
+  List<Stockist> get _filtered {
+    var list = _stockists;
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      list = list
+          .where((s) =>
+              s.name.toLowerCase().contains(q) ||
+              s.id.toLowerCase().contains(q) ||
+              s.city.toLowerCase().contains(q) ||
+              s.phone.contains(q))
+          .toList();
+    }
+    list = [...list]..sort((a, b) {
+        final t = stockistTierRank(b.stockistType)
+            .compareTo(stockistTierRank(a.stockistType));
+        if (t != 0) return t;
+        final p = b.priority.compareTo(a.priority);
+        if (p != 0) return p;
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+    return list;
+  }
+
+  Future<void> _openEditForm(Stockist s) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => _AddStockistSheet(existing: s),
+    );
+    if (saved == true) _load();
+  }
+
+  Future<void> _confirmDelete(Stockist s) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete stockist?'),
+        content: Text(
+            'Permanently delete ${s.name} (${s.id})?\n\nThis removes their login '
+            'and ALL their designs & stock. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child:
+                  const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _dataSvc.deleteStockist(s.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${s.name} deleted.'), backgroundColor: Colors.red));
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$e'.replaceAll('PostgrestException:', '').trim()),
+          backgroundColor: Colors.red));
+    }
   }
 
   Future<void> _load() async {
@@ -78,23 +156,59 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _stockists.isEmpty
-              ? const Center(
-                  child: Text('No stockists yet. Tap "Add Stockist".',
-                      style: TextStyle(color: Colors.grey)))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-                    itemCount: _stockists.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (_, i) => _stockistTile(_stockists[i]),
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onChanged: (v) => setState(() => _query = v),
+                    decoration: InputDecoration(
+                      hintText: 'Search name, ID, city, phone…',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() => _query = '');
+                              }),
+                    ),
                   ),
                 ),
+                Expanded(
+                  child: _filtered.isEmpty
+                      ? Center(
+                          child: Text(
+                              _stockists.isEmpty
+                                  ? 'No stockists yet. Tap "Add Stockist".'
+                                  : 'No matches.',
+                              style: const TextStyle(color: Colors.grey)))
+                      : RefreshIndicator(
+                          onRefresh: _load,
+                          child: ListView.separated(
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 8, 12, 90),
+                            itemCount: _filtered.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 6),
+                            itemBuilder: (_, i) => _stockistTile(_filtered[i]),
+                          ),
+                        ),
+                ),
+              ],
+            ),
     );
   }
 
-  Widget _stockistTile(Stockist s) => Opacity(
+  Widget _stockistTile(Stockist s) => InkWell(
+        onTap: () => _openEditForm(s),
+        borderRadius: BorderRadius.circular(8),
+        child: Opacity(
         opacity: s.isActive ? 1 : 0.55,
         child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -168,10 +282,30 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
                   onChanged: (v) => _toggleActive(s, v),
                   activeThumbColor: const Color(0xFF2E7D32),
                 ),
+                // Delete is only offered once the stockist is deactivated.
+                if (!s.isActive)
+                  InkWell(
+                    onTap: () => _confirmDelete(s),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.delete_outline,
+                              size: 16, color: Colors.red),
+                          SizedBox(width: 2),
+                          Text('Delete',
+                              style:
+                                  TextStyle(fontSize: 11, color: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  ),
               ],
             ),
           ],
         ),
+      ),
       ),
     );
 
@@ -187,9 +321,11 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
   }
 }
 
-// ── Add-stockist bottom sheet ────────────────────────────────────────────────
+// ── Add / edit-stockist bottom sheet ─────────────────────────────────────────
 class _AddStockistSheet extends StatefulWidget {
-  const _AddStockistSheet();
+  /// When non-null the sheet edits this stockist instead of creating one.
+  final Stockist? existing;
+  const _AddStockistSheet({this.existing});
   @override
   State<_AddStockistSheet> createState() => _AddStockistSheetState();
 }
@@ -213,6 +349,25 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   bool _saving = false;
   String? _error;
 
+  bool get _isEdit => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final s = widget.existing;
+    if (s != null) {
+      _name.text     = s.name;
+      _phone.text    = s.phone;
+      _code.text     = s.countryCode.isEmpty ? '+91' : s.countryCode;
+      _city.text     = s.city;
+      _state.text    = s.state;
+      _address.text  = s.address;
+      _gst.text      = s.gstNumber;
+      _priority.text = s.priority.toStringAsFixed(2);
+      _tier = kStockistTiers.contains(s.stockistType) ? s.stockistType : '';
+    }
+  }
+
   @override
   void dispose() {
     for (final c in [
@@ -228,24 +383,41 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() { _saving = true; _error = null; });
     try {
-      final seqId = await _dataSvc.addStockist(
-        name:     _name.text.trim(),
-        email:    _email.text.trim(),
-        password: _password.text,
-        phone:    _phone.text.trim(),
-        countryCode: _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
-        city:     _city.text.trim(),
-        state:    _state.text.trim(),
-        address:  _address.text.trim(),
-        priority: double.tryParse(_priority.text.trim()) ?? 0,
-        gstNumber: _gst.text.trim(),
-        stockistType: _tier,
-      );
+      final String msg;
+      if (_isEdit) {
+        await _dataSvc.updateStockist(
+          sequentialId: widget.existing!.id,
+          name:     _name.text.trim(),
+          phone:    _phone.text.trim(),
+          countryCode: _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
+          city:     _city.text.trim(),
+          state:    _state.text.trim(),
+          address:  _address.text.trim(),
+          priority: double.tryParse(_priority.text.trim()) ?? 0,
+          gstNumber: _gst.text.trim(),
+          stockistType: _tier,
+        );
+        msg = 'Stockist updated.';
+      } else {
+        final seqId = await _dataSvc.addStockist(
+          name:     _name.text.trim(),
+          email:    _email.text.trim(),
+          password: _password.text,
+          phone:    _phone.text.trim(),
+          countryCode: _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
+          city:     _city.text.trim(),
+          state:    _state.text.trim(),
+          address:  _address.text.trim(),
+          priority: double.tryParse(_priority.text.trim()) ?? 0,
+          gstNumber: _gst.text.trim(),
+          stockistType: _tier,
+        );
+        msg = 'Stockist created${seqId.isNotEmpty ? ' · ID $seqId' : ''}.';
+      }
       if (!mounted) return;
       Navigator.pop(context, true);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Stockist created'
-            '${seqId.isNotEmpty ? ' · ID $seqId' : ''}.'),
+        content: Text(msg),
         backgroundColor: const Color(0xFF2E7D32),
       ));
     } catch (e) {
@@ -277,25 +449,30 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                       borderRadius: BorderRadius.circular(2)),
                 ),
               ),
-              const Text('Add Stockist',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              Text(_isEdit ? 'Edit Stockist' : 'Add Stockist',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               const SizedBox(height: 2),
-              Text('The stockist ID is generated automatically (e.g. A01).',
+              Text(
+                  _isEdit
+                      ? 'ID ${widget.existing!.id} · login email/password unchanged here.'
+                      : 'The stockist ID is generated automatically (e.g. A01).',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
               const SizedBox(height: 14),
 
               _field(_name, 'Name *', required: true),
-              _field(_email, 'Email *',
-                  keyboard: TextInputType.emailAddress,
-                  validator: (v) {
-                    final t = (v ?? '').trim();
-                    if (t.isEmpty) return 'Email is required';
-                    if (!t.contains('@')) return 'Invalid email';
-                    return null;
-                  }),
-              _field(_password, 'Password *',
-                  validator: (v) =>
-                      (v ?? '').length < 6 ? 'Min 6 characters' : null),
+              if (!_isEdit) ...[
+                _field(_email, 'Email *',
+                    keyboard: TextInputType.emailAddress,
+                    validator: (v) {
+                      final t = (v ?? '').trim();
+                      if (t.isEmpty) return 'Email is required';
+                      if (!t.contains('@')) return 'Invalid email';
+                      return null;
+                    }),
+                _field(_password, 'Password *',
+                    validator: (v) =>
+                        (v ?? '').length < 6 ? 'Min 6 characters' : null),
+              ],
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: PhoneField(
@@ -349,8 +526,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                           width: 20, height: 20,
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
-                      : const Text('Create Stockist',
-                          style: TextStyle(
+                      : Text(_isEdit ? 'Save Changes' : 'Create Stockist',
+                          style: const TextStyle(
                               fontSize: 15, fontWeight: FontWeight.bold)),
                 ),
               ),

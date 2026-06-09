@@ -88,9 +88,6 @@ class AdminPanelScreen extends StatelessWidget {
           _adminCard(Icons.bar_chart_outlined, 'Inquiry Reports',
               'All inquiries across stockists', Colors.purple,
               onTap: () => context.push('/admin/inquiry-report')),
-          _adminCard(Icons.sort_outlined, 'Listing Order',
-              'Set stockist tier & priority (controls buyer order)', Colors.red,
-              onTap: () => context.push('/admin/listing-order')),
 
         ],
 

@@ -15,6 +15,24 @@ class _ManageRegistrationRequestsScreenState
   final _dataSvc = SupabaseDataService();
   List<Map<String, dynamic>> _requests = [];
   bool _loading = true;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _filtered {
+    if (_query.isEmpty) return _requests;
+    final q = _query.toLowerCase();
+    return _requests
+        .where((r) => [r['company_name'], r['email'], r['contact_person'],
+                r['city'], r['phone']]
+            .any((v) => (v ?? '').toString().toLowerCase().contains(q)))
+        .toList();
+  }
 
   @override
   void initState() {
@@ -142,19 +160,51 @@ class _ManageRegistrationRequestsScreenState
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _requests.isEmpty
-              ? const Center(
-                  child: Text('No pending requests.',
-                      style: TextStyle(color: Colors.grey)))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: _requests.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (_, i) => _requestCard(_requests[i]),
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onChanged: (v) => setState(() => _query = v),
+                    decoration: InputDecoration(
+                      hintText: 'Search company, email, contact, city…',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() => _query = '');
+                              }),
+                    ),
                   ),
                 ),
+                Expanded(
+                  child: _filtered.isEmpty
+                      ? Center(
+                          child: Text(
+                              _requests.isEmpty
+                                  ? 'No pending requests.'
+                                  : 'No matches.',
+                              style: const TextStyle(color: Colors.grey)))
+                      : RefreshIndicator(
+                          onRefresh: _load,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.all(12),
+                            itemCount: _filtered.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (_, i) => _requestCard(_filtered[i]),
+                          ),
+                        ),
+                ),
+              ],
+            ),
     );
   }
 

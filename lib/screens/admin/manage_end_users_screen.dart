@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/end_user.dart';
 import '../../services/supabase_data_service.dart';
 import '../../widgets/phone_field.dart';
+import '../../utils/stockist_tiers.dart';
 import 'excel_import_screen.dart';
 
 // Admin screen to view end users (companies) and add a single new one. The
@@ -17,11 +18,79 @@ class _ManageEndUsersScreenState extends State<ManageEndUsersScreen> {
 
   List<EndUser> _users = [];
   bool _loading = true;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  List<EndUser> get _filtered {
+    if (_query.isEmpty) return _users;
+    final q = _query.toLowerCase();
+    return _users
+        .where((u) =>
+            u.companyName.toLowerCase().contains(q) ||
+            u.id.toLowerCase().contains(q) ||
+            u.contactPerson.toLowerCase().contains(q) ||
+            u.city.toLowerCase().contains(q) ||
+            u.phone.contains(q) ||
+            u.email.toLowerCase().contains(q))
+        .toList();
+  }
+
+  Future<void> _openEditForm(EndUser u) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => _AddEndUserSheet(existing: u),
+    );
+    if (saved == true) _load();
+  }
+
+  Future<void> _confirmDelete(EndUser u) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete end user?'),
+        content: Text(
+            'Permanently delete ${u.companyName} (${u.id})?\n\nThis removes '
+            'their login and saved choices/inquiries. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child:
+                  const Text('Delete', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _dataSvc.deleteEndUser(u.uuid);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${u.companyName} deleted.'),
+          backgroundColor: Colors.red));
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$e'.replaceAll('PostgrestException:', '').trim()),
+          backgroundColor: Colors.red));
+    }
   }
 
   Future<void> _load() async {
@@ -76,23 +145,59 @@ class _ManageEndUsersScreenState extends State<ManageEndUsersScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _users.isEmpty
-              ? const Center(
-                  child: Text('No end users yet. Tap "Add End User".',
-                      style: TextStyle(color: Colors.grey)))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-                    itemCount: _users.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (_, i) => _userTile(_users[i]),
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    onChanged: (v) => setState(() => _query = v),
+                    decoration: InputDecoration(
+                      hintText: 'Search company, ID, contact, city, phone…',
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                setState(() => _query = '');
+                              }),
+                    ),
                   ),
                 ),
+                Expanded(
+                  child: _filtered.isEmpty
+                      ? Center(
+                          child: Text(
+                              _users.isEmpty
+                                  ? 'No end users yet. Tap "Add End User".'
+                                  : 'No matches.',
+                              style: const TextStyle(color: Colors.grey)))
+                      : RefreshIndicator(
+                          onRefresh: _load,
+                          child: ListView.separated(
+                            padding:
+                                const EdgeInsets.fromLTRB(12, 8, 12, 90),
+                            itemCount: _filtered.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 6),
+                            itemBuilder: (_, i) => _userTile(_filtered[i]),
+                          ),
+                        ),
+                ),
+              ],
+            ),
     );
   }
 
-  Widget _userTile(EndUser u) => Opacity(
+  Widget _userTile(EndUser u) => InkWell(
+        onTap: () => _openEditForm(u),
+        borderRadius: BorderRadius.circular(8),
+        child: Opacity(
         opacity: u.isActive ? 1 : 0.55,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -164,14 +269,37 @@ class _ManageEndUsersScreenState extends State<ManageEndUsersScreen> {
                   ],
                 ),
               ),
-              Switch(
-                value: u.isActive,
-                onChanged: (v) => _toggleActive(u, v),
-                activeThumbColor: const Color(0xFF2E7D32),
+              Column(
+                children: [
+                  Switch(
+                    value: u.isActive,
+                    onChanged: (v) => _toggleActive(u, v),
+                    activeThumbColor: const Color(0xFF2E7D32),
+                  ),
+                  if (!u.isActive)
+                    InkWell(
+                      onTap: () => _confirmDelete(u),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.delete_outline,
+                                size: 16, color: Colors.red),
+                            SizedBox(width: 2),
+                            Text('Delete',
+                                style: TextStyle(
+                                    fontSize: 11, color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
         ),
+      ),
       );
 
   Future<void> _openAddForm() async {
@@ -186,9 +314,11 @@ class _ManageEndUsersScreenState extends State<ManageEndUsersScreen> {
   }
 }
 
-// ── Add-end-user bottom sheet ────────────────────────────────────────────────
+// ── Add / edit-end-user bottom sheet ─────────────────────────────────────────
 class _AddEndUserSheet extends StatefulWidget {
-  const _AddEndUserSheet();
+  /// When non-null the sheet edits this end user instead of creating one.
+  final EndUser? existing;
+  const _AddEndUserSheet({this.existing});
   @override
   State<_AddEndUserSheet> createState() => _AddEndUserSheetState();
 }
@@ -205,17 +335,35 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
   final _code     = TextEditingController(text: '+91');
   final _city     = TextEditingController();
   final _gst      = TextEditingController();
-  final _type     = TextEditingController();
   final _priority = TextEditingController(text: '0.00');
+  String _tier = ''; // '' = none; else Platinum/Gold/Silver (enduser_type)
 
   bool _saving = false;
   String? _error;
+
+  bool get _isEdit => widget.existing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = widget.existing;
+    if (u != null) {
+      _company.text  = u.companyName;
+      _contact.text  = u.contactPerson;
+      _phone.text    = u.phone;
+      _code.text     = u.countryCode.isEmpty ? '+91' : u.countryCode;
+      _city.text     = u.city;
+      _gst.text      = u.gstNumber;
+      _priority.text = u.priority.toStringAsFixed(2);
+      _tier = kStockistTiers.contains(u.endUserType) ? u.endUserType : '';
+    }
+  }
 
   @override
   void dispose() {
     for (final c in [
       _company, _email, _password, _contact, _phone, _code, _city, _gst,
-      _type, _priority
+      _priority
     ]) {
       c.dispose();
     }
@@ -226,22 +374,39 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() { _saving = true; _error = null; });
     try {
-      final id = await _dataSvc.addEndUser(
-        companyName:   _company.text.trim(),
-        email:         _email.text.trim(),
-        password:      _password.text,
-        contactPerson: _contact.text.trim(),
-        phone:         _phone.text.trim(),
-        countryCode:   _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
-        city:          _city.text.trim(),
-        gstNumber:     _gst.text.trim(),
-        endUserType:   _type.text.trim(),
-        priority:      double.tryParse(_priority.text.trim()) ?? 0,
-      );
+      final String msg;
+      if (_isEdit) {
+        await _dataSvc.updateEndUser(
+          uuid:          widget.existing!.uuid,
+          companyName:   _company.text.trim(),
+          contactPerson: _contact.text.trim(),
+          phone:         _phone.text.trim(),
+          countryCode:   _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
+          city:          _city.text.trim(),
+          gstNumber:     _gst.text.trim(),
+          endUserType:   _tier,
+          priority:      double.tryParse(_priority.text.trim()) ?? 0,
+        );
+        msg = 'End user updated.';
+      } else {
+        final id = await _dataSvc.addEndUser(
+          companyName:   _company.text.trim(),
+          email:         _email.text.trim(),
+          password:      _password.text,
+          contactPerson: _contact.text.trim(),
+          phone:         _phone.text.trim(),
+          countryCode:   _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
+          city:          _city.text.trim(),
+          gstNumber:     _gst.text.trim(),
+          endUserType:   _tier,
+          priority:      double.tryParse(_priority.text.trim()) ?? 0,
+        );
+        msg = 'End user created${id.isNotEmpty ? ' · ID $id' : ''}.';
+      }
       if (!mounted) return;
       Navigator.pop(context, true);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('End user created${id.isNotEmpty ? ' · ID $id' : ''}.'),
+        content: Text(msg),
         backgroundColor: const Color(0xFF2E7D32),
       ));
     } catch (e) {
@@ -273,25 +438,30 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
                       borderRadius: BorderRadius.circular(2)),
                 ),
               ),
-              const Text('Add End User',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              Text(_isEdit ? 'Edit End User' : 'Add End User',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               const SizedBox(height: 2),
-              Text('The ID is generated automatically (e.g. 01A).',
+              Text(
+                  _isEdit
+                      ? 'ID ${widget.existing!.id} · login email/password unchanged here.'
+                      : 'The ID is generated automatically (e.g. 01A).',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
               const SizedBox(height: 14),
 
               _field(_company, 'Company name *', required: true),
-              _field(_email, 'Email *',
-                  keyboard: TextInputType.emailAddress,
-                  validator: (v) {
-                    final t = (v ?? '').trim();
-                    if (t.isEmpty) return 'Email is required';
-                    if (!t.contains('@')) return 'Invalid email';
-                    return null;
-                  }),
-              _field(_password, 'Password *',
-                  validator: (v) =>
-                      (v ?? '').length < 6 ? 'Min 6 characters' : null),
+              if (!_isEdit) ...[
+                _field(_email, 'Email *',
+                    keyboard: TextInputType.emailAddress,
+                    validator: (v) {
+                      final t = (v ?? '').trim();
+                      if (t.isEmpty) return 'Email is required';
+                      if (!t.contains('@')) return 'Invalid email';
+                      return null;
+                    }),
+                _field(_password, 'Password *',
+                    validator: (v) =>
+                        (v ?? '').length < 6 ? 'Min 6 characters' : null),
+              ],
               _field(_contact, 'Contact person'),
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -302,8 +472,25 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
               ),
               _field(_city, 'City'),
               _field(_gst, 'GST number (optional)'),
-              _field(_type, 'End user type (optional)',
-                  hint: 'e.g. Gold, Platinum, Silver'),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: DropdownButtonFormField<String>(
+                  initialValue: _tier,
+                  isDense: true,
+                  decoration: InputDecoration(
+                    labelText: 'Tier (for future stock-timing)',
+                    isDense: true,
+                    border:
+                        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('None')),
+                    ...kStockistTiers.map(
+                        (t) => DropdownMenuItem(value: t, child: Text(t))),
+                  ],
+                  onChanged: (v) => setState(() => _tier = v ?? ''),
+                ),
+              ),
               _field(_priority, 'Priority (0.00)',
                   keyboard: const TextInputType.numberWithOptions(decimal: true),
                   validator: (v) {
@@ -331,8 +518,8 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
                           width: 20, height: 20,
                           child: CircularProgressIndicator(
                               color: Colors.white, strokeWidth: 2))
-                      : const Text('Create End User',
-                          style: TextStyle(
+                      : Text(_isEdit ? 'Save Changes' : 'Create End User',
+                          style: const TextStyle(
                               fontSize: 15, fontWeight: FontWeight.bold)),
                 ),
               ),
