@@ -449,6 +449,23 @@ class SupabaseDataService {
     }
   }
 
+  /// All dispatches for the current stockist, newest first. Each row has the
+  /// design name plus quantity, buyer, notes and timestamp.
+  Future<List<Map<String, dynamic>>> getAllDispatches() async {
+    try {
+      final res = await supabase
+          .from('dispatches')
+          .select(
+              'id, quantity_dispatched, buyer_name, notes, created_at, designs(name)')
+          .eq('stockist_id', currentStockistUUID)
+          .order('created_at', ascending: false);
+      return (res as List).map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e, st) {
+      debugPrint('getAllDispatches failed: $e\n$st');
+      return [];
+    }
+  }
+
   // ── my choices (per end user) ──────────────────────────────────────────────
 
   /// This end user's saved choices as { designId : quantity }.

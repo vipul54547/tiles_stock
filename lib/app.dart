@@ -42,6 +42,7 @@ import 'screens/end_user/stockist_group_screen.dart';
 import 'screens/end_user/my_choice_screen.dart';
 import 'screens/stockist/upload_stock_screen.dart';
 import 'screens/stockist/add_dispatch_screen.dart';
+import 'screens/stockist/all_dispatches_screen.dart';
 import 'screens/stockist/stock_history_screen.dart';
 
 
@@ -147,6 +148,10 @@ final GoRouter _router = GoRouter(
       path: '/stockist/stock/dispatch',
       builder: (_, state) =>
           AddDispatchScreen(initialDesignId: state.extra as String?),
+    ),
+    GoRoute(
+      path: '/stockist/dispatches',
+      builder: (_, __) => const AllDispatchesScreen(),
     ),
     GoRoute(
       path: '/stockist/stock/history/:designId/:designName',

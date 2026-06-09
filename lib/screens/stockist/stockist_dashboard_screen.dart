@@ -529,8 +529,11 @@ class _State extends State<StockistDashboardScreen> {
             _load();
           }),
           const SizedBox(width: 6),
-          // Spare button — reserved for future use.
-          _actionBtn('•', Icons.more_horiz, Colors.grey, null),
+          _actionBtn('Records', Icons.receipt_long_outlined,
+              const Color(0xFF6A1B9A), () async {
+            await context.push('/stockist/dispatches');
+            _load();
+          }),
         ],
       ),
     );
