@@ -419,7 +419,8 @@ class SupabaseDataService {
   }
 
   /// Per-buyer breakdown for one of the stockist's designs: each entry has
-  /// company, contact, phone, boxes. Empty unless the design belongs to caller.
+  /// end_user_id, company, contact, phone, boxes. Empty unless the design
+  /// belongs to caller.
   Future<List<Map<String, dynamic>>> getDesignBuyers(String designId) async {
     try {
       final res = await supabase
@@ -429,6 +430,22 @@ class SupabaseDataService {
     } catch (e, st) {
       debugPrint('getDesignBuyers failed ($designId): $e\n$st');
       return [];
+    }
+  }
+
+  /// After dispatching to a buyer, reduce that buyer's My-Choice (inquiry) for
+  /// the design by [quantity], clearing it once fulfilled. No-op server-side if
+  /// the caller doesn't own the design.
+  Future<void> fulfillChoice(
+      String designId, String endUserId, int quantity) async {
+    try {
+      await supabase.rpc('fulfill_choice', params: {
+        'p_design_id':   designId,
+        'p_end_user_id': endUserId,
+        'p_quantity':    quantity,
+      });
+    } catch (e, st) {
+      debugPrint('fulfillChoice failed ($designId/$endUserId): $e\n$st');
     }
   }
 

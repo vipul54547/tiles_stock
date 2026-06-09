@@ -24,9 +24,19 @@ class _State extends State<AddDispatchScreen> {
   TileDesign? _selected;
   bool _loading = false;
 
+  // Buyers who bookmarked the selected design (company, contact, phone, boxes).
+  List<Map<String, dynamic>> _buyers = [];
+  bool _loadingBuyers = false;
+
+  // When the stockist picks a buyer from the list, remember who — so a
+  // successful dispatch can reduce/clear that buyer's inquiry (My Choice).
+  String? _pickedBuyerId;
+  String _pickedBuyerName = '';
+
   @override
   void initState() {
     super.initState();
+    _qtyCtrl.addListener(() => setState(() {})); // live "remaining" preview
     _loadDesigns();
   }
 
@@ -47,6 +57,48 @@ class _State extends State<AddDispatchScreen> {
     setState(() {
       _designs = inStock;
       _selected = pre.isEmpty ? null : pre.first;
+    });
+    if (_selected != null) _loadBuyers(_selected!.id);
+  }
+
+  // Loads the buyer list for a design so the stockist can pick who they're
+  // dispatching to (tapping a buyer fills the name + their wanted quantity).
+  Future<void> _loadBuyers(String designId) async {
+    setState(() {
+      _loadingBuyers = true;
+      _buyers = [];
+    });
+    final buyers = await _dataSvc.getDesignBuyers(designId);
+    if (!mounted) return;
+    setState(() {
+      _buyers = buyers;
+      _loadingBuyers = false;
+    });
+  }
+
+  void _onDesignChanged(TileDesign? d) {
+    setState(() {
+      _selected = d;
+      _buyerCtrl.clear();
+      _qtyCtrl.clear();
+      _pickedBuyerId = null;
+      _pickedBuyerName = '';
+    });
+    if (d != null) _loadBuyers(d.id);
+  }
+
+  // Fills buyer name + quantity from a tapped buyer row, capping the quantity
+  // at the available stock so the form stays valid. Remembers the buyer id so
+  // the dispatch can clear their inquiry afterwards.
+  void _pickBuyer(Map<String, dynamic> b) {
+    final wanted = (b['boxes'] as num?)?.toInt() ?? 0;
+    final available = _selected?.boxQuantity ?? 0;
+    final company = (b['company'] ?? '').toString();
+    setState(() {
+      _buyerCtrl.text = company;
+      _qtyCtrl.text = '${wanted > available ? available : wanted}';
+      _pickedBuyerId = (b['end_user_id'] ?? '').toString();
+      _pickedBuyerName = company;
     });
   }
 
@@ -71,6 +123,15 @@ class _State extends State<AddDispatchScreen> {
       buyerName:    _buyerCtrl.text.trim(),
       notes:        _notesCtrl.text.trim(),
     );
+
+    // If this dispatch was for a buyer picked from the inquiry list (and the
+    // name wasn't changed afterwards), reduce/clear that buyer's inquiry.
+    if (ok &&
+        _pickedBuyerId != null &&
+        _pickedBuyerId!.isNotEmpty &&
+        _buyerCtrl.text.trim() == _pickedBuyerName) {
+      await _dataSvc.fulfillChoice(_selected!.id, _pickedBuyerId!, qty);
+    }
 
     setState(() => _loading = false);
     if (!mounted) return;
@@ -123,7 +184,7 @@ class _State extends State<AddDispatchScreen> {
                   ],
                 ),
               )).toList(),
-              onChanged: (v) => setState(() => _selected = v),
+              onChanged: _onDesignChanged,
               validator: (v) => v == null ? 'Please select a design' : null,
             ),
             const SizedBox(height: 16),
@@ -150,6 +211,9 @@ class _State extends State<AddDispatchScreen> {
                 ),
               ),
 
+            // Buyers interested in this design — tap one to fill name + qty.
+            if (_selected != null) _buildBuyersSection(),
+
             TextFormField(
               controller: _qtyCtrl,
               keyboardType: TextInputType.number,
@@ -162,9 +226,13 @@ class _State extends State<AddDispatchScreen> {
                 if (v == null || v.isEmpty) return 'Required';
                 final n = int.tryParse(v);
                 if (n == null || n <= 0) return 'Enter valid quantity';
+                if (_selected != null && n > _selected!.boxQuantity) {
+                  return 'Only ${_selected!.boxQuantity} boxes in stock';
+                }
                 return null;
               },
             ),
+            _buildRemainingHint(),
             const SizedBox(height: 16),
 
             TextFormField(
@@ -212,6 +280,145 @@ class _State extends State<AddDispatchScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // Buyer-interest list for the selected design. Each row is tappable and
+  // fills the buyer name + their wanted quantity into the form.
+  Widget _buildBuyersSection() {
+    if (_loadingBuyers) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 16),
+        child: Center(
+          child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+      );
+    }
+    if (_buyers.isEmpty) return const SizedBox.shrink();
+
+    final selectedName = _buyerCtrl.text.trim();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF6A1B9A).withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF6A1B9A).withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.people_alt_outlined,
+                  size: 16, color: Color(0xFF6A1B9A)),
+              const SizedBox(width: 6),
+              Text('Interested buyers (${_buyers.length})',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF6A1B9A))),
+              const Spacer(),
+              const Text('Tap to fill',
+                  style: TextStyle(fontSize: 10, color: Colors.grey)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ..._buyers.map((b) {
+            final company = (b['company'] ?? '').toString();
+            final contact = (b['contact'] ?? '').toString();
+            final phone = (b['phone'] ?? '').toString();
+            final boxes = (b['boxes'] as num?)?.toInt() ?? 0;
+            final sub =
+                [contact, phone].where((x) => x.isNotEmpty).join('  ·  ');
+            final isPicked = company == selectedName && selectedName.isNotEmpty;
+            return InkWell(
+              onTap: () => _pickBuyer(b),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isPicked
+                      ? const Color(0xFF6A1B9A).withValues(alpha: 0.12)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: isPicked
+                          ? const Color(0xFF6A1B9A)
+                          : Colors.grey.shade200,
+                      width: isPicked ? 1.5 : 1),
+                ),
+                child: Row(
+                  children: [
+                    if (isPicked)
+                      const Padding(
+                        padding: EdgeInsets.only(right: 6),
+                        child: Icon(Icons.check_circle,
+                            size: 16, color: Color(0xFF6A1B9A)),
+                      ),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(company,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 13),
+                              overflow: TextOverflow.ellipsis),
+                          if (sub.isNotEmpty)
+                            Text(sub,
+                                style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1565C0).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text('$boxes boxes',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1565C0))),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // Live "remaining after dispatch" preview under the quantity field.
+  Widget _buildRemainingHint() {
+    if (_selected == null) return const SizedBox.shrink();
+    final n = int.tryParse(_qtyCtrl.text);
+    if (n == null || n <= 0) return const SizedBox.shrink();
+    final available = _selected!.boxQuantity;
+    if (n > available) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 6, left: 4),
+        child: Text('Exceeds stock — only $available boxes available',
+            style: TextStyle(
+                fontSize: 12,
+                color: Colors.red.shade700,
+                fontWeight: FontWeight.w600)),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, left: 4),
+      child: Text('After dispatch: ${available - n} boxes left',
+          style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
     );
   }
 
