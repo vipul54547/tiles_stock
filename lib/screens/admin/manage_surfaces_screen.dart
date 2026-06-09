@@ -144,13 +144,35 @@ class _ManageSurfacesScreenState extends State<ManageSurfacesScreen> {
     );
   }
 
-  Future<void> _onReorder(int oldIndex, int newIndex) async {
-    if (newIndex > oldIndex) newIndex -= 1;
-    setState(() {
-      final moved = _items.removeAt(oldIndex);
-      _items.insert(newIndex, moved);
-    });
-    await _run(() => _data.reorderSurfaceTypes(_items.map((s) => s.id).toList()));
+  Future<void> _editOrderDialog(SurfaceType s) async {
+    final ctrl = TextEditingController(text: '${s.sortOrder}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Order — ${s.name}'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Order number (lower shows first)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final n = int.tryParse(ctrl.text.trim());
+    if (n == null) return;
+    await _run(() => _data.setSurfaceOrder(s.id, n));
   }
 
   // ── build ────────────────────────────────────────────────────────────────
@@ -201,19 +223,17 @@ class _ManageSurfacesScreenState extends State<ManageSurfacesScreen> {
           color: _navy.withValues(alpha: 0.06),
           child: const Text(
             'These finishes are the master list. Stockists align their PDF '
-            'surface words to them. Drag to reorder; hide a finish to keep it '
-            'out of pickers without deleting it.',
+            'surface words to them. Tap the order number to change position '
+            '(lower shows first); hide a finish to keep it out of pickers.',
             style: TextStyle(fontSize: 12, color: Colors.black54),
           ),
         ),
         if (_busy) const LinearProgressIndicator(minHeight: 2),
         Expanded(
-          child: ReorderableListView.builder(
+          child: ListView.builder(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
             itemCount: _items.length,
-            onReorder: _onReorder,
-            buildDefaultDragHandles: false,
-            itemBuilder: (_, i) => _tile(_items[i], i, key: ValueKey(_items[i].id)),
+            itemBuilder: (_, i) => _tile(_items[i], i),
           ),
         ),
         if (_system != null) _systemTile(_system!),
@@ -221,28 +241,32 @@ class _ManageSurfacesScreenState extends State<ManageSurfacesScreen> {
     );
   }
 
-  Widget _tile(SurfaceType s, int index, {required Key key}) {
+  Widget _tile(SurfaceType s, int index) {
     return Card(
-      key: key,
       margin: const EdgeInsets.only(bottom: 8),
       child: Opacity(
         opacity: s.isActive ? 1 : 0.5,
         child: ListTile(
-          leading: ReorderableDragStartListener(
-            index: index,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 24,
-                  alignment: Alignment.center,
-                  child: Text('${index + 1}',
+          leading: InkWell(
+            onTap: _busy ? null : () => _editOrderDialog(s),
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 44,
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B4F72).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${s.sortOrder}',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Color(0xFF1B4F72))),
-                ),
-                const Icon(Icons.drag_handle, color: Colors.grey),
-              ],
+                  const Icon(Icons.edit, size: 11, color: Color(0xFF1B4F72)),
+                ],
+              ),
             ),
           ),
           title: Text(s.name,

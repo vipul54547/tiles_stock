@@ -49,12 +49,35 @@ class _State extends State<ManageSizesScreen> {
     }
   }
 
-  Future<void> _onReorder(int oldIndex, int newIndex) async {
-    if (newIndex > oldIndex) newIndex--;
-    final item = _items.removeAt(oldIndex);
-    _items.insert(newIndex, item);
-    setState(() {});
-    await _run(() => _data.reorderTileSizes(_items.map((s) => s.id).toList()));
+  Future<void> _editOrderDialog(TileSize s) async {
+    final ctrl = TextEditingController(text: '${s.sortOrder}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Order — ${s.name}'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Order number (lower shows first)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final n = int.tryParse(ctrl.text.trim());
+    if (n == null) return;
+    await _run(() => _data.setTileSizeOrder(s.id, n));
   }
 
   Future<void> _addDialog() async {
@@ -146,18 +169,16 @@ class _State extends State<ManageSizesScreen> {
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Text(
-                    'Drag to reorder; hide to keep a size out of pickers/filters '
-                    'without deleting it. Order here is the display order.',
+                    'Tap the order number to change a size\'s position (lower '
+                    'shows first). Hide to keep it out of pickers/filters.',
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
                 Expanded(
-                  child: ReorderableListView.builder(
+                  child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(12, 8, 12, 80),
                     itemCount: _items.length,
-                    onReorder: _onReorder,
-                    itemBuilder: (_, i) =>
-                        _tile(_items[i], i, key: ValueKey(_items[i].id)),
+                    itemBuilder: (_, i) => _tile(_items[i], i),
                   ),
                 ),
               ],
@@ -165,27 +186,31 @@ class _State extends State<ManageSizesScreen> {
     );
   }
 
-  Widget _tile(TileSize s, int index, {required Key key}) {
+  Widget _tile(TileSize s, int index) {
     return Card(
-      key: key,
       margin: const EdgeInsets.only(bottom: 8),
       child: Opacity(
         opacity: s.isActive ? 1 : 0.5,
         child: ListTile(
-          leading: ReorderableDragStartListener(
-            index: index,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 24,
-                  child: Text('${index + 1}',
-                      textAlign: TextAlign.center,
+          leading: InkWell(
+            onTap: _busy ? null : () => _editOrderDialog(s),
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 44,
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              decoration: BoxDecoration(
+                color: _navy.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${s.sortOrder}',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, color: _navy)),
-                ),
-                const Icon(Icons.drag_handle, color: Colors.grey),
-              ],
+                  const Icon(Icons.edit, size: 11, color: _navy),
+                ],
+              ),
             ),
           ),
           title: Text(s.name,

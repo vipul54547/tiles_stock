@@ -1118,6 +1118,11 @@ class SupabaseDataService {
     await supabase.rpc('reorder_tile_sizes', params: {'p_ids': orderedIds});
   }
 
+  /// Set a size's explicit sort number (lower shows first).
+  Future<void> setTileSizeOrder(String id, int order) async {
+    await supabase.from('tile_sizes').update({'sort_order': order}).eq('id', id);
+  }
+
   Future<void> addSurfaceType(String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw 'Finish name cannot be empty.';
@@ -1144,6 +1149,13 @@ class SupabaseDataService {
 
   Future<void> setSurfaceActive(String id, bool active) async {
     await supabase.from('surface_types').update({'is_active': active}).eq('id', id);
+  }
+
+  /// Set a finish's explicit sort number (lower shows first).
+  Future<void> setSurfaceOrder(String id, int order) async {
+    await supabase
+        .from('surface_types')
+        .update({'sort_order': order}).eq('id', id);
   }
 
   /// Persists a new ordering. [orderedIds] is the full list top-to-bottom;
