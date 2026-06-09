@@ -70,7 +70,6 @@ class _State extends State<StockistsOverviewScreen> {
   final Set<String> _selectedSizes = {};
   final Set<String> _selectedSurfaces = {};
 
-  int get _activeFilterCount => _selectedSizes.length + _selectedSurfaces.length;
 
   // Design filter (Qty, Colour, Stock Type — in addition to shared Size/Finish/Quality)
   final Set<String> _selectedColours = {};
@@ -95,21 +94,47 @@ class _State extends State<StockistsOverviewScreen> {
   // Group filter
   int _activeGroupIndex = -1;
 
-  // Platform-level benchmarks — computed as getters so they always
-  // reflect the active filters (size, surface, quality).
-  List<TileDesign> get _platformFilteredDesigns {
-    var all = _allData.expand((d) => d.designs).toList();
-    if (_selectedQualities.isNotEmpty) {
-      all = all.where((t) => _selectedQualities.contains(t.quality)).toList();
+  // Shared design-filter predicate — applies every active facet (quality, size,
+  // surface, colour, tile type, thickness, stock type, qty). Used by both the
+  // Stock (stockist) view and the All-Design grid so their filters match.
+  bool _matchesDesignFacets(TileDesign t) {
+    if (_selectedQualities.isNotEmpty && !_selectedQualities.contains(t.quality)) {
+      return false;
     }
-    if (_selectedSizes.isNotEmpty) {
-      all = all.where((t) => _selectedSizes.contains(t.size)).toList();
+    if (_selectedSizes.isNotEmpty && !_selectedSizes.contains(t.size)) return false;
+    if (_selectedSurfaces.isNotEmpty &&
+        !_selectedSurfaces.contains(t.surfaceType)) {
+      return false;
     }
-    if (_selectedSurfaces.isNotEmpty) {
-      all = all.where((t) => _selectedSurfaces.contains(t.surfaceType)).toList();
+    if (_selectedColours.isNotEmpty && !_selectedColours.contains(t.colour)) {
+      return false;
     }
-    return all;
+    if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(t.tileType)) {
+      return false;
+    }
+    if (_selectedThickness.isNotEmpty &&
+        !_selectedThickness.contains(thicknessBandOf(t))) {
+      return false;
+    }
+    if (_designStockType != 'Both' &&
+        !(t.stockType == _designStockType || t.stockType == 'Both')) {
+      return false;
+    }
+    final mn = int.tryParse(_minQtyCtrl.text);
+    final mx = int.tryParse(_maxQtyCtrl.text);
+    if (mn != null && t.boxQuantity < mn) return false;
+    if (mx != null && t.boxQuantity > mx) return false;
+    return true;
   }
+
+  // True when any design facet (beyond quality, which has its own chips) is set.
+  bool get _anyDesignFilterActive =>
+      _selectedQualities.isNotEmpty || _designFilterCount > 0;
+
+  // Platform-level benchmarks — computed as getters so they always
+  // reflect the active filters.
+  List<TileDesign> get _platformFilteredDesigns =>
+      _allData.expand((d) => d.designs).where(_matchesDesignFacets).toList();
 
   double get _platformAvgBoxesPerDesign {
     final designs = _platformFilteredDesigns;
@@ -202,19 +227,8 @@ class _State extends State<StockistsOverviewScreen> {
     });
   }
 
-  List<TileDesign> _stockistDesigns(_StockistData d) {
-    var designs = d.designs;
-    if (_selectedQualities.isNotEmpty) {
-      designs = designs.where((t) => _selectedQualities.contains(t.quality)).toList();
-    }
-    if (_selectedSizes.isNotEmpty) {
-      designs = designs.where((t) => _selectedSizes.contains(t.size)).toList();
-    }
-    if (_selectedSurfaces.isNotEmpty) {
-      designs = designs.where((t) => _selectedSurfaces.contains(t.surfaceType)).toList();
-    }
-    return designs;
-  }
+  List<TileDesign> _stockistDesigns(_StockistData d) =>
+      d.designs.where(_matchesDesignFacets).toList();
 
   int _filteredBoxCount(_StockistData d) {
     final designs = _stockistDesigns(d);
@@ -250,21 +264,11 @@ class _State extends State<StockistsOverviewScreen> {
       final groupIds = stockistGroups[_activeGroupIndex].stockistIds;
       result = result.where((d) => groupIds.contains(d.stockist.id)).toList();
     }
-    if (_selectedQualities.isNotEmpty) {
-      result = result
-          .where((d) => d.designs.any((t) => _selectedQualities.contains(t.quality)))
-          .toList();
-    }
-    if (_selectedSizes.isNotEmpty) {
-      result = result
-          .where((d) => d.designs.any((t) => _selectedSizes.contains(t.size)))
-          .toList();
-    }
-    if (_selectedSurfaces.isNotEmpty) {
-      result = result
-          .where((d) =>
-              d.designs.any((t) => _selectedSurfaces.contains(t.surfaceType)))
-          .toList();
+    // Keep only stockists that carry at least one design matching every active
+    // facet (size, surface, colour, type, thickness, stock type, qty, quality).
+    if (_anyDesignFilterActive) {
+      result =
+          result.where((d) => d.designs.any(_matchesDesignFacets)).toList();
     }
     result.sort((a, b) {
       final tierDiff = _tier(a).compareTo(_tier(b));
@@ -371,140 +375,12 @@ class _State extends State<StockistsOverviewScreen> {
         _maxQtyCtrl.clear();
       });
 
-  void _showFilterSheet() {
-    _dismissKeyboard();
-    final sheetHeight = MediaQuery.sizeOf(context).height * 0.6;
-    var localSizes     = Set<String>.from(_selectedSizes);
-    var localSurfaces  = Set<String>.from(_selectedSurfaces);
-
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => StatefulBuilder(
-        builder: (_, setSheet) {
-          Widget chipRow(Set<String> set, List<String> options) => Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: options.map((v) {
-                  final sel = set.contains(v);
-                  return GestureDetector(
-                    onTap: () => setSheet(() {
-                      if (set.contains(v)) { set.remove(v); } else { set.add(v); }
-                    }),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: sel ? const Color(0xFF1B4F72) : Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade400,
-                        ),
-                      ),
-                      child: Text(
-                        v,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: sel ? Colors.white : Colors.grey.shade700,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              );
-
-          return SizedBox(
-            height: sheetHeight,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 10),
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.tune_rounded, color: Color(0xFF1B4F72)),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text('Filter',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: Color(0xFF1B4F72))),
-                      ),
-                      TextButton(
-                        onPressed: () => setSheet(() {
-                          localSizes.clear();
-                          localSurfaces.clear();
-                        }),
-                        child: const Text('Reset All',
-                            style: TextStyle(color: Colors.red)),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      const Text('Size',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                              color: Color(0xFF1B4F72))),
-                      const SizedBox(height: 10),
-                      chipRow(localSizes, _allSizes),
-                      const SizedBox(height: 20),
-                      const Text('Finish',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                              color: Color(0xFF1B4F72))),
-                      const SizedBox(height: 10),
-                      chipRow(localSurfaces, _allSurfaces),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    ).then((_) {
-      if (mounted) {
-        setState(() {
-          _selectedSizes
-            ..clear()
-            ..addAll(localSizes);
-          _selectedSurfaces
-            ..clear()
-            ..addAll(localSurfaces);
-        });
-      }
-    });
-  }
-
   static const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
   static const _filterStockTypes = ['One Time', 'Regular', 'Both'];
 
   void _showDesignFilterSheet() {
     _dismissKeyboard();
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
-    final savedMin     = _minQtyCtrl.text;
-    final savedMax     = _maxQtyCtrl.text;
     var localSizes      = Set<String>.from(_selectedSizes);
     var localSurfaces   = Set<String>.from(_selectedSurfaces);
     var localColours    = Set<String>.from(_selectedColours);
@@ -516,7 +392,6 @@ class _State extends State<StockistsOverviewScreen> {
     showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      enableDrag: false,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -750,21 +625,17 @@ class _State extends State<StockistsOverviewScreen> {
           );
         },
       ),
-    ).then((applied) {
+    ).then((_) {
       if (!mounted) return;
-      if (applied == true) {
-        setState(() {
-          _selectedSizes      ..clear()..addAll(localSizes);
-          _selectedSurfaces   ..clear()..addAll(localSurfaces);
-          _selectedColours    ..clear()..addAll(localColours);
-          _selectedTypes      ..clear()..addAll(localTypes);
-          _selectedThickness  ..clear()..addAll(localThickness);
-          _designStockType    = localStockType;
-        });
-      } else {
-        _minQtyCtrl.text = savedMin;
-        _maxQtyCtrl.text = savedMax;
-      }
+      // Apply on any close (Apply button, swipe-down, or tap-outside).
+      setState(() {
+        _selectedSizes      ..clear()..addAll(localSizes);
+        _selectedSurfaces   ..clear()..addAll(localSurfaces);
+        _selectedColours    ..clear()..addAll(localColours);
+        _selectedTypes      ..clear()..addAll(localTypes);
+        _selectedThickness  ..clear()..addAll(localThickness);
+        _designStockType    = localStockType;
+      });
     });
   }
 
@@ -1716,30 +1587,30 @@ class _State extends State<StockistsOverviewScreen> {
           ),
           const SizedBox(width: 6),
           GestureDetector(
-            onTap: _viewDesigns ? _showDesignFilterSheet : _showFilterSheet,
+            onTap: _showDesignFilterSheet,
             child: Stack(
               clipBehavior: Clip.none,
               children: [
                 Container(
                   padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    color: (_viewDesigns ? _designFilterCount : _activeFilterCount) > 0
+                    color: (_designFilterCount) > 0
                         ? const Color(0xFF1B4F72)
                         : const Color(0xFFF5F5F5),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: (_viewDesigns ? _designFilterCount : _activeFilterCount) > 0
+                      color: (_designFilterCount) > 0
                           ? const Color(0xFF1B4F72)
                           : Colors.grey.shade400,
                     ),
                   ),
                   child: Icon(Icons.tune_rounded,
                       size: 16,
-                      color: (_viewDesigns ? _designFilterCount : _activeFilterCount) > 0
+                      color: (_designFilterCount) > 0
                           ? Colors.white
                           : Colors.grey.shade600),
                 ),
-                if ((_viewDesigns ? _designFilterCount : _activeFilterCount) > 0)
+                if ((_designFilterCount) > 0)
                   Positioned(
                     right: -4,
                     top: -4,
@@ -1750,7 +1621,7 @@ class _State extends State<StockistsOverviewScreen> {
                           color: Colors.red, shape: BoxShape.circle),
                       child: Center(
                         child: Text(
-                            '${_viewDesigns ? _designFilterCount : _activeFilterCount}',
+                            '$_designFilterCount',
                             style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 8,
@@ -1761,24 +1632,19 @@ class _State extends State<StockistsOverviewScreen> {
               ],
             ),
           ),
-          if ((_viewDesigns ? _designFilterCount : _activeFilterCount) > 0) ...[
+          if ((_designFilterCount) > 0) ...[
             const SizedBox(width: 6),
             GestureDetector(
               onTap: () => setState(() {
-                if (_viewDesigns) {
-                  _selectedSizes.clear();
-                  _selectedSurfaces.clear();
-                  _selectedColours.clear();
-                  _selectedTypes.clear();
-                  _selectedThickness.clear();
-                  _selectedQualities.clear();
-                  _designStockType = 'Both';
-                  _minQtyCtrl.clear();
-                  _maxQtyCtrl.clear();
-                } else {
-                  _selectedSizes.clear();
-                  _selectedSurfaces.clear();
-                }
+                _selectedSizes.clear();
+                _selectedSurfaces.clear();
+                _selectedColours.clear();
+                _selectedTypes.clear();
+                _selectedThickness.clear();
+                _selectedQualities.clear();
+                _designStockType = 'Both';
+                _minQtyCtrl.clear();
+                _maxQtyCtrl.clear();
               }),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),

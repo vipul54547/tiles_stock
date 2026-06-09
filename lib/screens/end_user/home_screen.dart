@@ -195,9 +195,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showFilterSheet() {
     FocusManager.instance.primaryFocus?.unfocus();
-    // Save current qty values so we can restore them if the user cancels.
-    final savedMin = _minQtyCtrl.text;
-    final savedMax = _maxQtyCtrl.text;
     var localSizes     = Set<String>.from(_selectedSizes);
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
     var localColours   = Set<String>.from(_selectedColours);
@@ -209,7 +206,6 @@ class _HomeScreenState extends State<HomeScreen> {
     showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
-      enableDrag: false,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -459,22 +455,17 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         },
       ),
-    ).then((applied) {
+    ).then((_) {
       if (!mounted) return;
-      if (applied == true) {
-        setState(() {
-          _selectedSizes     = Set<String>.from(localSizes);
-          _selectedSurfaces  = Set<String>.from(localSurfaces);
-          _selectedColours   = Set<String>.from(localColours);
-          _selectedTypes     = Set<String>.from(localTypes);
-          _selectedThickness = Set<String>.from(localThickness);
-          _stockType         = localStockType;
-        });
-      } else {
-        // User dismissed without applying — restore qty values.
-        _minQtyCtrl.text = savedMin;
-        _maxQtyCtrl.text = savedMax;
-      }
+      // Apply on any close (Apply button, swipe-down, or tap-outside).
+      setState(() {
+        _selectedSizes     = Set<String>.from(localSizes);
+        _selectedSurfaces  = Set<String>.from(localSurfaces);
+        _selectedColours   = Set<String>.from(localColours);
+        _selectedTypes     = Set<String>.from(localTypes);
+        _selectedThickness = Set<String>.from(localThickness);
+        _stockType         = localStockType;
+      });
     });
   }
 

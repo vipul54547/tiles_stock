@@ -873,16 +873,12 @@ class _State extends State<StockistPortfolioScreen> {
     var localThickness = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_designs);
     var localStockType = _stockType;
-    final savedMin     = _minQtyCtrl.text;
-    final savedMax     = _maxQtyCtrl.text;
-    var applied        = false;
     final sheetHeight  = MediaQuery.sizeOf(context).height * 0.72;
     final bottomPad    = MediaQuery.paddingOf(context).bottom;
 
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      enableDrag: false,
       backgroundColor: Colors.transparent,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setSheet) {
@@ -1043,7 +1039,6 @@ class _State extends State<StockistPortfolioScreen> {
               _selectedThickness = Set<String>.from(localThickness);
               _stockType         = localStockType;
             });
-            applied = true;
             Navigator.of(ctx).pop();
           }
 
@@ -1174,10 +1169,17 @@ class _State extends State<StockistPortfolioScreen> {
         },
       ),
     ).then((_) {
-      if (!applied && mounted) {
-        _minQtyCtrl.text = savedMin;
-        _maxQtyCtrl.text = savedMax;
-      }
+      if (!mounted) return;
+      // Apply on any close (Apply button, swipe-down, or tap-outside). The
+      // qty fields edit the live controllers, so they're already current.
+      setState(() {
+        _selectedSizes     = Set<String>.from(localSizes);
+        _selectedSurfaces  = Set<String>.from(localSurfaces);
+        _selectedColours   = Set<String>.from(localColours);
+        _selectedTypes     = Set<String>.from(localTypes);
+        _selectedThickness = Set<String>.from(localThickness);
+        _stockType         = localStockType;
+      });
     });
   }
 

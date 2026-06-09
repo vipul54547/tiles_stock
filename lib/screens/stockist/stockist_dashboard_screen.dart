@@ -6,7 +6,9 @@ import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
+import '../../widgets/filter_section.dart';
 import '../../models/choice_state.dart';
+import '../../utils/tile_types.dart';
 
 class StockistDashboardScreen extends StatefulWidget {
   const StockistDashboardScreen({super.key});
@@ -31,6 +33,9 @@ const _sortOptions = [
 
 const int _lowStockThreshold = 10;
 
+// Stock-type options for the filter (matches the buyer "All Designs" filter).
+const _filterStockTypes = ['One Time', 'Regular', 'Both'];
+
 class _State extends State<StockistDashboardScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
@@ -46,15 +51,30 @@ class _State extends State<StockistDashboardScreen> {
   bool _selectMode = false;
   final Set<String> _selectedIds = {};
 
-  // My Stock filters
+  // My Stock filters — full "All Designs" facet set.
   final Set<String> _selectedQualities = {};
   final Set<String> _selectedSizes = {};
   final Set<String> _selectedSurfaces = {};
+  final Set<String> _selectedColours = {};
+  final Set<String> _selectedTypes = {};
+  final Set<String> _selectedThickness = {};
+  String _stockType = 'Both';
+  final _minQtyCtrl = TextEditingController();
+  final _maxQtyCtrl = TextEditingController();
   String _sortBy = 'default';
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
-  int get _filterCount => _selectedSizes.length + _selectedSurfaces.length;
+  // Count of active facets (quality has its own chips, so it's excluded here).
+  int get _filterCount =>
+      _selectedSizes.length +
+      _selectedSurfaces.length +
+      _selectedColours.length +
+      _selectedTypes.length +
+      _selectedThickness.length +
+      (_stockType != 'Both' ? 1 : 0) +
+      (_minQtyCtrl.text.isNotEmpty ? 1 : 0) +
+      (_maxQtyCtrl.text.isNotEmpty ? 1 : 0);
 
   @override
   void initState() {
@@ -65,6 +85,8 @@ class _State extends State<StockistDashboardScreen> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _minQtyCtrl.dispose();
+    _maxQtyCtrl.dispose();
     super.dispose();
   }
 
@@ -133,6 +155,30 @@ class _State extends State<StockistDashboardScreen> {
     if (_selectedSurfaces.isNotEmpty) {
       result =
           result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
+    }
+    if (_selectedColours.isNotEmpty) {
+      result = result.where((d) => _selectedColours.contains(d.colour)).toList();
+    }
+    if (_selectedTypes.isNotEmpty) {
+      result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
+    }
+    if (_selectedThickness.isNotEmpty) {
+      result = result
+          .where((d) => _selectedThickness.contains(thicknessBandOf(d)))
+          .toList();
+    }
+    if (_stockType != 'Both') {
+      result = result
+          .where((d) => d.stockType == _stockType || d.stockType == 'Both')
+          .toList();
+    }
+    final minQty = int.tryParse(_minQtyCtrl.text);
+    final maxQty = int.tryParse(_maxQtyCtrl.text);
+    if (minQty != null) {
+      result = result.where((d) => d.boxQuantity >= minQty).toList();
+    }
+    if (maxQty != null) {
+      result = result.where((d) => d.boxQuantity <= maxQty).toList();
     }
 
     if (_searchQuery.isNotEmpty) {
@@ -667,134 +713,290 @@ class _State extends State<StockistDashboardScreen> {
         ),
       );
 
-  // Filter sheet (size + surface), All-Design style.
+  // Full "All Designs" style filter: Size, Finish, Tile Type, Thickness,
+  // Colour, Stock Type and a Quantity range, with a live result count. Options
+  // are derived from the stockist's in-stock designs (so no empty choices).
   void _showFilterSheet() {
+    FocusManager.instance.primaryFocus?.unfocus();
     final inStock = _inStockDesigns;
-    final sizes = inStock.map((d) => d.size).toSet().toList()..sort();
+    final sizes    = inStock.map((d) => d.size).toSet().toList()..sort();
     final surfaces = inStock.map((d) => d.surfaceType).toSet().toList()..sort();
-    showModalBottomSheet<void>(
+    final colours  = inStock
+        .map((d) => d.colour)
+        .where((c) => c.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    final types = inStock
+        .map((d) => d.tileType)
+        .where((t) => t.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    final thicknessBands = availableThicknessBands(inStock);
+
+    // Edit a working copy of the chip selections; they're committed when the
+    // sheet closes (Apply button, swipe-down, or tap-outside all apply).
+    var localSizes     = Set<String>.from(_selectedSizes);
+    var localSurfaces  = Set<String>.from(_selectedSurfaces);
+    var localColours   = Set<String>.from(_selectedColours);
+    var localTypes     = Set<String>.from(_selectedTypes);
+    var localThickness = Set<String>.from(_selectedThickness);
+    var localStockType = _stockType;
+    final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
+
+    showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
+        builder: (ctx, setSheet) {
+          Widget chip(String label, bool sel, VoidCallback onTap) =>
+              GestureDetector(
+                onTap: () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  onTap();
+                },
                 child: Container(
-                  width: 40, height: 4,
-                  margin: const EdgeInsets.only(bottom: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2)),
-                ),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Filter',
+                    color: sel ? const Color(0xFF1B4F72) : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: sel
+                            ? const Color(0xFF1B4F72)
+                            : Colors.grey.shade400),
+                  ),
+                  child: Text(label,
                       style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
-                  if (_filterCount > 0)
-                    TextButton(
-                      onPressed: () {
-                        setSheet(() {
-                          _selectedSizes.clear();
-                          _selectedSurfaces.clear();
-                        });
-                        setState(() {});
-                      },
-                      child: const Text('Clear all'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              const Text('Size',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-              const SizedBox(height: 6),
-              Wrap(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: sel ? Colors.white : Colors.grey.shade700)),
+                ),
+              );
+
+          Widget chipWrap(List<String> options, Set<String> sel) => Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: sizes
-                    .map((s) => _filterChip(s, _selectedSizes.contains(s), () {
-                          setSheet(() {
-                            if (_selectedSizes.contains(s)) {
-                              _selectedSizes.remove(s);
-                            } else {
-                              _selectedSizes.add(s);
-                            }
-                          });
-                          setState(() {});
-                        }))
+                children: options
+                    .map((o) => chip(o, sel.contains(o), () => setSheet(() {
+                          if (sel.contains(o)) {
+                            sel.remove(o);
+                          } else {
+                            sel.add(o);
+                          }
+                        })))
                     .toList(),
-              ),
-              const SizedBox(height: 14),
-              const Text('Surface',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: surfaces
-                    .map((s) =>
-                        _filterChip(s, _selectedSurfaces.contains(s), () {
-                          setSheet(() {
-                            if (_selectedSurfaces.contains(s)) {
-                              _selectedSurfaces.remove(s);
-                            } else {
-                              _selectedSurfaces.add(s);
-                            }
-                          });
-                          setState(() {});
-                        }))
-                    .toList(),
-              ),
-              const SizedBox(height: 18),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1B4F72),
-                      foregroundColor: Colors.white),
-                  child: const Text('Done'),
+              );
+
+          int previewCount() {
+            var r = _inStockDesigns;
+            if (_selectedQualities.isNotEmpty) {
+              r = r.where((d) => _selectedQualities.contains(d.quality)).toList();
+            }
+            if (_searchQuery.isNotEmpty) {
+              final q = _searchQuery.toLowerCase();
+              r = r.where((d) => d.name.toLowerCase().contains(q)).toList();
+            }
+            if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
+            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
+            if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
+            if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
+            if (localThickness.isNotEmpty) {
+              r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
+            }
+            if (localStockType != 'Both') {
+              r = r.where((d) => d.stockType == localStockType || d.stockType == 'Both').toList();
+            }
+            final mn = int.tryParse(_minQtyCtrl.text);
+            final mx = int.tryParse(_maxQtyCtrl.text);
+            if (mn != null) r = r.where((d) => d.boxQuantity >= mn).toList();
+            if (mx != null) r = r.where((d) => d.boxQuantity <= mx).toList();
+            return r.length;
+          }
+
+          final qtyRow = Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _minQtyCtrl,
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setSheet(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Min', isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
                 ),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _maxQtyCtrl,
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setSheet(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Max', isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ]);
 
-  Widget _filterChip(String label, bool selected, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: selected
-                ? const Color(0xFF1B4F72)
-                : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-                color: selected
-                    ? const Color(0xFF1B4F72)
-                    : Colors.grey.shade300),
-          ),
-          child: Text(label.replaceAll(' mm', ''),
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: selected ? Colors.white : Colors.grey.shade700)),
-        ),
-      );
+          return SizedBox(
+            height: sheetHeight,
+            child: Column(
+              children: [
+                Center(
+                  child: Container(
+                    width: 40, height: 4,
+                    margin: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                  child: Row(
+                    children: [
+                      const Text('Filter Designs',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => setSheet(() {
+                          localSizes.clear();
+                          localSurfaces.clear();
+                          localColours.clear();
+                          localTypes.clear();
+                          localThickness.clear();
+                          localStockType = 'Both';
+                          _minQtyCtrl.clear();
+                          _maxQtyCtrl.clear();
+                        }),
+                        child: const Text('Reset all',
+                            style: TextStyle(color: Colors.red, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: Colors.grey.shade200),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Quantity (boxes)',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      qtyRow,
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: Colors.grey.shade200),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    children: [
+                      if (sizes.isNotEmpty)
+                        FilterSection(
+                          title: 'Size',
+                          summary: filterSummary(localSizes),
+                          child: chipWrap(sizes, localSizes),
+                        ),
+                      if (surfaces.isNotEmpty)
+                        FilterSection(
+                          title: 'Finish',
+                          summary: filterSummary(localSurfaces),
+                          child: chipWrap(surfaces, localSurfaces),
+                        ),
+                      if (types.isNotEmpty)
+                        FilterSection(
+                          title: 'Tile Type',
+                          summary: filterSummary(localTypes),
+                          child: chipWrap(types, localTypes),
+                        ),
+                      if (thicknessBands.isNotEmpty)
+                        FilterSection(
+                          title: 'Thickness (approx)',
+                          summary: filterSummary(localThickness),
+                          child: chipWrap(thicknessBands, localThickness),
+                        ),
+                      if (colours.isNotEmpty)
+                        FilterSection(
+                          title: 'Colour',
+                          summary: filterSummary(localColours),
+                          child: chipWrap(colours, localColours),
+                        ),
+                      FilterSection(
+                        title: 'Stock Type',
+                        summary: localStockType,
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _filterStockTypes
+                              .map((t) => chip(t, localStockType == t,
+                                  () => setSheet(() => localStockType = t)))
+                              .toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1B4F72),
+                            foregroundColor: Colors.white),
+                        child: Text('Show ${previewCount()} designs'),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    ).then((_) {
+      if (!mounted) return;
+      // Apply on any close (Apply button, swipe-down, or tap-outside). Qty
+      // fields edit the live controllers, so they're already current.
+      setState(() {
+        _selectedSizes
+          ..clear()
+          ..addAll(localSizes);
+        _selectedSurfaces
+          ..clear()
+          ..addAll(localSurfaces);
+        _selectedColours
+          ..clear()
+          ..addAll(localColours);
+        _selectedTypes
+          ..clear()
+          ..addAll(localTypes);
+        _selectedThickness
+          ..clear()
+          ..addAll(localThickness);
+        _stockType = localStockType;
+      });
+    });
+  }
 
   void _showSortSheet() {
     showModalBottomSheet(
