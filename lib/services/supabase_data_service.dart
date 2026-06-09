@@ -466,6 +466,29 @@ class SupabaseDataService {
     }
   }
 
+  /// Rejects one buyer's inquiry for a design by deleting their My-Choice.
+  /// Server-side no-op if the caller doesn't own the design.
+  Future<void> rejectInquiry(String designId, String endUserId) async {
+    try {
+      await supabase.rpc('reject_inquiry', params: {
+        'p_design_id':   designId,
+        'p_end_user_id': endUserId,
+      });
+    } catch (e, st) {
+      debugPrint('rejectInquiry failed ($designId/$endUserId): $e\n$st');
+    }
+  }
+
+  /// Rejects every buyer's inquiry for a design (clears all My-Choice rows).
+  Future<void> rejectDesignInquiries(String designId) async {
+    try {
+      await supabase.rpc('reject_design_inquiries',
+          params: {'p_design_id': designId});
+    } catch (e, st) {
+      debugPrint('rejectDesignInquiries failed ($designId): $e\n$st');
+    }
+  }
+
   // ── my choices (per end user) ──────────────────────────────────────────────
 
   /// This end user's saved choices as { designId : quantity }.
