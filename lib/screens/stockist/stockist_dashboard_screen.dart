@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../config/app_config.dart';
 import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
@@ -44,6 +47,8 @@ class _State extends State<StockistDashboardScreen> {
   Map<String, ({int buyers, int boxes})> _inquiries = {};
   // Boxes the stockist added that are held for admin approval (big-stock rule).
   int _pendingBoxes = 0;
+  // This stockist's public catalog share token (for the shareable link).
+  String _shareToken = '';
   bool _loading = true;
   String get _myStockistId => currentStockistUUID;
 
@@ -129,6 +134,10 @@ class _State extends State<StockistDashboardScreen> {
     final data = await _service.getDesignsByStockist(_myStockistId);
     final inquiries = await _service.getMyDesignInquiries();
     final pending = await _service.myPendingStockBoxes();
+    if (_shareToken.isEmpty) {
+      final me = await _service.getStockistBySequentialId(currentStockistId);
+      _shareToken = me?.shareToken ?? '';
+    }
     if (!mounted) return;
     setState(() {
       _designs = data;
@@ -136,6 +145,89 @@ class _State extends State<StockistDashboardScreen> {
       _pendingBoxes = pending;
       _loading = false;
     });
+  }
+
+  // Hash-style URL so the link routes on any static host (no server rewrite).
+  String get _shareLink => '${AppConfig.shareBaseUrl}/#/s/$_shareToken';
+
+  void _showShareSheet() {
+    if (_shareToken.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Share link not available yet.')));
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Share your catalog',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 4),
+              const Text(
+                  'Send this link to buyers you choose. They can view your '
+                  'in-stock designs in a browser — no app or login needed.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: Text(_shareLink,
+                    style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        await Clipboard.setData(
+                            ClipboardData(text: _shareLink));
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Link copied.')));
+                        }
+                      },
+                      icon: const Icon(Icons.copy, size: 18),
+                      label: const Text('Copy'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final uri = Uri.parse(
+                            'https://wa.me/?text=${Uri.encodeComponent('My tile catalog: $_shareLink')}');
+                        await launchUrl(uri,
+                            mode: LaunchMode.externalApplication);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      },
+                      icon: const Icon(Icons.chat_rounded, size: 18),
+                      label: const Text('WhatsApp'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF25D366),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -247,6 +339,11 @@ class _State extends State<StockistDashboardScreen> {
           : AppBar(
               title: const Text('Stock Dashboard'),
               actions: [
+                IconButton(
+                  icon: const Icon(Icons.share_outlined),
+                  tooltip: 'Share my catalog',
+                  onPressed: _showShareSheet,
+                ),
                 IconButton(
                   icon: const Icon(Icons.move_to_inbox_outlined),
                   tooltip: 'Received inquiries',

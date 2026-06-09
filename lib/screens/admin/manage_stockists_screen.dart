@@ -345,6 +345,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _priority = TextEditingController(text: '0.00');
   final _gst      = TextEditingController();
   String _tier = ''; // '' = no tier; else Platinum/Gold/Silver
+  bool _listed = true; // shown in the public market (false = link-only)
 
   bool _saving = false;
   String? _error;
@@ -365,6 +366,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _gst.text      = s.gstNumber;
       _priority.text = s.priority.toStringAsFixed(2);
       _tier = kStockistTiers.contains(s.stockistType) ? s.stockistType : '';
+      _listed = s.isListed;
     }
   }
 
@@ -397,6 +399,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           gstNumber: _gst.text.trim(),
           stockistType: _tier,
         );
+        await _dataSvc.setStockistListed(widget.existing!.id, _listed);
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -499,6 +502,22 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                   onChanged: (v) => setState(() => _tier = v ?? ''),
                 ),
               ),
+              if (_isEdit)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _listed,
+                    activeThumbColor: const Color(0xFF1B4F72),
+                    title: const Text('Show in market'),
+                    subtitle: Text(
+                        _listed
+                            ? 'Visible to all buyers in the app.'
+                            : 'Private — hidden from the app, reachable only by share link.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _listed = v),
+                  ),
+                ),
               _field(_priority, 'Priority (0.00)',
                   keyboard: const TextInputType.numberWithOptions(decimal: true),
                   validator: (v) {

@@ -179,7 +179,10 @@ class _State extends State<StockistsOverviewScreen> {
       _service.getAllDesigns(),
     ]);
 
-    final stockists = results[0] as List<Stockist>;
+    // Link-only stockists are hidden from the public market (reachable only via
+    // their share link).
+    final stockists =
+        (results[0] as List<Stockist>).where((s) => s.isListed).toList();
     final designs = results[1] as List<TileDesign>;
     await loadStockistGroupsFromDb(); // the user's saved group filters
     await loadMyChoices();            // restore saved My Choice selections

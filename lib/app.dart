@@ -13,6 +13,7 @@ import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 
 import 'screens/notifications_screen.dart';
+import 'screens/public_catalog_screen.dart';
 
 import 'screens/reset_password_screen.dart';
 
@@ -66,6 +67,13 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/reset-password', builder: (_, __) => const ResetPasswordScreen()),
 
     GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
+
+    // Public, login-free stockist catalog (share link → Flutter web build).
+    GoRoute(
+      path: '/s/:token',
+      builder: (_, state) =>
+          PublicCatalogScreen(token: state.pathParameters['token']!),
+    ),
 
     GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
 

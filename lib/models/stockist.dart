@@ -30,6 +30,13 @@ class Stockist {
 
   final bool isActive;
 
+  /// Whether the stockist appears in the public in-app market. False = the
+  /// stockist is hidden from the market and reachable only via their share link.
+  final bool isListed;
+
+  /// Unguessable token that powers the stockist's public web catalog link.
+  final String shareToken;
+
   final DateTime createdAt;
 
 
@@ -59,6 +66,10 @@ class Stockist {
     this.stockistType = '',
 
     this.isActive = true,
+
+    this.isListed = true,
+
+    this.shareToken = '',
 
     required this.createdAt,
 
@@ -91,6 +102,10 @@ class Stockist {
     stockistType: json['stockist_type'] ?? '',
 
     isActive: json['is_active'] ?? true,
+
+    isListed: json['is_listed'] ?? true,
+
+    shareToken: json['share_token'] ?? '',
 
     createdAt: DateTime.parse(json['created_at']),
 

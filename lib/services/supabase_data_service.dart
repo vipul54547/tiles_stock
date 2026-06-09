@@ -68,8 +68,9 @@ class SupabaseDataService {
       }
       final data = await supabase
           .from('designs')
-          .select('*, stockists!inner(sequential_id, is_active, priority)')
+          .select('*, stockists!inner(sequential_id, is_active, is_listed, priority)')
           .eq('stockists.is_active', true)
+          .eq('stockists.is_listed', true) // hide link-only stockists from market
           .neq('status', 'out_of_stock')
           .gt('box_quantity', 0) // never show 0-stock to buyers
           .order('created_at', ascending: false);
@@ -133,8 +134,9 @@ class SupabaseDataService {
           ? supabase.from('public_designs').select()
           : supabase
               .from('designs')
-              .select('*, stockists!inner(sequential_id, is_active, priority)')
+              .select('*, stockists!inner(sequential_id, is_active, is_listed, priority)')
               .eq('stockists.is_active', true)
+              .eq('stockists.is_listed', true) // hide link-only from market
               .neq('status', 'out_of_stock')
               .gt('box_quantity', 0); // never show 0-stock to buyers
 
@@ -285,6 +287,27 @@ class SupabaseDataService {
     await supabase.rpc('admin_delete_stockist', params: {'p_seq': sequentialId});
   }
 
+  /// Admin: set whether a stockist appears in the public in-app market
+  /// (false = link-only / private; still reachable via their share link).
+  Future<void> setStockistListed(String sequentialId, bool listed) async {
+    await supabase.rpc('admin_set_stockist_listed',
+        params: {'p_seq': sequentialId, 'p_is_listed': listed});
+  }
+
+  /// Public (no login): a stockist's catalog by share token, for the web link.
+  /// Returns null if the token is invalid or the stockist is inactive.
+  Future<Map<String, dynamic>?> getPublicCatalog(String token) async {
+    try {
+      final res =
+          await supabase.rpc('public_catalog', params: {'p_token': token});
+      if (res == null) return null;
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('getPublicCatalog failed ($token): $e\n$st');
+      return null;
+    }
+  }
+
   /// Admin: update an end user's editable fields (keyed by row uuid).
   Future<void> updateEndUser({
     required String uuid,
@@ -366,6 +389,8 @@ class SupabaseDataService {
         gstNumber: s['gst_number'] ?? '',
         stockistType: s['stockist_type'] ?? '',
         isActive:  s['is_active'] ?? true,
+        isListed:  s['is_listed'] ?? true,
+        shareToken: s['share_token'] ?? '',
         createdAt: DateTime.parse(s['created_at']),
       );
 
