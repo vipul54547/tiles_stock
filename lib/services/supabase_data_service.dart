@@ -4,6 +4,9 @@ import '../models/stockist.dart';
 import '../models/end_user.dart';
 import '../models/surface_type.dart';
 import '../models/app_notification.dart';
+import '../models/tile_size.dart';
+import '../utils/finishes.dart';
+import '../utils/tile_sizes.dart';
 import 'supabase_auth_service.dart';
 import '../models/choice_state.dart';
 import '../main.dart';
@@ -250,6 +253,17 @@ class SupabaseDataService {
     }
   }
 
+  /// Admin: set a stockist's listing controls — priority (in-tier order) and
+  /// tier (Platinum/Gold/Silver). Keyed by sequential id. Drives buyer order.
+  Future<void> updateStockistListing(
+      String sequentialId, double priority, String stockistType) async {
+    await supabase.rpc('admin_set_stockist_listing', params: {
+      'p_seq':           sequentialId,
+      'p_priority':      priority,
+      'p_stockist_type': stockistType,
+    });
+  }
+
   /// Activate / deactivate a stockist by its display (sequential) ID.
   Future<bool> setStockistActive(String sequentialId, bool active) async {
     try {
@@ -452,6 +466,56 @@ class SupabaseDataService {
       });
     } catch (e, st) {
       debugPrint('fulfillChoice failed ($designId/$endUserId): $e\n$st');
+    }
+  }
+
+  /// Admin: all buyer inquiries across stockists (stockist, design, buyer,
+  /// city, boxes).
+  Future<List<Map<String, dynamic>>> getInquiryReport() async {
+    try {
+      final res = await supabase.rpc('admin_inquiry_report');
+      final list = (res as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e, st) {
+      debugPrint('getInquiryReport failed: $e\n$st');
+      return [];
+    }
+  }
+
+  // ── pending stock approval (big-stock workflow) ────────────────────────────
+
+  /// Admin: per-stockist summary of stock awaiting approval.
+  Future<List<Map<String, dynamic>>> getPendingStock() async {
+    try {
+      final res = await supabase.rpc('admin_pending_stock');
+      final list = (res as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (e, st) {
+      debugPrint('getPendingStock failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Admin: approve or reject ALL pending stock for one stockist.
+  Future<int> setPendingStock(String stockistId, bool approve) async {
+    try {
+      final res = await supabase.rpc('set_pending_stock',
+          params: {'p_stockist_id': stockistId, 'p_approve': approve});
+      return (res as int?) ?? 0;
+    } catch (e, st) {
+      debugPrint('setPendingStock failed ($stockistId): $e\n$st');
+      rethrow;
+    }
+  }
+
+  /// Stockist: total of my own boxes awaiting admin approval.
+  Future<int> myPendingStockBoxes() async {
+    try {
+      final res = await supabase.rpc('my_pending_stock_boxes');
+      return (res as int?) ?? 0;
+    } catch (e, st) {
+      debugPrint('myPendingStockBoxes failed: $e\n$st');
+      return 0;
     }
   }
 
@@ -924,6 +988,72 @@ class SupabaseDataService {
     if (activeOnly) query = query.eq('is_active', true);
     final data = await query.order('sort_order');
     return data.map<SurfaceType>((s) => SurfaceType.fromJson(s)).toList();
+  }
+
+  /// Active finish names in the admin-defined order — used so the finish lists
+  /// in buyer filters match the Manage Finishes sequence. Falls back to the
+  /// built-in kFinishes order on failure.
+  Future<List<String>> getActiveFinishNames() async {
+    try {
+      final types = await getSurfaceTypes(activeOnly: true);
+      final names = types.map((t) => t.name).toList();
+      return names.isEmpty ? List<String>.from(kFinishes) : names;
+    } catch (_) {
+      return List<String>.from(kFinishes);
+    }
+  }
+
+  // ── tile sizes (admin-managed master) ───────────────────────────────────────
+
+  Future<List<TileSize>> getTileSizes({bool activeOnly = false}) async {
+    var query = supabase.from('tile_sizes').select();
+    if (activeOnly) query = query.eq('is_active', true);
+    final data = await query.order('sort_order');
+    return data.map<TileSize>((s) => TileSize.fromJson(s)).toList();
+  }
+
+  /// Active size names in the admin-defined order (fallback to kAllowedSizes).
+  Future<List<String>> getActiveSizeNames() async {
+    try {
+      final sizes = await getTileSizes(activeOnly: true);
+      final names = sizes.map((s) => s.name).toList();
+      return names.isEmpty ? List<String>.from(kAllowedSizes) : names;
+    } catch (_) {
+      return List<String>.from(kAllowedSizes);
+    }
+  }
+
+  Future<void> addTileSize(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw 'Size cannot be empty.';
+    final existing = await supabase
+        .from('tile_sizes')
+        .select('sort_order')
+        .order('sort_order', ascending: false)
+        .limit(1);
+    final nextOrder =
+        (existing.isEmpty ? 0 : (existing.first['sort_order'] as int)) + 10;
+    await supabase
+        .from('tile_sizes')
+        .insert({'name': trimmed, 'sort_order': nextOrder});
+  }
+
+  Future<void> renameTileSize(String id, String newName) async {
+    final trimmed = newName.trim();
+    if (trimmed.isEmpty) throw 'Size cannot be empty.';
+    await supabase.from('tile_sizes').update({'name': trimmed}).eq('id', id);
+  }
+
+  Future<void> setTileSizeActive(String id, bool active) async {
+    await supabase.from('tile_sizes').update({'is_active': active}).eq('id', id);
+  }
+
+  Future<void> deleteTileSize(String id) async {
+    await supabase.from('tile_sizes').delete().eq('id', id);
+  }
+
+  Future<void> reorderTileSizes(List<String> orderedIds) async {
+    await supabase.rpc('reorder_tile_sizes', params: {'p_ids': orderedIds});
   }
 
   Future<void> addSurfaceType(String name) async {

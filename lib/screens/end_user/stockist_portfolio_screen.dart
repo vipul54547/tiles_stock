@@ -31,7 +31,6 @@ const _qualityMeta = {
 };
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-const _filterSurfaces   = kFinishes;
 const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
 const _filterStockTypes = ['One Time', 'Regular', 'Both'];
 
@@ -39,6 +38,9 @@ class _State extends State<StockistPortfolioScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs  = [];
   Stockist?        _stockist;
+  // Finish + size options for the filter, in the admin's master order.
+  List<String>     _surfaceOpts = kFinishes;
+  List<String>     _sizeOpts = _filterSizes;
   bool             _loading  = true;
 
   final Set<String> _selectedQualities = {};
@@ -186,9 +188,14 @@ class _State extends State<StockistPortfolioScreen> {
     try {
       stockist = stockists.firstWhere((s) => s.id == widget.stockistId);
     } catch (_) {}
+    final finishes = await _service.getActiveFinishNames();
+    final sizes = await _service.getActiveSizeNames();
+    if (!mounted) return;
     setState(() {
       _designs  = designs;
       _stockist = stockist;
+      _surfaceOpts = finishes;
+      _sizeOpts = sizes;
       _loading  = false;
     });
   }
@@ -1086,12 +1093,12 @@ class _State extends State<StockistPortfolioScreen> {
                       FilterSection(
                         title: 'Size',
                         summary: filterSummary(localSizes),
-                        child: chipRow(_filterSizes, localSizes, stripMm: true),
+                        child: chipRow(_sizeOpts, localSizes, stripMm: true),
                       ),
                       FilterSection(
                         title: 'Finish',
                         summary: filterSummary(localSurfaces),
-                        child: chipRow(_filterSurfaces, localSurfaces),
+                        child: chipRow(_surfaceOpts, localSurfaces),
                       ),
                       FilterSection(
                         title: 'Tile Type',

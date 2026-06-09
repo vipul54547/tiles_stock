@@ -82,6 +82,7 @@ class _State extends State<UploadStockScreen> {
   // once so every parsed row can be aligned to an official finish (and the
   // surface picker offers exactly the admin's finishes, not a hardcoded list).
   List<String>        _finishes = kFinishes;     // fallback until loaded
+  List<String>        _sizes    = kAllowedSizes;  // admin master, loaded once
   Map<String, String> _aliases  = {};            // normalisedRaw → finish name
   bool _configLoaded = false;
 
@@ -97,12 +98,14 @@ class _State extends State<UploadStockScreen> {
     try {
       final types = await _dataSvc.getSurfaceTypes(activeOnly: true);
       final names = types.map((t) => t.name).toList();
+      final sizeNames = await _dataSvc.getActiveSizeNames();
       final aliases = currentStockistUUID.isEmpty
           ? <String, String>{}
           : await _dataSvc.getSurfaceAliases(currentStockistUUID);
       if (!mounted) return;
       setState(() {
         if (names.isNotEmpty) _finishes = names;
+        if (sizeNames.isNotEmpty) _sizes = sizeNames;
         _aliases = aliases;
         _configLoaded = true;
       });
@@ -407,7 +410,7 @@ class _State extends State<UploadStockScreen> {
   Future<bool> _confirmDetails(PdfImportResult parsed) async {
     // Pre-fill size from the filename when it maps to a supported size.
     final parsedSize = normaliseSize(parsed.size);
-    _size = kAllowedSizes.contains(parsedSize) ? parsedSize : kAllowedSizes.first;
+    _size = _sizes.contains(parsedSize) ? parsedSize : _sizes.first;
     _quality = kQualities.contains(parsed.quality) ? parsed.quality : 'Standard';
     final countCtrl =
         TextEditingController(text: parsed.designs.length.toString());
@@ -440,13 +443,13 @@ class _State extends State<UploadStockScreen> {
                   DropdownButton<String>(
                     isExpanded: true,
                     value: _size,
-                    items: kAllowedSizes
+                    items: _sizes
                         .map((s) => DropdownMenuItem(
                             value: s, child: Text(s.replaceAll(' mm', ' mm'))))
                         .toList(),
                     onChanged: (v) => setLocal(() => _size = v ?? _size),
                   ),
-                  if (!kAllowedSizes.contains(parsedSize))
+                  if (!_sizes.contains(parsedSize))
                     Text('⚠ Filename size "${parsed.size}" not recognised — '
                         'please pick the correct size.',
                         style: TextStyle(

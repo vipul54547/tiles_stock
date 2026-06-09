@@ -16,7 +16,6 @@ import '../../utils/tile_types.dart';
 import '../../widgets/filter_section.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-const _filterSurfaces   = kFinishes;
 const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
 const _filterQualities  = ['Premium', 'Standard'];
 const _filterStockTypes = ['One Time', 'Regular', 'Both'];
@@ -37,6 +36,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
+  // Finish + size options for the filter, in the admin's master order.
+  List<String> _surfaceOpts = kFinishes;
+  List<String> _sizeOpts = _filterSizes;
   bool _loading = true;
 
   Set<String> _selectedSizes = {};
@@ -85,8 +87,13 @@ class _HomeScreenState extends State<HomeScreen> {
     // varies each time the screen loads (app open / pull-to-refresh).
     final ranked =
         rankDesigns(designs, seed: DateTime.now().microsecondsSinceEpoch);
+    final finishes = await _service.getActiveFinishNames();
+    final sizes = await _service.getActiveSizeNames();
+    if (!mounted) return;
     setState(() {
       _designs = ranked;
+      _surfaceOpts = finishes;
+      _sizeOpts = sizes;
       _loading = false;
     });
   }
@@ -386,12 +393,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       FilterSection(
                         title: 'Size',
                         summary: filterSummary(localSizes),
-                        child: chipWrap(_filterSizes, localSizes),
+                        child: chipWrap(_sizeOpts, localSizes),
                       ),
                       FilterSection(
                         title: 'Finish',
                         summary: filterSummary(localSurfaces),
-                        child: chipWrap(_filterSurfaces, localSurfaces),
+                        child: chipWrap(_surfaceOpts, localSurfaces),
                       ),
                       FilterSection(
                         title: 'Tile Type',

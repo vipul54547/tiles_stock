@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
 import '../../widgets/phone_field.dart';
+import '../../utils/stockist_tiers.dart';
 import 'excel_import_screen.dart';
 
 // Admin screen to view existing stockists and add a single new one. The
@@ -207,7 +208,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _address  = TextEditingController();
   final _priority = TextEditingController(text: '0.00');
   final _gst      = TextEditingController();
-  final _type     = TextEditingController();
+  String _tier = ''; // '' = no tier; else Platinum/Gold/Silver
 
   bool _saving = false;
   String? _error;
@@ -216,7 +217,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   void dispose() {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
-      _priority, _gst, _type
+      _priority, _gst
     ]) {
       c.dispose();
     }
@@ -238,7 +239,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
         address:  _address.text.trim(),
         priority: double.tryParse(_priority.text.trim()) ?? 0,
         gstNumber: _gst.text.trim(),
-        stockistType: _type.text.trim(),
+        stockistType: _tier,
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -306,8 +307,21 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
               _field(_state, 'State'),
               _field(_address, 'Address'),
               _field(_gst, 'GST number (optional)'),
-              _field(_type, 'Stockist type (optional)',
-                  hint: 'e.g. Gold, Platinum, Silver'),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: DropdownButtonFormField<String>(
+                  initialValue: _tier,
+                  decoration: const InputDecoration(
+                      labelText: 'Tier (controls listing order)',
+                      border: OutlineInputBorder()),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('None')),
+                    ...kStockistTiers.map(
+                        (t) => DropdownMenuItem(value: t, child: Text(t))),
+                  ],
+                  onChanged: (v) => setState(() => _tier = v ?? ''),
+                ),
+              ),
               _field(_priority, 'Priority (0.00)',
                   keyboard: const TextInputType.numberWithOptions(decimal: true),
                   validator: (v) {

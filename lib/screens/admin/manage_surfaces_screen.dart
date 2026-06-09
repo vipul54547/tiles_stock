@@ -230,7 +230,20 @@ class _ManageSurfacesScreenState extends State<ManageSurfacesScreen> {
         child: ListTile(
           leading: ReorderableDragStartListener(
             index: index,
-            child: const Icon(Icons.drag_handle, color: Colors.grey),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 24,
+                  alignment: Alignment.center,
+                  child: Text('${index + 1}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B4F72))),
+                ),
+                const Icon(Icons.drag_handle, color: Colors.grey),
+              ],
+            ),
           ),
           title: Text(s.name,
               style: const TextStyle(fontWeight: FontWeight.w600)),

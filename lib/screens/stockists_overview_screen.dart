@@ -15,6 +15,7 @@ import '../utils/my_choice.dart';
 import '../utils/tile_types.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/notification_bell.dart';
+import '../utils/stockist_tiers.dart';
 
 const _qualities = ['Premium', 'Standard'];
 const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
@@ -183,8 +184,24 @@ class _State extends State<StockistsOverviewScreen> {
     await loadStockistGroupsFromDb(); // the user's saved group filters
     await loadMyChoices();            // restore saved My Choice selections
 
-    final sizes = designs.map((d) => d.size).toSet().toList()..sort();
-    final surfaces = designs.map((d) => d.surfaceType).toSet().toList()..sort();
+    // Order sizes & surfaces by the admin master sequence (unknown ones fall to
+    // the end), so the filter + size table rows/columns match that order.
+    final sizeOrder = await _service.getActiveSizeNames();
+    final finishOrder = await _service.getActiveFinishNames();
+    int rankIn(List<String> order, String v) {
+      final i = order.indexOf(v);
+      return i < 0 ? 1 << 20 : i;
+    }
+    final sizes = designs.map((d) => d.size).toSet().toList()
+      ..sort((a, b) {
+        final r = rankIn(sizeOrder, a).compareTo(rankIn(sizeOrder, b));
+        return r != 0 ? r : a.compareTo(b);
+      });
+    final surfaces = designs.map((d) => d.surfaceType).toSet().toList()
+      ..sort((a, b) {
+        final r = rankIn(finishOrder, a).compareTo(rankIn(finishOrder, b));
+        return r != 0 ? r : a.compareTo(b);
+      });
 
     final data = stockists.asMap().entries.map((e) {
       final s = e.value;
@@ -255,6 +272,14 @@ class _State extends State<StockistsOverviewScreen> {
           result.where((d) => d.designs.any(_matchesDesignFacets)).toList();
     }
     result.sort((a, b) {
+      // 1) membership tier (Platinum > Gold > Silver > none) — admin-set.
+      final typeDiff = stockistTierRank(b.stockist.stockistType)
+          .compareTo(stockistTierRank(a.stockist.stockistType));
+      if (typeDiff != 0) return typeDiff;
+      // 2) priority within the tier (higher shown first) — admin-set.
+      final prioDiff = b.stockist.priority.compareTo(a.stockist.priority);
+      if (prioDiff != 0) return prioDiff;
+      // 3) automatic stock-volume ranking as the tiebreaker.
       final tierDiff = _tier(a).compareTo(_tier(b));
       if (tierDiff != 0) return tierDiff;
       return _filteredPerDesignAvg(b).compareTo(_filteredPerDesignAvg(a));
@@ -1032,14 +1057,18 @@ class _State extends State<StockistsOverviewScreen> {
   @override
   Widget build(BuildContext context) {
     final appBar = AppBar(
-      leading: IconButton(
-        icon: const Icon(Icons.logout),
-        tooltip: 'Logout',
-        onPressed: () async {
-          await SupabaseAuthService().logout();
-          if (context.mounted) context.go('/login');
-        },
-      ),
+      // When this screen was pushed (e.g. admin opening it from the panel) show
+      // a Back button; when it's the buyer's home root, show Logout instead.
+      leading: Navigator.canPop(context)
+          ? const BackButton()
+          : IconButton(
+              icon: const Icon(Icons.logout),
+              tooltip: 'Logout',
+              onPressed: () async {
+                await SupabaseAuthService().logout();
+                if (context.mounted) context.go('/login');
+              },
+            ),
       title: const Text('Tiles Stock'),
       actions: [
         IconButton(

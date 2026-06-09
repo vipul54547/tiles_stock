@@ -42,6 +42,8 @@ class _State extends State<StockistDashboardScreen> {
   List<TileDesign> _designs = [];
   // Buyer My-Choice interest in this stockist's designs: designId → (buyers, boxes).
   Map<String, ({int buyers, int boxes})> _inquiries = {};
+  // Boxes the stockist added that are held for admin approval (big-stock rule).
+  int _pendingBoxes = 0;
   bool _loading = true;
   String get _myStockistId => currentStockistUUID;
 
@@ -126,10 +128,12 @@ class _State extends State<StockistDashboardScreen> {
   Future<void> _load() async {
     final data = await _service.getDesignsByStockist(_myStockistId);
     final inquiries = await _service.getMyDesignInquiries();
+    final pending = await _service.myPendingStockBoxes();
     if (!mounted) return;
     setState(() {
       _designs = data;
       _inquiries = inquiries;
+      _pendingBoxes = pending;
       _loading = false;
     });
   }
@@ -266,6 +270,7 @@ class _State extends State<StockistDashboardScreen> {
           : Column(
               children: [
                 _buildStatsBar(),  // pinned, slim
+                if (_pendingBoxes > 0) _buildPendingBanner(),
                 _buildChipRow(),   // pinned: tabs + quality chips
                 Expanded(
                   child: _activeTab == 0
@@ -310,6 +315,30 @@ class _State extends State<StockistDashboardScreen> {
 
   Widget _divider() =>
       Container(width: 1, height: 22, color: Colors.grey.shade300);
+
+  // Banner shown when some of the stockist's added stock is held for admin
+  // approval (big-stock rule: 10,000+ boxes in a day). It's not live yet.
+  Widget _buildPendingBanner() => Container(
+        width: double.infinity,
+        color: const Color(0xFFFFF3E0),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.hourglass_top_rounded,
+                size: 16, color: Colors.orange.shade800),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$_pendingBoxes boxes awaiting admin approval — not live yet.',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.orange.shade900),
+              ),
+            ),
+          ],
+        ),
+      );
 
   // Slim single-line stat: icon · value · label.
   Widget _statItem(

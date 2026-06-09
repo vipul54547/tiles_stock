@@ -40,6 +40,7 @@ class _State extends State<AddEditStockScreen> {
   String _stockType = 'Regular';
 
   List<String> _surfaces = kFinishes;   // replaced by admin master list on load
+  List<String> _sizes    = kAllowedSizes; // replaced by admin master list on load
   final _qualities  = ['Premium', 'Standard'];
   final _stockTypes = ['Both', 'Regular', 'One Time'];
 
@@ -58,7 +59,23 @@ class _State extends State<AddEditStockScreen> {
 
   Future<void> _init() async {
     await _loadSurfaces();
+    await _loadSizes();
     if (isEdit) await _loadExisting();
+  }
+
+  // Use the admin's live size list so the picker matches the master.
+  Future<void> _loadSizes() async {
+    try {
+      final names = await _service.getActiveSizeNames();
+      if (names.isNotEmpty && mounted) {
+        setState(() {
+          _sizes = names;
+          if (!_sizes.contains(_size)) _size = _sizes.first;
+        });
+      }
+    } catch (_) {
+      // keep kAllowedSizes fallback
+    }
   }
 
   // Use the admin's live finish list so the dropdown matches what stockists
@@ -119,9 +136,9 @@ class _State extends State<AddEditStockScreen> {
     final key = d.size
         .replaceAll(RegExp(r'[^0-9x]', caseSensitive: false), '')
         .toLowerCase();
-    _size = kAllowedSizes.firstWhere(
+    _size = _sizes.firstWhere(
       (s) => s.replaceAll(RegExp(r'[^0-9x]', caseSensitive: false), '').toLowerCase() == key,
-      orElse: () => kAllowedSizes.first,
+      orElse: () => _sizes.isEmpty ? d.size : _sizes.first,
     );
   }
 
@@ -479,7 +496,7 @@ class _State extends State<AddEditStockScreen> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: kAllowedSizes.map((s) {
+            children: _sizes.map((s) {
               final selected = _size == s;
               final r = aspectRatioFromSize(s);
               final label = s.replaceAll(' mm', '');
