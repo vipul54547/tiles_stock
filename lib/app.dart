@@ -1,10 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:go_router/go_router.dart';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'main.dart';
+
 import 'screens/splash_screen.dart';
 
 import 'screens/login_screen.dart';
+
+import 'screens/reset_password_screen.dart';
 
 import 'screens/register_screen.dart';
 
@@ -47,6 +55,8 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
 
     GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+
+    GoRoute(path: '/reset-password', builder: (_, __) => const ResetPasswordScreen()),
 
     GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
 
@@ -152,11 +162,37 @@ final GoRouter _router = GoRouter(
 
 
 
-class TilesStockApp extends StatelessWidget {
+class TilesStockApp extends StatefulWidget {
 
   const TilesStockApp({super.key});
 
+  @override
+  State<TilesStockApp> createState() => _TilesStockAppState();
 
+}
+
+class _TilesStockAppState extends State<TilesStockApp> {
+
+  StreamSubscription<AuthState>? _authSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // When the user opens the password-reset link from their email, Supabase
+    // captures the deep link and emits a passwordRecovery event. Route them to
+    // the "set new password" screen so they can finish the reset in-app.
+    _authSub = supabase.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery) {
+        _router.go('/reset-password');
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
 
   @override
 

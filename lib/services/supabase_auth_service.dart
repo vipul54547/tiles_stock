@@ -113,6 +113,21 @@ class SupabaseAuthService {
     }
   }
 
+  /// Deep link the password-reset email redirects back to. The matching scheme
+  /// is registered in AndroidManifest.xml and must be added to the Supabase
+  /// dashboard's "Redirect URLs" allow-list (Authentication → URL Configuration).
+  static const passwordResetRedirect = 'tilesstock://reset-password-callback';
+
+  /// Sends a password-reset email via Supabase Auth. The user gets a link that
+  /// reopens the app (via [passwordResetRedirect]) so they can set a new
+  /// password. Throws on failure so the UI can surface it.
+  Future<void> sendPasswordReset(String email) async {
+    await supabase.auth.resetPasswordForEmail(
+      email.trim(),
+      redirectTo: passwordResetRedirect,
+    );
+  }
+
   Future<void> logout() async {
     await supabase.auth.signOut();
     _role = null;

@@ -22,6 +22,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _loading = false;
 
+  bool _obscurePassword = true;
+
 
 
   void _login() async {
@@ -67,6 +69,68 @@ class _LoginScreenState extends State<LoginScreen> {
       context.go('/stockist/dashboard');
     } else {
       context.go('/home');
+    }
+  }
+
+  // Sends a Supabase password-reset email. Pre-fills the address from the email
+  // field, lets the user confirm/edit it, then dispatches the reset link.
+  void _forgotPassword() async {
+    final resetCtrl = TextEditingController(text: _emailCtrl.text.trim());
+    final email = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reset password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter your email and we\'ll send you a link to reset your '
+              'password.',
+              style: TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: resetCtrl,
+              keyboardType: TextInputType.emailAddress,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.email_outlined),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, resetCtrl.text.trim()),
+            child: const Text('Send link'),
+          ),
+        ],
+      ),
+    );
+
+    if (email == null || email.isEmpty) return;
+
+    try {
+      await SupabaseAuthService().sendPasswordReset(email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Password-reset link sent to $email. Check your inbox.'),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 6),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not send reset email: $e'),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 6),
+      ));
     }
   }
 
@@ -150,21 +214,53 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 controller: _passCtrl,
 
-                obscureText: true,
+                obscureText: _obscurePassword,
 
-                decoration: const InputDecoration(
+                onSubmitted: (_) { if (!_loading) _login(); },
+
+                decoration: InputDecoration(
 
                   labelText: 'Password',
 
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
 
-                  prefixIcon: Icon(Icons.lock_outline),
+                  prefixIcon: const Icon(Icons.lock_outline),
+
+                  suffixIcon: IconButton(
+
+                    icon: Icon(_obscurePassword
+
+                        ? Icons.visibility_outlined
+
+                        : Icons.visibility_off_outlined),
+
+                    tooltip: _obscurePassword ? 'Show password' : 'Hide password',
+
+                    onPressed: () =>
+
+                        setState(() => _obscurePassword = !_obscurePassword),
+
+                  ),
 
                 ),
 
               ),
 
-              const SizedBox(height: 24),
+              Align(
+
+                alignment: Alignment.centerRight,
+
+                child: TextButton(
+
+                  onPressed: _loading ? null : _forgotPassword,
+
+                  child: const Text('Forgot password?'),
+
+                ),
+
+              ),
+
+              const SizedBox(height: 8),
 
               SizedBox(
 

@@ -29,6 +29,17 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- Password-reset deep link. Supabase sends an email whose link
+                 redirects to tilesstock://reset-password-callback; this filter
+                 lets that link reopen the app so the user can set a new password.
+                 Keep the scheme/host in sync with passwordResetRedirect in
+                 supabase_auth_service.dart and the Supabase Redirect URL list. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="tilesstock" android:host="reset-password-callback"/>
+            </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
