@@ -1267,6 +1267,7 @@ class _State extends State<StockistsOverviewScreen> {
                           selectedQualities: _selectedQualities,
                           selectedSizes: _selectedSizes,
                           selectedSurfaces: _selectedSurfaces,
+                          matches: _matchesDesignFacets,
                           onViewProfile: () async {
                             await context.push(
                                 '/stockist/${filteredStockists[i].stockist.id}/portfolio');
@@ -1724,6 +1725,10 @@ class _StockistCard extends StatelessWidget {
   final Set<String> selectedQualities;
   final Set<String> selectedSizes;
   final Set<String> selectedSurfaces;
+  /// Full design-facet predicate (quality, size, surface, colour, type,
+  /// thickness, stock type, qty range) so the card's totals/table show only
+  /// designs that match every active filter.
+  final bool Function(TileDesign) matches;
   final VoidCallback onViewProfile;
   final void Function(int groupIndex) onToggleGroup;
 
@@ -1734,35 +1739,36 @@ class _StockistCard extends StatelessWidget {
     required this.selectedQualities,
     required this.selectedSizes,
     required this.selectedSurfaces,
+    required this.matches,
     required this.onViewProfile,
     required this.onToggleGroup,
   });
 
-  (Map<String, Map<String, int>>, int) _computeDisplayData(
-      List<String> dispSizes, List<String> dispSurfaces) {
-    var filtered = data.designs;
-    if (selectedQualities.isNotEmpty) {
-      filtered = filtered.where((d) => selectedQualities.contains(d.quality)).toList();
-    }
-    if (selectedSizes.isNotEmpty) {
-      filtered = filtered.where((d) => selectedSizes.contains(d.size)).toList();
-    }
-    if (selectedSurfaces.isNotEmpty) {
-      filtered = filtered.where((d) => selectedSurfaces.contains(d.surfaceType)).toList();
-    }
+  // Returns (boxTable, countTable, totalBoxes, totalDesigns). Only designs that
+  // pass [matches] (all active filters incl. the qty range) are counted, so the
+  // totals/table reflect exactly what's filtered.
+  (Map<String, Map<String, int>>, Map<String, Map<String, int>>, int, int)
+      _computeDisplayData(List<String> dispSizes, List<String> dispSurfaces) {
+    final filtered = data.designs.where(matches).toList();
 
-    final total = filtered.fold(0, (sum, d) => sum + d.boxQuantity);
+    final totalBoxes   = filtered.fold(0, (sum, d) => sum + d.boxQuantity);
+    final totalDesigns = filtered.length;
 
-    final table = <String, Map<String, int>>{};
+    final boxTable   = <String, Map<String, int>>{};
+    final countTable = <String, Map<String, int>>{};
     for (final size in dispSizes) {
-      table[size] = {};
+      boxTable[size]   = {};
+      countTable[size] = {};
       for (final surface in dispSurfaces) {
-        final match =
-            filtered.where((d) => d.size == size && d.surfaceType == surface);
-        table[size]![surface] = match.isEmpty ? 0 : match.first.boxQuantity;
+        final cell = filtered
+            .where((d) => d.size == size && d.surfaceType == surface)
+            .toList();
+        boxTable[size]![surface] =
+            cell.fold(0, (sum, d) => sum + d.boxQuantity);
+        countTable[size]![surface] = cell.length;
       }
     }
-    return (table, total);
+    return (boxTable, countTable, totalBoxes, totalDesigns);
   }
 
   @override
@@ -1774,7 +1780,8 @@ class _StockistCard extends StatelessWidget {
     final dispSurfaces = selectedSurfaces.isEmpty
         ? surfaces
         : surfaces.where((sf) => selectedSurfaces.contains(sf)).toList();
-    final (sizeTable, displayBoxes) = _computeDisplayData(dispSizes, dispSurfaces);
+    final (boxTable, countTable, displayBoxes, displayDesigns) =
+        _computeDisplayData(dispSizes, dispSurfaces);
     final qualityLabel = selectedQualities.isEmpty
         ? null
         : selectedQualities.join(' / ');
@@ -1812,7 +1819,8 @@ class _StockistCard extends StatelessWidget {
                         color: const Color(0xFF1B4F72).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Text('$displayBoxes boxes',
+                      child: Text(
+                          '$displayDesigns design${displayDesigns == 1 ? '' : 's'} · $displayBoxes boxes',
                           style: const TextStyle(
                               color: Color(0xFF1B4F72),
                               fontWeight: FontWeight.bold,
@@ -1884,7 +1892,7 @@ class _StockistCard extends StatelessWidget {
             const SizedBox(height: 10),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: _buildTable(sizeTable, dispSizes, dispSurfaces),
+              child: _buildTable(boxTable, countTable, dispSizes, dispSurfaces),
             ),
           ],
         ),
@@ -1892,12 +1900,15 @@ class _StockistCard extends StatelessWidget {
     );
   }
 
-  Widget _buildTable(Map<String, Map<String, int>> sizeTable,
-      List<String> dispSizes, List<String> dispSurfaces) {
+  Widget _buildTable(
+      Map<String, Map<String, int>> boxTable,
+      Map<String, Map<String, int>> countTable,
+      List<String> dispSizes,
+      List<String> dispSurfaces) {
     const firstColW = 88.0;
     const cellW = 56.0;
     const headerH = 30.0;
-    const cellH = 28.0;
+    const cellH = 38.0; // taller: holds boxes on top + (designs) beneath
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1912,11 +1923,18 @@ class _StockistCard extends StatelessWidget {
               children: [
                 _sizeCell(size, firstColW, cellH),
                 ...dispSurfaces.map((sf) {
-                  final boxes = sizeTable[size]?[sf] ?? 0;
-                  return _boxCell(boxes, cellW, cellH);
+                  final boxes = boxTable[size]?[sf] ?? 0;
+                  final count = countTable[size]?[sf] ?? 0;
+                  return _boxCell(boxes, count, cellW, cellH);
                 }),
               ],
             )),
+        // Legend so the bracket number is clear.
+        Padding(
+          padding: const EdgeInsets.only(top: 4, left: 2),
+          child: Text('boxes (designs)',
+              style: TextStyle(fontSize: 9, color: Colors.grey.shade500)),
+        ),
       ],
     );
   }
@@ -1946,7 +1964,9 @@ class _StockistCard extends StatelessWidget {
             style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
       );
 
-  Widget _boxCell(int boxes, double w, double h) {
+  // Stacked cell: box total (bold, coloured) on top, design count (small, grey)
+  // in brackets beneath. Empty cells just show a dash.
+  Widget _boxCell(int boxes, int count, double w, double h) {
     final Color bg;
     final Color fg;
     if (boxes == 0) {
@@ -1963,8 +1983,21 @@ class _StockistCard extends StatelessWidget {
         color: bg,
         border: Border.all(color: const Color(0xFFCCCCCC), width: 0.5),
       ),
-      child: Text(boxes == 0 ? '-' : '$boxes',
-          style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
+      child: boxes == 0
+          ? Text('-',
+              style: TextStyle(
+                  fontSize: 12, color: fg, fontWeight: FontWeight.w600))
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text('$boxes',
+                    style: TextStyle(
+                        fontSize: 13, color: fg, fontWeight: FontWeight.bold)),
+                Text('($count)',
+                    style: TextStyle(
+                        fontSize: 9, color: Colors.grey.shade500)),
+              ],
+            ),
     );
   }
 }
