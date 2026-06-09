@@ -421,3 +421,108 @@ create policy "surface_aliases_delete_own" on surface_aliases for delete
     stockist_id in (select id from stockists where user_id = auth.uid())
     or current_user_role() = 'admin'
   );
+
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- CHANGES APPLIED VIA MCP MIGRATIONS — 2026-06 session
+-- Mirrored here for reference; these are also in Supabase's migration history.
+-- All SECURITY DEFINER functions below set search_path = public, extensions,
+-- pg_temp (hardening). Existing functions earlier in this file were also
+-- ALTERed to the same fixed search_path.
+-- ══════════════════════════════════════════════════════════════════════════
+
+-- ── Column additions ────────────────────────────────────────────────────────
+alter table stockists             add column if not exists country_code text not null default '+91';
+alter table end_users             add column if not exists country_code text not null default '+91';
+alter table registration_requests add column if not exists country_code text not null default '+91';
+alter table stock_in add column if not exists status text not null default 'approved'
+  check (status in ('approved', 'pending', 'rejected'));
+
+-- ── New tables ────────────────────────────────────────────────────────────────
+
+-- stock_adjustments: recount ledger (correct stock to physical reality).
+create table if not exists stock_adjustments (
+  id           uuid primary key default uuid_generate_v4(),
+  design_id    uuid not null references designs(id)   on delete cascade,
+  stockist_id  uuid not null references stockists(id) on delete cascade,
+  old_quantity int  not null,
+  new_quantity int  not null check (new_quantity >= 0),
+  delta        int  not null,
+  reason       text not null default '',
+  note         text not null default '',
+  created_at   timestamptz default now()
+);
+alter table stock_adjustments enable row level security;
+drop policy if exists stock_adjustments_read on stock_adjustments;
+create policy stock_adjustments_read on stock_adjustments for select using (
+  stockist_id in (select id from stockists where user_id = auth.uid())
+  or current_user_role() = 'admin');
+
+-- notifications: in-app inbox (buyer/stockist/admin). Insert via _notify only.
+create table if not exists notifications (
+  id           uuid primary key default gen_random_uuid(),
+  recipient_id uuid not null references auth.users(id) on delete cascade,
+  type         text not null default 'info',
+  title        text not null,
+  body         text not null default '',
+  data         jsonb not null default '{}',
+  is_read      boolean not null default false,
+  created_at   timestamptz default now()
+);
+create index if not exists notifications_recipient_idx
+  on notifications(recipient_id, created_at desc);
+alter table notifications enable row level security;
+drop policy if exists notif_read on notifications;
+create policy notif_read on notifications for select using (recipient_id = auth.uid());
+drop policy if exists notif_update on notifications;
+create policy notif_update on notifications for update
+  using (recipient_id = auth.uid()) with check (recipient_id = auth.uid());
+drop policy if exists notif_delete on notifications;
+create policy notif_delete on notifications for delete using (recipient_id = auth.uid());
+
+-- tile_sizes: admin-managed size master (replaces the hardcoded kAllowedSizes).
+create table if not exists tile_sizes (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  sort_order int  not null default 0,
+  is_active  boolean not null default true,
+  created_at timestamptz default now()
+);
+alter table tile_sizes enable row level security;
+drop policy if exists tile_sizes_read on tile_sizes;
+create policy tile_sizes_read on tile_sizes for select using (true);
+drop policy if exists tile_sizes_admin_all on tile_sizes;
+create policy tile_sizes_admin_all on tile_sizes for all using (current_user_role() = 'admin');
+
+-- ── Functions (final versions) ───────────────────────────────────────────────
+-- NOTE: full bodies live in Supabase migration history. Signatures + purpose:
+--   add_stock(uuid,uuid,int,text,text,text)           -- now holds >=10k/day as 'pending'
+--   adjust_stock(uuid,int,text,text) -> bool           -- recount, logs stock_adjustments
+--   set_pending_stock(uuid,bool) -> int                -- admin approve/reject pending stock
+--   admin_pending_stock() -> jsonb                     -- admin: pending stock per stockist
+--   my_pending_stock_boxes() -> int                    -- stockist: own pending boxes
+--   fulfill_choice(uuid,uuid,int)                      -- dispatch reduces buyer's my_choice
+--   reject_inquiry(uuid,uuid)                          -- delete a buyer's my_choice + notify
+--   reject_design_inquiries(uuid)                      -- delete all my_choices for a design
+--   my_design_buyers(text) -> jsonb                    -- now includes end_user_id
+--   _notify(uuid,text,text,text,jsonb)                 -- internal insert (revoked from clients)
+--   notify_stockist(text)                              -- buyer->stockist "New inquiry" (name/phone/city)
+--   notify_dispatch(uuid,uuid,int)                     -- stockist->buyer dispatch alert
+--   admin_send_notification(text,text,text[],text[],bool,bool) -> int
+--   daily_admin_join_summary()                         -- pg_cron 03:30 UTC (09:00 IST)
+--   daily_group_restock_alert()                        -- pg_cron 04:00 UTC (09:30 IST)
+--   create_user_from_excel(...,p_country_code)         -- +country_code (old 15-arg dropped)
+--   submit_registration_request(...,p_country_code)    -- +country_code, notifies admins
+--   approve_registration_request(text,numeric,text)    -- +country_code carry, notifies new user
+--   admin_set_stockist_listing(text,numeric,text)      -- set tier + priority (by seq)
+--   admin_update_stockist(text,text,text,text,text,text,text,text,text,numeric)
+--   admin_delete_stockist(text)                        -- hard delete (only when inactive)
+--   admin_update_end_user(uuid,text,text,text,text,text,text,text,numeric)
+--   admin_delete_end_user(uuid)                        -- hard delete (only when inactive)
+--   admin_inquiry_report() -> jsonb                    -- all inquiries across stockists
+--   reorder_tile_sizes(uuid[])                         -- admin reorder sizes
+
+-- ── Scheduled jobs (pg_cron) ──────────────────────────────────────────────────
+-- create extension if not exists pg_cron;
+-- cron.schedule('daily-admin-join-summary',  '30 3 * * *', 'select public.daily_admin_join_summary();');
+-- cron.schedule('daily-group-restock-alert', '0 4 * * *',  'select public.daily_group_restock_alert();');
