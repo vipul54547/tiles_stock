@@ -131,6 +131,8 @@ class _State extends State<AddDispatchScreen> {
         _pickedBuyerId!.isNotEmpty &&
         _buyerCtrl.text.trim() == _pickedBuyerName) {
       await _dataSvc.fulfillChoice(_selected!.id, _pickedBuyerId!, qty);
+      // Notify the buyer their order was dispatched.
+      await _dataSvc.notifyDispatch(_selected!.id, _pickedBuyerId!, qty);
     }
 
     setState(() => _loading = false);

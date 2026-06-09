@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/supabase_auth_service.dart';
+import '../../widgets/notification_bell.dart';
 
 
 
@@ -21,6 +22,8 @@ class AdminPanelScreen extends StatelessWidget {
         title: const Text('Admin Panel'),
 
         actions: [
+
+          const NotificationBell(),
 
           IconButton(
             icon: const Icon(Icons.logout),
@@ -65,6 +68,9 @@ class AdminPanelScreen extends StatelessWidget {
           _adminCard(Icons.how_to_reg_outlined, 'Registration Requests',
               'Approve or reject new company signups', const Color(0xFF00838F),
               onTap: () => context.push('/admin/registration-requests')),
+          _adminCard(Icons.campaign_outlined, 'Send Notification',
+              'Notify selected stockists or end users', const Color(0xFFEF6C00),
+              onTap: () => context.push('/admin/send-notification')),
           // Only the super admin can create / manage sub-admins.
           if (isSuperAdmin)
             _adminCard(Icons.admin_panel_settings_outlined, 'Manage Admins',

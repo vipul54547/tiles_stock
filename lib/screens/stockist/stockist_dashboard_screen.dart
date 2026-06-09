@@ -7,6 +7,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
 import '../../widgets/filter_section.dart';
+import '../../widgets/notification_bell.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_types.dart';
 
@@ -243,9 +244,11 @@ class _State extends State<StockistDashboardScreen> {
               title: const Text('Stock Dashboard'),
               actions: [
                 IconButton(
-                  icon: const Icon(Icons.notifications_outlined),
+                  icon: const Icon(Icons.move_to_inbox_outlined),
+                  tooltip: 'Received inquiries',
                   onPressed: () => context.push('/stockist/inquiries'),
                 ),
+                const NotificationBell(),
                 IconButton(
                   icon: const Icon(Icons.logout),
                   onPressed: () async {

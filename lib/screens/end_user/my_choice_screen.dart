@@ -137,14 +137,15 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                       .replaceAll(RegExp(r'[^0-9]'), '');
                   final uri = Uri.parse(
                       'https://wa.me/$phone?text=${Uri.encodeComponent(message)}');
-                  if (!await launchUrl(uri,
-                      mode: LaunchMode.externalApplication)) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Could not open WhatsApp')),
-                      );
-                    }
+                  final ok = await launchUrl(uri,
+                      mode: LaunchMode.externalApplication);
+                  if (ok) {
+                    // Auto-alert the stockist that a buyer reached out.
+                    await _service.notifyStockist(stockist.id);
+                  } else if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Could not open WhatsApp')),
+                    );
                   }
                 },
                 icon: const Icon(Icons.chat_rounded, size: 18),
@@ -158,48 +159,8 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          'Order notification sent to ${stockist.name}'),
-                      backgroundColor: const Color(0xFF2E7D32),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.notifications_outlined, size: 18),
-                label: const Text('Send Notification'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF1B4F72),
-                  side: const BorderSide(color: Color(0xFF1B4F72)),
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ),
           ],
         ),
-      ),
-    );
-  }
-
-  void _sendAllNotifications() {
-    if (blockIfGuest(context, feature: 'Placing orders')) return;
-    final stockistIds =
-        _chosenDesigns.map((d) => d.stockistId).toSet();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-            'Order notifications sent to ${stockistIds.length} stockist${stockistIds.length == 1 ? '' : 's'}'),
-        backgroundColor: const Color(0xFF2E7D32),
-        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -231,9 +192,6 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
           : _chosenDesigns.isEmpty
               ? _buildEmptyState()
               : _buildContent(),
-      bottomNavigationBar: !_loading && _chosenDesigns.isNotEmpty
-          ? _buildSendAllBar()
-          : null,
     );
   }
 
@@ -575,37 +533,6 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
           child: Icon(icon, size: 14, color: color),
         ),
       );
-
-  Widget _buildSendAllBar() {
-    final count =
-        _chosenDesigns.map((d) => d.stockistId).toSet().length;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 8,
-              offset: const Offset(0, -2))
-        ],
-      ),
-      child: ElevatedButton.icon(
-        onPressed: _sendAllNotifications,
-        icon: const Icon(Icons.send_rounded, size: 18),
-        label: Text(
-            'Send All Orders ($count stockist${count == 1 ? '' : 's'})'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF1B4F72),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          minimumSize: const Size(double.infinity, 48),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10)),
-        ),
-      ),
-    );
-  }
 
   Widget _buildEmptyState() {
     return Center(

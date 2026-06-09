@@ -755,14 +755,15 @@ class _State extends State<StockistPortfolioScreen> {
                   }
                   final uri = Uri.parse(
                       'https://wa.me/$phone?text=${Uri.encodeComponent(message)}');
-                  if (!await launchUrl(uri,
-                      mode: LaunchMode.externalApplication)) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Could not open WhatsApp')),
-                      );
-                    }
+                  final ok = await launchUrl(uri,
+                      mode: LaunchMode.externalApplication);
+                  if (ok) {
+                    // Auto-alert the stockist that a buyer reached out.
+                    await _service.notifyStockist(widget.stockistId);
+                  } else if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Could not open WhatsApp')),
+                    );
                   }
                 },
                 icon: const Icon(Icons.chat_rounded, size: 18),
@@ -770,33 +771,6 @@ class _State extends State<StockistPortfolioScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF25D366),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                          'Order notification sent to '
-                          '${_stockist?.name ?? widget.stockistId}'),
-                      backgroundColor: const Color(0xFF2E7D32),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.notifications_outlined, size: 18),
-                label: const Text('Send Notification'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF1B4F72),
-                  side: const BorderSide(color: Color(0xFF1B4F72)),
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),

@@ -14,6 +14,7 @@ import '../utils/design_ranking.dart';
 import '../utils/my_choice.dart';
 import '../utils/tile_types.dart';
 import '../widgets/filter_section.dart';
+import '../widgets/notification_bell.dart';
 
 const _qualities = ['Premium', 'Standard'];
 const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
@@ -57,9 +58,6 @@ class _State extends State<StockistsOverviewScreen> {
   String _searchQuery  = '';
   bool _searchActive   = false;
   bool _searchByDesign = true; // true = design name, false = stockist
-
-  // Mock notification count
-  int _notificationCount = 3;
 
   // Quality filter
   final Set<String> _selectedQualities = {};
@@ -625,66 +623,6 @@ class _State extends State<StockistsOverviewScreen> {
     });
   }
 
-  void _showNotifications() {
-    setState(() => _notificationCount = 0);
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 8),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade300,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
-            child: Row(
-              children: [
-                Icon(Icons.notifications_outlined, color: Color(0xFF1B4F72)),
-                SizedBox(width: 8),
-                Text('Notifications',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                        color: Color(0xFF1B4F72))),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          _notifTile(Icons.inventory_2_outlined, 'Stockist A updated stock',
-              '50 boxes of Marble Elite added', '2 min ago'),
-          _notifTile(Icons.storefront_outlined, 'New stockist registered',
-              'Sunshine Tiles joined the platform', '1 hour ago'),
-          _notifTile(Icons.send_outlined, 'Inquiry received',
-              'A buyer inquired about 600x600 Glossy', '3 hours ago'),
-          const SizedBox(height: 12),
-        ],
-      ),
-    );
-  }
-
-  Widget _notifTile(IconData icon, String title, String subtitle, String time) =>
-      ListTile(
-        leading: CircleAvatar(
-          backgroundColor: const Color(0xFF1B4F72).withValues(alpha: 0.1),
-          child: Icon(icon, color: const Color(0xFF1B4F72), size: 20),
-        ),
-        title: Text(title,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-        subtitle: Text(subtitle,
-            style: const TextStyle(fontSize: 12, color: Colors.grey)),
-        trailing: Text(time,
-            style: const TextStyle(fontSize: 10, color: Colors.grey)),
-      );
-
   void _openDesignSheet(int startIndex, List<TileDesign> list) {
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.75;
     showModalBottomSheet<void>(
@@ -1109,38 +1047,7 @@ class _State extends State<StockistsOverviewScreen> {
           tooltip: 'Refresh',
           onPressed: _load,
         ),
-        // Bell icon with badge
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            IconButton(
-              icon: const Icon(Icons.notifications_outlined),
-              onPressed: _showNotifications,
-            ),
-            if (_notificationCount > 0)
-              Positioned(
-                right: 6,
-                top: 6,
-                child: Container(
-                  width: 16,
-                  height: 16,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      '$_notificationCount',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+        const NotificationBell(),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(48),

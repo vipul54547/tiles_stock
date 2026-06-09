@@ -3,6 +3,7 @@ import '../models/tile_design.dart';
 import '../models/stockist.dart';
 import '../models/end_user.dart';
 import '../models/surface_type.dart';
+import '../models/app_notification.dart';
 import 'supabase_auth_service.dart';
 import '../models/choice_state.dart';
 import '../main.dart';
@@ -451,6 +452,116 @@ class SupabaseDataService {
       });
     } catch (e, st) {
       debugPrint('fulfillChoice failed ($designId/$endUserId): $e\n$st');
+    }
+  }
+
+  // ── notifications ───────────────────────────────────────────────────────────
+
+  /// The signed-in user's notifications, newest first (RLS limits to own).
+  Future<List<AppNotification>> getNotifications() async {
+    try {
+      final res = await supabase
+          .from('notifications')
+          .select()
+          .order('created_at', ascending: false)
+          .limit(100);
+      return (res as List)
+          .map((e) => AppNotification.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getNotifications failed: $e\n$st');
+      return [];
+    }
+  }
+
+  Future<int> getUnreadNotificationCount() async {
+    try {
+      final res = await supabase
+          .from('notifications')
+          .select('id')
+          .eq('is_read', false);
+      return (res as List).length;
+    } catch (e, st) {
+      debugPrint('getUnreadNotificationCount failed: $e\n$st');
+      return 0;
+    }
+  }
+
+  Future<void> markNotificationRead(String id) async {
+    try {
+      await supabase.from('notifications').update({'is_read': true}).eq('id', id);
+    } catch (e, st) {
+      debugPrint('markNotificationRead failed ($id): $e\n$st');
+    }
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    try {
+      await supabase
+          .from('notifications')
+          .update({'is_read': true})
+          .eq('is_read', false);
+    } catch (e, st) {
+      debugPrint('markAllNotificationsRead failed: $e\n$st');
+    }
+  }
+
+  Future<void> deleteNotification(String id) async {
+    try {
+      await supabase.from('notifications').delete().eq('id', id);
+    } catch (e, st) {
+      debugPrint('deleteNotification failed ($id): $e\n$st');
+    }
+  }
+
+  /// Buyer → stockist alert ("New inquiry" with the buyer's name/phone/city).
+  /// Fired automatically when the buyer contacts the stockist on WhatsApp.
+  Future<void> notifyStockist(String stockistSeqId) async {
+    try {
+      await supabase
+          .rpc('notify_stockist', params: {'p_stockist_seq': stockistSeqId});
+    } catch (e, st) {
+      debugPrint('notifyStockist failed ($stockistSeqId): $e\n$st');
+    }
+  }
+
+  /// Stockist → buyer: dispatch confirmation (buyer picked from inquiry list).
+  Future<void> notifyDispatch(
+      String designId, String endUserId, int quantity) async {
+    try {
+      await supabase.rpc('notify_dispatch', params: {
+        'p_design_id':   designId,
+        'p_end_user_id': endUserId,
+        'p_quantity':    quantity,
+      });
+    } catch (e, st) {
+      debugPrint('notifyDispatch failed ($designId/$endUserId): $e\n$st');
+    }
+  }
+
+  /// Admin → picked stockists / end-users (or everyone of a role). Returns the
+  /// stockist recipient count (best-effort).
+  Future<int> adminSendNotification({
+    required String title,
+    required String body,
+    List<String>? stockistSeqIds,
+    List<String>? endUserIds,
+    bool allStockists = false,
+    bool allEndUsers = false,
+  }) async {
+    try {
+      final res = await supabase.rpc('admin_send_notification', params: {
+        'p_title':            title,
+        'p_body':             body,
+        'p_stockist_seq_ids': stockistSeqIds,
+        'p_end_user_ids':     endUserIds,
+        'p_all_stockists':    allStockists,
+        'p_all_end_users':    allEndUsers,
+      });
+      return (res as int?) ?? 0;
+    } catch (e, st) {
+      debugPrint('adminSendNotification failed: $e\n$st');
+      rethrow;
     }
   }
 
