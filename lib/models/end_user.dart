@@ -9,6 +9,9 @@ class EndUser {
   final String contactPerson;
   final String email;
   final String phone;
+
+  /// Dialling code (e.g. +91). Defaults to +91 for old data.
+  final String countryCode;
   final String city;
   final String gstNumber;
 
@@ -31,6 +34,7 @@ class EndUser {
     required this.contactPerson,
     this.email = '',
     required this.phone,
+    this.countryCode = '+91',
     required this.city,
     this.gstNumber = '',
     this.priority = 0,
@@ -49,6 +53,7 @@ class EndUser {
         contactPerson: json['contact_person'] ?? '',
         email:         json['email'] ?? '',
         phone:         json['phone'] ?? '',
+        countryCode:   json['country_code'] ?? '+91',
         city:          json['city'] ?? '',
         gstNumber:     json['gst_number'] ?? '',
         priority:      (json['priority'] as num?)?.toDouble() ?? 0,

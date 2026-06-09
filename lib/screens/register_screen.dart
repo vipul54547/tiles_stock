@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/supabase_data_service.dart';
+import '../widgets/phone_field.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -14,6 +15,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _contactCtrl = TextEditingController();
   final _emailCtrl   = TextEditingController();
   final _phoneCtrl   = TextEditingController();
+  final _codeCtrl    = TextEditingController(text: '+91');
   final _cityCtrl    = TextEditingController();
   final _gstCtrl     = TextEditingController();
   final _passCtrl    = TextEditingController();
@@ -25,6 +27,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _contactCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
+    _codeCtrl.dispose();
     _cityCtrl.dispose();
     _gstCtrl.dispose();
     _passCtrl.dispose();
@@ -42,6 +45,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         companyName:   _companyCtrl.text.trim(),
         contactPerson: _contactCtrl.text.trim(),
         phone:         _phoneCtrl.text.trim(),
+        countryCode:   _codeCtrl.text.trim().isEmpty ? '+91' : _codeCtrl.text.trim(),
         city:          _cityCtrl.text.trim(),
         gstNumber:     _gstCtrl.text.trim().isEmpty ? null : _gstCtrl.text.trim(),
       );
@@ -91,7 +95,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
             _field(_companyCtrl, 'Company Name',   Icons.business,             required: true),
             _field(_contactCtrl, 'Contact Person', Icons.person_outline,        required: true),
             _field(_emailCtrl,   'Email',           Icons.email_outlined,        required: true),
-            _field(_phoneCtrl,   'Phone Number',    Icons.phone_outlined,        required: true),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: PhoneField(
+                codeController: _codeCtrl,
+                phoneController: _phoneCtrl,
+                icon: Icons.phone_outlined,
+                required: true,
+              ),
+            ),
             _field(_cityCtrl,    'City',             Icons.location_city_outlined, required: true),
             _field(_gstCtrl,     'GST Number',      Icons.receipt_outlined),
             _field(_passCtrl,    'Password',         Icons.lock_outline,         required: true, obscure: true),

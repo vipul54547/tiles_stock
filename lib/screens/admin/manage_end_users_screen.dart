@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/end_user.dart';
 import '../../services/supabase_data_service.dart';
+import '../../widgets/phone_field.dart';
 import 'excel_import_screen.dart';
 
 // Admin screen to view end users (companies) and add a single new one. The
@@ -201,6 +202,7 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
   final _password = TextEditingController();
   final _contact  = TextEditingController();
   final _phone    = TextEditingController();
+  final _code     = TextEditingController(text: '+91');
   final _city     = TextEditingController();
   final _gst      = TextEditingController();
   final _type     = TextEditingController();
@@ -212,8 +214,8 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
   @override
   void dispose() {
     for (final c in [
-      _company, _email, _password, _contact, _phone, _city, _gst, _type,
-      _priority
+      _company, _email, _password, _contact, _phone, _code, _city, _gst,
+      _type, _priority
     ]) {
       c.dispose();
     }
@@ -230,6 +232,7 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
         password:      _password.text,
         contactPerson: _contact.text.trim(),
         phone:         _phone.text.trim(),
+        countryCode:   _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
         city:          _city.text.trim(),
         gstNumber:     _gst.text.trim(),
         endUserType:   _type.text.trim(),
@@ -290,7 +293,13 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
                   validator: (v) =>
                       (v ?? '').length < 6 ? 'Min 6 characters' : null),
               _field(_contact, 'Contact person'),
-              _field(_phone, 'Phone', keyboard: TextInputType.phone),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: PhoneField(
+                    codeController: _code,
+                    phoneController: _phone,
+                    label: 'Phone'),
+              ),
               _field(_city, 'City'),
               _field(_gst, 'GST number (optional)'),
               _field(_type, 'End user type (optional)',

@@ -8,6 +8,9 @@ class Stockist {
 
   final String phone;
 
+  /// Dialling code (e.g. +91). Defaults to +91 for old data.
+  final String countryCode;
+
   final String city;
 
   final String state;
@@ -41,6 +44,8 @@ class Stockist {
 
     required this.phone,
 
+    this.countryCode = '+91',
+
     required this.city,
 
     required this.state,
@@ -70,6 +75,8 @@ class Stockist {
     email: json['email'],
 
     phone: json['phone'],
+
+    countryCode: json['country_code'] ?? '+91',
 
     city: json['city'],
 

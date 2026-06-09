@@ -131,7 +131,9 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
               child: ElevatedButton.icon(
                 onPressed: () async {
                   Navigator.pop(context);
-                  final phone = stockist.phone
+                  // WhatsApp needs the full international number (country code +
+                  // phone), digits only — no '+'.
+                  final phone = '${stockist.countryCode}${stockist.phone}'
                       .replaceAll(RegExp(r'[^0-9]'), '');
                   final uri = Uri.parse(
                       'https://wa.me/$phone?text=${Uri.encodeComponent(message)}');

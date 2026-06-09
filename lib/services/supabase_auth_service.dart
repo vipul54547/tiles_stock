@@ -143,6 +143,7 @@ class SupabaseAuthService {
     required String companyName,
     required String contactPerson,
     required String phone,
+    String countryCode = '+91',
     required String city,
     String? gstNumber,
   }) async {
@@ -159,6 +160,7 @@ class SupabaseAuthService {
         'company_name':   companyName,
         'contact_person': contactPerson,
         'phone':          phone,
+        'country_code':   countryCode,
         'city':           city,
         'gst_number':     gstNumber,
       }).select().single();

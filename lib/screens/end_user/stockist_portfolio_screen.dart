@@ -740,9 +740,11 @@ class _State extends State<StockistPortfolioScreen> {
               child: ElevatedButton.icon(
                 onPressed: () async {
                   Navigator.pop(context);
-                  final phone = (_stockist?.phone ?? '')
-                      .replaceAll(RegExp(r'[^0-9]'), '');
-                  if (phone.isEmpty) {
+                  // Full international number (country code + phone), digits only.
+                  final phone =
+                      '${_stockist?.countryCode ?? '+91'}${_stockist?.phone ?? ''}'
+                          .replaceAll(RegExp(r'[^0-9]'), '');
+                  if ((_stockist?.phone ?? '').isEmpty) {
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(

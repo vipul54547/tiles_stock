@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
+import '../../widgets/phone_field.dart';
 import 'excel_import_screen.dart';
 
 // Admin screen to view existing stockists and add a single new one. The
@@ -200,6 +201,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _email    = TextEditingController();
   final _password = TextEditingController();
   final _phone    = TextEditingController();
+  final _code     = TextEditingController(text: '+91');
   final _city     = TextEditingController();
   final _state    = TextEditingController();
   final _address  = TextEditingController();
@@ -213,8 +215,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   @override
   void dispose() {
     for (final c in [
-      _name, _email, _password, _phone, _city, _state, _address, _priority,
-      _gst, _type
+      _name, _email, _password, _phone, _code, _city, _state, _address,
+      _priority, _gst, _type
     ]) {
       c.dispose();
     }
@@ -230,6 +232,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
         email:    _email.text.trim(),
         password: _password.text,
         phone:    _phone.text.trim(),
+        countryCode: _code.text.trim().isEmpty ? '+91' : _code.text.trim(),
         city:     _city.text.trim(),
         state:    _state.text.trim(),
         address:  _address.text.trim(),
@@ -292,7 +295,13 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
               _field(_password, 'Password *',
                   validator: (v) =>
                       (v ?? '').length < 6 ? 'Min 6 characters' : null),
-              _field(_phone, 'Phone', keyboard: TextInputType.phone),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: PhoneField(
+                    codeController: _code,
+                    phoneController: _phone,
+                    label: 'Phone'),
+              ),
               _field(_city, 'City'),
               _field(_state, 'State'),
               _field(_address, 'Address'),
