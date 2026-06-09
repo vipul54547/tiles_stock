@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/supabase_data_service.dart';
+import '../../services/stock_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
 import '../../models/tile_design.dart';
@@ -21,6 +22,7 @@ class AddEditStockScreen extends StatefulWidget {
 class _State extends State<AddEditStockScreen> {
   final _formKey = GlobalKey<FormState>();
   final _service = SupabaseDataService();
+  final _stockSvc = StockService();
   bool get isEdit => widget.designId != null;
 
   final _nameCtrl      = TextEditingController();
@@ -209,6 +211,9 @@ class _State extends State<AddEditStockScreen> {
 
     bool ok;
     if (isEdit) {
+      // box_quantity is intentionally omitted here — in edit mode stock only
+      // changes through Recount (adjustment), dispatch, or add-stock, so saving
+      // other fields never silently rewrites the count.
       ok = await _service.updateDesign(widget.designId!, {
         'name':          _nameCtrl.text.trim(),
         'size':          _size,
@@ -217,7 +222,6 @@ class _State extends State<AddEditStockScreen> {
         'quality':       _quality,
         'colour':        _colourCtrl.text.trim(),
         'stock_type':    _stockType,
-        'box_quantity':  int.tryParse(_qtyCtrl.text)       ?? 0,
         'pieces_per_box': int.tryParse(_piecesCtrl.text)   ?? 0,
         'box_weight_kg': double.tryParse(_weightCtrl.text)    ?? 0,
         'thickness_mm':  approxThicknessMm(_size,
@@ -308,6 +312,17 @@ class _State extends State<AddEditStockScreen> {
         actions: [
           if (isEdit)
             IconButton(
+              icon: const Icon(Icons.history),
+              tooltip: 'Stock history',
+              onPressed: _saving
+                  ? null
+                  : () => context.push(
+                        '/stockist/stock/history/${widget.designId}/'
+                        '${Uri.encodeComponent(_nameCtrl.text.trim())}',
+                      ),
+            ),
+          if (isEdit)
+            IconButton(
               icon: const Icon(Icons.delete_outline, color: Colors.red),
               tooltip: 'Delete design',
               onPressed: _saving ? null : _confirmDelete,
@@ -340,8 +355,7 @@ class _State extends State<AddEditStockScreen> {
                     Expanded(child: _field(_piecesCtrl, 'Pieces/Box',
                         numeric: true, required: true)),
                     const SizedBox(width: 12),
-                    Expanded(child: _field(_qtyCtrl, 'Box Quantity',
-                        numeric: true, required: true)),
+                    Expanded(child: _buildQtyField()),
                   ]),
                   Row(children: [
                     Expanded(child: _field(_weightCtrl, 'Box Weight (kg)',
@@ -722,5 +736,152 @@ class _State extends State<AddEditStockScreen> {
             labelText: label, border: const OutlineInputBorder()),
       ),
     );
+  }
+
+  // Add mode: a normal editable Box Quantity field (the opening stock).
+  // Edit mode: read-only — stock is changed through Recount so every change is
+  // logged as an adjustment. Tapping opens the recount dialog.
+  Widget _buildQtyField() {
+    if (!isEdit) {
+      return _field(_qtyCtrl, 'Box Quantity', numeric: true, required: true);
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: InkWell(
+        onTap: _saving ? null : _showRecountDialog,
+        borderRadius: BorderRadius.circular(4),
+        child: InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Box Quantity',
+            helperText: 'Tap to recount',
+            border: OutlineInputBorder(),
+            suffixIcon: Icon(Icons.fact_check_outlined),
+          ),
+          child: Text(_qtyCtrl.text.isEmpty ? '0' : _qtyCtrl.text,
+              style: const TextStyle(fontSize: 16)),
+        ),
+      ),
+    );
+  }
+
+  static const _recountReasons = [
+    'Miscount',
+    'Damaged',
+    'Lost / theft',
+    'Found extra',
+    'Return',
+    'Other',
+  ];
+
+  // Recount: the stockist enters the physically-counted boxes; we record the
+  // difference as an adjustment and update the design's stock.
+  Future<void> _showRecountDialog() async {
+    final current = int.tryParse(_qtyCtrl.text) ?? 0;
+    final countCtrl = TextEditingController(text: '$current');
+    final noteCtrl = TextEditingController();
+    String reason = _recountReasons.first;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          final entered = int.tryParse(countCtrl.text);
+          final delta = (entered ?? current) - current;
+          return AlertDialog(
+            title: const Text('Recount stock'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('System count: $current boxes',
+                      style: const TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: countCtrl,
+                    keyboardType: TextInputType.number,
+                    autofocus: true,
+                    onChanged: (_) => setD(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'Actual boxes counted',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (entered != null && delta != 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        delta > 0
+                            ? 'Adds $delta box${delta == 1 ? '' : 'es'}'
+                            : 'Removes ${-delta} box${-delta == 1 ? '' : 'es'}',
+                        style: TextStyle(
+                            color: delta > 0
+                                ? Colors.green.shade700
+                                : Colors.red.shade700,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: reason,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _recountReasons
+                        .map((r) =>
+                            DropdownMenuItem(value: r, child: Text(r)))
+                        .toList(),
+                    onChanged: (v) => setD(() => reason = v ?? reason),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: noteCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Note (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: () async {
+                  final n = int.tryParse(countCtrl.text);
+                  if (n == null || n < 0) {
+                    _snack('Enter a valid count', Colors.red);
+                    return;
+                  }
+                  if (n == current) {
+                    Navigator.pop(ctx, false);
+                    _snack('No change — count is the same.', Colors.grey);
+                    return;
+                  }
+                  final ok = await _stockSvc.adjustStock(
+                    designId:    widget.designId!,
+                    newQuantity: n,
+                    reason:      reason,
+                    note:        noteCtrl.text.trim(),
+                  );
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx, ok);
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (saved == true && mounted) {
+      final n = int.tryParse(countCtrl.text) ?? current;
+      setState(() => _qtyCtrl.text = '$n');
+      _snack('Stock recounted to $n boxes.', Colors.green);
+    }
   }
 }

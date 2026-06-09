@@ -48,23 +48,35 @@ class _State extends State<StockHistoryScreen> {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
                     final rec = _history[i];
-                    final isIn = rec['type'] == 'in';
+                    final type = rec['type'];
+                    // in = green +, out = red -, adjust = blue with its own sign.
+                    final Color color;
+                    final IconData icon;
+                    final String sign;
+                    if (type == 'in') {
+                      color = Colors.green;
+                      icon = Icons.add;
+                      sign = '+';
+                    } else if (type == 'out') {
+                      color = Colors.red;
+                      icon = Icons.remove;
+                      sign = '-';
+                    } else {
+                      color = const Color(0xFF1565C0);
+                      icon = Icons.fact_check_outlined;
+                      sign = (rec['sign'] ?? '').toString();
+                    }
                     return Card(
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: isIn
-                              ? Colors.green.withValues(alpha: 0.12)
-                              : Colors.red.withValues(alpha: 0.12),
-                          child: Icon(
-                            isIn ? Icons.add : Icons.remove,
-                            color: isIn ? Colors.green : Colors.red,
-                          ),
+                          backgroundColor: color.withValues(alpha: 0.12),
+                          child: Icon(icon, color: color),
                         ),
                         title: Text(
-                          '${isIn ? '+' : '-'} ${rec['quantity']} boxes',
+                          '$sign ${rec['quantity']} boxes',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: isIn ? Colors.green : Colors.red,
+                            color: color,
                             fontSize: 16,
                           ),
                         ),
