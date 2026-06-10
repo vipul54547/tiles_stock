@@ -361,7 +361,10 @@ class _State extends State<AddEditStockScreen> {
           : Form(
               key: _formKey,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                // Bottom inset clears the system nav bar so the "Add Design"
+                // button is never hidden under it.
+                padding: EdgeInsets.fromLTRB(
+                    16, 16, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
                 children: [
                   _buildImagePicker(),
                   const SizedBox(height: 8),
