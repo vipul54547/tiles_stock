@@ -11,19 +11,17 @@ const List<String> kTileTypes = [
   'Colour Body',
 ];
 
-/// Approximate bulk density (kg/m³) per body type. Density tracks water
-/// absorption: the more a body absorbs, the more porous it is and the lower its
-/// density. Ceramic absorbs the most (12–16%) so it is the lightest; porcelain
-/// (2.5–4.5%) is denser; the fully-vitrified bodies (PGVT/GVT, Full Body, DC,
-/// Colour Body — 0.05–0.5%) are the densest. These are estimates used only to
-/// derive an approximate thickness; tune them as real data comes in.
+/// Effective bulk density (kg/m³) per body type, used only to derive the
+/// approximate thickness band from box weight + area. Calibrated from real
+/// per-sq-ft weight data supplied by the user: PGVT&GVT 1.815 kg/sq.ft → 8.75 mm
+/// (2233); Ceramic 1.21 kg/sq.ft → 7.79 mm (1672).
 const Map<String, double> kTileDensity = {
-  'PGVT & GVT': 2400,
-  'Porcelain': 2350,
-  'Ceramic': 2000,
-  'Full Body': 2400,
-  'DC': 2400,
-  'Colour Body': 2400,
+  'PGVT & GVT': 2233,
+  'Full Body': 2350,
+  'DC': 2350,
+  'Colour Body': 2350,
+  'Porcelain': 2085,
+  'Ceramic': 1672,
 };
 
 double densityFor(String tileType) => kTileDensity[tileType] ?? 2350;

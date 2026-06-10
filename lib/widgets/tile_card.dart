@@ -45,26 +45,29 @@ class TileCard extends StatelessWidget {
                     tileAspectRatio: ratio,
                   ),
                 ),
-                // Non-standard finish (e.g. "Punch Ghr", "Lustra") shown over the image.
-                if (design.finishLabel != null && design.finishLabel!.isNotEmpty)
-                  Positioned(
-                    left: 6,
-                    bottom: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.62),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text(
-                        design.finishLabel!,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600),
-                      ),
+                // Finish chip over the image on every card: the standard finish
+                // (surface_type), plus the stockist's own wording (finish_label,
+                // e.g. "Punch Ghr", "Lustra") when the design has one.
+                Positioned(
+                  left: 6,
+                  bottom: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      design.finishLabel != null && design.finishLabel!.isNotEmpty
+                          ? '${design.surfaceType} · ${design.finishLabel}'
+                          : design.surfaceType,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
+                ),
                 if (onChoiceTap != null)
                   Positioned(
                     top: 6,
@@ -104,13 +107,14 @@ class TileCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 3),
-                  // Size · Surface  +  quality badge on same row
+                  // Size  +  quality badge on same row (finish now shown as a
+                  // chip over the image, so it isn't repeated/truncated here).
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
                         child: Text(
-                          '${design.size.replaceAll(' mm', '')} · ${design.surfaceType}',
+                          design.size.replaceAll(' mm', ''),
                           style: TextStyle(
                               color: Colors.grey[600], fontSize: 10),
                           overflow: TextOverflow.ellipsis,

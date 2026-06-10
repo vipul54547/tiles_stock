@@ -7,6 +7,7 @@ import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
 import '../../widgets/tile_card.dart';
+import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
@@ -31,7 +32,6 @@ const _qualityMeta = {
 };
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
 const _filterStockTypes = ['One Time', 'Regular', 'Both'];
 
 class _State extends State<StockistPortfolioScreen> {
@@ -46,7 +46,6 @@ class _State extends State<StockistPortfolioScreen> {
   final Set<String> _selectedQualities = {};
   Set<String> _selectedSizes    = {};
   Set<String> _selectedSurfaces = {};
-  Set<String> _selectedColours  = {};
   Set<String> _selectedTypes    = {};
   Set<String> _selectedThickness = {};
   String      _stockType        = 'Both';
@@ -61,7 +60,6 @@ class _State extends State<StockistPortfolioScreen> {
     int n = 0;
     if (_selectedSizes.isNotEmpty)    n++;
     if (_selectedSurfaces.isNotEmpty) n++;
-    if (_selectedColours.isNotEmpty)  n++;
     if (_selectedTypes.isNotEmpty)    n++;
     if (_selectedThickness.isNotEmpty) n++;
     if (_stockType != 'Both')         n++;
@@ -75,16 +73,13 @@ class _State extends State<StockistPortfolioScreen> {
         : _designs.where((d) => _selectedQualities.contains(d.quality)).toList();
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
+      result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
     }
     if (_selectedSizes.isNotEmpty) {
       result = result.where((d) => _selectedSizes.contains(d.size)).toList();
     }
     if (_selectedSurfaces.isNotEmpty) {
       result = result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
-    }
-    if (_selectedColours.isNotEmpty) {
-      result = result.where((d) => _selectedColours.contains(d.colour)).toList();
     }
     if (_selectedTypes.isNotEmpty) {
       result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
@@ -116,7 +111,6 @@ class _State extends State<StockistPortfolioScreen> {
     }
     addSet(_selectedSizes, (v) => v.replaceAll(' mm', ''));
     addSet(_selectedSurfaces);
-    addSet(_selectedColours);
     addSet(_selectedTypes);
     addSet(_selectedThickness);
     addSet(_selectedQualities);
@@ -140,7 +134,6 @@ class _State extends State<StockistPortfolioScreen> {
   void _clearAllFilters() => setState(() {
         _selectedSizes.clear();
         _selectedSurfaces.clear();
-        _selectedColours.clear();
         _selectedTypes.clear();
         _selectedThickness.clear();
         _selectedQualities.clear();
@@ -221,7 +214,9 @@ class _State extends State<StockistPortfolioScreen> {
             autofocus: true,
             onChanged: (v) => setState(() => _searchQuery = v),
             decoration: InputDecoration(
-              hintText: 'Search design name...',
+              hintText: smartSearch
+                  ? 'Smart: white = bianco, carrara…'
+                  : 'Search design name…',
               prefixIcon: const Icon(Icons.search, size: 20),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8)),
@@ -240,6 +235,8 @@ class _State extends State<StockistPortfolioScreen> {
             ),
           ),
         ),
+        const SizedBox(width: 6),
+        SmartSearchToggle(onChanged: () => setState(() {})),
         const SizedBox(width: 6),
         _buildFilterBtn(),
         if (_filterCount > 0) ...[
@@ -377,7 +374,6 @@ class _State extends State<StockistPortfolioScreen> {
       onTap: () => setState(() {
         _selectedSizes.clear();
         _selectedSurfaces.clear();
-        _selectedColours.clear();
         _selectedTypes.clear();
         _selectedThickness.clear();
         _stockType = 'Both';
@@ -851,7 +847,6 @@ class _State extends State<StockistPortfolioScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
     var localSizes     = Set<String>.from(_selectedSizes);
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
-    var localColours   = Set<String>.from(_selectedColours);
     var localTypes     = Set<String>.from(_selectedTypes);
     var localThickness = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_designs);
@@ -959,11 +954,10 @@ class _State extends State<StockistPortfolioScreen> {
                     .toList();
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
-              r = r.where((d) => d.name.toLowerCase().contains(q)).toList();
+              r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
             if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
-            if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
@@ -1017,7 +1011,6 @@ class _State extends State<StockistPortfolioScreen> {
             setState(() {
               _selectedSizes     = Set<String>.from(localSizes);
               _selectedSurfaces  = Set<String>.from(localSurfaces);
-              _selectedColours   = Set<String>.from(localColours);
               _selectedTypes     = Set<String>.from(localTypes);
               _selectedThickness = Set<String>.from(localThickness);
               _stockType         = localStockType;
@@ -1056,7 +1049,6 @@ class _State extends State<StockistPortfolioScreen> {
                         onPressed: () => setSheet(() {
                           localSizes.clear();
                           localSurfaces.clear();
-                          localColours.clear();
                           localTypes.clear();
                           localThickness.clear();
                           localStockType = 'Both';
@@ -1112,11 +1104,6 @@ class _State extends State<StockistPortfolioScreen> {
                           child: chipRow(thicknessBands, localThickness),
                         ),
                       FilterSection(
-                        title: 'Colour',
-                        summary: filterSummary(localColours),
-                        child: chipRow(_filterColours, localColours),
-                      ),
-                      FilterSection(
                         title: 'Stock Type',
                         summary: localStockType,
                         child: stockTypeRow(),
@@ -1158,7 +1145,6 @@ class _State extends State<StockistPortfolioScreen> {
       setState(() {
         _selectedSizes     = Set<String>.from(localSizes);
         _selectedSurfaces  = Set<String>.from(localSurfaces);
-        _selectedColours   = Set<String>.from(localColours);
         _selectedTypes     = Set<String>.from(localTypes);
         _selectedThickness = Set<String>.from(localThickness);
         _stockType         = localStockType;

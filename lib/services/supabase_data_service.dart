@@ -5,6 +5,7 @@ import '../models/end_user.dart';
 import '../models/surface_type.dart';
 import '../models/app_notification.dart';
 import '../models/tile_size.dart';
+import '../models/share_link.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
 import 'supabase_auth_service.dart';
@@ -305,6 +306,47 @@ class SupabaseDataService {
     } catch (e, st) {
       debugPrint('getPublicCatalog failed ($token): $e\n$st');
       return null;
+    }
+  }
+
+  // ── Stockist share links (permanent + create-on-demand, optional expiry) ────
+
+  /// The calling stockist's share links: the always-on Permanent (from
+  /// share_token) first, then any active create-on-demand links.
+  Future<List<ShareLink>> getMyShareLinks() async {
+    try {
+      final res = await supabase.rpc('my_share_links');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => ShareLink.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyShareLinks failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Creates a new share link for the calling stockist. [duration] is one of
+  /// 'permanent','1week','1month','3month','6month','1year'. Returns true on
+  /// success.
+  Future<bool> createShareLink(String duration) async {
+    try {
+      await supabase.rpc('create_share_link', params: {'p_duration': duration});
+      return true;
+    } catch (e, st) {
+      debugPrint('createShareLink($duration) failed: $e\n$st');
+      return false;
+    }
+  }
+
+  /// Revokes (deactivates) one of the calling stockist's create-on-demand links.
+  Future<bool> revokeShareLink(String id) async {
+    try {
+      await supabase.rpc('revoke_share_link', params: {'p_id': id});
+      return true;
+    } catch (e, st) {
+      debugPrint('revokeShareLink($id) failed: $e\n$st');
+      return false;
     }
   }
 
@@ -1073,7 +1115,10 @@ class SupabaseDataService {
   Future<List<SurfaceType>> getSurfaceTypes({bool activeOnly = false}) async {
     var query = supabase.from('surface_types').select();
     if (activeOnly) query = query.eq('is_active', true);
-    final data = await query.order('sort_order');
+    // ascending: true is REQUIRED — supabase-dart .order() defaults to
+    // DESCENDING, which reversed the finish order everywhere (filters, overview
+    // columns, dropdowns) vs the admin Manage Finishes sequence.
+    final data = await query.order('sort_order', ascending: true);
     return data.map<SurfaceType>((s) => SurfaceType.fromJson(s)).toList();
   }
 
@@ -1095,7 +1140,8 @@ class SupabaseDataService {
   Future<List<TileSize>> getTileSizes({bool activeOnly = false}) async {
     var query = supabase.from('tile_sizes').select();
     if (activeOnly) query = query.eq('is_active', true);
-    final data = await query.order('sort_order');
+    // ascending: true required — see getSurfaceTypes; .order() defaults to DESC.
+    final data = await query.order('sort_order', ascending: true);
     return data.map<TileSize>((s) => TileSize.fromJson(s)).toList();
   }
 

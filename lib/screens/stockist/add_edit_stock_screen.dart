@@ -32,6 +32,9 @@ class _State extends State<AddEditStockScreen> {
   final _weightCtrl    = TextEditingController();
   final _thicknessCtrl = TextEditingController();
   final _colourCtrl    = TextEditingController();
+  // Stockist's own wording for the chosen finish — learned as a surface_alias so
+  // future PDF uploads carrying this wording auto-align to the admin finish.
+  final _finishAliasCtrl = TextEditingController();
 
   String _size      = kAllowedSizes.first;
   String _surface   = 'Matt';
@@ -100,7 +103,7 @@ class _State extends State<AddEditStockScreen> {
     _nameCtrl.dispose();      _qtyCtrl.dispose();
     _priceCtrl.dispose();     _piecesCtrl.dispose();
     _weightCtrl.dispose();    _thicknessCtrl.dispose();
-    _colourCtrl.dispose();
+    _colourCtrl.dispose();    _finishAliasCtrl.dispose();
     super.dispose();
   }
 
@@ -269,6 +272,13 @@ class _State extends State<AddEditStockScreen> {
       ok = id != null;
     }
 
+    // Learn the stockist's own finish wording -> chosen admin finish, so future
+    // PDF uploads carrying this wording auto-align (mirrors the upload screen).
+    final aliasRaw = _finishAliasCtrl.text.trim();
+    if (ok && aliasRaw.isNotEmpty && _surface != 'None') {
+      await _service.upsertSurfaceAlias(currentStockistUUID, aliasRaw, _surface);
+    }
+
     setState(() => _saving = false);
     if (!mounted) return;
 
@@ -357,8 +367,7 @@ class _State extends State<AddEditStockScreen> {
                   const SizedBox(height: 8),
                   _field(_nameCtrl, 'Design Name', required: true),
                   _buildSizePicker(),
-                  _buildDropdown('Surface Type', _surfaces, _surface,
-                      (v) => setState(() => _surface = v!)),
+                  _buildSurfaceSection(),
                   const SizedBox(height: 16),
                   _buildDropdown('Tile Type', kTileTypes, _tileType,
                       (v) => setState(() => _tileType = v!)),
@@ -694,6 +703,33 @@ class _State extends State<AddEditStockScreen> {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  // Surface Type = the canonical admin finish stored on the design. Beneath it,
+  // an OPTIONAL field lets the stockist type their own wording for this finish;
+  // on save it's learned as a surface_alias so future PDF uploads with that
+  // wording auto-align to the chosen finish (same mechanism as Upload Stock).
+  Widget _buildSurfaceSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildDropdown('Surface Type', _surfaces, _surface,
+            (v) => setState(() => _surface = v!)),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: TextFormField(
+            controller: _finishAliasCtrl,
+            decoration: InputDecoration(
+              labelText: 'Your name for this finish (optional)',
+              helperText: 'Maps your wording to "$_surface" so future PDF '
+                  'uploads using it auto-align.',
+              helperMaxLines: 2,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildDropdown(String label, List<String> items, String value,
       void Function(String?) onChange) {

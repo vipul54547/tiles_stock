@@ -12,6 +12,7 @@ import '../../widgets/tile_card.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/notification_bell.dart';
 import '../../models/choice_state.dart';
+import '../../models/share_link.dart';
 import '../../utils/tile_types.dart';
 
 class StockistDashboardScreen extends StatefulWidget {
@@ -47,8 +48,6 @@ class _State extends State<StockistDashboardScreen> {
   Map<String, ({int buyers, int boxes})> _inquiries = {};
   // Boxes the stockist added that are held for admin approval (big-stock rule).
   int _pendingBoxes = 0;
-  // This stockist's public catalog share token (for the shareable link).
-  String _shareToken = '';
   bool _loading = true;
   String get _myStockistId => currentStockistUUID;
 
@@ -134,10 +133,6 @@ class _State extends State<StockistDashboardScreen> {
     final data = await _service.getDesignsByStockist(_myStockistId);
     final inquiries = await _service.getMyDesignInquiries();
     final pending = await _service.myPendingStockBoxes();
-    if (_shareToken.isEmpty) {
-      final me = await _service.getStockistBySequentialId(currentStockistId);
-      _shareToken = me?.shareToken ?? '';
-    }
     if (!mounted) return;
     setState(() {
       _designs = data;
@@ -147,86 +142,13 @@ class _State extends State<StockistDashboardScreen> {
     });
   }
 
-  // Hash-style URL so the link routes on any static host (no server rewrite).
-  String get _shareLink => '${AppConfig.shareBaseUrl}/#/s/$_shareToken';
-
   void _showShareSheet() {
-    if (_shareToken.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Share link not available yet.')));
-      return;
-    }
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Share your catalog',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 4),
-              const Text(
-                  'Send this link to buyers you choose. They can view your '
-                  'in-stock designs in a browser — no app or login needed.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: Text(_shareLink,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () async {
-                        await Clipboard.setData(
-                            ClipboardData(text: _shareLink));
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Link copied.')));
-                        }
-                      },
-                      icon: const Icon(Icons.copy, size: 18),
-                      label: const Text('Copy'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final uri = Uri.parse(
-                            'https://wa.me/?text=${Uri.encodeComponent('My tile catalog: $_shareLink')}');
-                        await launchUrl(uri,
-                            mode: LaunchMode.externalApplication);
-                        if (ctx.mounted) Navigator.pop(ctx);
-                      },
-                      icon: const Icon(Icons.chat_rounded, size: 18),
-                      label: const Text('WhatsApp'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF25D366),
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+      builder: (ctx) => _ShareLinksSheet(service: _service),
     );
   }
 
@@ -461,7 +383,9 @@ class _State extends State<StockistDashboardScreen> {
   Widget _buildChipRow() {
     final interestCount = _buyerInterestDesigns.length;
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      // Extra top padding leaves room for the Inquiry badge that sits above the
+      // pill, so it isn't clipped by the header.
+      padding: const EdgeInsets.fromLTRB(10, 14, 10, 8),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -473,6 +397,8 @@ class _State extends State<StockistDashboardScreen> {
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
+        // Clip.none so the badge can sit above the pill without being cut off.
+        clipBehavior: Clip.none,
         child: Row(
           children: [
             _tabPill('Stock', Icons.inventory_2_outlined, _activeTab == 0,
@@ -480,10 +406,11 @@ class _State extends State<StockistDashboardScreen> {
             const SizedBox(width: 6),
             _tabPill('Inquiry', Icons.bookmark_outlined, _activeTab == 1,
                 () => setState(() => _activeTab = 1), badge: interestCount),
+            // Wider gap so the Inquiry badge doesn't crowd the divider.
             Container(
                 width: 1,
                 height: 22,
-                margin: const EdgeInsets.symmetric(horizontal: 8),
+                margin: const EdgeInsets.only(left: 14, right: 10),
                 color: Colors.grey.shade300),
             ..._qualities.map((q) {
               final m = _qualityMeta[q]!;
@@ -681,7 +608,45 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Row 3: Dispatch · Upload PDF · Add Design · spare (compact buttons).
+  // The Upload button offers two stock sources: a PDF stock report (parsed,
+  // with images) or a plain Excel stock list (quantities only, photos reused).
+  void _showUploadSourceSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf, color: Color(0xFF1B4F72)),
+              title: const Text('Upload PDF stock report'),
+              subtitle: const Text('Parses designs + tile photos'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.push('/stockist/stock/upload');
+                _load();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.table_view_rounded, color: Color(0xFF2E7D32)),
+              title: const Text('Import Excel stock list'),
+              subtitle: const Text('Design, size, quality, boxes — photos reused'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.push('/stockist/stock/import-excel');
+                _load();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Row 3: Dispatch · Upload · Add Design · Records (compact buttons).
   Widget _buildActionButtonRow() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 2),
@@ -694,10 +659,7 @@ class _State extends State<StockistDashboardScreen> {
           }),
           const SizedBox(width: 6),
           _actionBtn('Upload', Icons.upload_file, const Color(0xFF1B4F72),
-              () async {
-            await context.push('/stockist/stock/upload');
-            _load();
-          }),
+              _showUploadSourceSheet),
           const SizedBox(width: 6),
           _actionBtn('Add', Icons.add, const Color(0xFF2E7D32), () async {
             await context.push('/stockist/stock/add');
@@ -1594,4 +1556,282 @@ class _State extends State<StockistDashboardScreen> {
                 color: fg,
                 fontWeight: FontWeight.w600)),
       );
+}
+
+// ── Share-links bottom sheet ─────────────────────────────────────────────────
+// Lists the stockist's public-catalog links — the always-on Permanent one plus
+// any create-on-demand links (with optional expiry) — and lets them create new
+// links, copy, share to WhatsApp, or revoke a time-limited one.
+class _ShareLinksSheet extends StatefulWidget {
+  final SupabaseDataService service;
+  const _ShareLinksSheet({required this.service});
+  @override
+  State<_ShareLinksSheet> createState() => _ShareLinksSheetState();
+}
+
+class _ShareLinksSheetState extends State<_ShareLinksSheet> {
+  List<ShareLink> _links = [];
+  bool _loading = true;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final links = await widget.service.getMyShareLinks();
+    if (!mounted) return;
+    setState(() {
+      _links = links;
+      _loading = false;
+    });
+  }
+
+  // Hash-style URL so the link routes on any static host (no server rewrite).
+  String _urlFor(String token) => '${AppConfig.shareBaseUrl}/#/s/$token';
+
+  String _statusLabel(ShareLink l) {
+    if (l.expiresAt == null) return 'Never expires';
+    if (l.expired) return 'Expired';
+    final diff = l.expiresAt!.difference(DateTime.now());
+    if (diff.inDays >= 1) {
+      return 'Expires in ${diff.inDays} day${diff.inDays == 1 ? '' : 's'}';
+    }
+    if (diff.inHours >= 1) {
+      return 'Expires in ${diff.inHours} hour${diff.inHours == 1 ? '' : 's'}';
+    }
+    return 'Expires soon';
+  }
+
+  Future<void> _copy(String token) async {
+    await Clipboard.setData(ClipboardData(text: _urlFor(token)));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Link copied.')));
+    }
+  }
+
+  Future<void> _whatsapp(String token) async {
+    final uri = Uri.parse(
+        'https://wa.me/?text=${Uri.encodeComponent('My tile catalog: ${_urlFor(token)}')}');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _create() async {
+    final duration = await showModalBottomSheet<String>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Create a link',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ),
+            for (final d in kShareLinkDurations)
+              ListTile(
+                leading: Icon(
+                    d.value == 'permanent'
+                        ? Icons.all_inclusive
+                        : Icons.schedule,
+                    color: const Color(0xFF1B4F72)),
+                title: Text(d.label),
+                onTap: () => Navigator.pop(ctx, d.value),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (duration == null) return;
+    setState(() => _busy = true);
+    final ok = await widget.service.createShareLink(duration);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ok) {
+      await _reload();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not create link.')));
+    }
+  }
+
+  Future<void> _revoke(ShareLink l) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Revoke link?'),
+        content: Text('The "${l.label}" link will stop working immediately. '
+            'This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child:
+                  const Text('Revoke', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (yes != true || l.id == null) return;
+    setState(() => _busy = true);
+    final ok = await widget.service.revokeShareLink(l.id!);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ok) {
+      await _reload();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not revoke link.')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: 16 + MediaQuery.of(context).viewInsets.bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('Share your catalog',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                ),
+                TextButton.icon(
+                  onPressed: _busy ? null : _create,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Create link'),
+                ),
+              ],
+            ),
+            const Text(
+                'Send a link to buyers you choose — they view your in-stock '
+                'designs in a browser, no app or login needed. Time-limited '
+                'links stop working automatically when they expire.',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 12),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _links.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (_, i) => _linkTile(_links[i]),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _linkTile(ShareLink l) {
+    final expired = l.expired;
+    final url = _urlFor(l.token);
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: expired ? Colors.red.shade50 : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+            color: expired ? Colors.red.shade200 : Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1B4F72).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(l.label,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B4F72))),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(_statusLabel(l),
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: expired
+                            ? Colors.red.shade700
+                            : Colors.grey.shade600)),
+              ),
+              if (l.revocable)
+                InkWell(
+                  onTap: _busy ? null : () => _revoke(l),
+                  child: const Padding(
+                    padding: EdgeInsets.all(2),
+                    child: Icon(Icons.delete_outline,
+                        size: 18, color: Colors.red),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: expired ? null : () => _copy(l.token),
+                  icon: const Icon(Icons.copy, size: 16),
+                  label: const Text('Copy'),
+                  style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 6)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: expired ? null : () => _whatsapp(l.token),
+                  icon: const Icon(Icons.chat_rounded, size: 16),
+                  label: const Text('WhatsApp'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF25D366),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }

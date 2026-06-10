@@ -151,9 +151,12 @@ class _State extends State<StockistGroupScreen> {
         ),
         title: const Text('Stockist Groups'),
       ),
-      body: _loading
+      body: SafeArea(
+        child: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
+              // Bottom padding clears the system navigation bar so the
+              // "Create group" button is never hidden under it.
               padding: const EdgeInsets.all(16),
               children: [
                 Container(
@@ -205,6 +208,7 @@ class _State extends State<StockistGroupScreen> {
                 ),
               ],
             ),
+      ),
     );
   }
 

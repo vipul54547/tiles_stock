@@ -94,3 +94,81 @@ class TileDesign {
         'stock_type': stockType,
       };
 }
+
+/// Search-synonym taxonomy for SMART search: typing any term matches designs
+/// whose name/finish contains ANY term in the same group — bridging languages
+/// (bianco↔white), marble names (carrara→white), materials (cemento→concrete),
+/// wood (legno/rovere), finishes (lappato→sugar) and shapes. Marble/material
+/// names are folded into their colour group so a colour search also surfaces
+/// them. Extend freely. (Source: curated tile-trade vocabulary.)
+const Map<String, List<String>> kSearchSynonyms = {
+  'white': ['white', 'bianco', 'blanco', 'snow', 'alabaster', 'offwhite',
+      'chalk', 'ivory', 'carrara', 'statuario', 'satvario', 'calacatta',
+      'arabescato', 'michelangelo', 'thassos', 'volakas'],
+  'grey': ['grey', 'gray', 'grigio', 'gris', 'charcoal', 'graphite',
+      'anthracite', 'antracite', 'piombo', 'silver', 'argento', 'platino',
+      'bardiglio', 'fiorito', 'tundra'],
+  'black': ['black', 'nero', 'negro', 'midnight', 'obsidian', 'marquina',
+      'portoro', 'laurent'],
+  'beige': ['beige', 'cream', 'crema', 'avorio', 'marfil', 'almond', 'sand',
+      'sabbia', 'vaniglia', 'biscuit', 'ecru', 'travertino', 'travertine',
+      'emperador', 'perlato', 'breccia', 'botticino', 'diano', 'pulpis'],
+  'brown': ['brown', 'marrone', 'noce', 'coffee', 'moka', 'chocolate',
+      'bronze', 'bronzo', 'taupe', 'wenge', 'terracotta', 'cotto'],
+  'gold': ['gold', 'golden', 'oro', 'dorato', 'brass', 'ottone', 'honey',
+      'miele'],
+  'blue': ['blue', 'blu', 'azzurro', 'azul', 'navy', 'cobalt', 'cobalto',
+      'teal', 'turquoise', 'indigo', 'ocean'],
+  'green': ['green', 'verde', 'sage', 'emerald', 'smeraldo', 'mint', 'olive',
+      'oliva', 'moss', 'jade'],
+  'pink': ['pink', 'rosa'],
+  'red': ['red', 'rosso'],
+  'concrete': ['concrete', 'cement', 'cemento', 'microcement', 'resin',
+      'resina', 'plaster', 'beton'],
+  'metal': ['metal', 'metallic', 'corten', 'ferro', 'steel', 'titanium',
+      'ossido'],
+  'terrazzo': ['terrazzo', 'palladiana', 'venetian', 'stracciatella', 'ceppo'],
+  'stone': ['stone', 'limestone', 'pietra', 'basalt', 'slate', 'ardesia',
+      'quartzite', 'quartz', 'bluestone', 'porphyry', 'porfido', 'luserna'],
+  'wood': ['wood', 'legno', 'timber', 'plank', 'rovere', 'oak', 'walnut',
+      'cedar', 'parquet', 'hardwood', 'bamboo', 'chestnut', 'castagno'],
+  'glossy': ['glossy', 'shiny', 'polished', 'levigato', 'pulido', 'lucido'],
+  'matt': ['matt', 'matte', 'honed', 'satinato', 'satina'],
+  'sugar': ['sugar', 'lappato', 'semipolished'],
+  'rough': ['rough', 'textured', 'structured', 'strutturato', 'antislip',
+      'flamed', 'bocciardato', 'bushhammered'],
+  'slab': ['slab', 'slabs', 'gvt', 'pgvt', 'jumbo', 'maxi'],
+  'subway': ['subway', 'metro', 'brick', 'briquette'],
+  'mosaic': ['mosaic', 'hexagonal', 'hexagon', 'esagono', 'herringbone',
+      'chevron'],
+};
+
+/// Expands a (lowercased) query to its synonym group(s) so search bridges
+/// languages/materials. Always includes the original query. Only expands
+/// queries of 3+ chars to avoid spurious short-substring hits.
+Set<String> expandSearchTerms(String qLower) {
+  final terms = <String>{qLower};
+  if (qLower.length >= 3) {
+    for (final group in kSearchSynonyms.values) {
+      if (group.any((t) => t.contains(qLower) || qLower.contains(t))) {
+        terms.addAll(group);
+      }
+    }
+  }
+  return terms;
+}
+
+extension TileDesignSearch on TileDesign {
+  /// Whether this design matches a buyer's typed search against the design
+  /// name, the standard finish, and the full finish wording (`finishLabel`).
+  /// When [smart] is true, colour/material/finish words are expanded via
+  /// [kSearchSynonyms] (so "bianco"/"carrara" find white tiles); when false it
+  /// is a plain literal substring match. [qLower] must be lowercased.
+  bool matchesSearch(String qLower, {bool smart = true}) {
+    final terms = smart ? expandSearchTerms(qLower) : {qLower};
+    final n = name.toLowerCase();
+    final s = surfaceType.toLowerCase();
+    final f = finishLabel?.toLowerCase() ?? '';
+    return terms.any((t) => n.contains(t) || s.contains(t) || f.contains(t));
+  }
+}

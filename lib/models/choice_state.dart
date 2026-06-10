@@ -10,6 +10,11 @@ String currentStockistUUID = '';  // Supabase UUID  (DB query use)
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID
 
+// Buyer search mode shared across all buyer screens for the session:
+// true  = SMART (synonym/multi-language expansion, e.g. bianco = white),
+// false = NORMAL (plain literal text match). Toggled from the search bar.
+bool smartSearch = true;
+
 // Test accounts for development (email → sequential_id)
 const Map<String, String> stockistTestAccounts = {
   'krishna@test.com': '002',

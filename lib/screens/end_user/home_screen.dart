@@ -14,9 +14,9 @@ import '../../utils/design_ranking.dart';
 import '../../utils/my_choice.dart';
 import '../../utils/tile_types.dart';
 import '../../widgets/filter_section.dart';
+import '../../widgets/smart_search_toggle.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
 const _filterQualities  = ['Premium', 'Standard'];
 const _filterStockTypes = ['One Time', 'Regular', 'Both'];
 
@@ -43,7 +43,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Set<String> _selectedSizes = {};
   Set<String> _selectedSurfaces = {};
-  Set<String> _selectedColours = {};
   Set<String> _selectedTypes = {};
   Set<String> _selectedThickness = {};
   Set<String> _selectedQualities = {};
@@ -102,7 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
     var result = _designs;
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
+      result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
     }
     if (_activeGroupIndex >= 0) {
       final groupIds = stockistGroups[_activeGroupIndex].stockistIds;
@@ -116,9 +115,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     if (_selectedSurfaces.isNotEmpty) {
       result = result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
-    }
-    if (_selectedColours.isNotEmpty) {
-      result = result.where((d) => _selectedColours.contains(d.colour)).toList();
     }
     if (_selectedTypes.isNotEmpty) {
       result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
@@ -153,7 +149,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     addSet(_selectedSizes, (v) => v.replaceAll(' mm', ''));
     addSet(_selectedSurfaces);
-    addSet(_selectedColours);
     addSet(_selectedTypes);
     addSet(_selectedThickness);
     addSet(_selectedQualities);
@@ -177,7 +172,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _clearAllFilters() => setState(() {
         _selectedSizes.clear();
         _selectedSurfaces.clear();
-        _selectedColours.clear();
         _selectedTypes.clear();
         _selectedThickness.clear();
         _selectedQualities.clear();
@@ -190,7 +184,6 @@ class _HomeScreenState extends State<HomeScreen> {
     int c = 0;
     if (_selectedSizes.isNotEmpty) c++;
     if (_selectedSurfaces.isNotEmpty) c++;
-    if (_selectedColours.isNotEmpty) c++;
     if (_selectedTypes.isNotEmpty) c++;
     if (_selectedThickness.isNotEmpty) c++;
     if (_selectedQualities.isNotEmpty) c++;
@@ -204,7 +197,6 @@ class _HomeScreenState extends State<HomeScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
     var localSizes     = Set<String>.from(_selectedSizes);
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
-    var localColours   = Set<String>.from(_selectedColours);
     var localTypes     = Set<String>.from(_selectedTypes);
     var localThickness = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_designs);
@@ -264,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
             var r = _designs;
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
-              r = r.where((d) => d.name.toLowerCase().contains(q)).toList();
+              r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
             }
             if (_activeGroupIndex >= 0) {
               final g = stockistGroups[_activeGroupIndex].stockistIds;
@@ -275,7 +267,6 @@ class _HomeScreenState extends State<HomeScreen> {
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
             if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
-            if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
@@ -355,7 +346,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         onPressed: () => setSheet(() {
                           localSizes.clear();
                           localSurfaces.clear();
-                          localColours.clear();
                           localTypes.clear();
                           localThickness.clear();
                           localStockType = 'Both';
@@ -412,11 +402,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: chipWrap(thicknessBands, localThickness),
                         ),
                       FilterSection(
-                        title: 'Colour',
-                        summary: filterSummary(localColours),
-                        child: chipWrap(_filterColours, localColours),
-                      ),
-                      FilterSection(
                         title: 'Stock Type',
                         summary: localStockType,
                         child: Wrap(
@@ -468,7 +453,6 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _selectedSizes     = Set<String>.from(localSizes);
         _selectedSurfaces  = Set<String>.from(localSurfaces);
-        _selectedColours   = Set<String>.from(localColours);
         _selectedTypes     = Set<String>.from(localTypes);
         _selectedThickness = Set<String>.from(localThickness);
         _stockType         = localStockType;
@@ -600,7 +584,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   onChanged: (v) => setState(() => _searchQuery = v),
                   onSubmitted: (_) => _closeSearch(),
                   decoration: InputDecoration(
-                    hintText: 'Search design name...',
+                    hintText: smartSearch
+                        ? 'Smart: white = bianco, carrara…'
+                        : 'Search design name…',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8)),
@@ -610,6 +596,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              SmartSearchToggle(onChanged: () => setState(() {})),
               const SizedBox(width: 8),
               GestureDetector(
                 onTap: _closeSearch,
@@ -1115,7 +1103,6 @@ class _HomeScreenState extends State<HomeScreen> {
                           onTap: () => setState(() {
                             _selectedSizes.clear();
                             _selectedSurfaces.clear();
-                            _selectedColours.clear();
                             _selectedTypes.clear();
                             _selectedThickness.clear();
                             _selectedQualities = {};

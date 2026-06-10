@@ -10,6 +10,7 @@ import '../widgets/tile_card.dart';
 import 'end_user/stockist_group_screen.dart'
     show stockistGroups, loadStockistGroupsFromDb;
 import '../models/choice_state.dart';
+import '../widgets/smart_search_toggle.dart';
 import '../utils/design_ranking.dart';
 import '../utils/my_choice.dart';
 import '../utils/tile_types.dart';
@@ -68,8 +69,7 @@ class _State extends State<StockistsOverviewScreen> {
   final Set<String> _selectedSurfaces = {};
 
 
-  // Design filter (Qty, Colour, Stock Type — in addition to shared Size/Finish/Quality)
-  final Set<String> _selectedColours = {};
+  // Design filter (Qty, Stock Type — in addition to shared Size/Finish/Quality)
   final Set<String> _selectedTypes = {};
   final Set<String> _selectedThickness = {};
   String _designStockType = 'Both';
@@ -79,7 +79,6 @@ class _State extends State<StockistsOverviewScreen> {
   int get _designFilterCount {
     int c = _selectedSizes.length +
         _selectedSurfaces.length +
-        _selectedColours.length +
         _selectedTypes.length +
         _selectedThickness.length;
     if (_designStockType != 'Both') c++;
@@ -101,9 +100,6 @@ class _State extends State<StockistsOverviewScreen> {
     if (_selectedSizes.isNotEmpty && !_selectedSizes.contains(t.size)) return false;
     if (_selectedSurfaces.isNotEmpty &&
         !_selectedSurfaces.contains(t.surfaceType)) {
-      return false;
-    }
-    if (_selectedColours.isNotEmpty && !_selectedColours.contains(t.colour)) {
       return false;
     }
     if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(t.tileType)) {
@@ -295,7 +291,7 @@ class _State extends State<StockistsOverviewScreen> {
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       if (_searchByDesign) {
-        result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
+        result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
       } else {
         final matchingIds = _allData
             .where((sd) =>
@@ -318,9 +314,6 @@ class _State extends State<StockistsOverviewScreen> {
     }
     if (_selectedSurfaces.isNotEmpty) {
       result = result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
-    }
-    if (_selectedColours.isNotEmpty) {
-      result = result.where((d) => _selectedColours.contains(d.colour)).toList();
     }
     if (_selectedTypes.isNotEmpty) {
       result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
@@ -354,7 +347,6 @@ class _State extends State<StockistsOverviewScreen> {
     }
     addSet(_selectedSizes, (v) => v.replaceAll(' mm', ''));
     addSet(_selectedSurfaces);
-    addSet(_selectedColours);
     addSet(_selectedTypes);
     addSet(_selectedThickness);
     addSet(_selectedQualities);
@@ -378,7 +370,6 @@ class _State extends State<StockistsOverviewScreen> {
   void _clearAllDesignFilters() => setState(() {
         _selectedSizes.clear();
         _selectedSurfaces.clear();
-        _selectedColours.clear();
         _selectedTypes.clear();
         _selectedThickness.clear();
         _selectedQualities.clear();
@@ -387,7 +378,6 @@ class _State extends State<StockistsOverviewScreen> {
         _maxQtyCtrl.clear();
       });
 
-  static const _filterColours    = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
   static const _filterStockTypes = ['One Time', 'Regular', 'Both'];
 
   void _showDesignFilterSheet() {
@@ -395,7 +385,6 @@ class _State extends State<StockistsOverviewScreen> {
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     var localSizes      = Set<String>.from(_selectedSizes);
     var localSurfaces   = Set<String>.from(_selectedSurfaces);
-    var localColours    = Set<String>.from(_selectedColours);
     var localTypes      = Set<String>.from(_selectedTypes);
     var localThickness  = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_allDesigns);
@@ -448,7 +437,7 @@ class _State extends State<StockistsOverviewScreen> {
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
               if (_searchByDesign) {
-                r = r.where((d) => d.name.toLowerCase().contains(q)).toList();
+                r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
               } else {
                 final ids = _allData
                     .where((sd) =>
@@ -468,7 +457,6 @@ class _State extends State<StockistsOverviewScreen> {
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
             if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
-            if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
@@ -536,7 +524,6 @@ class _State extends State<StockistsOverviewScreen> {
                         onPressed: () => setSheet(() {
                           localSizes.clear();
                           localSurfaces.clear();
-                          localColours.clear();
                           localTypes.clear();
                           localThickness.clear();
                           localStockType = 'Both';
@@ -591,11 +578,6 @@ class _State extends State<StockistsOverviewScreen> {
                           child: chipWrap(thicknessBands, localThickness),
                         ),
                       FilterSection(
-                        title: 'Colour',
-                        summary: filterSummary(localColours),
-                        child: chipWrap(_filterColours, localColours),
-                      ),
-                      FilterSection(
                         title: 'Stock Type',
                         summary: localStockType,
                         child: Wrap(spacing: 8, runSpacing: 8,
@@ -643,7 +625,6 @@ class _State extends State<StockistsOverviewScreen> {
       setState(() {
         _selectedSizes      ..clear()..addAll(localSizes);
         _selectedSurfaces   ..clear()..addAll(localSurfaces);
-        _selectedColours    ..clear()..addAll(localColours);
         _selectedTypes      ..clear()..addAll(localTypes);
         _selectedThickness  ..clear()..addAll(localThickness);
         _designStockType    = localStockType;
@@ -1368,7 +1349,9 @@ class _State extends State<StockistsOverviewScreen> {
     if (_searchActive) {
       final hint = !_viewDesigns || !_searchByDesign
           ? 'Search stockist name or ID...'
-          : 'Search design name...';
+          : (smartSearch
+              ? 'Smart: white = bianco, carrara…'
+              : 'Search design name…');
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1395,6 +1378,10 @@ class _State extends State<StockistsOverviewScreen> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (_searchByDesign) ...[
+                  SmartSearchToggle(onChanged: () => setState(() {})),
+                  const SizedBox(width: 8),
+                ],
                 GestureDetector(
                   onTap: _closeSearch,
                   child: Container(
@@ -1564,7 +1551,6 @@ class _State extends State<StockistsOverviewScreen> {
               onTap: () => setState(() {
                 _selectedSizes.clear();
                 _selectedSurfaces.clear();
-                _selectedColours.clear();
                 _selectedTypes.clear();
                 _selectedThickness.clear();
                 _selectedQualities.clear();
