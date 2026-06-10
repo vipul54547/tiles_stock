@@ -368,15 +368,15 @@ class _State extends State<AddEditStockScreen> {
                   _field(_nameCtrl, 'Design Name', required: true),
                   _buildSizePicker(),
                   _buildSurfaceSection(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _buildDropdown('Tile Type', kTileTypes, _tileType,
                       (v) => setState(() => _tileType = v!)),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _buildQualityPicker(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _buildStockTypePicker(),
-                  const SizedBox(height: 16),
-                  _field(_colourCtrl, 'Colour', required: true),
+                  const SizedBox(height: 12),
+                  _field(_colourCtrl, 'Colour (optional)'),
                   Row(children: [
                     Expanded(child: _field(_piecesCtrl, 'Pieces/Box',
                         numeric: true, required: true)),
@@ -588,19 +588,19 @@ class _State extends State<AddEditStockScreen> {
       children: [
         const Text('Quality',
             style: TextStyle(color: Colors.grey, fontSize: 13)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Row(
           children: _qualities.map((q) {
             final sel = _quality == q;
             final Color bg, fg;
             final IconData icon;
             if (q == 'Premium') {
-              bg   = const Color(0xFFFFF8E1);
-              fg   = const Color(0xFFF9A825);
+              bg = const Color(0xFFFFF8E1);
+              fg = const Color(0xFFF9A825);
               icon = Icons.star_rounded;
             } else {
-              bg   = const Color(0xFFE3F2FD);
-              fg   = const Color(0xFF1565C0);
+              bg = const Color(0xFFE3F2FD);
+              fg = const Color(0xFF1565C0);
               icon = Icons.verified_outlined;
             }
             return Expanded(
@@ -608,22 +608,17 @@ class _State extends State<AddEditStockScreen> {
                 onTap: () => setState(() => _quality = q),
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 4),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 9),
                   decoration: BoxDecoration(
                     color: sel ? fg : bg,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: fg, width: sel ? 2 : 1),
-                    boxShadow: sel
-                        ? [BoxShadow(
-                              color: fg.withValues(alpha: 0.25),
-                              blurRadius: 6)]
-                        : [],
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(icon, size: 22, color: sel ? Colors.white : fg),
-                      const SizedBox(height: 6),
+                      Icon(icon, size: 16, color: sel ? Colors.white : fg),
+                      const SizedBox(width: 6),
                       Text(q,
                           style: TextStyle(
                               fontSize: 12,
@@ -648,55 +643,51 @@ class _State extends State<AddEditStockScreen> {
       children: [
         const Text('Stock Type',
             style: TextStyle(color: Colors.grey, fontSize: 13)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         Row(
-          children: _stockTypes.map((type) => Expanded(
-            child: GestureDetector(
-              onTap: () => setState(() => _stockType = type),
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  color: _stockType == type
-                      ? const Color(0xFF1B4F72)
-                      : Colors.grey[100],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: _stockType == type
-                          ? const Color(0xFF1B4F72)
-                          : Colors.grey),
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      type == 'Regular'
-                          ? Icons.autorenew
-                          : Icons.looks_one_outlined,
-                      color: _stockType == type
-                          ? Colors.white
-                          : Colors.grey,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(type,
-                        style: TextStyle(
-                            color: _stockType == type
-                                ? Colors.white
-                                : Colors.grey,
-                            fontWeight: FontWeight.bold)),
-                    Text(
-                        type == 'Regular'
-                            ? 'Always available'
-                            : 'Limited stock',
-                        style: TextStyle(
-                            fontSize: 10,
-                            color: _stockType == type
-                                ? Colors.white70
-                                : Colors.grey)),
-                  ],
+          children: _stockTypes.map((type) {
+            final sel = _stockType == type;
+            final icon = type == 'Regular'
+                ? Icons.autorenew
+                : type == 'Both'
+                    ? Icons.layers_outlined
+                    : Icons.looks_one_outlined;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _stockType = type),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: sel ? const Color(0xFF1B4F72) : Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color:
+                            sel ? const Color(0xFF1B4F72) : Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(icon,
+                          size: 16,
+                          color: sel ? Colors.white : Colors.grey.shade600),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(type,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color:
+                                    sel ? Colors.white : Colors.grey.shade700)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          )).toList(),
+            );
+          }).toList(),
         ),
       ],
     );
