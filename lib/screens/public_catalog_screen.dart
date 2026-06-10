@@ -5,6 +5,7 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel;
+import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 
 /// Public, login-free catalog opened via a stockist's private share link
 /// (`/s/<token>`). Shows that stockist's in-stock designs with search, filters,
@@ -488,6 +489,9 @@ class _State extends State<PublicCatalogScreen> {
     final surface = (d['surface'] ?? '').toString();
     final finishChip =
         finish.isNotEmpty ? '$surface · $finish' : surface;
+    // Match the in-app card: image follows the tile's real shape (e.g. 800x1600
+    // -> 1:2 portrait, 1200x1800 -> 2:3), computed from the size, not a square.
+    final ratio = aspectRatioFromSize((d['size'] ?? '').toString());
 
     return GestureDetector(
       onTap: () => _toggle(id),
@@ -506,7 +510,7 @@ class _State extends State<PublicCatalogScreen> {
             Stack(
               children: [
                 AspectRatio(
-                  aspectRatio: 1,
+                  aspectRatio: ratio,
                   child: img.isEmpty
                       ? Container(
                           color: Colors.grey.shade100,
