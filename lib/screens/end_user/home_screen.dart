@@ -711,6 +711,11 @@ class _HomeScreenState extends State<HomeScreen> {
                               _infoChip(d.size.replaceAll(' mm', '')),
                               _infoChip(d.surfaceType),
                               _infoChip(d.quality),
+                              if (d.finishLabel != null &&
+                                  d.finishLabel!.trim().isNotEmpty &&
+                                  d.finishLabel!.toLowerCase() !=
+                                      d.surfaceType.toLowerCase())
+                                _stockistFinishChip(d.finishLabel!.trim()),
                             ],
                           ),
                           const SizedBox(height: 8),
@@ -875,6 +880,32 @@ class _HomeScreenState extends State<HomeScreen> {
             color: Color(0xFF1B4F72),
             fontWeight: FontWeight.w500,
           ),
+        ),
+      );
+
+  // Stockist's own finish wording (finish_label), labelled so it's distinct
+  // from the standard finish chip.
+  Widget _stockistFinishChip(String name) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE65100).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border:
+              Border.all(color: const Color(0xFFE65100).withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.storefront_outlined,
+                size: 12, color: Color(0xFFE65100)),
+            const SizedBox(width: 4),
+            Text('Stockist: $name',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFFE65100),
+                  fontWeight: FontWeight.w600,
+                )),
+          ],
         ),
       );
 

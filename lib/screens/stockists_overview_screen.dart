@@ -822,7 +822,8 @@ class _State extends State<StockistsOverviewScreen> {
                             ],
                           ),
                           const SizedBox(height: 10),
-                          // Size / surface / quality chips
+                          // Size / finish / quality chips, plus the stockist's
+                          // own finish wording when it differs from the standard.
                           Wrap(
                             spacing: 6,
                             runSpacing: 6,
@@ -830,6 +831,11 @@ class _State extends State<StockistsOverviewScreen> {
                               _infoChip(d.size.replaceAll(' mm', '')),
                               _infoChip(d.surfaceType),
                               _infoChip(d.quality),
+                              if (d.finishLabel != null &&
+                                  d.finishLabel!.trim().isNotEmpty &&
+                                  d.finishLabel!.toLowerCase() !=
+                                      d.surfaceType.toLowerCase())
+                                _stockistFinishChip(d.finishLabel!.trim()),
                             ],
                           ),
                           const SizedBox(height: 10),
@@ -976,6 +982,35 @@ class _State extends State<StockistsOverviewScreen> {
             color: Color(0xFF1B4F72),
             fontWeight: FontWeight.w500,
           ),
+        ),
+      );
+
+  // The stockist's own wording for the finish (finish_label), labelled so the
+  // buyer can tell it apart from the standard finish chip and recognise the
+  // design by the stockist's name too.
+  Widget _stockistFinishChip(String name) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE65100).withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border:
+              Border.all(color: const Color(0xFFE65100).withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.storefront_outlined,
+                size: 12, color: Color(0xFFE65100)),
+            const SizedBox(width: 4),
+            Text(
+              'Stockist: $name',
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFFE65100),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       );
 
