@@ -36,6 +36,14 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
     });
   }
 
+  void _openFullImage(TileDesign design, List<String> urls, double ar) {
+    Navigator.of(context).push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) =>
+          _FullImageView(urls: urls, aspectRatio: ar, title: design.name),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -74,19 +82,66 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
         },
         child: ListView(
           children: [
-            AspectRatio(
-              aspectRatio: aspectRatioFromSize(design.size),
-              child: PageView.builder(
-                itemCount: design.faceImageUrls.isNotEmpty
-                    ? design.faceImageUrls.length
-                    : 1,
-                itemBuilder: (_, i) => TileImage(
-                  url: design.faceImageUrls.isNotEmpty
-                      ? design.faceImageUrls[i]
-                      : '',
+            // Height-capped, tappable hero image. Bounding the height keeps the
+            // specs below visible without a long scroll; tapping opens a
+            // full-screen zoomable view of the full tile.
+            LayoutBuilder(builder: (ctx, constraints) {
+              final ar = aspectRatioFromSize(design.size); // width ÷ height
+              final maxH = MediaQuery.of(context).size.height * 0.42;
+              double w = constraints.maxWidth;
+              double h = w / ar;
+              if (h > maxH) {
+                h = maxH;
+                w = h * ar;
+              }
+              final urls = design.faceImageUrls.isNotEmpty
+                  ? design.faceImageUrls
+                  : <String>[''];
+              return GestureDetector(
+                onTap: () => _openFullImage(design, urls, ar),
+                child: Container(
+                  color: Colors.grey.shade100,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: SizedBox(
+                    width: w,
+                    height: h,
+                    child: Stack(
+                      children: [
+                        PageView.builder(
+                          itemCount: urls.length,
+                          itemBuilder: (_, i) =>
+                              TileImage(url: urls[i], tileAspectRatio: ar),
+                        ),
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.zoom_out_map_rounded,
+                                    size: 13, color: Colors.white),
+                                SizedBox(width: 4),
+                                Text('Tap to view full',
+                                    style: TextStyle(
+                                        color: Colors.white, fontSize: 11)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
+              );
+            }),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Row(
@@ -297,6 +352,42 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Full-screen zoomable image view ────────────────────────────────────────────
+
+class _FullImageView extends StatelessWidget {
+  final List<String> urls;
+  final double aspectRatio;
+  final String title;
+  const _FullImageView(
+      {required this.urls, required this.aspectRatio, required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(title, style: const TextStyle(fontSize: 16)),
+      ),
+      body: PageView.builder(
+        itemCount: urls.length,
+        itemBuilder: (_, i) => InteractiveViewer(
+          minScale: 1,
+          maxScale: 5,
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: aspectRatio,
+              child: TileImage(url: urls[i], tileAspectRatio: aspectRatio),
+            ),
+          ),
         ),
       ),
     );

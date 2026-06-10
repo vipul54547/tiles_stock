@@ -110,4 +110,23 @@ class CloudinaryService {
   // Exponential-ish backoff between retry attempts: 500ms, 1s, 1.5s …
   static Duration _backoff(int attempt) =>
       Duration(milliseconds: 500 * attempt);
+
+  /// Rewrites a Cloudinary delivery URL into a resized/compressed **thumbnail**
+  /// for grids — `c_limit` scales the WHOLE image down to [width] (never crops,
+  /// never upscales), `q_auto`+`f_auto` compress and pick a modern format. The
+  /// original upload is untouched, so detail/zoom views still get full quality.
+  ///
+  /// Non-Cloudinary, asset, empty, or already-transformed URLs are returned
+  /// unchanged, so this is safe to call on any image URL.
+  static String thumbUrl(String url, {int width = 600}) {
+    if (url.isEmpty) return url;
+    const marker = '/image/upload/';
+    final i = url.indexOf(marker);
+    if (i < 0) return url; // not a Cloudinary delivery URL
+    final insertAt = i + marker.length;
+    final rest = url.substring(insertAt);
+    // Already has a transformation (e.g. "w_..", "c_..") → leave it alone.
+    if (RegExp(r'^[a-z]{1,3}_').hasMatch(rest)) return url;
+    return '${url.substring(0, insertAt)}w_$width,c_limit,q_auto,f_auto/$rest';
+  }
 }

@@ -9,6 +9,7 @@ import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
+import '../../services/cloudinary_service.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/notification_bell.dart';
 import '../../models/choice_state.dart';
@@ -406,11 +407,12 @@ class _State extends State<StockistDashboardScreen> {
             const SizedBox(width: 6),
             _tabPill('Inquiry', Icons.bookmark_outlined, _activeTab == 1,
                 () => setState(() => _activeTab = 1), badge: interestCount),
-            // Wider gap so the Inquiry badge doesn't crowd the divider.
+            // Gap kept clear of the Inquiry badge while staying compact enough
+            // that all four items fit one screen width without scrolling.
             Container(
                 width: 1,
                 height: 22,
-                margin: const EdgeInsets.only(left: 14, right: 10),
+                margin: const EdgeInsets.only(left: 9, right: 8),
                 color: Colors.grey.shade300),
             ..._qualities.map((q) {
               final m = _qualityMeta[q]!;
@@ -427,7 +429,7 @@ class _State extends State<StockistDashboardScreen> {
                   }),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 7),
+                        horizontal: 8, vertical: 7),
                     decoration: BoxDecoration(
                       color: sel ? m.fg : m.bg,
                       borderRadius: BorderRadius.circular(8),
@@ -460,7 +462,7 @@ class _State extends State<StockistDashboardScreen> {
         clipBehavior: Clip.none,
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
               color: active ? const Color(0xFF1B4F72) : Colors.grey.shade100,
               borderRadius: BorderRadius.circular(8),
@@ -1260,7 +1262,7 @@ class _State extends State<StockistDashboardScreen> {
                         size: 28, color: Colors.grey.shade400),
                   )
                 : CachedNetworkImage(
-                    imageUrl: imageUrl,
+                    imageUrl: CloudinaryService.thumbUrl(imageUrl, width: 300),
                     width: 68,
                     height: 68,
                     fit: BoxFit.cover,

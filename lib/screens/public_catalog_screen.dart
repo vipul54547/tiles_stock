@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
+import '../services/cloudinary_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
@@ -274,7 +275,9 @@ class _State extends State<PublicCatalogScreen> {
                               child: AspectRatio(
                                 aspectRatio: ratio,
                                 child: CachedNetworkImage(
-                                    imageUrl: img, fit: BoxFit.cover),
+                                    imageUrl:
+                                        CloudinaryService.thumbUrl(img, width: 300),
+                                    fit: BoxFit.cover),
                               ),
                             ),
                           ),
@@ -666,7 +669,8 @@ class _State extends State<PublicCatalogScreen> {
                           child: Icon(Icons.image_not_supported,
                               size: 32, color: Colors.grey.shade400))
                       : CachedNetworkImage(
-                          imageUrl: img,
+                          // Grid card → lightweight Cloudinary thumbnail.
+                          imageUrl: CloudinaryService.thumbUrl(img, width: 600),
                           fit: BoxFit.cover,
                           placeholder: (_, __) =>
                               Container(color: Colors.grey.shade200),

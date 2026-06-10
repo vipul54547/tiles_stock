@@ -26,7 +26,9 @@ const _qualityMeta = {
   'Both':     (icon: Icons.layers_outlined,   bg: Color(0xFFE8F5E9), fg: Color(0xFF2E7D32)),
 };
 
-const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
+// Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
+// so a group's coloured circle never blends with the profile identity.
+const _groupColors = [Color(0xFFEF6C00), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -660,10 +662,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
-                  // Image
+                  // Image (bottom-sheet preview → medium thumbnail, not full-size)
                   AspectRatio(
                     aspectRatio: aspectRatioFromSize(d.size),
-                    child: TileImage(url: imageUrl),
+                    child: TileImage(url: imageUrl, thumbWidth: 800),
                   ),
                   // Details
                   Expanded(

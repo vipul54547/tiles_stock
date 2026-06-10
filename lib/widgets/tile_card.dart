@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../models/tile_design.dart';
 import '../utils/tile_sizes.dart';
 import '../services/supabase_auth_service.dart';
+import '../services/cloudinary_service.dart';
 
 export '../utils/tile_sizes.dart' show aspectRatioFromSize, kAllowedSizes;
 
@@ -38,11 +39,14 @@ class TileCard extends StatelessWidget {
               children: [
                 AspectRatio(
                   aspectRatio: ratio,
+                  // Grid card → load a lightweight thumbnail, not the full-size
+                  // original (which is reserved for the detail/zoom view).
                   child: TileImage(
                     url: design.faceImageUrls.isNotEmpty
                         ? design.faceImageUrls.first
                         : '',
                     tileAspectRatio: ratio,
+                    thumbWidth: 600,
                   ),
                 ),
                 // Finish chip over the image on every card: the standard finish
@@ -198,11 +202,15 @@ class TileCard extends StatelessWidget {
 class TileImage extends StatefulWidget {
   final String url;
   final double tileAspectRatio; // width ÷ height (e.g. 0.5 for 1:2 portrait)
+  /// When set, a Cloudinary thumbnail of this width is shown instead of the
+  /// full-size original (grids pass this; detail/zoom views leave it null).
+  final int? thumbWidth;
 
   const TileImage({
     super.key,
     required this.url,
     this.tileAspectRatio = 1.0,
+    this.thumbWidth,
   });
 
   @override
@@ -213,6 +221,12 @@ class _TileImageState extends State<TileImage> {
   bool _rotate = false;
   ImageStream? _stream;
   ImageStreamListener? _listener;
+
+  // Effective image URL: a Cloudinary thumbnail when [thumbWidth] is set,
+  // otherwise the original. (No-op for asset/empty/non-Cloudinary URLs.)
+  String get _src => widget.thumbWidth == null
+      ? widget.url
+      : CloudinaryService.thumbUrl(widget.url, width: widget.thumbWidth!);
 
   @override
   void initState() {
@@ -244,7 +258,7 @@ class _TileImageState extends State<TileImage> {
       if (imgLandscape != _rotate) setState(() => _rotate = imgLandscape);
     }, onError: (_, __) {});
 
-    _stream = CachedNetworkImageProvider(widget.url)
+    _stream = CachedNetworkImageProvider(_src)
         .resolve(const ImageConfiguration());
     _stream!.addListener(_listener!);
   }
@@ -274,7 +288,7 @@ class _TileImageState extends State<TileImage> {
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => _placeholder())
         : CachedNetworkImage(
-            imageUrl: widget.url,
+            imageUrl: _src,
             fit: BoxFit.cover,
             placeholder: (_, __) => _placeholder(),
             errorWidget: (_, __, ___) => _placeholder(),

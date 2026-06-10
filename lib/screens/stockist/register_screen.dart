@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../widgets/save_bar.dart';
+import '../../widgets/unsaved_changes.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -15,19 +17,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _cityCtrl = TextEditingController();
   final _gstCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  bool _dirty = false;
+
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
+
+  void _submit() {
+    if (_formKey.currentState!.validate()) {
+      setState(() => _dirty = false);
+      context.go('/stockist/dashboard');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: SaveBar(
+        label: 'Create Account',
+        icon: Icons.person_add_alt_1,
+        onPressed: _submit,
+        dirty: _dirty,
+      ),
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.maybePop(context),
         ),
         title: const Text('Company Registration'),
       ),
-      body: Form(
+      body: UnsavedChangesGuard(
+        isDirty: _dirty,
+        child: Form(
         key: _formKey,
+        onChanged: _markDirty,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -38,25 +61,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
             _field(_cityCtrl, 'City', Icons.location_city_outlined, required: true),
             _field(_gstCtrl, 'GST Number', Icons.receipt_outlined),
             _field(_passCtrl, 'Password', Icons.lock_outline, required: true, obscure: true),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: () {
-                  if (_formKey.currentState!.validate()) {
-                    context.go('/stockist/dashboard');
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1B4F72),
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Create Account', style: TextStyle(fontSize: 16)),
-              ),
-            ),
           ],
         ),
+      ),
       ),
     );
   }

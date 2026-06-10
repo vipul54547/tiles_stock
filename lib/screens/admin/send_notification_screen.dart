@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../models/stockist.dart';
 import '../../models/end_user.dart';
 import '../../services/supabase_data_service.dart';
+import '../../widgets/save_bar.dart';
+import '../../widgets/unsaved_changes.dart';
 
 /// Admin composes a notification and picks recipients — specific stockists
 /// and/or end users, or everyone of a role.
@@ -26,10 +28,17 @@ class _State extends State<SendNotificationScreen> {
   int _tab = 0; // 0 = stockists, 1 = end users
   bool _loading = true;
   bool _sending = false;
+  bool _dirty = false;
+
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
 
   @override
   void initState() {
     super.initState();
+    _titleCtrl.addListener(_markDirty);
+    _bodyCtrl.addListener(_markDirty);
     _load();
   }
 
@@ -79,6 +88,7 @@ class _State extends State<SendNotificationScreen> {
         allEndUsers: _allEndUsers,
       );
       if (!mounted) return;
+      _dirty = false; // sent → allow pop through the exit guard
       _snack('Notification sent to $_recipientCount recipient(s).',
           const Color(0xFF2E7D32));
       Navigator.pop(context);
@@ -96,9 +106,20 @@ class _State extends State<SendNotificationScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Send Notification')),
+      bottomNavigationBar: _loading
+          ? null
+          : SaveBar(
+              label: 'Send to $_recipientCount recipient(s)',
+              icon: Icons.send,
+              onPressed: _send,
+              saving: _sending,
+              dirty: _dirty,
+            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
+          : UnsavedChangesGuard(
+              isDirty: _dirty,
+              child: Column(
               children: [
                 Padding(
                   padding: const EdgeInsets.all(12),
@@ -125,32 +146,8 @@ class _State extends State<SendNotificationScreen> {
                 ),
                 _tabBar(),
                 Expanded(child: _tab == 0 ? _stockistList() : _endUserList()),
-                SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: _sending ? null : _send,
-                        icon: _sending
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : const Icon(Icons.send),
-                        label: Text('Send to $_recipientCount recipient(s)'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1B4F72),
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
               ],
+            ),
             ),
     );
   }
@@ -195,7 +192,7 @@ class _State extends State<SendNotificationScreen> {
           title: const Text('All stockists'),
           value: _allStockists,
           activeThumbColor: const Color(0xFF1B4F72),
-          onChanged: (v) => setState(() => _allStockists = v),
+          onChanged: (v) => setState(() { _allStockists = v; _dirty = true; }),
         ),
         const Divider(height: 1),
         Expanded(
@@ -208,6 +205,7 @@ class _State extends State<SendNotificationScreen> {
                 title: Text(s.name),
                 subtitle: Text('ID: ${s.id}'),
                 onChanged: (v) => setState(() {
+                  _dirty = true;
                   if (v == true) {
                     _pickedStockists.add(s.id);
                   } else {
@@ -229,7 +227,7 @@ class _State extends State<SendNotificationScreen> {
           title: const Text('All end users'),
           value: _allEndUsers,
           activeThumbColor: const Color(0xFF1B4F72),
-          onChanged: (v) => setState(() => _allEndUsers = v),
+          onChanged: (v) => setState(() { _allEndUsers = v; _dirty = true; }),
         ),
         const Divider(height: 1),
         Expanded(
@@ -242,6 +240,7 @@ class _State extends State<SendNotificationScreen> {
                 title: Text(e.companyName),
                 subtitle: Text('ID: ${e.id}'),
                 onChanged: (v) => setState(() {
+                  _dirty = true;
                   if (v == true) {
                     _pickedEndUsers.add(e.uuid);
                   } else {

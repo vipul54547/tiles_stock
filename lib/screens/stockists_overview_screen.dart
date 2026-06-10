@@ -7,6 +7,7 @@ import '../models/tile_design.dart';
 import '../services/supabase_data_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../widgets/tile_card.dart';
+import '../services/cloudinary_service.dart';
 import 'end_user/stockist_group_screen.dart'
     show stockistGroups, loadStockistGroupsFromDb;
 import '../models/choice_state.dart';
@@ -19,7 +20,9 @@ import '../widgets/notification_bell.dart';
 import '../utils/stockist_tiers.dart';
 
 const _qualities = ['Premium', 'Standard'];
-const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
+// Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
+// so a group's coloured circle never blends with the profile identity.
+const _groupColors = [Color(0xFFEF6C00), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
 const _qualityMeta = {
   'Premium': (icon: Icons.star_rounded,      bg: Color(0xFFFFF8E1), fg: Color(0xFFF9A825)),
   'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
@@ -694,12 +697,12 @@ class _State extends State<StockistsOverviewScreen> {
                       ],
                     ),
                   ),
-                  // Big image
+                  // Big image (bottom-sheet preview → medium thumbnail)
                   SizedBox(
                     height: 240,
                     width: double.infinity,
                     child: CachedNetworkImage(
-                      imageUrl: imageUrl,
+                      imageUrl: CloudinaryService.thumbUrl(imageUrl, width: 800),
                       fit: BoxFit.cover,
                       placeholder: (_, __) =>
                           Container(color: Colors.grey.shade200),
@@ -1234,11 +1237,13 @@ class _State extends State<StockistsOverviewScreen> {
     );
   }
 
-  Widget _groupChip(String label, bool active, VoidCallback? onTap) {
+  Widget _groupChip(String label, bool active, VoidCallback? onTap,
+      {Color? badgeColor, int? badgeNumber}) {
+    final hasBadge = badgeColor != null && badgeNumber != null;
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: EdgeInsets.fromLTRB(hasBadge ? 6 : 12, 6, 12, 6),
         decoration: BoxDecoration(
           color: active
               ? const Color(0xFF1B4F72)
@@ -1254,17 +1259,46 @@ class _State extends State<StockistsOverviewScreen> {
                     : Colors.grey.shade400,
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: active
-                ? Colors.white
-                : onTap == null
-                    ? Colors.grey.shade400
-                    : Colors.grey.shade700,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasBadge) ...[
+              // Same coloured numbered circle shown on the tile cards — the legend
+              // that ties a group's name to its ① circle.
+              Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.2),
+                ),
+                child: Center(
+                  child: Text(
+                    '$badgeNumber',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: active
+                    ? Colors.white
+                    : onTap == null
+                        ? Colors.grey.shade400
+                        : Colors.grey.shade700,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1300,30 +1334,39 @@ class _State extends State<StockistsOverviewScreen> {
                           _dismissKeyboard();
                           setState(() => _activeGroupIndex = i);
                         },
+                  badgeColor: _groupColors[i % _groupColors.length],
+                  badgeNumber: i + 1,
                 ),
                 const SizedBox(width: 6),
               ],
-              OutlinedButton.icon(
-                onPressed: () async {
-                  _dismissKeyboard();
-                  await context.push('/stockist-groups');
-                  if (mounted) {
-                    setState(() {
-                      if (_activeGroupIndex >= 0 &&
-                          stockistGroups[_activeGroupIndex].stockistIds.isEmpty) {
-                        _activeGroupIndex = -1;
-                      }
-                    });
-                  }
-                },
-                icon: const Icon(Icons.tune_rounded, size: 14),
-                label: const Text('Manage', style: TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF1B4F72),
-                  side: const BorderSide(color: Color(0xFF1B4F72)),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              // Compact people-icon action (not a chip) — opens Manage Groups.
+              Tooltip(
+                message: 'Manage groups',
+                child: GestureDetector(
+                  onTap: () async {
+                    _dismissKeyboard();
+                    await context.push('/stockist-groups');
+                    if (mounted) {
+                      setState(() {
+                        if (_activeGroupIndex >= 0 &&
+                            stockistGroups[_activeGroupIndex]
+                                .stockistIds
+                                .isEmpty) {
+                          _activeGroupIndex = -1;
+                        }
+                      });
+                    }
+                  },
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1B4F72),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.group_add_outlined,
+                        size: 18, color: Colors.white),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),

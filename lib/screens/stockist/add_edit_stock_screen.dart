@@ -11,6 +11,8 @@ import '../../models/tile_design.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/finishes.dart';
+import '../../widgets/save_bar.dart';
+import '../../widgets/unsaved_changes.dart';
 
 class AddEditStockScreen extends StatefulWidget {
   final String? designId;
@@ -51,6 +53,14 @@ class _State extends State<AddEditStockScreen> {
   List<String> _pickedPaths       = []; // newly picked local files
   bool _pageLoading = false;
   bool _saving      = false;
+  bool _processingDialogShown = false;
+  bool _dirty       = false; // unsaved edits → pinned Save bar + exit guard
+
+  // Marks the form dirty on user edits. Ignored during the initial load/_fill
+  // so prefilling an existing design doesn't count as a change.
+  void _markDirty() {
+    if (!_pageLoading && !_dirty) setState(() => _dirty = true);
+  }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -188,6 +198,7 @@ class _State extends State<AddEditStockScreen> {
       setState(() {
         _pickedPaths = [x.path];
         _existingImageUrls = []; // replace existing with the new photo
+        _dirty = true;
       });
     } catch (e) {
       if (mounted) _snack('Could not open camera: $e', Colors.red);
@@ -206,6 +217,7 @@ class _State extends State<AddEditStockScreen> {
             .map((f) => f.path!)
             .toList();
         _existingImageUrls = []; // replace existing images with new pick
+        _dirty = true;
       });
     }
   }
@@ -220,6 +232,10 @@ class _State extends State<AddEditStockScreen> {
     }
 
     setState(() => _saving = true);
+
+    // Only show the "uploading to server" dialog when there are new photos to
+    // upload — a plain field-only save doesn't hit the image server.
+    if (_pickedPaths.isNotEmpty) _showProcessing();
 
     // Upload any newly picked images to Cloudinary
     final newUrls = <String>[];
@@ -279,10 +295,17 @@ class _State extends State<AddEditStockScreen> {
       await _service.upsertSurfaceAlias(currentStockistUUID, aliasRaw, _surface);
     }
 
-    setState(() => _saving = false);
     if (!mounted) return;
+    _hideProcessing();
+    setState(() {
+      _saving = false;
+      if (ok) _dirty = false; // saved → let the pop through the exit guard
+    });
 
-    _snack(ok ? 'Design saved!' : 'Failed to save. Please try again.',
+    _snack(
+        ok
+            ? 'Design saved! Your tile photo is now live.'
+            : 'Failed to save. Please try again.',
         ok ? Colors.green : Colors.red);
     if (ok) context.pop();
   }
@@ -312,8 +335,11 @@ class _State extends State<AddEditStockScreen> {
 
     setState(() => _saving = true);
     final ok = await _service.deleteDesign(widget.designId!);
-    setState(() => _saving = false);
     if (!mounted) return;
+    setState(() {
+      _saving = false;
+      if (ok) _dirty = false; // deleted → allow the pop through the exit guard
+    });
 
     _snack(ok ? 'Design deleted.' : 'Delete failed.', ok ? Colors.green : Colors.red);
     if (ok) context.pop();
@@ -325,15 +351,74 @@ class _State extends State<AddEditStockScreen> {
     );
   }
 
+  // Blocking "uploading to server" dialog, shown while newly captured tile
+  // photos are being uploaded so the stockist knows the work is in progress
+  // (and not to close the app). Dismissed by [_hideProcessing] when done.
+  void _showProcessing() {
+    _processingDialogShown = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Uploading your tile photo…',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    SizedBox(height: 6),
+                    Text(
+                      'Saving the image to the server. Please keep the app '
+                      'open — this can take a little longer on a slow '
+                      'connection.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _hideProcessing() {
+    if (_processingDialogShown) {
+      Navigator.of(context, rootNavigator: true).pop();
+      _processingDialogShown = false;
+    }
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: _pageLoading
+          ? null
+          : SaveBar(
+              label: isEdit ? 'Update Design' : 'Add Design',
+              onPressed: _save,
+              saving: _saving,
+              dirty: _dirty,
+            ),
       appBar: AppBar(
+        // maybePop (not pop) so the unsaved-changes guard can intercept.
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.maybePop(context),
         ),
         title: Text(isEdit ? 'Edit Design' : 'Add New Design'),
         actions: [
@@ -358,8 +443,11 @@ class _State extends State<AddEditStockScreen> {
       ),
       body: _pageLoading
           ? const Center(child: CircularProgressIndicator())
-          : Form(
+          : UnsavedChangesGuard(
+              isDirty: _dirty,
+              child: Form(
               key: _formKey,
+              onChanged: _markDirty,
               child: ListView(
                 // Bottom inset clears the system nav bar so the "Add Design"
                 // button is never hidden under it.
@@ -373,7 +461,7 @@ class _State extends State<AddEditStockScreen> {
                   _buildSurfaceSection(),
                   const SizedBox(height: 12),
                   _buildDropdown('Tile Type', kTileTypes, _tileType,
-                      (v) => setState(() => _tileType = v!)),
+                      (v) => setState(() { _tileType = v!; _dirty = true; })),
                   const SizedBox(height: 12),
                   _buildQualityPicker(),
                   const SizedBox(height: 12),
@@ -393,25 +481,10 @@ class _State extends State<AddEditStockScreen> {
                     Expanded(child: _buildThicknessField()),
                   ]),
                   _field(_priceCtrl, 'Box Price (₹)', numeric: true, required: true),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: _saving ? null : _save,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF1B4F72),
-                        foregroundColor: Colors.white,
-                      ),
-                      child: _saving
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : Text(isEdit ? 'Update Design' : 'Add Design',
-                              style: const TextStyle(fontSize: 16)),
-                    ),
-                  ),
                 ],
               ),
             ),
+          ),
     );
   }
 
@@ -516,7 +589,7 @@ class _State extends State<AddEditStockScreen> {
               final iconW = r >= 0.95 ? 16.0 : (r > 0.63 ? 12.0 : 10.0);
               final iconH = r >= 0.95 ? 16.0 : (r > 0.63 ? 18.0 : 20.0);
               return GestureDetector(
-                onTap: () => setState(() => _size = s),
+                onTap: () => setState(() { _size = s; _dirty = true; }),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(
@@ -608,7 +681,7 @@ class _State extends State<AddEditStockScreen> {
             }
             return Expanded(
               child: GestureDetector(
-                onTap: () => setState(() => _quality = q),
+                onTap: () => setState(() { _quality = q; _dirty = true; }),
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 4),
                   padding: const EdgeInsets.symmetric(vertical: 9),
@@ -657,7 +730,7 @@ class _State extends State<AddEditStockScreen> {
                     : Icons.looks_one_outlined;
             return Expanded(
               child: GestureDetector(
-                onTap: () => setState(() => _stockType = type),
+                onTap: () => setState(() { _stockType = type; _dirty = true; }),
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 4),
                   padding:
@@ -707,7 +780,7 @@ class _State extends State<AddEditStockScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildDropdown('Surface Type', _surfaces, _surface,
-            (v) => setState(() => _surface = v!)),
+            (v) => setState(() { _surface = v!; _dirty = true; })),
         Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: TextFormField(

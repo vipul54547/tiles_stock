@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../main.dart';
+import '../widgets/save_bar.dart';
 
 /// Shown after the user opens the password-reset link from their email. At this
 /// point Supabase has put the app into a temporary "recovery" session, so we can
@@ -67,6 +68,12 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
+      bottomNavigationBar: SaveBar(
+        label: 'Update password',
+        icon: Icons.lock_reset,
+        onPressed: _save,
+        saving: _saving,
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -106,22 +113,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   labelText: 'Confirm new password',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.lock_outline),
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: _saving ? null : _save,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1B4F72),
-                    foregroundColor: Colors.white,
-                  ),
-                  child: _saving
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Update password',
-                          style: TextStyle(fontSize: 16)),
                 ),
               ),
             ],

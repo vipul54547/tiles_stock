@@ -3,6 +3,8 @@ import '../../services/stock_service.dart';
 import '../../services/supabase_data_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/choice_state.dart';
+import '../../widgets/save_bar.dart';
+import '../../widgets/unsaved_changes.dart';
 
 class AddDispatchScreen extends StatefulWidget {
   /// Optional design to pre-select (e.g. from the Inquiry tab's Dispatch button).
@@ -32,6 +34,11 @@ class _State extends State<AddDispatchScreen> {
   // successful dispatch can reduce/clear that buyer's inquiry (My Choice).
   String? _pickedBuyerId;
   String _pickedBuyerName = '';
+
+  bool _dirty = false;
+  void _markDirty() {
+    if (!_dirty) setState(() => _dirty = true);
+  }
 
   @override
   void initState() {
@@ -83,6 +90,7 @@ class _State extends State<AddDispatchScreen> {
       _qtyCtrl.clear();
       _pickedBuyerId = null;
       _pickedBuyerName = '';
+      _dirty = true;
     });
     if (d != null) _loadBuyers(d.id);
   }
@@ -99,6 +107,7 @@ class _State extends State<AddDispatchScreen> {
       _qtyCtrl.text = '${wanted > available ? available : wanted}';
       _pickedBuyerId = (b['end_user_id'] ?? '').toString();
       _pickedBuyerName = company;
+      _dirty = true;
     });
   }
 
@@ -135,8 +144,11 @@ class _State extends State<AddDispatchScreen> {
       await _dataSvc.notifyDispatch(_selected!.id, _pickedBuyerId!, qty);
     }
 
-    setState(() => _loading = false);
     if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (ok) _dirty = false; // recorded → allow pop through the exit guard
+    });
 
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -155,15 +167,26 @@ class _State extends State<AddDispatchScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: SaveBar(
+        label: 'Record Dispatch',
+        icon: Icons.send_outlined,
+        color: Colors.red[700],
+        onPressed: _submit,
+        saving: _loading,
+        dirty: _dirty,
+      ),
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.maybePop(context),
         ),
         title: const Text('Add Dispatch'),
       ),
-      body: Form(
+      body: UnsavedChangesGuard(
+        isDirty: _dirty,
+        child: Form(
         key: _formKey,
+        onChanged: _markDirty,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -257,30 +280,9 @@ class _State extends State<AddDispatchScreen> {
                 prefixIcon: Icon(Icons.notes_outlined),
               ),
             ),
-            const SizedBox(height: 24),
-
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton.icon(
-                onPressed: _loading ? null : _submit,
-                icon: _loading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : const Icon(Icons.send_outlined),
-                label: const Text('Record Dispatch',
-                    style: TextStyle(fontSize: 16)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red[700],
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ),
           ],
         ),
+      ),
       ),
     );
   }

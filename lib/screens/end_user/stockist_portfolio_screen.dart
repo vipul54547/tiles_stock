@@ -7,6 +7,7 @@ import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
 import '../../widgets/tile_card.dart';
+import '../../services/cloudinary_service.dart';
 import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
@@ -469,12 +470,12 @@ class _State extends State<StockistPortfolioScreen> {
                       ],
                     ),
                   ),
-                  // 2. Image (240 px, cached)
+                  // 2. Image (240 px, cached) → medium thumbnail
                   SizedBox(
                     height: 240,
                     width: double.infinity,
                     child: CachedNetworkImage(
-                      imageUrl: imageUrl,
+                      imageUrl: CloudinaryService.thumbUrl(imageUrl, width: 800),
                       fit: BoxFit.cover,
                       placeholder: (_, __) =>
                           Container(color: Colors.grey[200]),

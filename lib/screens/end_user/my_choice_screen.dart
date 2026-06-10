@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
+import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/my_choice.dart';
@@ -437,7 +438,8 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
             borderRadius: BorderRadius.circular(8),
             child: d.faceImageUrls.isNotEmpty
                 ? CachedNetworkImage(
-                    imageUrl: d.faceImageUrls.first,
+                    imageUrl: CloudinaryService.thumbUrl(
+                        d.faceImageUrls.first, width: 300),
                     width: 64,
                     height: 64,
                     fit: BoxFit.cover,

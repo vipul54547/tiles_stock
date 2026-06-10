@@ -37,7 +37,9 @@ class StockistGroupScreen extends StatefulWidget {
   State<StockistGroupScreen> createState() => _State();
 }
 
-const _groupColors = [Color(0xFF1B4F72), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
+// Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
+// so a group's coloured circle never blends with the profile identity.
+const _groupColors = [Color(0xFFEF6C00), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
 
 class _State extends State<StockistGroupScreen> {
   final SupabaseDataService _service = SupabaseDataService();
@@ -508,13 +510,14 @@ class _State extends State<StockistGroupScreen> {
                     height: 36,
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: color, width: 1.5),
                     ),
                     child: Center(
                       child: Text(
                         '${index + 1}',
                         style: TextStyle(
-                          fontSize: 17,
+                          fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: color,
                         ),
