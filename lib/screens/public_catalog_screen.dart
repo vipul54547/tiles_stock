@@ -4,7 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
-import '../utils/tile_types.dart' show thicknessRangeLabel;
+import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 
 /// Public, login-free catalog opened via a stockist's private share link
@@ -168,13 +168,15 @@ class _State extends State<PublicCatalogScreen> {
         '${_stockist['country_code'] ?? '+91'}${_stockist['phone'] ?? ''}'
             .replaceAll(RegExp(r'[^0-9]'), '');
     final name = (_stockist['name'] ?? '').toString();
+    final sid = (_stockist['id'] ?? '').toString();
+    final who = sid.isNotEmpty ? '$name ($sid)' : name;
 
     final lines = <String>[];
     if (_selected.isEmpty) {
-      lines.add('Hello $name, I saw your catalog and would like to enquire '
+      lines.add('Hello $who, I saw your catalog and would like to enquire '
           'about some designs.');
     } else {
-      lines.add('Hello $name, I would like to enquire about these designs '
+      lines.add('Hello $who, I would like to enquire about these designs '
           'from your catalog:');
       lines.add('');
       var n = 1;
@@ -195,6 +197,153 @@ class _State extends State<PublicCatalogScreen> {
         ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')
         : Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  // ── Tile detail bottom sheet ───────────────────────────────────────────────
+
+  void _showDetail(Map<String, dynamic> d) {
+    final id = '${d['id']}';
+    final size = (d['size'] ?? '').toString();
+    final pieces = (d['pieces'] as num?)?.toInt() ?? 0;
+    final weight = (d['weight'] as num?)?.toDouble() ?? 0;
+    final sqft = sqftPerBox(size, pieces);
+    final band = _bandOf(d);
+    final surface = (d['surface'] ?? '').toString();
+    final finish = (d['finish'] ?? '').toString();
+    final finishText = finish.isNotEmpty ? '$surface · $finish' : surface;
+    final images = (d['images'] as List?) ?? const [];
+    final img = images.isNotEmpty ? images.first.toString() : '';
+    final ratio = aspectRatioFromSize(size);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final selected = _selected.containsKey(id);
+          Widget row(String label, String value) {
+            if (value.trim().isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                      width: 120,
+                      child: Text(label,
+                          style: const TextStyle(
+                              fontSize: 13, color: Colors.grey))),
+                  Expanded(
+                      child: Text(value,
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600))),
+                ],
+              ),
+            );
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                            color: Colors.grey.shade300,
+                            borderRadius: BorderRadius.circular(2)),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (img.isNotEmpty) ...[
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: SizedBox(
+                              width: 96,
+                              child: AspectRatio(
+                                aspectRatio: ratio,
+                                child: CachedNetworkImage(
+                                    imageUrl: img, fit: BoxFit.cover),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                        ],
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text((d['name'] ?? '').toString(),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16)),
+                              const SizedBox(height: 4),
+                              Text('${d['boxes']} boxes in stock',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF2E7D32))),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 22),
+                    row('Size', size.replaceAll(' mm', '')),
+                    row('Finish', finishText),
+                    row('Quality', (d['quality'] ?? '').toString()),
+                    row('Tile Type', (d['tile_type'] ?? '').toString()),
+                    row('Colour', (d['colour'] ?? '').toString()),
+                    if (pieces > 0) row('Pieces / box', '$pieces'),
+                    if (weight > 0)
+                      row('Box weight',
+                          '${weight.toStringAsFixed(weight % 1 == 0 ? 0 : 1)} kg'),
+                    if (sqft != null) row('Sq.ft / box', sqft.toStringAsFixed(2)),
+                    if (band != null) row('Thickness (approx)', band),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          _toggle(id);
+                          setSheet(() {});
+                        },
+                        icon: Icon(
+                            selected
+                                ? Icons.check_circle
+                                : Icons.add_circle_outline,
+                            size: 18),
+                        label: Text(selected
+                            ? 'Added to enquiry — tap to remove'
+                            : 'Add to enquiry'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: selected
+                              ? const Color(0xFF2E7D32)
+                              : const Color(0xFF1B4F72),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   // ── Filters sheet ──────────────────────────────────────────────────────────
@@ -544,6 +693,22 @@ class _State extends State<PublicCatalogScreen> {
                               fontWeight: FontWeight.w600)),
                     ),
                   ),
+                Positioned(
+                  top: 6,
+                  left: 6,
+                  child: GestureDetector(
+                    onTap: () => _showDetail(d),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.info_outline,
+                          size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
                 Positioned(
                   top: 6,
                   right: 6,
