@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
+import '../utils/tile_types.dart' show thicknessRangeLabel;
 
 /// Public, login-free catalog opened via a stockist's private share link
 /// (`/s/<token>`). Shows that stockist's in-stock designs with search, filters,
@@ -35,6 +36,8 @@ class _State extends State<PublicCatalogScreen> {
   final Set<String> _fFinishes = {};
   final Set<String> _fQualities = {};
   final Set<String> _fTypes = {};
+  final Set<String> _fThickness = {};
+  final Set<String> _fStockTypes = {};
 
   @override
   void initState() {
@@ -80,7 +83,33 @@ class _State extends State<PublicCatalogScreen> {
   }
 
   int get _filterCount =>
-      _fSizes.length + _fFinishes.length + _fQualities.length + _fTypes.length;
+      _fSizes.length +
+      _fFinishes.length +
+      _fQualities.length +
+      _fTypes.length +
+      _fThickness.length +
+      _fStockTypes.length;
+
+  // Thickness band for a design, computed from box weight + pieces (sent by the
+  // RPC now). Null when there's no weight data, so it just won't show a band.
+  String? _bandOf(Map<String, dynamic> d) => thicknessRangeLabel(
+        (d['size'] ?? '').toString(),
+        (d['pieces'] as num?)?.toInt() ?? 0,
+        (d['weight'] as num?)?.toDouble() ?? 0,
+        (d['tile_type'] ?? '').toString(),
+      );
+
+  List<String> _thicknessBands() {
+    final s = <String>{};
+    for (final d in _all) {
+      final b = _bandOf(d);
+      if (b != null) s.add(b);
+    }
+    final list = s.toList()
+      ..sort((a, b) => (double.tryParse(a.split('–').first.trim()) ?? 0)
+          .compareTo(double.tryParse(b.split('–').first.trim()) ?? 0));
+    return list;
+  }
 
   List<Map<String, dynamic>> get _filtered {
     Iterable<Map<String, dynamic>> r = _all;
@@ -103,6 +132,12 @@ class _State extends State<PublicCatalogScreen> {
     }
     if (_fTypes.isNotEmpty) {
       r = r.where((d) => _fTypes.contains('${d['tile_type']}'));
+    }
+    if (_fThickness.isNotEmpty) {
+      r = r.where((d) => _fThickness.contains(_bandOf(d)));
+    }
+    if (_fStockTypes.isNotEmpty) {
+      r = r.where((d) => _fStockTypes.contains('${d['stock_type']}'));
     }
     return r.toList();
   }
@@ -222,6 +257,8 @@ class _State extends State<PublicCatalogScreen> {
                             _fFinishes.clear();
                             _fQualities.clear();
                             _fTypes.clear();
+                            _fThickness.clear();
+                            _fStockTypes.clear();
                           }),
                           child: const Text('Clear all'),
                         ),
@@ -232,6 +269,8 @@ class _State extends State<PublicCatalogScreen> {
                     section('Finish', _distinct('surface'), _fFinishes),
                     section('Quality', _distinct('quality'), _fQualities),
                     section('Tile Type', _distinct('tile_type'), _fTypes),
+                    section('Thickness (approx)', _thicknessBands(), _fThickness),
+                    section('Stock Type', _distinct('stock_type'), _fStockTypes),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
