@@ -100,7 +100,13 @@ class _ExcelImportScreenState extends State<ExcelImportScreen> {
     String cell(List<Data?> row, String name) {
       final i = col(name);
       if (i < 0 || i >= row.length) return '';
-      return row[i]?.value?.toString().trim() ?? '';
+      var s = row[i]?.value?.toString().trim() ?? '';
+      // Excel stores plain numbers (e.g. a phone) as doubles, so toString()
+      // yields "8320911882.0". Drop the trailing ".0" for whole-number cells so
+      // phone/gst stay clean digit strings (real decimals like 0.5 are kept).
+      final whole = RegExp(r'^(\d+)\.0+$').firstMatch(s);
+      if (whole != null) s = whole.group(1)!;
+      return s;
     }
 
     final parsed = <_ImportRow>[];
