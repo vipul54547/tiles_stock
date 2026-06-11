@@ -888,6 +888,18 @@ class SupabaseDataService {
     }
   }
 
+  /// Delete ALL of the signed-in user's notifications (the inbox "Clear all").
+  /// RLS limits the delete to the caller's own rows.
+  Future<void> clearMyNotifications() async {
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return;
+      await supabase.from('notifications').delete().eq('recipient_id', uid);
+    } catch (e, st) {
+      debugPrint('clearMyNotifications failed: $e\n$st');
+    }
+  }
+
   /// Buyer → stockist alert ("New inquiry" with the buyer's name/phone/city).
   /// Fired automatically when the buyer contacts the stockist on WhatsApp.
   Future<void> notifyStockist(String stockistSeqId) async {

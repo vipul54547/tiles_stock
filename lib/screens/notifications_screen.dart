@@ -31,6 +31,29 @@ class _State extends State<NotificationsScreen> {
     await _reload();
   }
 
+  Future<void> _clearAll() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear all notifications?'),
+        content: const Text(
+            'This permanently deletes all your notifications. This can\'t be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child:
+                  const Text('Clear all', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _svc.clearMyNotifications();
+    await _reload();
+  }
+
   IconData _iconFor(String type) {
     switch (type) {
       case 'interest':
@@ -77,6 +100,14 @@ class _State extends State<NotificationsScreen> {
             onPressed: _markAllRead,
             child: const Text('Mark all read',
                 style: TextStyle(color: Colors.white, fontSize: 12)),
+          ),
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'clear') _clearAll();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'clear', child: Text('Clear all')),
+            ],
           ),
         ],
       ),
