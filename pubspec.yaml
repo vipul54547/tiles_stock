@@ -41,6 +41,7 @@ dependencies:
   syncfusion_flutter_pdf: ^28.1.33
   image: ^4.3.0
   image_picker: ^1.1.2
+  pdfx: ^2.6.0   # on-device PDF page rasteriser (pdfium) for the crop fallback
 
 
 

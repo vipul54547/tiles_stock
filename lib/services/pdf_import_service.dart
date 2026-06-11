@@ -3,6 +3,7 @@ import 'dart:convert' show latin1; // byte→marker scanning of PDF image dicts
 import 'dart:ui' show Offset; // page-template placement during per-page split
 import 'package:flutter/foundation.dart'; // compute() + Uint8List
 import 'package:image/image.dart' as img;
+import 'package:pdfx/pdfx.dart' as pdfx; // on-device page rasteriser (crop fallback)
 import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 // ── Data classes ──────────────────────────────────────────────────────────────
@@ -141,11 +142,20 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
     // (header-based, e.g. 800X1600 STD) with the flat-text fallback.
     final geo = _buildGeoRows(lines);
     final lineRows = _buildLineRows(lines); // Syncfusion line grouping (STOCK)
+    // Reflowed words: some exports (the LABELED and RAK card layouts) split words
+    // at kerning gaps ("Box"→"B"+"ox"), so re-join fragments by horizontal gap.
+    final wordRows = _buildWordRows(lines);
+    final rawToks = _flattenToks(lines); // raw glyphs (RAK reads vertical margins)
     final stockFooters = lineRows.rows
         .where((r) => _stockFooterRe.hasMatch(r.map((t) => t.text).join(' ')))
         .length;
     if (stockFooters >= 2) {
       designMaps = _parseDesignsStock(lineRows); // DESIGN/GRADE/QTY/IMAGE + footers
+    } else if (_looksLikeLabeled(wordRows)) {
+      designMaps = _parseDesignsLabeled(wordRows); // "Design : …" key:value cards
+    } else if (_looksLikeRak(wordRows)) {
+      designMaps =
+          _parseDesignsRak(wordRows, rawToks); // photo + "NAME … BOX = n" cards
     } else if (_looksLikePrm(geo)) {
       designMaps = _parseDesignsPrm(geo); // vertical card blocks
     } else {
@@ -248,6 +258,11 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
   List<Uint8List?> imagesByDesign;
   int imageCount;
 
+  // Crop requests: photos whose placement we found but whose bytes we couldn't
+  // decode (CMYK / JPEG2000 / unsupported colour space). The main isolate
+  // rasterises those pages and crops the photo out — pdfium can't run here.
+  var cropRequests = <Map<String, dynamic>>[];
+
   // Position-based matching: when every design carries a 'yc' (currently the PRM
   // card parser), read each photo's real position from the PDF and attach it to
   // the design it sits next to — correct even when some tiles have no photo.
@@ -258,14 +273,15 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
       designMaps.every((m) => (m['page'] as int? ?? -1) >= 0);
 
   if (positional) {
-    imagesByDesign = _matchImagesByPosition(bytes, designMaps);
+    imagesByDesign = _matchImagesByPosition(bytes, designMaps, cropRequests);
     imageCount = imagesByDesign.where((x) => x != null).length;
     debugPrint('Position-based match: $imageCount photos placed for '
-        '${designMaps.length} designs.');
+        '${designMaps.length} designs '
+        '(${cropRequests.length} pending raster-crop).');
     // Safety net: position parsing can come back empty for a PDF whose images
     // live inside Form XObjects (not the page content stream). Fall back to
     // per-page slot matching so those formats keep their photos.
-    if (imageCount == 0 && perPageUsable) {
+    if (imageCount == 0 && cropRequests.isEmpty && perPageUsable) {
       debugPrint('Position-based match found nothing — '
           'falling back to per-page slot matching.');
       imageCount =
@@ -304,6 +320,7 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
     'designs':        designMaps,
     'images':         orientedImages,
     'imageCount':     imageCount,
+    'cropRequests':   cropRequests,
     'dbgTotalLines':  dbgTotalLines,
     'dbgDigitLines':  dbgDigitLines,
   };
@@ -574,8 +591,9 @@ class _PlacedImg {
   double top;     // top edge in top-left page coords
   double height;
   final double width;
+  final double left; // left edge in page coords (for the raster-crop fallback)
   final List<int> refs; // image XObject numbers (>1 when a tile is tiled strips)
-  _PlacedImg(this.top, this.height, this.width, this.refs);
+  _PlacedImg(this.top, this.height, this.width, this.left, this.refs);
   double get centerY => top + height / 2;
 }
 
@@ -636,6 +654,20 @@ double _mediaBoxH(String pageDict) {
     if (v.length == 4 && v.every((e) => e != null)) return v[3]! - v[1]!;
   }
   return 792.0;
+}
+
+// Page [width, height] in points — used to scale the raster-crop render so the
+// image-placement rectangles (also in points) map onto the rendered bitmap.
+List<double> _mediaBoxWH(String pageDict) {
+  final m = RegExp(r'/MediaBox\s*\[([^\]]+)\]').firstMatch(pageDict);
+  if (m != null) {
+    final v =
+        m.group(1)!.trim().split(RegExp(r'\s+')).map(double.tryParse).toList();
+    if (v.length == 4 && v.every((e) => e != null)) {
+      return [v[2]! - v[0]!, v[3]! - v[1]!];
+    }
+  }
+  return [612.0, 792.0];
 }
 
 Map<String, int> _xobjectMap(Map<int, _PdfObj> objs, String pageDict) {
@@ -781,11 +813,24 @@ List<int> _pngUnpredict(List<int> data, int columns, int colors) {
   return out;
 }
 
-// Returns JPEG bytes for an image XObject, decoding the two encodings these
-// reports use: DCTDecode (already JPEG) and FlateDecode 8-bit RGB/Gray rasters
-// (e.g. PNG-sourced photos) which we inflate and re-encode. CMYK / other
-// colour spaces / bit depths are skipped (left blank for manual fill).
-Uint8List? _decodeImageXObject(Uint8List bytes, _PdfObj o) {
+// Decoded bytes of a stream object (inflating FlateDecode), used to read an
+// indexed colour space's palette / lookup table.
+List<int> _streamBytes(Uint8List bytes, _PdfObj o) {
+  if (o.streamStart == null) return const [];
+  final raw = bytes.sublist(o.streamStart!, o.streamEnd!);
+  return o.dict.contains('FlateDecode')
+      ? _inflate(Uint8List.fromList(raw))
+      : raw;
+}
+
+// Returns JPEG bytes for an image XObject, decoding the encodings these reports
+// use: DCTDecode (already JPEG) and FlateDecode 8-bit rasters — DeviceGray /
+// DeviceRGB, ICCBased, and Indexed (palette) PNGs whose colour space is an
+// indirect object. Indexed images store one palette index per pixel, so we look
+// the index up in the colour table and expand to RGB. CMYK / non-8-bit images
+// are skipped (left blank for manual fill).
+Uint8List? _decodeImageXObject(
+    Uint8List bytes, Map<int, _PdfObj> objs, _PdfObj o) {
   if (o.streamStart == null) return null;
   final d = o.dict;
   if (d.contains('DCTDecode')) return _imageJpeg(bytes, o);
@@ -794,25 +839,83 @@ Uint8List? _decodeImageXObject(Uint8List bytes, _PdfObj o) {
   final h = _intField(d, 'Height');
   final bpc = _intField(d, 'BitsPerComponent') ?? 8;
   if (w == null || h == null || bpc != 8) return null;
-  if (d.contains('/DeviceCMYK')) return null;
-  final channels = d.contains('/DeviceGray') ? 1 : 3;
 
-  var raw = _inflate(Uint8List.fromList(bytes.sublist(o.streamStart!, o.streamEnd!)));
+  // Resolve the colour space → samples-per-pixel in the raster, plus an RGB
+  // palette when the image is Indexed. The space may be an inline name or an
+  // indirect reference to an array (Indexed) or stream (ICCBased).
+  var channels = 3;
+  List<int>? palette; // RGB triples, set only for Indexed images
+  final csInline = RegExp(r'/ColorSpace\s*/([A-Za-z]+)').firstMatch(d);
+  final csRef = RegExp(r'/ColorSpace\s+(\d+)\s+0\s+R').firstMatch(d);
+  if (csInline != null) {
+    if (csInline.group(1) == 'DeviceCMYK') return null;
+    channels = csInline.group(1) == 'DeviceGray' ? 1 : 3;
+  } else if (csRef != null) {
+    final cs = objs[int.parse(csRef.group(1)!)]?.dict ?? '';
+    if (cs.contains('/Indexed')) {
+      final base = cs.contains('/DeviceGray') ? 1 : 3;
+      final lut =
+          RegExp(r'/Indexed\b.*?(\d+)\s+0\s+R', dotAll: true).firstMatch(cs);
+      if (lut == null) return null;
+      final lutObj = objs[int.parse(lut.group(1)!)];
+      if (lutObj == null) return null;
+      final tbl = _streamBytes(bytes, lutObj);
+      palette = base == 3 ? tbl : [for (final g in tbl) ...[g, g, g]];
+      channels = 1; // raster holds one palette index per pixel
+    } else if (cs.contains('/ICCBased')) {
+      final icc = RegExp(r'(\d+)\s+0\s+R').firstMatch(cs);
+      final n = icc != null
+          ? _intField(objs[int.parse(icc.group(1)!)]?.dict ?? '', 'N')
+          : null;
+      if (n == 4) return null; // CMYK
+      channels = n ?? 3;
+    } else if (cs.contains('/DeviceCMYK')) {
+      return null;
+    } else {
+      channels = cs.contains('/DeviceGray') ? 1 : 3;
+    }
+  } else {
+    channels = d.contains('/DeviceGray') ? 1 : 3;
+  }
+
+  var raw =
+      _inflate(Uint8List.fromList(bytes.sublist(o.streamStart!, o.streamEnd!)));
   final predM = RegExp(r'/Predictor\s+(\d+)').firstMatch(d);
   if (predM != null && int.parse(predM.group(1)!) >= 10) {
     raw = _pngUnpredict(raw, w, channels);
   }
   final need = w * h * channels;
   if (raw.length < need) return null;
-  final pix = Uint8List.fromList(raw.sublist(0, need));
-  final im = channels == 1
-      ? img.Image.fromBytes(width: w, height: h, bytes: pix.buffer, numChannels: 1)
-      : img.Image.fromBytes(
-          width: w,
-          height: h,
-          bytes: pix.buffer,
-          numChannels: 3,
-          order: img.ChannelOrder.rgb);
+
+  final img.Image im;
+  if (palette != null) {
+    final rgb = Uint8List(w * h * 3);
+    for (var i = 0; i < w * h; i++) {
+      final idx = raw[i] * 3;
+      if (idx + 2 < palette.length) {
+        rgb[i * 3] = palette[idx];
+        rgb[i * 3 + 1] = palette[idx + 1];
+        rgb[i * 3 + 2] = palette[idx + 2];
+      }
+    }
+    im = img.Image.fromBytes(
+        width: w,
+        height: h,
+        bytes: rgb.buffer,
+        numChannels: 3,
+        order: img.ChannelOrder.rgb);
+  } else {
+    final pix = Uint8List.fromList(raw.sublist(0, need));
+    im = channels == 1
+        ? img.Image.fromBytes(
+            width: w, height: h, bytes: pix.buffer, numChannels: 1)
+        : img.Image.fromBytes(
+            width: w,
+            height: h,
+            bytes: pix.buffer,
+            numChannels: 3,
+            order: img.ChannelOrder.rgb);
+  }
   return img.encodeJpg(im, quality: 85);
 }
 
@@ -860,10 +963,12 @@ Uint8List? _decodeFlateSlot(
 
 // Bytes for a placement: a single image, or vertically stitched strips.
 Uint8List? _placedBytes(Uint8List bytes, Map<int, _PdfObj> objs, _PlacedImg p) {
-  if (p.refs.length == 1) return _decodeImageXObject(bytes, objs[p.refs.first]!);
+  if (p.refs.length == 1) {
+    return _decodeImageXObject(bytes, objs, objs[p.refs.first]!);
+  }
   final parts = <img.Image>[];
   for (final r in p.refs) {
-    final jb = _decodeImageXObject(bytes, objs[r]!);
+    final jb = _decodeImageXObject(bytes, objs, objs[r]!);
     if (jb == null) return null;
     final im = img.decodeJpg(jb);
     if (im == null) return null;
@@ -916,7 +1021,7 @@ List<_PlacedImg> _imagesOnPage(
         final wdt = ctm[0].abs();
         final hh = ctm[3].abs();
         final top = h - (ctm[5] + hh);
-        raw.add(_PlacedImg(top, hh, wdt, [ref]));
+        raw.add(_PlacedImg(top, hh, wdt, ctm[4], [ref]));
       }
     }
   }
@@ -938,7 +1043,8 @@ List<_PlacedImg> _imagesOnPage(
 }
 
 List<Uint8List?> _matchImagesByPosition(
-    Uint8List bytes, List<Map<String, dynamic>> designMaps) {
+    Uint8List bytes, List<Map<String, dynamic>> designMaps,
+    [List<Map<String, dynamic>>? cropOut]) {
   final out = List<Uint8List?>.filled(designMaps.length, null);
   try {
     final s = latin1.decode(bytes, allowInvalid: true);
@@ -977,6 +1083,23 @@ List<Uint8List?> _matchImagesByPosition(
         if (best >= 0 && (bestContains || bestDist <= 40)) {
           used[best] = true;
           out[di] = _placedBytes(bytes, objs, imgs[best]);
+          // Matched a placement but couldn't decode its bytes (CMYK / JPEG2000 /
+          // an unsupported colour space). Record where it sits so the main
+          // isolate can rasterise the page and crop the photo out instead.
+          if (out[di] == null && cropOut != null) {
+            final p = imgs[best];
+            final wh = _mediaBoxWH(objs[pageObjs[page]]!.dict);
+            cropOut.add({
+              'design': di,
+              'page': page,
+              'left': p.left,
+              'top': p.top,
+              'width': p.width,
+              'height': p.height,
+              'pageW': wh[0],
+              'pageH': wh[1],
+            });
+          }
         }
       }
     });
@@ -1410,6 +1533,73 @@ _GeoRows _buildGeoRows(List<TextLine> lines) {
   return _GeoRows(rows, medH);
 }
 
+// Flatten every word into a positioned token (page, x0, x1, y-centre, height).
+List<_Tok> _flattenToks(List<TextLine> lines) {
+  final toks = <_Tok>[];
+  for (final line in lines) {
+    for (final w in line.wordCollection) {
+      final t = w.text.trim();
+      if (t.isEmpty) continue;
+      final b = w.bounds;
+      toks.add(_Tok(line.pageIndex, b.left, b.right,
+          b.top + b.height / 2, b.height, t));
+    }
+  }
+  return toks;
+}
+
+// Re-join glyph fragments a PDF split at kerning gaps. Some exporters render
+// "Box" as separate "B" + "ox" tokens (and "BREEZA" as "BRE" + "EZA"); on a
+// single visual line we stitch tokens whose horizontal gap is tiny back into one
+// word, inserting nothing between fragments but leaving a real word gap as a
+// separate token. A ":" is never merged, so "Label : value" keeps its colon.
+List<_Tok> _reflowLine(List<_Tok> line, double gapTol) {
+  final s = [...line]..sort((a, b) => a.x0.compareTo(b.x0));
+  final out = <_Tok>[];
+  for (final t in s) {
+    if (out.isNotEmpty &&
+        t.text != ':' &&
+        out.last.text != ':' &&
+        t.x0 - out.last.x1 <= gapTol) {
+      final p = out.removeLast();
+      out.add(_Tok(p.page, p.x0, t.x1 > p.x1 ? t.x1 : p.x1, (p.yc + t.yc) / 2,
+          p.h > t.h ? p.h : t.h, p.text + t.text));
+    } else {
+      out.add(t);
+    }
+  }
+  return out;
+}
+
+// Visual rows of whole words: group tokens into lines by Y then reflow each line
+// so kerning-split fragments re-join. Used by the LABELED + RAK card parsers
+// (and their detectors), which depend on reading whole field labels/values.
+_GeoRows _buildWordRows(List<TextLine> lines) {
+  final toks = _flattenToks(lines);
+  if (toks.isEmpty) return _GeoRows(const [], 10);
+  final hs = toks.map((t) => t.h).where((h) => h > 0).toList()..sort();
+  final medH = hs.isEmpty ? 10.0 : hs[hs.length ~/ 2];
+  final yTol = medH * 0.6;
+  // Kerning-split fragments are flush (gap ≈ 0 px); genuine word spaces measure
+  // ≥ ~2 px even in small fonts. A tight absolute threshold stitches the former
+  // without swallowing the latter.
+  const gapTol = 1.5;
+
+  toks.sort((a, b) =>
+      a.page != b.page ? a.page.compareTo(b.page) : a.yc.compareTo(b.yc));
+  final rows = <List<_Tok>>[];
+  for (final t in toks) {
+    if (rows.isNotEmpty &&
+        t.page == rows.last.first.page &&
+        (t.yc - rows.last.first.yc).abs() <= yTol) {
+      rows.last.add(t);
+    } else {
+      rows.add([t]);
+    }
+  }
+  return _GeoRows([for (final r in rows) _reflowLine(r, gapTol)], medH);
+}
+
 // Like _buildGeoRows but keeps Syncfusion's own line grouping (one row per
 // TextLine) instead of re-grouping by Y. Used by the STOCK parser because its
 // footer subtotal lines (e.g. "600X1200 - MATT - PRE : 270") must stay on a
@@ -1552,6 +1742,253 @@ List<Map<String, dynamic>> _parseDesignsPrm(_GeoRows g) {
     } else {
       buf.add(r);
     }
+  }
+  return result;
+}
+
+// ── 'LABELED' key:value card parser ────────────────────────────────────────────
+//
+// A layout where each tile is a card of labelled fields rather than a table row:
+//
+//     Design  : AQUARIUS ONYX GREY      Size      800X1600 (2)
+//     Packing : IP                      Category  PGVT
+//     Grade   : SILVER                  Surface   GLOSSY
+//     Box     : 45                                          [ photo → ]
+//
+// The right column carries "Design"/"Packing"/"Grade"/"Box" as "Label : value";
+// the left column stacks "Size"/"Category"/"Surface" with the value one line
+// BELOW the label. Each "Design" label starts a new card. Field values are bound
+// to their label by nearest vertical position, which tolerates a name that wraps
+// onto the line just above its "Design" label. Grade (e.g. SILVER) isn't one of
+// the app's qualities, so it's ignored — the filename quality stands.
+
+const Set<String> _kLabelWords = {
+  'DESIGN', 'PACKING', 'GRADE', 'BOX', 'SIZE', 'CATEGORY', 'SURFACE',
+};
+
+// True when several rows read "Design : …" / "Box : …" — the labelled card form.
+bool _looksLikeLabeled(_GeoRows g) {
+  if (g.rows.isEmpty) return false;
+  var design = 0, box = 0;
+  for (final r in g.rows) {
+    final hasColon = r.any((t) => t.text == ':');
+    if (!hasColon) continue;
+    if (r.any((t) => t.text.toUpperCase() == 'DESIGN')) design++;
+    if (r.any((t) => t.text.toUpperCase() == 'BOX')) box++;
+  }
+  return design >= 3 && box >= 3;
+}
+
+List<Map<String, dynamic>> _parseDesignsLabeled(_GeoRows g) {
+  // Each "Design" label row starts one card.
+  final starts = <int>[];
+  for (var i = 0; i < g.rows.length; i++) {
+    if (g.rows[i].any((t) => t.text.toUpperCase() == 'DESIGN')) starts.add(i);
+  }
+
+  final result = <Map<String, dynamic>>[];
+  for (var s = 0; s < starts.length; s++) {
+    final from = starts[s];
+    final page = g.rows[from].first.page;
+    // Card runs to the next Design row, but never crosses a page boundary.
+    var to = s + 1 < starts.length ? starts[s + 1] : g.rows.length;
+    for (var k = from + 1; k < to; k++) {
+      if (g.rows[k].first.page != page) { to = k; break; }
+    }
+    final toks = <_Tok>[for (var k = from; k < to; k++) ...g.rows[k]];
+
+    // Right-column labels and their y positions (Design/Packing/Grade/Box).
+    final labelY = <String, double>{};
+    for (final t in toks) {
+      if (t.x0 < 140 || t.x0 > 205) continue; // right-column label band
+      final u = t.text.toUpperCase();
+      if (u == 'DESIGN' || u == 'PACKING' || u == 'GRADE' || u == 'BOX') {
+        labelY.putIfAbsent(u, () => t.yc);
+      }
+    }
+    // Bind each right-column value token to its nearest label by vertical gap.
+    final byLabel = <String, List<_Tok>>{};
+    for (final t in toks) {
+      if (t.x0 < 202) continue; // values sit right of the colon
+      if (t.text == ':' || _kLabelWords.contains(t.text.toUpperCase())) continue;
+      String? best;
+      var bestD = 1e9;
+      labelY.forEach((lbl, y) {
+        final d = (t.yc - y).abs();
+        if (d < bestD) { bestD = d; best = lbl; }
+      });
+      if (best != null) (byLabel[best!] ??= []).add(t);
+    }
+
+    final nameToks = (byLabel['DESIGN'] ?? <_Tok>[])
+      ..sort((a, b) =>
+          a.yc != b.yc ? a.yc.compareTo(b.yc) : a.x0.compareTo(b.x0));
+    final name =
+        _cleanName(nameToks.map((t) => t.text).join(' '), allowNumeric: true);
+    if (name.isEmpty) continue;
+
+    int? qty;
+    for (final t in (byLabel['BOX'] ?? <_Tok>[])) {
+      qty ??= int.tryParse(t.text.replaceAll(RegExp(r'[^0-9]'), ''));
+    }
+    if (qty == null) continue;
+
+    // Left column: Size value is recognisable on its own; Surface value is the
+    // word on the line just below the "Surface" label.
+    double? surfLabelY;
+    for (final t in toks) {
+      if (t.x0 <= 160 && t.text.toUpperCase() == 'SURFACE') {
+        surfLabelY ??= t.yc;
+      }
+    }
+    String? sizeData;
+    var surfaceRaw = '';
+    for (final t in toks) {
+      if (t.x0 > 160) continue; // left column only
+      if (_kLabelWords.contains(t.text.toUpperCase())) continue;
+      final m = RegExp(r'^(\d{2,4})[xX](\d{2,4})').firstMatch(t.text);
+      if (m != null) {
+        sizeData ??= '${m.group(1)}x${m.group(2)} mm';
+        continue;
+      }
+      if (surfLabelY != null &&
+          t.yc > surfLabelY &&
+          t.yc - surfLabelY <= 20 &&
+          RegExp(r'^[A-Za-z]').hasMatch(t.text)) {
+        surfaceRaw = surfaceRaw.isEmpty ? t.text : '$surfaceRaw ${t.text}';
+      }
+    }
+
+    final surface =
+        surfaceRaw.isEmpty ? 'None' : (_surfaceOf(surfaceRaw) ?? 'None');
+    final finishLabel = surfaceRaw.isEmpty
+        ? null
+        : (surface == 'None'
+            ? _titleCaseFinish(surfaceRaw)
+            : _finishLabelFor(surfaceRaw, surface));
+
+    result.add({
+      'name': name,
+      'quantity': qty,
+      'surface': surface,
+      'finishLabel': finishLabel,
+      'surfaceRaw': surfaceRaw.isEmpty ? null : _titleCaseFinish(surfaceRaw),
+      'page': page,
+      'yc': g.rows[from].first.yc, // Design row → sits in the photo's band
+      'sizeData': sizeData,
+      'qualityData': null, // grade isn't an app quality → keep the filename one
+    });
+  }
+  return result;
+}
+
+// ── 'RAK' photo-caption card parser ────────────────────────────────────────────
+//
+// A card layout with a large photo per tile and a caption row beneath it:
+//
+//     600X1200 MM   [    photo    ]   HIGH GLOSSY
+//     RAK
+//     BLACK PAPER                     BOX = 3684
+//
+// Size + brand sit in the left margin, the surface in the right margin (both
+// alongside the photo), and the caption row below carries the design name plus
+// "BOX = <qty>". Each "BOX = n" closes one card; that card's size/surface are the
+// margin tokens in the vertical band above the caption.
+
+// A caption row carries an "=" token followed by the box quantity. The size +
+// brand (left margin) and surface (right margin) of that tile are VERTICAL text
+// — single glyphs stacked at one x — so they're read from the raw glyph stream,
+// not the reflowed caption rows.
+bool _looksLikeRak(_GeoRows g) {
+  if (g.rows.isEmpty) return false;
+  var n = 0;
+  for (final r in g.rows) {
+    if (r.any((t) => t.text == '=') && r.any((t) => _intRe.hasMatch(t.text))) {
+      n++;
+    }
+  }
+  return n >= 3;
+}
+
+List<Map<String, dynamic>> _parseDesignsRak(_GeoRows g, List<_Tok> rawToks) {
+  // Caption rows (the only rows with an "=" and an integer) — one per tile.
+  final caps = <List<_Tok>>[
+    for (final r in g.rows)
+      if (r.any((t) => t.text == '=') && r.any((t) => _intRe.hasMatch(t.text)))
+        r
+  ]..sort((a, b) => a.first.page != b.first.page
+      ? a.first.page.compareTo(b.first.page)
+      : a.first.yc.compareTo(b.first.yc));
+
+  final result = <Map<String, dynamic>>[];
+  var prevCapY = -1.0;
+  var prevPage = -1;
+
+  for (final c in caps) {
+    final page = c.first.page;
+    final capY = c.first.yc;
+    if (page != prevPage) prevCapY = -1.0;
+    final sorted = [...c]..sort((a, b) => a.x0.compareTo(b.x0));
+
+    // qty = first integer after the "=" (the box count).
+    int? qty;
+    var seenEq = false;
+    for (final t in sorted) {
+      if (t.text == '=') { seenEq = true; continue; }
+      if (seenEq && _intRe.hasMatch(t.text)) {
+        qty = int.tryParse(t.text);
+        break;
+      }
+    }
+    // Name = caption tokens left of the box field. Names may be a pure design
+    // code (e.g. "3499"), so digits count too — only the BOX/=/qty tokens (all
+    // at the right, x ≥ 400) are excluded.
+    final nameToks = sorted
+        .where((t) => t.x0 < 400 && RegExp(r'[A-Za-z0-9]').hasMatch(t.text))
+        .toList();
+    final name =
+        _cleanName(nameToks.map((t) => t.text).join(' '), allowNumeric: true);
+    if (qty == null || name.isEmpty) {
+      prevCapY = capY;
+      prevPage = page;
+      continue;
+    }
+
+    // Surface = vertical right-margin glyphs in the band above this caption.
+    // Floor the band below the page header (y≈18) for the top tile of a page.
+    final lo = prevCapY < 0 ? 35.0 : prevCapY;
+    final glyphs = rawToks
+        .where(
+            (t) => t.page == page && t.x0 > 500 && t.yc > lo && t.yc < capY - 2)
+        .toList();
+    final asc = [...glyphs]..sort((a, b) => a.yc.compareTo(b.yc));
+    final desc = [...glyphs]..sort((a, b) => b.yc.compareTo(a.yc));
+    final up = asc.map((t) => t.text).join();
+    final down = desc.map((t) => t.text).join();
+    // Rotation direction differs per margin; pick whichever reads as a finish.
+    final raw = _surfaceOf(up) != null
+        ? up
+        : (_surfaceOf(down) != null ? down : up);
+    final surface = raw.isEmpty ? 'None' : (_surfaceOf(raw) ?? 'None');
+    final finishLabel = raw.isEmpty
+        ? null
+        : (surface == 'None'
+            ? _titleCaseFinish(raw)
+            : _finishLabelFor(raw, surface));
+
+    result.add({
+      'name': name,
+      'quantity': qty,
+      'surface': surface,
+      'finishLabel': finishLabel,
+      'surfaceRaw': raw.isEmpty ? null : _titleCaseFinish(raw),
+      'page': page,
+      'yc': (lo + capY) / 2, // photo band centre → position-based image matching
+      'sizeData': null, // size is vertical/whole-doc → taken from the filename
+      'qualityData': null,
+    });
+    prevCapY = capY;
+    prevPage = page;
   }
   return result;
 }
@@ -1972,13 +2409,91 @@ class PdfImportService {
       );
     });
 
+    // Raster-crop fallback (main isolate — pdfium needs platform channels): fill
+    // photos the byte-decoder couldn't (CMYK / JPEG2000 / unsupported colour
+    // spaces) by rendering their page and cropping the placement rectangle.
+    final cropReqs = (result['cropRequests'] as List?)
+            ?.cast<Map<String, dynamic>>() ??
+        const <Map<String, dynamic>>[];
+    if (cropReqs.isNotEmpty) {
+      await _rasterCropFill(bytes, designs, cropReqs);
+    }
+
     return PdfImportResult(
       size:         result['size']          as String,
       quality:      result['quality']       as String,
       designs:      designs,
-      imageCount:   result['imageCount']    as int? ?? 0,
+      imageCount:   designs.where((d) => d.imageBytes != null).length,
       rawLineCount: result['dbgTotalLines'] as int? ?? 0,
       digitLines:   result['dbgDigitLines'] as int? ?? 0,
     );
+  }
+
+  // Render each needed page once (pdfium) and crop out the photos the byte
+  // decoder couldn't produce. Requests carry the placement rectangle and page
+  // size in PDF points; the render is scaled so points map onto pixels. A
+  // rendered crop already shows the tile the right way up, so no orientation
+  // correction is applied. Best-effort — any failure just leaves photos blank.
+  Future<void> _rasterCropFill(
+    Uint8List bytes,
+    List<PdfDesignRow> designs,
+    List<Map<String, dynamic>> reqs,
+  ) async {
+    final byPage = <int, List<Map<String, dynamic>>>{};
+    for (final r in reqs) {
+      (byPage[r['page'] as int] ??= []).add(r);
+    }
+
+    pdfx.PdfDocument? doc;
+    try {
+      doc = await pdfx.PdfDocument.openData(bytes);
+      for (final entry in byPage.entries) {
+        final pageNo = entry.key + 1; // pdfx pages are 1-based
+        if (pageNo < 1 || pageNo > doc.pagesCount) continue;
+        final reqsForPage = entry.value;
+        final pageWpts = (reqsForPage.first['pageW'] as num).toDouble();
+        final pageHpts = (reqsForPage.first['pageH'] as num).toDouble();
+        if (pageWpts <= 0 || pageHpts <= 0) continue;
+        // Render ~1600 px on the wide side (clamped) so crops are sharp.
+        final scale = (1600 / pageWpts).clamp(1.5, 4.0);
+
+        final page = await doc.getPage(pageNo);
+        try {
+          final rendered = await page.render(
+            width: pageWpts * scale,
+            height: pageHpts * scale,
+            format: pdfx.PdfPageImageFormat.png,
+            backgroundColor: '#FFFFFF',
+          );
+          final pngBytes = rendered?.bytes;
+          if (pngBytes == null) continue;
+          final full = img.decodeImage(pngBytes);
+          if (full == null) continue;
+
+          for (final r in reqsForPage) {
+            final di = r['design'] as int;
+            if (di < 0 || di >= designs.length) continue;
+            var x = ((r['left'] as num) * scale).round();
+            var y = ((r['top'] as num) * scale).round();
+            var w = ((r['width'] as num) * scale).round();
+            var h = ((r['height'] as num) * scale).round();
+            if (x < 0) { w += x; x = 0; }
+            if (y < 0) { h += y; y = 0; }
+            if (x >= full.width || y >= full.height) continue;
+            if (x + w > full.width) w = full.width - x;
+            if (y + h > full.height) h = full.height - y;
+            if (w < 4 || h < 4) continue;
+            final crop = img.copyCrop(full, x: x, y: y, width: w, height: h);
+            designs[di].imageBytes = img.encodeJpg(crop, quality: 85);
+          }
+        } finally {
+          await page.close();
+        }
+      }
+    } catch (e) {
+      debugPrint('raster-crop fallback failed: $e');
+    } finally {
+      await doc?.close();
+    }
   }
 }

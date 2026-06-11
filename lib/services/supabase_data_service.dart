@@ -18,6 +18,25 @@ import '../main.dart';
 String normalizeSurfaceRaw(String raw) =>
     raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
 
+/// Normalises a design NAME into the shared design-image library key: uppercase,
+/// A–Z/0–9 only. So "Aquarius Onyx Grey", "AQUARIUS-ONYX GRY"… collapse to the
+/// same key. Pairs with [normalizeSizeKey] to identify "the same tile".
+String normalizeDesignNameKey(String name) =>
+    name.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+
+/// Normalises a tile SIZE to its bare WxH dimensions for the library key, so
+/// "800x1600 mm", "800X1600", "800 x 1600mm" and "12X18(5)" all collapse to the
+/// same "WxH" ("800x1600", "12x18") regardless of units/case/trailing counts.
+String normalizeSizeKey(String size) {
+  final m = RegExp(r'(\d+)\s*[xX]\s*(\d+)').firstMatch(size);
+  if (m != null) return '${m.group(1)}x${m.group(2)}';
+  return size.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+}
+
+/// Joined "nameKey|sizeKey" used as the map key returned by [lookupDesignImages].
+String designImageKey(String name, String size) =>
+    '${normalizeDesignNameKey(name)}|${normalizeSizeKey(size)}';
+
 class SupabaseDataService {
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -1305,6 +1324,98 @@ class SupabaseDataService {
       }, onConflict: 'stockist_id,raw_text');
     } catch (e, stk) {
       debugPrint('upsertSurfaceAlias failed ("$rawText"->"$surfaceName"): $e\n$stk');
+    }
+  }
+
+  // ── shared design-image library ────────────────────────────────────────────
+  //
+  // A canonical photo per (design name, size), shared across stockists, so an
+  // Excel import or an image-less PDF row can auto-fill a picture and the same
+  // photo isn't re-uploaded twice. First contributor wins; the library never
+  // overwrites an existing image (admins curate). It is an IMAGE lookup only —
+  // each stockist still owns their own stock rows.
+
+  /// Looks up library images for a batch of (name, size) pairs. Returns a map
+  /// keyed by [designImageKey] → image URL; designs absent from the library
+  /// simply don't appear. Used before saving an import to fill blank photos.
+  Future<Map<String, String>> lookupDesignImages(
+      List<(String name, String size)> items) async {
+    final nameKeys = <String>{};
+    for (final it in items) {
+      final nk = normalizeDesignNameKey(it.$1);
+      if (nk.isNotEmpty) nameKeys.add(nk);
+    }
+    if (nameKeys.isEmpty) return {};
+    final out = <String, String>{};
+    try {
+      final list = nameKeys.toList();
+      for (var i = 0; i < list.length; i += 200) {
+        final chunk = list.sublist(i, (i + 200).clamp(0, list.length));
+        final rows = await supabase
+            .from('design_images')
+            .select('name_key,size_key,image_url')
+            .inFilter('name_key', chunk);
+        for (final r in rows) {
+          out['${r['name_key']}|${r['size_key']}'] = r['image_url'] as String;
+        }
+      }
+    } catch (e, st) {
+      debugPrint('lookupDesignImages failed: $e\n$st');
+    }
+    return out;
+  }
+
+  /// Contributes a single image to the library for (name, size). First writer
+  /// wins — an existing canonical image is never overwritten. No-op on an empty
+  /// key/url. Used by the in-design camera/gallery save.
+  Future<void> contributeDesignImage({
+    required String name,
+    required String size,
+    required String imageUrl,
+    String? source,
+    String? stockistUUID,
+  }) async {
+    final nk = normalizeDesignNameKey(name);
+    if (nk.isEmpty || imageUrl.isEmpty) return;
+    try {
+      await supabase.from('design_images').upsert({
+        'name_key': nk,
+        'size_key': normalizeSizeKey(size),
+        'image_url': imageUrl,
+        'source': source,
+        'contributed_by': stockistUUID,
+      }, onConflict: 'name_key,size_key', ignoreDuplicates: true);
+    } catch (e, st) {
+      debugPrint('contributeDesignImage failed ("$name"): $e\n$st');
+    }
+  }
+
+  /// Bulk variant for a PDF import: contributes many freshly-uploaded photos in
+  /// one insert-or-ignore. Deduped by key within the batch. First writer wins.
+  Future<void> contributeDesignImages(
+      List<({String name, String size, String url})> items,
+      {String? source, String? stockistUUID}) async {
+    final seen = <String>{};
+    final rows = <Map<String, dynamic>>[];
+    for (final it in items) {
+      final nk = normalizeDesignNameKey(it.name);
+      if (nk.isEmpty || it.url.isEmpty) continue;
+      final sk = normalizeSizeKey(it.size);
+      if (!seen.add('$nk|$sk')) continue;
+      rows.add({
+        'name_key': nk,
+        'size_key': sk,
+        'image_url': it.url,
+        'source': source,
+        'contributed_by': stockistUUID,
+      });
+    }
+    if (rows.isEmpty) return;
+    try {
+      await supabase.from('design_images').upsert(rows,
+          onConflict: 'name_key,size_key', ignoreDuplicates: true);
+    } catch (e, st) {
+      debugPrint('contributeDesignImages failed: $e\n$st');
     }
   }
 }

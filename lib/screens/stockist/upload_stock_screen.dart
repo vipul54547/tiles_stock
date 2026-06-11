@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/pdf_import_service.dart';
 import '../../services/stock_service.dart';
 import '../../services/supabase_data_service.dart';
@@ -61,6 +62,10 @@ class _State extends State<UploadStockScreen> {
 
   PdfImportResult?   _parsed;
   List<_Resolved>    _rows      = [];
+  // Shared-library photos matched for the preview (name+size → url). Shown as the
+  // thumbnail for rows the PDF carried no image for, so the stockist sees the
+  // auto-matched picture before importing.
+  Map<String, String> _libImages = {};
   bool  _loading   = false;
   bool  _importing = false;
   String _filename    = '';
@@ -182,7 +187,13 @@ class _State extends State<UploadStockScreen> {
       return _Resolved(row, match, rawKey: rawKey);
     }).toList();
 
-    setState(() { _loading = false; _loadingStep = ''; });
+    // Look up shared-library photos so the preview can show an auto-matched
+    // picture for rows the PDF had no image for. Text-only query (URLs); the
+    // thumbnails themselves load lazily, only for visible rows.
+    final lib = await _dataSvc
+        .lookupDesignImages([for (final r in rows) (r.row.name, _size)]);
+
+    setState(() { _loading = false; _loadingStep = ''; _libImages = lib; });
     if (!mounted) return;
 
     // Bulk finish-mapping step: map each UNIQUE PDF surface word to a standard
@@ -641,7 +652,15 @@ class _State extends State<UploadStockScreen> {
     int created = 0;
     int imagesUploaded = 0;
     int imagesFailed   = 0;
+    int imagesFromLibrary = 0;
     String? lastImageError;
+
+    // Shared design-image library: photos contributed by earlier imports (from
+    // any stockist), keyed by (name + size). Used to fill rows whose PDF had no
+    // photo, and freshly-uploaded photos are contributed back below.
+    final libImages = await _dataSvc.lookupDesignImages(
+        [for (final r in _rows) (r.row.name, _size)]);
+    final contributions = <({String name, String size, String url})>[];
 
     // Upload a tile photo extracted from the PDF. Tracks success/failure
     // counts and remembers the last error so we can surface it to the user.
@@ -661,6 +680,22 @@ class _State extends State<UploadStockScreen> {
       return null;
     }
 
+    // Resolve a row's photo: upload the one extracted from the PDF (and queue it
+    // to enrich the shared library), or fall back to a library image when the
+    // PDF carried none for this design.
+    Future<String?> resolvePhoto(PdfDesignRow row) async {
+      if (row.imageBytes != null) {
+        final url = await uploadPhoto(row);
+        if (url != null) {
+          contributions.add((name: row.name, size: _size, url: url));
+        }
+        return url;
+      }
+      final libUrl = libImages[designImageKey(row.name, _size)];
+      if (libUrl != null) imagesFromLibrary++;
+      return libUrl;
+    }
+
     for (final r in _rows) {
       if (r.isUpdate) {
         // Existing design — add the new stock quantity…
@@ -674,9 +709,10 @@ class _State extends State<UploadStockScreen> {
         );
         if (ok) updated++;
 
-        // …and backfill a photo if the design has none yet.
-        if (r.match!.faceImageUrls.isEmpty && r.row.imageBytes != null) {
-          final url = await uploadPhoto(r.row);
+        // …and backfill a photo if the design has none yet — from the PDF or,
+        // failing that, the shared library.
+        if (r.match!.faceImageUrls.isEmpty) {
+          final url = await resolvePhoto(r.row);
           if (url != null) {
             await _dataSvc.updateDesign(r.match!.id, {
               'face_image_urls': [url],
@@ -684,8 +720,8 @@ class _State extends State<UploadStockScreen> {
           }
         }
       } else {
-        // New design — upload image first (if extracted from PDF), then create.
-        final url = await uploadPhoto(r.row);
+        // New design — resolve image (PDF photo or library), then create.
+        final url = await resolvePhoto(r.row);
         final imageUrls = url != null ? [url] : <String>[];
 
         final newId = await _dataSvc.addDesign(
@@ -720,6 +756,11 @@ class _State extends State<UploadStockScreen> {
       }
     }
 
+    // Enrich the shared library with every photo this import uploaded, so the
+    // next stockist's Excel/PDF (even one with no images) can reuse them.
+    await _dataSvc.contributeDesignImages(contributions,
+        source: 'pdf', stockistUUID: currentStockistUUID);
+
     // Learn finish alignments: remember each raw PDF surface word → the finish
     // it ended up as, so the next PDF from this stockist auto-aligns. Deduped
     // (last choice wins); 'None' and empty keys are not worth remembering.
@@ -736,7 +777,11 @@ class _State extends State<UploadStockScreen> {
     if (!mounted) return;
 
     final total = updated + created;
-    final imageNote = imagesUploaded > 0 ? ' · $imagesUploaded photos added' : '';
+    final libNote = imagesFromLibrary > 0
+        ? ' · $imagesFromLibrary from library'
+        : '';
+    final imageNote =
+        imagesUploaded > 0 ? ' · $imagesUploaded photos added$libNote' : libNote;
     // If photos were extracted but none uploaded, the upload itself is failing
     // (e.g. Cloudinary preset not set to "unsigned") — tell the user why.
     final failNote = imagesFailed > 0
@@ -867,7 +912,7 @@ class _State extends State<UploadStockScreen> {
             ),
             TextButton(
               onPressed: () =>
-                  setState(() { _parsed = null; _rows = []; _filename = ''; }),
+                  setState(() { _parsed = null; _rows = []; _filename = ''; _libImages = {}; }),
               child: const Text('Change'),
             ),
           ],
@@ -1029,23 +1074,34 @@ class _State extends State<UploadStockScreen> {
       );
 
   // Update row: existing stock + incoming boxes = new total
-  // Tile photo extracted from the PDF, shown for visual verification only.
-  // Photo management (add/replace via gallery or camera) happens inside the
-  // design on the edit screen — not here. A plain placeholder means the PDF had
-  // no photo for this tile; the stockist adds one later from the design.
-  Widget _thumb(PdfDesignRow row) => ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: SizedBox(
-          width: 46,
-          height: 46,
-          child: row.imageBytes != null
-              ? Image.memory(row.imageBytes!,
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  errorBuilder: (_, __, ___) => _thumbPlaceholder())
-              : _thumbPlaceholder(),
-        ),
-      );
+  // Tile photo shown for visual verification only. Priority: the photo extracted
+  // from the PDF, else a shared-library photo auto-matched by name+size (loaded
+  // lazily, small), else a placeholder (the stockist can add one later from the
+  // design). Photo management happens inside the design on the edit screen.
+  Widget _thumb(PdfDesignRow row) {
+    final libUrl = row.imageBytes == null
+        ? _libImages[designImageKey(row.name, _size)]
+        : null;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 46,
+        height: 46,
+        child: row.imageBytes != null
+            ? Image.memory(row.imageBytes!,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => _thumbPlaceholder())
+            : (libUrl != null
+                ? CachedNetworkImage(
+                    imageUrl: CloudinaryService.thumbUrl(libUrl, width: 120),
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => _thumbPlaceholder(),
+                    errorWidget: (_, __, ___) => _thumbPlaceholder())
+                : _thumbPlaceholder()),
+      ),
+    );
+  }
 
   Widget _thumbPlaceholder() => Container(
         color: Colors.grey.shade100,

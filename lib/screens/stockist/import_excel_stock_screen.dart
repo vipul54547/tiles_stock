@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' hide Border, BorderStyle;
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/supabase_data_service.dart';
+import '../../services/cloudinary_service.dart';
 import '../../services/stock_service.dart';
 import '../../models/tile_design.dart';
 import '../../utils/finishes.dart';
@@ -80,6 +82,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   final _stockSvc = StockService();
 
   List<_XlsRow> _rows = [];
+  // Shared-library photos matched for the preview (name+size → url). Excel has no
+  // images, so this is the only photo shown per row before import.
+  Map<String, String> _libImages = {};
   bool _parsed = false;
   bool _importing = false;
   bool _loading = false;
@@ -234,7 +239,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     if (!ok) return; // cancelled
 
     _computeActions(parsed);
-    setState(() { _rows = parsed; _parsed = true; _done = 0; });
+
+    // Auto-match shared-library photos by name+size so the preview shows a
+    // picture for each row (Excel carries none). Text-only query; thumbnails
+    // load lazily for visible rows.
+    final lib = await _dataSvc.lookupDesignImages(
+        [for (final r in parsed) if (r.valid) (r.name, r.size)]);
+
+    setState(() { _rows = parsed; _parsed = true; _done = 0; _libImages = lib; });
   }
 
   // Validate required fields/values; align each finish to an admin finish.
@@ -398,10 +410,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     if (toDo.isEmpty) { _snack('Nothing to import.'); return; }
 
     setState(() { _importing = true; _done = 0; });
-    int updated = 0, created = 0, finishFixed = 0;
+    int updated = 0, created = 0, finishFixed = 0, imagesFromLibrary = 0;
     final learned = <String, String>{};
 
+    // Excel carries no photos — pull them from the shared design-image library
+    // (populated by earlier PDF/camera imports) by (name + size).
+    final libImages = await _dataSvc
+        .lookupDesignImages([for (final r in toDo) (r.name, r.size)]);
+
     for (final r in toDo) {
+      final libUrl = libImages[designImageKey(r.name, r.size)];
       final addAsNew = r.action == 'new' || (r.action == 'conflict' && r.conflictAsNew);
       if (addAsNew) {
         final newId = await _dataSvc.addDesign(
@@ -421,10 +439,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               0,
           boxPrice: r.price ?? 0,
           tileType: kTileTypes.contains(r.tileType) ? r.tileType : '',
-          faceImageUrls: const [],
+          faceImageUrls: libUrl != null ? [libUrl] : const [],
           finishLabel: r.surfaceRaw.trim().isEmpty ? null : r.surfaceRaw.trim(),
         );
         if (newId != null) {
+          if (libUrl != null) imagesFromLibrary++;
           final ok = await _stockSvc.addStock(
             designId: newId, stockistUUID: currentStockistUUID,
             quantity: r.qty, pdfFilename: _filename, size: r.size, quality: r.quality);
@@ -437,6 +456,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             r.surface != r.match!.surfaceType) {
           await _dataSvc.updateDesign(r.match!.id, {'surface_type': r.surface});
           finishFixed++;
+        }
+        // Backfill a photo from the library if this design still has none.
+        if (libUrl != null && r.match!.faceImageUrls.isEmpty) {
+          await _dataSvc.updateDesign(r.match!.id, {'face_image_urls': [libUrl]});
+          imagesFromLibrary++;
         }
         final ok = await _stockSvc.addStock(
           designId: r.match!.id, stockistUUID: currentStockistUUID,
@@ -455,12 +479,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     if (!mounted) return;
     setState(() => _importing = false);
     final fixNote = finishFixed > 0 ? ' · $finishFixed finish corrected' : '';
-    _snack('Done — $updated updated, $created new$fixNote.', Colors.green);
+    final libNote =
+        imagesFromLibrary > 0 ? ' · $imagesFromLibrary photos from library' : '';
+    _snack('Done — $updated updated, $created new$fixNote$libNote.', Colors.green);
     if (updated + created > 0) Navigator.of(context).pop();
   }
 
   void _reset() => setState(() {
-        _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = '';
+        _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = ''; _libImages = {};
       });
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -679,6 +705,32 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         ],
       );
 
+  // Auto-matched shared-library photo for this row (by name+size), loaded lazily
+  // and small; a placeholder when no library photo exists yet.
+  Widget _libThumb(_XlsRow r) {
+    final url = _libImages[designImageKey(r.name, r.size)];
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: url != null
+            ? CachedNetworkImage(
+                imageUrl: CloudinaryService.thumbUrl(url, width: 120),
+                fit: BoxFit.cover,
+                placeholder: (_, __) => _thumbPlaceholder(),
+                errorWidget: (_, __, ___) => _thumbPlaceholder())
+            : _thumbPlaceholder(),
+      ),
+    );
+  }
+
+  Widget _thumbPlaceholder() => Container(
+        color: Colors.grey.shade100,
+        alignment: Alignment.center,
+        child: Icon(Icons.image_outlined, size: 16, color: Colors.grey.shade400),
+      );
+
   Widget _rowCard(_XlsRow r) {
     final Color border, bg;
     String tag;
@@ -710,6 +762,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         children: [
           Row(
             children: [
+              if (r.valid) ...[ _libThumb(r), const SizedBox(width: 8) ],
               if (r.valid)
                 Checkbox(
                   value: r.include,

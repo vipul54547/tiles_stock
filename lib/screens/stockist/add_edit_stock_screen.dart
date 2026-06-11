@@ -295,6 +295,20 @@ class _State extends State<AddEditStockScreen> {
       await _service.upsertSurfaceAlias(currentStockistUUID, aliasRaw, _surface);
     }
 
+    // Contribute a newly added photo to the shared design-image library (first
+    // writer wins), so the next stockist's Excel/PDF import of the same design
+    // (name + size) auto-fills this picture. This is what makes a manually
+    // snapped photo fill everyone's blank rows.
+    if (ok && newUrls.isNotEmpty) {
+      await _service.contributeDesignImage(
+        name: _nameCtrl.text.trim(),
+        size: _size,
+        imageUrl: newUrls.first,
+        source: 'camera',
+        stockistUUID: currentStockistUUID,
+      );
+    }
+
     if (!mounted) return;
     _hideProcessing();
     setState(() {
