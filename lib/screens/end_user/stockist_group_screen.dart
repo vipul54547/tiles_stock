@@ -29,6 +29,51 @@ Future<void> loadStockistGroupsFromDb() async {
     }));
 }
 
+/// Confirms — then, on Yes, performs AND persists — adding/removing a stockist
+/// to/from a saved group. Naming the stockist + ID + group prevents an accidental
+/// tap (on the overview / all-designs page / design-card sheet) from silently
+/// changing a group, in either direction. Returns true if the group changed.
+Future<bool> confirmToggleStockistInGroup(
+  BuildContext context, {
+  required int groupIndex,
+  required String stockistId,
+  required String stockistName,
+}) async {
+  if (groupIndex < 0 || groupIndex >= stockistGroups.length) return false;
+  final g = stockistGroups[groupIndex];
+  final adding = !g.stockistIds.contains(stockistId);
+  final who = stockistName.trim().isEmpty
+      ? 'Stockist $stockistId'
+      : '$stockistName ($stockistId)';
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(adding ? 'Add to group?' : 'Remove from group?'),
+      content: Text(adding
+          ? 'Add $who to your group "${g.name}"?'
+          : 'Remove $who from your group "${g.name}"?'),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel')),
+        ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(adding ? 'Add' : 'Remove')),
+      ],
+    ),
+  );
+  if (ok != true) return false;
+  if (adding) {
+    g.stockistIds.add(stockistId);
+  } else {
+    g.stockistIds.remove(stockistId);
+  }
+  if (g.id != null) {
+    await SupabaseDataService().setGroupMembers(g.id!, g.stockistIds.toList());
+  }
+  return true;
+}
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 class StockistGroupScreen extends StatefulWidget {

@@ -6,7 +6,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
 import 'stockist_group_screen.dart'
-    show stockistGroups, loadStockistGroupsFromDb;
+    show stockistGroups, loadStockistGroupsFromDb, confirmToggleStockistInGroup;
 import '../../models/choice_state.dart';
 import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
@@ -41,6 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // Finish + size options for the filter, in the admin's master order.
   List<String> _surfaceOpts = kFinishes;
   List<String> _sizeOpts = _filterSizes;
+  Map<String, String> _stockistNames = {}; // seq id → name (group confirm)
   bool _loading = true;
 
   Set<String> _selectedSizes = {};
@@ -90,14 +91,20 @@ class _HomeScreenState extends State<HomeScreen> {
         rankDesigns(designs, seed: DateTime.now().microsecondsSinceEpoch);
     final finishes = await _service.getActiveFinishNames();
     final sizes = await _service.getActiveSizeNames();
+    // Stockist seq-id → name (for the group confirm dialog). Empty for guests.
+    final stockists = await _service.getAllStockists();
     if (!mounted) return;
     setState(() {
       _designs = ranked;
       _surfaceOpts = finishes;
       _sizeOpts = sizes;
+      _stockistNames = {for (final s in stockists) s.id: s.name};
       _loading = false;
     });
   }
+
+  // Stockist display name for a sequential id (for the group confirm dialog).
+  String _stockistName(String seqId) => _stockistNames[seqId] ?? '';
 
   List<TileDesign> get _filtered {
     var result = _designs;
@@ -771,14 +778,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                 return Padding(
                                   padding: const EdgeInsets.only(right: 5),
                                   child: GestureDetector(
-                                    onTap: () {
-                                      if (inGroup) {
-                                        stockistGroups[i].stockistIds.remove(d.stockistId);
-                                      } else {
-                                        stockistGroups[i].stockistIds.add(d.stockistId);
+                                    onTap: () async {
+                                      final changed =
+                                          await confirmToggleStockistInGroup(
+                                        context,
+                                        groupIndex: i,
+                                        stockistId: d.stockistId,
+                                        stockistName:
+                                            _stockistName(d.stockistId),
+                                      );
+                                      if (changed) {
+                                        setSheet(() {});
+                                        setState(() {});
                                       }
-                                      setSheet(() {});
-                                      setState(() {});
                                     },
                                     child: Tooltip(
                                       message: stockistGroups[i].name,

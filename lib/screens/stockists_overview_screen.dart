@@ -9,7 +9,7 @@ import '../services/supabase_auth_service.dart';
 import '../widgets/tile_card.dart';
 import '../services/cloudinary_service.dart';
 import 'end_user/stockist_group_screen.dart'
-    show stockistGroups, loadStockistGroupsFromDb;
+    show stockistGroups, loadStockistGroupsFromDb, confirmToggleStockistInGroup;
 import '../models/choice_state.dart';
 import '../widgets/smart_search_toggle.dart';
 import '../utils/design_ranking.dart';
@@ -232,6 +232,14 @@ class _State extends State<StockistsOverviewScreen> {
 
   List<TileDesign> _stockistDesigns(_StockistData d) =>
       d.designs.where(_matchesDesignFacets).toList();
+
+  // Stockist display name for a sequential id (for the group confirm dialog).
+  String _stockistName(String seqId) {
+    for (final sd in _allData) {
+      if (sd.stockist.id == seqId) return sd.stockist.name;
+    }
+    return '';
+  }
 
   int _filteredBoxCount(_StockistData d) {
     final designs = _stockistDesigns(d);
@@ -890,14 +898,18 @@ class _State extends State<StockistsOverviewScreen> {
                                 return Padding(
                                   padding: const EdgeInsets.only(right: 6),
                                   child: GestureDetector(
-                                    onTap: () {
-                                      if (inGroup) {
-                                        stockistGroups[i].stockistIds.remove(d.stockistId);
-                                      } else {
-                                        stockistGroups[i].stockistIds.add(d.stockistId);
+                                    onTap: () async {
+                                      final changed =
+                                          await confirmToggleStockistInGroup(
+                                        context,
+                                        groupIndex: i,
+                                        stockistId: d.stockistId,
+                                        stockistName: _stockistName(d.stockistId),
+                                      );
+                                      if (changed) {
+                                        setSheet(() {});
+                                        setState(() {});
                                       }
-                                      setSheet(() {});
-                                      setState(() {});
                                     },
                                     child: Tooltip(
                                       message: stockistGroups[i].name,
@@ -1216,15 +1228,16 @@ class _State extends State<StockistsOverviewScreen> {
                                 '/stockist/${filteredStockists[i].stockist.id}/portfolio');
                             if (mounted) _load();
                           },
-                          onToggleGroup: (groupIndex) => setState(() {
-                            final ids = stockistGroups[groupIndex].stockistIds;
-                            final stockistId = filteredStockists[i].stockist.id;
-                            if (ids.contains(stockistId)) {
-                              ids.remove(stockistId);
-                            } else {
-                              ids.add(stockistId);
-                            }
-                          }),
+                          onToggleGroup: (groupIndex) async {
+                            final s = filteredStockists[i].stockist;
+                            final changed = await confirmToggleStockistInGroup(
+                              context,
+                              groupIndex: groupIndex,
+                              stockistId: s.id,
+                              stockistName: s.name,
+                            );
+                            if (changed && mounted) setState(() {});
+                          },
                         ),
                       ),
           ),
