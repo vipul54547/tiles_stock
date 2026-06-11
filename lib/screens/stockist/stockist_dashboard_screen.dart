@@ -263,6 +263,14 @@ class _State extends State<StockistDashboardScreen> {
               title: const Text('Stock Dashboard'),
               actions: [
                 IconButton(
+                  icon: const Icon(Icons.collections_bookmark_outlined),
+                  tooltip: 'My stock catalogs',
+                  onPressed: () async {
+                    await context.push('/stockist/catalogs');
+                    _load();
+                  },
+                ),
+                IconButton(
                   icon: const Icon(Icons.share_outlined),
                   tooltip: 'Share my catalog',
                   onPressed: _showShareSheet,

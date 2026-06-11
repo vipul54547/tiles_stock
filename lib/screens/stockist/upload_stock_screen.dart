@@ -7,6 +7,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/tile_size.dart';
+import '../../models/stock_catalog.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -90,6 +91,8 @@ class _State extends State<UploadStockScreen> {
   List<String>        _finishes = kFinishes;     // fallback until loaded
   List<String>        _sizes    = kAllowedSizes;  // admin master, loaded once
   List<TileSize>      _tileSizes = [];           // full size rows (with aliases)
+  List<StockCatalog>  _catalogs  = [];           // stockist's stock catalogs
+  String?             _catalogId;                // chosen upload target catalog
   Map<String, String> _aliases  = {};            // normalisedRaw → finish name
   bool _configLoaded = false;
 
@@ -107,6 +110,9 @@ class _State extends State<UploadStockScreen> {
       final names = types.map((t) => t.name).toList();
       final tileSizes = await _dataSvc.getTileSizes(activeOnly: true);
       final sizeNames = tileSizes.map((s) => s.name).toList();
+      final catalogs = currentStockistUUID.isEmpty
+          ? <StockCatalog>[]
+          : await _dataSvc.getCatalogs(currentStockistUUID);
       final aliases = currentStockistUUID.isEmpty
           ? <String, String>{}
           : await _dataSvc.getSurfaceAliases(currentStockistUUID);
@@ -115,6 +121,9 @@ class _State extends State<UploadStockScreen> {
         if (names.isNotEmpty) _finishes = names;
         if (sizeNames.isNotEmpty) _sizes = sizeNames;
         _tileSizes = tileSizes;
+        _catalogs = catalogs.where((c) => c.isActive).toList();
+        // Default to the first public catalog (the usual marketplace stock).
+        _catalogId ??= _defaultCatalogId();
         _aliases = aliases;
         _configLoaded = true;
       });
@@ -420,6 +429,14 @@ class _State extends State<UploadStockScreen> {
     return true;
   }
 
+  // The default upload target: the first active public catalog, else the first.
+  String? _defaultCatalogId() {
+    for (final c in _catalogs) {
+      if (!c.isPrivate) return c.id;
+    }
+    return _catalogs.isEmpty ? null : _catalogs.first.id;
+  }
+
   // Ask the stockist to confirm size + quality (defaulted from the filename)
   // and enter how many designs they expect. Returns false if cancelled.
   Future<bool> _confirmDetails(PdfImportResult parsed) async {
@@ -455,6 +472,26 @@ class _State extends State<UploadStockScreen> {
                   Text('File: $_filename',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
                   const SizedBox(height: 14),
+                  // Catalog (which stock this upload goes into) — only when the
+                  // stockist has more than the default catalog.
+                  if (_catalogs.length > 1) ...[
+                    const Text('Add to catalog',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600)),
+                    DropdownButton<String>(
+                      isExpanded: true,
+                      value: _catalogId,
+                      items: _catalogs
+                          .map((c) => DropdownMenuItem(
+                              value: c.id,
+                              child: Text(
+                                  '${c.name}${c.isPrivate ? '  (private)' : ''}')))
+                          .toList(),
+                      onChanged: (v) =>
+                          setLocal(() => _catalogId = v ?? _catalogId),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   // Size
                   const Text('Tile size',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
@@ -748,6 +785,7 @@ class _State extends State<UploadStockScreen> {
           tileType:      _tileType,
           faceImageUrls: imageUrls,
           finishLabel:   r.row.finishLabel,
+          catalogId:     _catalogId,
         );
         if (newId != null) {
           final ok = await _stockSvc.addStock(

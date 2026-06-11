@@ -5,6 +5,7 @@ import '../models/end_user.dart';
 import '../models/surface_type.dart';
 import '../models/app_notification.dart';
 import '../models/tile_size.dart';
+import '../models/stock_catalog.dart';
 import '../models/share_link.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
@@ -58,6 +59,7 @@ class SupabaseDataService {
         stockistId:   d['stockists'] != null
             ? (d['stockists']['sequential_id'] ?? seqId ?? '')
             : (seqId ?? ''),
+        catalogId:    d['catalog_id'] as String?,
         updatedAt:  DateTime.parse(d['updated_at']),
         quality:    d['quality']    ?? 'Standard',
         stockType:  d['stock_type'] ?? 'Regular',
@@ -90,7 +92,7 @@ class SupabaseDataService {
           .from('designs')
           .select('*, stockists!inner(sequential_id, is_active, is_listed, priority)')
           .eq('stockists.is_active', true)
-          .eq('stockists.is_listed', true) // hide link-only stockists from market
+          .eq('is_market_visible', true) // only public-catalog stock in the market
           .neq('status', 'out_of_stock')
           .gt('box_quantity', 0) // never show 0-stock to buyers
           .order('created_at', ascending: false);
@@ -126,7 +128,12 @@ class SupabaseDataService {
           .select('*, stockists(sequential_id)')
           .eq('stockist_id', stockistUUID);
       if (inStockOnly) {
-        query = query.neq('status', 'out_of_stock').gt('box_quantity', 0);
+        // Buyer view of a stockist's portfolio: in-stock AND public-catalog only
+        // (private-catalog designs are reachable only via their own link).
+        query = query
+            .neq('status', 'out_of_stock')
+            .gt('box_quantity', 0)
+            .eq('is_market_visible', true);
       }
       final data = await query.order('created_at', ascending: false);
       return data.map<TileDesign>((d) => _toDesign(d)).toList();
@@ -156,7 +163,7 @@ class SupabaseDataService {
               .from('designs')
               .select('*, stockists!inner(sequential_id, is_active, is_listed, priority)')
               .eq('stockists.is_active', true)
-              .eq('stockists.is_listed', true) // hide link-only from market
+              .eq('is_market_visible', true) // only public-catalog stock in market
               .neq('status', 'out_of_stock')
               .gt('box_quantity', 0); // never show 0-stock to buyers
 
@@ -201,10 +208,12 @@ class SupabaseDataService {
     String tileType = '',
     required List<String> faceImageUrls,
     String? finishLabel,
+    String? catalogId,
   }) async {
     try {
       final row = await supabase.from('designs').insert({
         'stockist_id':   stockistUUID,
+        'catalog_id':    catalogId,
         'name':          name,
         'size':          size,
         'surface_type':  surfaceType,
@@ -257,6 +266,104 @@ class SupabaseDataService {
     } catch (_) {
       return false;
     }
+  }
+
+  // ── stock catalogs (Father & Child) ────────────────────────────────────────
+
+  /// Whether this stockist may create PRIVATE catalogs (admin-granted).
+  Future<bool> canCreatePrivate(String stockistUUID) async {
+    try {
+      final s = await supabase
+          .from('stockists')
+          .select('can_create_private_catalog')
+          .eq('id', stockistUUID)
+          .maybeSingle();
+      return s?['can_create_private_catalog'] as bool? ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// A stockist's catalogs (public + private), in display order.
+  Future<List<StockCatalog>> getCatalogs(String stockistUUID) async {
+    try {
+      final data = await supabase
+          .from('stock_catalogs')
+          .select()
+          .eq('stockist_id', stockistUUID)
+          .order('sort_order', ascending: true)
+          .order('created_at', ascending: true);
+      return data.map<StockCatalog>((c) => StockCatalog.fromJson(c)).toList();
+    } catch (e, st) {
+      debugPrint('getCatalogs failed ($stockistUUID): $e\n$st');
+      return [];
+    }
+  }
+
+  /// The stockist's default public catalog (the one new uploads target by
+  /// default) — the lowest-sorted public catalog.
+  Future<StockCatalog?> defaultCatalog(String stockistUUID) async {
+    final all = await getCatalogs(stockistUUID);
+    for (final c in all) {
+      if (!c.isPrivate && c.isActive) return c;
+    }
+    return all.isEmpty ? null : all.first;
+  }
+
+  /// Create a catalog. Private creation is gated by the stockist's admin-granted
+  /// `can_create_private_catalog` (enforced here and by RLS on the column).
+  Future<String?> addCatalog(String stockistUUID, String name,
+      {bool private = false}) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw 'Catalog name cannot be empty.';
+    try {
+      final existing = await supabase
+          .from('stock_catalogs')
+          .select('sort_order')
+          .eq('stockist_id', stockistUUID)
+          .order('sort_order', ascending: false)
+          .limit(1);
+      final nextOrder =
+          (existing.isEmpty ? 0 : (existing.first['sort_order'] as int)) + 10;
+      final row = await supabase
+          .from('stock_catalogs')
+          .insert({
+            'stockist_id': stockistUUID,
+            'name': trimmed,
+            'visibility': private ? 'private' : 'public',
+            'show_in_marketplace': !private, // private never in marketplace
+            'sort_order': nextOrder,
+          })
+          .select('id')
+          .single();
+      return row['id'] as String?;
+    } catch (e, st) {
+      debugPrint('addCatalog failed ($name): $e\n$st');
+      rethrow;
+    }
+  }
+
+  Future<void> renameCatalog(String id, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw 'Catalog name cannot be empty.';
+    await supabase.from('stock_catalogs').update({'name': trimmed}).eq('id', id);
+  }
+
+  /// Toggle a PUBLIC catalog's marketplace visibility (the "show in app" switch).
+  Future<void> setCatalogMarketplace(String id, bool show) async {
+    await supabase
+        .from('stock_catalogs')
+        .update({'show_in_marketplace': show}).eq('id', id);
+  }
+
+  Future<void> setCatalogActive(String id, bool active) async {
+    await supabase
+        .from('stock_catalogs')
+        .update({'is_active': active}).eq('id', id);
+  }
+
+  Future<void> deleteCatalog(String id) async {
+    await supabase.from('stock_catalogs').delete().eq('id', id);
   }
 
   // ── stockists ─────────────────────────────────────────────────────────────
@@ -312,6 +419,29 @@ class SupabaseDataService {
   Future<void> setStockistListed(String sequentialId, bool listed) async {
     await supabase.rpc('admin_set_stockist_listed',
         params: {'p_seq': sequentialId, 'p_is_listed': listed});
+  }
+
+  /// Admin: grant/revoke a stockist's permission to create PRIVATE catalogs
+  /// (the Father & Child gate — also the hook for paid/special features).
+  Future<void> setStockistPrivateCatalog(
+      String sequentialId, bool allowed) async {
+    await supabase.rpc('admin_set_private_catalog',
+        params: {'p_seq': sequentialId, 'p_allowed': allowed});
+  }
+
+  /// The stockist UUID for a sequential id (catalogs are keyed by UUID, but
+  /// admin screens work in sequential ids).
+  Future<String?> stockistUuidForSeq(String sequentialId) async {
+    try {
+      final s = await supabase
+          .from('stockists')
+          .select('id')
+          .eq('sequential_id', sequentialId)
+          .maybeSingle();
+      return s?['id'] as String?;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Public (no login): a stockist's catalog by share token, for the web link.
@@ -452,6 +582,7 @@ class SupabaseDataService {
         isActive:  s['is_active'] ?? true,
         isListed:  s['is_listed'] ?? true,
         shareToken: s['share_token'] ?? '',
+        canCreatePrivateCatalog: s['can_create_private_catalog'] ?? false,
         createdAt: DateTime.parse(s['created_at']),
       );
 

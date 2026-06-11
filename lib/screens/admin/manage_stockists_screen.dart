@@ -346,6 +346,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _gst      = TextEditingController();
   String _tier = ''; // '' = no tier; else Platinum/Gold/Silver
   bool _listed = true; // shown in the public market (false = link-only)
+  bool _canPrivate = false; // may create private (Most Exclusive) catalogs
 
   bool _saving = false;
   String? _error;
@@ -367,6 +368,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _priority.text = s.priority.toStringAsFixed(2);
       _tier = kStockistTiers.contains(s.stockistType) ? s.stockistType : '';
       _listed = s.isListed;
+      _canPrivate = s.canCreatePrivateCatalog;
     }
   }
 
@@ -400,6 +402,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           stockistType: _tier,
         );
         await _dataSvc.setStockistListed(widget.existing!.id, _listed);
+        await _dataSvc.setStockistPrivateCatalog(
+            widget.existing!.id, _canPrivate);
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -516,6 +520,22 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                             : 'Private — hidden from the app, reachable only by share link.',
                         style: const TextStyle(fontSize: 11)),
                     onChanged: (v) => setState(() => _listed = v),
+                  ),
+                ),
+              if (_isEdit)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _canPrivate,
+                    activeThumbColor: Colors.deepPurple,
+                    title: const Text('Allow private catalogs'),
+                    subtitle: Text(
+                        _canPrivate
+                            ? 'Can create private ("Most Exclusive") catalogs — link-only stock.'
+                            : 'Public catalogs only. Turn on for premium/trusted stockists.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _canPrivate = v),
                   ),
                 ),
               _field(_priority, 'Priority (0.00)',

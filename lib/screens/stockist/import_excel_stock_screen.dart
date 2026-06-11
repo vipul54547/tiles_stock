@@ -7,6 +7,7 @@ import '../../services/cloudinary_service.dart';
 import '../../services/stock_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/tile_size.dart';
+import '../../models/stock_catalog.dart';
 import '../../utils/finishes.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -97,6 +98,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   List<String> _finishes = kFinishes;
   List<String> _sizes = kAllowedSizes;
   List<TileSize> _tileSizes = []; // full size rows (with inch/feet aliases)
+  List<StockCatalog> _catalogs = []; // stockist's catalogs (upload target)
+  String? _catalogId; // chosen target catalog
   Map<String, String> _aliases = {};
   List<TileDesign> _existing = [];
 
@@ -128,10 +131,23 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       _existing = currentStockistUUID.isEmpty
           ? []
           : await _dataSvc.getDesignsByStockist(currentStockistUUID);
+      final catalogs = currentStockistUUID.isEmpty
+          ? <StockCatalog>[]
+          : await _dataSvc.getCatalogs(currentStockistUUID);
       if (names.isNotEmpty) _finishes = names;
       if (sizeNames.isNotEmpty) _sizes = sizeNames;
       _tileSizes = tileSizes;
+      _catalogs = catalogs.where((c) => c.isActive).toList();
+      _catalogId ??= _defaultCatalogId();
     } catch (_) {/* keep fallbacks */}
+  }
+
+  // Default import target: first active public catalog, else the first.
+  String? _defaultCatalogId() {
+    for (final c in _catalogs) {
+      if (!c.isPrivate) return c.id;
+    }
+    return _catalogs.isEmpty ? null : _catalogs.first.id;
   }
 
   String _normHeader(String h) =>
@@ -448,6 +464,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           tileType: kTileTypes.contains(r.tileType) ? r.tileType : '',
           faceImageUrls: libUrl != null ? [libUrl] : const [],
           finishLabel: r.surfaceRaw.trim().isEmpty ? null : r.surfaceRaw.trim(),
+          catalogId: _catalogId,
         );
         if (newId != null) {
           if (libUrl != null) imagesFromLibrary++;
@@ -656,6 +673,32 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
     return Column(
       children: [
+        // Which catalog this import goes into (only when there's a choice).
+        if (_catalogs.length > 1)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                const Text('Add to: ', style: TextStyle(fontSize: 12)),
+                Expanded(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: _catalogId,
+                    items: _catalogs
+                        .map((c) => DropdownMenuItem(
+                            value: c.id,
+                            child: Text(
+                                '${c.name}${c.isPrivate ? '  (private)' : ''}',
+                                style: const TextStyle(fontSize: 13))))
+                        .toList(),
+                    onChanged: _importing
+                        ? null
+                        : (v) => setState(() => _catalogId = v ?? _catalogId),
+                  ),
+                ),
+              ],
+            ),
+          ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: const Color(0xFF1B4F72).withValues(alpha: 0.06),

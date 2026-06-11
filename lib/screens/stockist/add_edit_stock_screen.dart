@@ -8,6 +8,7 @@ import '../../services/stock_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
 import '../../models/tile_design.dart';
+import '../../models/stock_catalog.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/finishes.dart';
@@ -46,6 +47,8 @@ class _State extends State<AddEditStockScreen> {
 
   List<String> _surfaces = kFinishes;   // replaced by admin master list on load
   List<String> _sizes    = kAllowedSizes; // replaced by admin master list on load
+  List<StockCatalog> _catalogs = []; // the stockist's catalogs
+  String? _catalogId; // which catalog this design belongs to
   final _qualities  = ['Premium', 'Standard'];
   final _stockTypes = ['Both', 'Regular', 'One Time'];
 
@@ -73,7 +76,24 @@ class _State extends State<AddEditStockScreen> {
   Future<void> _init() async {
     await _loadSurfaces();
     await _loadSizes();
+    await _loadCatalogs();
     if (isEdit) await _loadExisting();
+  }
+
+  // The stockist's catalogs; default a NEW design to the first public catalog.
+  Future<void> _loadCatalogs() async {
+    if (currentStockistUUID.isEmpty) return;
+    final cats = await _service.getCatalogs(currentStockistUUID);
+    if (!mounted) return;
+    setState(() {
+      _catalogs = cats.where((c) => c.isActive).toList();
+      if (!isEdit) {
+        for (final c in _catalogs) {
+          if (!c.isPrivate) { _catalogId = c.id; break; }
+        }
+        _catalogId ??= _catalogs.isEmpty ? null : _catalogs.first.id;
+      }
+    });
   }
 
   // Use the admin's live size list so the picker matches the master.
@@ -144,6 +164,10 @@ class _State extends State<AddEditStockScreen> {
     _quality            = _qualities.contains(d.quality)    ? d.quality    : _qualities.first;
     _stockType          = _stockTypes.contains(d.stockType) ? d.stockType  : _stockTypes.first;
     _existingImageUrls  = List.from(d.faceImageUrls);
+    // Preselect this design's catalog (only if it's still an active catalog).
+    if (d.catalogId != null && _catalogs.any((c) => c.id == d.catalogId)) {
+      _catalogId = d.catalogId;
+    }
 
     // Match stored size to allowed list (handles old wrong formats too)
     final key = d.size
@@ -265,6 +289,7 @@ class _State extends State<AddEditStockScreen> {
                 double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
         'box_price':     double.tryParse(_priceCtrl.text)     ?? 0,
         'face_image_urls': finalUrls,
+        if (_catalogId != null) 'catalog_id': _catalogId,
       });
     } else {
       final id = await _service.addDesign(
@@ -284,6 +309,7 @@ class _State extends State<AddEditStockScreen> {
                 double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
         boxPrice:      double.tryParse(_priceCtrl.text)     ?? 0,
         faceImageUrls: finalUrls,
+        catalogId:     _catalogId,
       );
       ok = id != null;
     }
@@ -471,6 +497,7 @@ class _State extends State<AddEditStockScreen> {
                   _buildImagePicker(),
                   const SizedBox(height: 8),
                   _field(_nameCtrl, 'Design Name', required: true),
+                  if (_catalogs.length > 1) _buildCatalogPicker(),
                   _buildSizePicker(),
                   _buildSurfaceSection(),
                   const SizedBox(height: 12),
@@ -579,6 +606,44 @@ class _State extends State<AddEditStockScreen> {
         ? Image.file(File(_pickedPaths.first), fit: BoxFit.cover)
         : Image.network(_existingImageUrls.first, fit: BoxFit.cover);
     return portrait ? RotatedBox(quarterTurns: 1, child: image) : image;
+  }
+
+  // ── Catalog picker (Father & Child) ───────────────────────────────────────
+
+  Widget _buildCatalogPicker() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Catalog',
+              style: TextStyle(fontSize: 13, color: Colors.grey)),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade400),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DropdownButton<String>(
+              value: _catalogId,
+              isExpanded: true,
+              underline: const SizedBox.shrink(),
+              items: _catalogs
+                  .map((c) => DropdownMenuItem(
+                      value: c.id,
+                      child: Text(
+                          '${c.name}${c.isPrivate ? '  (private)' : ''}')))
+                  .toList(),
+              onChanged: (v) => setState(() {
+                _catalogId = v ?? _catalogId;
+                _dirty = true;
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Size picker ───────────────────────────────────────────────────────────

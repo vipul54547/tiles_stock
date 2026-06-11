@@ -37,6 +37,10 @@ class Stockist {
   /// Unguessable token that powers the stockist's public web catalog link.
   final String shareToken;
 
+  /// Admin-granted permission to create PRIVATE catalogs (Father & Child).
+  /// Default false — public catalogs are always allowed.
+  final bool canCreatePrivateCatalog;
+
   final DateTime createdAt;
 
 
@@ -70,6 +74,8 @@ class Stockist {
     this.isListed = true,
 
     this.shareToken = '',
+
+    this.canCreatePrivateCatalog = false,
 
     required this.createdAt,
 
@@ -106,6 +112,8 @@ class Stockist {
     isListed: json['is_listed'] ?? true,
 
     shareToken: json['share_token'] ?? '',
+
+    canCreatePrivateCatalog: json['can_create_private_catalog'] ?? false,
 
     createdAt: DateTime.parse(json['created_at']),
 

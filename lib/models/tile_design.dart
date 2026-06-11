@@ -17,6 +17,9 @@ class TileDesign {
   final String tileType;
   final List<String> faceImageUrls;
   final String stockistId;
+  /// The stock catalog this design belongs to (Father & Child). Null for legacy
+  /// rows; the stockist's default public catalog otherwise.
+  final String? catalogId;
   final DateTime updatedAt;
   final String quality;
   final String stockType;
@@ -42,6 +45,7 @@ class TileDesign {
     this.tileType = '',
     required this.faceImageUrls,
     required this.stockistId,
+    this.catalogId,
     required this.updatedAt,
     required this.quality,
     required this.stockType,
@@ -64,6 +68,7 @@ class TileDesign {
         tileType: json['tile_type'] ?? '',
         faceImageUrls: List<String>.from(json['face_image_urls']),
         stockistId: json['stockist_id'],
+        catalogId: json['catalog_id'] as String?,
         updatedAt: DateTime.parse(json['updated_at']),
         quality: json['quality'] ?? 'Standard',
         stockType: json['stock_type'] ?? 'Regular',

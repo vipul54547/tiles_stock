@@ -48,6 +48,7 @@ import 'screens/stockists_overview_screen.dart';
 import 'screens/end_user/stockist_group_screen.dart';
 import 'screens/end_user/my_choice_screen.dart';
 import 'screens/stockist/upload_stock_screen.dart';
+import 'screens/stockist/manage_catalogs_screen.dart';
 import 'screens/stockist/import_excel_stock_screen.dart';
 import 'screens/stockist/add_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
@@ -164,6 +165,10 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/stockist/stock/upload',
       builder: (_, __) => const UploadStockScreen(),
+    ),
+    GoRoute(
+      path: '/stockist/catalogs',
+      builder: (_, __) => const ManageCatalogsScreen(),
     ),
     GoRoute(
       path: '/stockist/stock/import-excel',
