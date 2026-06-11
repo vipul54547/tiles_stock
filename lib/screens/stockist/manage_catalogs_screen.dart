@@ -297,18 +297,33 @@ class _State extends State<ManageCatalogsScreen> {
                     onPressed: _busy ? null : () => _copy(c),
                     icon: const Icon(Icons.link, size: 18),
                     label: const Text('Copy link'),
+                    style: TextButton.styleFrom(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                   ),
                   TextButton.icon(
                     onPressed: _busy ? null : () => _whatsapp(c),
                     icon: const Icon(Icons.share, size: 18),
                     label: const Text('Share'),
+                    style: TextButton.styleFrom(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 6),
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                   ),
                   const Spacer(),
                   IconButton(
                     tooltip: c.isActive ? 'Hide' : 'Show',
-                    icon: Icon(c.isActive
-                        ? Icons.visibility_outlined
-                        : Icons.visibility_off_outlined),
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(6),
+                    icon: Icon(
+                        c.isActive
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        size: 20),
                     onPressed: _busy
                         ? null
                         : () => _run(
@@ -316,11 +331,17 @@ class _State extends State<ManageCatalogsScreen> {
                   ),
                   IconButton(
                     tooltip: 'Rename',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(6),
                     icon: const Icon(Icons.edit_outlined, size: 20),
                     onPressed: _busy ? null : () => _renameDialog(c),
                   ),
                   IconButton(
                     tooltip: 'Delete',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(6),
                     icon: const Icon(Icons.delete_outline,
                         size: 20, color: Colors.red),
                     onPressed: _busy ? null : () => _confirmDelete(c),
