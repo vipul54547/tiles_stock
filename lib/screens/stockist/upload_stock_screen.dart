@@ -52,7 +52,10 @@ class _FinishGroup {
 }
 
 class UploadStockScreen extends StatefulWidget {
-  const UploadStockScreen({super.key});
+  /// Catalog chosen at the Upload tap (Public / Most Exclusive). Pre-selects the
+  /// upload target; null falls back to the default public catalog.
+  final String? initialCatalogId;
+  const UploadStockScreen({super.key, this.initialCatalogId});
   @override
   State<UploadStockScreen> createState() => _State();
 }
@@ -99,6 +102,7 @@ class _State extends State<UploadStockScreen> {
   @override
   void initState() {
     super.initState();
+    _catalogId = widget.initialCatalogId; // chosen at the Upload tap
     _ensureConfig();
   }
 

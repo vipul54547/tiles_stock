@@ -164,7 +164,8 @@ final GoRouter _router = GoRouter(
 
     GoRoute(
       path: '/stockist/stock/upload',
-      builder: (_, __) => const UploadStockScreen(),
+      builder: (_, state) =>
+          UploadStockScreen(initialCatalogId: state.extra as String?),
     ),
     GoRoute(
       path: '/stockist/catalogs',
@@ -172,7 +173,8 @@ final GoRouter _router = GoRouter(
     ),
     GoRoute(
       path: '/stockist/stock/import-excel',
-      builder: (_, __) => const ImportExcelStockScreen(),
+      builder: (_, state) =>
+          ImportExcelStockScreen(initialCatalogId: state.extra as String?),
     ),
     GoRoute(
       path: '/stockist/stock/dispatch',

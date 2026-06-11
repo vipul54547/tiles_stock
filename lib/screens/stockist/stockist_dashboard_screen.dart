@@ -692,39 +692,84 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // The Upload button offers two stock sources: a PDF stock report (parsed,
-  // with images) or a plain Excel stock list (quantities only, photos reused).
+  // Default upload target: the first active public catalog, else the first.
+  String? _defaultUploadCatalogId() {
+    for (final c in _catalogs) {
+      if (!c.isPrivate && c.isActive) return c.id;
+    }
+    return _catalogs.isEmpty ? null : _catalogs.first.id;
+  }
+
+  // The Upload button asks WHERE to upload (Public / Most Exclusive — only when
+  // a private catalog exists) and then which source (PDF report or Excel list).
+  // The chosen catalog is passed to the import screen.
   void _showUploadSourceSheet() {
+    var catId = _defaultUploadCatalogId();
+    final activeCatalogs = _catalogs.where((c) => c.isActive).toList();
     showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf, color: Color(0xFF1B4F72)),
-              title: const Text('Upload PDF stock report'),
-              subtitle: const Text('Parses designs + tile photos'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await context.push('/stockist/stock/upload');
-                _load();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.table_view_rounded, color: Color(0xFF2E7D32)),
-              title: const Text('Import Excel stock list'),
-              subtitle: const Text('Design, size, quality, boxes — photos reused'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await context.push('/stockist/stock/import-excel');
-                _load();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_hasPrivateCatalog) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
+                  child: Text('Upload to which stock?',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final c in activeCatalogs)
+                        ChoiceChip(
+                          label: Text(
+                              '${c.name}${c.isPrivate ? ' (private)' : ''}'),
+                          selected: catId == c.id,
+                          selectedColor: c.isPrivate
+                              ? Colors.deepPurple.shade100
+                              : const Color(0xFF1B4F72).withValues(alpha: 0.15),
+                          onSelected: (_) => setS(() => catId = c.id),
+                        ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 20),
+              ],
+              ListTile(
+                leading:
+                    const Icon(Icons.picture_as_pdf, color: Color(0xFF1B4F72)),
+                title: const Text('Upload PDF stock report'),
+                subtitle: const Text('Parses designs + tile photos'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await context.push('/stockist/stock/upload', extra: catId);
+                  _load();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.table_view_rounded,
+                    color: Color(0xFF2E7D32)),
+                title: const Text('Import Excel stock list'),
+                subtitle:
+                    const Text('Design, size, quality, boxes — photos reused'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await context.push('/stockist/stock/import-excel',
+                      extra: catId);
+                  _load();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );

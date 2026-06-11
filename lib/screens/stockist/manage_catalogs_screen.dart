@@ -77,71 +77,6 @@ class _State extends State<ManageCatalogsScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  Future<void> _addDialog() async {
-    final nameCtrl = TextEditingController();
-    var private = false;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => AlertDialog(
-          title: const Text('Add catalog'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Catalog name (e.g. Exclusive)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 14),
-              // Public vs private. Private is gated by the admin permission.
-              Row(
-                children: [
-                  ChoiceChip(
-                    label: const Text('Public'),
-                    selected: !private,
-                    onSelected: (_) => setS(() => private = false),
-                  ),
-                  const SizedBox(width: 8),
-                  ChoiceChip(
-                    label: const Text('Private'),
-                    selected: private,
-                    onSelected:
-                        _canPrivate ? (_) => setS(() => private = true) : null,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                private
-                    ? 'Private: not shown in the marketplace — shared only via its own link.'
-                    : (_canPrivate
-                        ? 'Public: shown in the app marketplace and via its link.'
-                        : 'Private catalogs are disabled. Ask the admin to enable them for you.'),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel')),
-            ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Add')),
-          ],
-        ),
-      ),
-    );
-    if (ok == true) {
-      await _run(() =>
-          _data.addCatalog(currentStockistUUID, nameCtrl.text, private: private));
-    }
-  }
-
   Future<void> _renameDialog(StockCatalog c) async {
     final ctrl = TextEditingController(text: c.name);
     final ok = await showDialog<bool>(
@@ -166,37 +101,10 @@ class _State extends State<ManageCatalogsScreen> {
     if (ok == true) await _run(() => _data.renameCatalog(c.id, ctrl.text));
   }
 
-  Future<void> _confirmDelete(StockCatalog c) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete catalog?'),
-        content: Text('Delete "${c.name}"? Designs in it keep existing but lose '
-            'this catalog (they fall back to your default visibility).'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child:
-                  const Text('Delete', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-    if (ok == true) await _run(() => _data.deleteCatalog(c.id));
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('My Stock Catalogs')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _busy ? null : _addDialog,
-        backgroundColor: _navy,
-        icon: const Icon(Icons.add),
-        label: const Text('Add catalog'),
-      ),
+      appBar: AppBar(title: const Text('Share My Catalogs')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -336,15 +244,6 @@ class _State extends State<ManageCatalogsScreen> {
                     padding: const EdgeInsets.all(6),
                     icon: const Icon(Icons.edit_outlined, size: 20),
                     onPressed: _busy ? null : () => _renameDialog(c),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete',
-                    visualDensity: VisualDensity.compact,
-                    constraints: const BoxConstraints(),
-                    padding: const EdgeInsets.all(6),
-                    icon: const Icon(Icons.delete_outline,
-                        size: 20, color: Colors.red),
-                    onPressed: _busy ? null : () => _confirmDelete(c),
                   ),
                 ],
               ),

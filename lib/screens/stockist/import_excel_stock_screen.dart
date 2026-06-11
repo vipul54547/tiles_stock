@@ -24,7 +24,9 @@ import '../../models/choice_state.dart';
 // finish, and a finish that differs from the existing one is flagged as a
 // conflict for the stockist to resolve.
 class ImportExcelStockScreen extends StatefulWidget {
-  const ImportExcelStockScreen({super.key});
+  /// Catalog chosen at the Upload tap; null falls back to the default public one.
+  final String? initialCatalogId;
+  const ImportExcelStockScreen({super.key, this.initialCatalogId});
   @override
   State<ImportExcelStockScreen> createState() => _ImportExcelStockScreenState();
 }
@@ -102,6 +104,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   String? _catalogId; // chosen target catalog
   Map<String, String> _aliases = {};
   List<TileDesign> _existing = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _catalogId = widget.initialCatalogId; // chosen at the Upload tap
+  }
 
   void _snack(String m, [Color? c]) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(m), backgroundColor: c));
