@@ -535,20 +535,24 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   // Manual quantity entry — tapping the number opens this so a buyer can type a
   // large box count directly instead of holding the +/- steppers.
   Future<void> _editQty(TileDesign d, int current) async {
-    final ctrl = TextEditingController(text: '$current');
+    // TextFormField (not a manual TextEditingController) so the field owns and
+    // disposes its own controller — disposing one by hand here crashed during
+    // the dialog's close animation ('_dependents.isEmpty' assertion).
+    int? entered = current;
     final value = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Quantity (boxes)'),
-        content: TextField(
-          controller: ctrl,
+        content: TextFormField(
+          initialValue: '$current',
           autofocus: true,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(
             hintText: 'Enter boxes',
             border: OutlineInputBorder(),
           ),
-          onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v.trim())),
+          onChanged: (v) => entered = int.tryParse(v.trim()),
+          onFieldSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v.trim())),
         ),
         actions: [
           TextButton(
@@ -556,13 +560,12 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
+            onPressed: () => Navigator.pop(ctx, entered),
             child: const Text('Set'),
           ),
         ],
       ),
     );
-    ctrl.dispose();
     if (value != null && value > 0) {
       setState(() => setMyChoiceQty(d.id, value));
     }
