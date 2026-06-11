@@ -36,7 +36,7 @@ class _State extends State<InquiryReportScreen> {
 
   Future<void> _reload() async {
     final f = _svc.getInquiryReport();
-    setState(() => _future = f);
+    setState(() { _future = f; });
     await f;
   }
 

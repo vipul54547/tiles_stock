@@ -22,7 +22,7 @@ class _State extends State<NotificationsScreen> {
 
   Future<void> _reload() async {
     final f = _svc.getNotifications();
-    setState(() => _future = f);
+    setState(() { _future = f; });
     await f;
   }
 

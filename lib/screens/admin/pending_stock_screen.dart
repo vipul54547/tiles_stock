@@ -22,7 +22,7 @@ class _State extends State<PendingStockScreen> {
 
   Future<void> _reload() async {
     final f = _svc.getPendingStock();
-    setState(() => _future = f);
+    setState(() { _future = f; });
     await f;
   }
 
