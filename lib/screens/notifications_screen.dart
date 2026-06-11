@@ -45,6 +45,14 @@ class _State extends State<NotificationsScreen> {
         return Icons.verified_user_outlined;
       case 'admin':
         return Icons.campaign_outlined;
+      case 'stock_pending':
+        return Icons.hourglass_top_rounded;
+      case 'stock_approved':
+        return Icons.check_circle_outline;
+      case 'stock_rejected':
+        return Icons.cancel_outlined;
+      case 'stock_big_live':
+        return Icons.inventory_2_outlined;
       default:
         return Icons.notifications_outlined;
     }

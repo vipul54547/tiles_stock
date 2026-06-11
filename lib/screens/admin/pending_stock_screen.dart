@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_data_service.dart';
 
-/// Admin reviews large stock additions (≥10,000 boxes/day per stockist) that
-/// were held pending. Approve → goes live; Reject → discarded. Per stockist.
+/// Admin reviews large stock additions (more than 35,000 boxes/day per stockist)
+/// that were held pending. Approve → goes live; Reject → discarded. Per stockist.
+/// (Smaller-but-unusual jumps go live and only notify the admin — no hold.)
 class PendingStockScreen extends StatefulWidget {
   const PendingStockScreen({super.key});
   @override

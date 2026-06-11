@@ -337,7 +337,8 @@ class _State extends State<StockistDashboardScreen> {
       Container(width: 1, height: 22, color: Colors.grey.shade300);
 
   // Banner shown when some of the stockist's added stock is held for admin
-  // approval (big-stock rule: 10,000+ boxes in a day). It's not live yet.
+  // approval (big-stock rule: more than 35,000 boxes added in a day). The rest
+  // of their stock stays live; only the held boxes are not live yet.
   Widget _buildPendingBanner() => Container(
         width: double.infinity,
         color: const Color(0xFFFFF3E0),
@@ -349,7 +350,7 @@ class _State extends State<StockistDashboardScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                '$_pendingBoxes boxes awaiting admin approval — not live yet.',
+                'Last stock is not live — $_pendingBoxes boxes awaiting admin approval.',
                 style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
