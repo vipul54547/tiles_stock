@@ -1175,7 +1175,7 @@ class SupabaseDataService {
     }
   }
 
-  Future<void> addTileSize(String name) async {
+  Future<void> addTileSize(String name, {List<String> aliases = const []}) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw 'Size cannot be empty.';
     final existing = await supabase
@@ -1185,9 +1185,29 @@ class SupabaseDataService {
         .limit(1);
     final nextOrder =
         (existing.isEmpty ? 0 : (existing.first['sort_order'] as int)) + 10;
+    await supabase.from('tile_sizes').insert({
+      'name': trimmed,
+      'sort_order': nextOrder,
+      'aliases': _cleanAliases(aliases),
+    });
+  }
+
+  /// Replace a size's alias list (alternate inch/feet trade names).
+  Future<void> setTileSizeAliases(String id, List<String> aliases) async {
     await supabase
         .from('tile_sizes')
-        .insert({'name': trimmed, 'sort_order': nextOrder});
+        .update({'aliases': _cleanAliases(aliases)}).eq('id', id);
+  }
+
+  List<String> _cleanAliases(List<String> raw) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final a in raw) {
+      final t = a.trim();
+      if (t.isEmpty || !seen.add(t.toLowerCase())) continue;
+      out.add(t);
+    }
+    return out;
   }
 
   Future<void> renameTileSize(String id, String newName) async {

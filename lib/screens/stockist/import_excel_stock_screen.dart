@@ -6,6 +6,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../services/stock_service.dart';
 import '../../models/tile_design.dart';
+import '../../models/tile_size.dart';
 import '../../utils/finishes.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -95,6 +96,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // Admin config + this stockist's data.
   List<String> _finishes = kFinishes;
   List<String> _sizes = kAllowedSizes;
+  List<TileSize> _tileSizes = []; // full size rows (with inch/feet aliases)
   Map<String, String> _aliases = {};
   List<TileDesign> _existing = [];
 
@@ -118,7 +120,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     try {
       final types = await _dataSvc.getSurfaceTypes(activeOnly: true);
       final names = types.map((t) => t.name).toList();
-      final sizeNames = await _dataSvc.getActiveSizeNames();
+      final tileSizes = await _dataSvc.getTileSizes(activeOnly: true);
+      final sizeNames = tileSizes.map((s) => s.name).toList();
       _aliases = currentStockistUUID.isEmpty
           ? {}
           : await _dataSvc.getSurfaceAliases(currentStockistUUID);
@@ -127,6 +130,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           : await _dataSvc.getDesignsByStockist(currentStockistUUID);
       if (names.isNotEmpty) _finishes = names;
       if (sizeNames.isNotEmpty) _sizes = sizeNames;
+      _tileSizes = tileSizes;
     } catch (_) {/* keep fallbacks */}
   }
 
@@ -254,9 +258,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     for (final r in rows) {
       if (r.name.isEmpty) { r.error = 'Missing design name'; continue; }
       if (r.sizeRaw.isEmpty) { r.error = 'Missing size'; continue; }
-      final sz = _sizes.firstWhere(
-          (s) => _sizeKey(s) == _sizeKey(r.sizeRaw),
-          orElse: () => '');
+      // Map any inch/feet trade name (12x18, 2x4 …) to its canonical mm size via
+      // the admin alias list; else fall back to a direct mm match.
+      final sz = resolveCanonicalSize(r.sizeRaw, _tileSizes) ??
+          _sizes.firstWhere(
+              (s) => _sizeKey(s) == _sizeKey(r.sizeRaw),
+              orElse: () => '');
       if (sz.isEmpty) { r.error = "Size '${r.sizeRaw}' is not in your size list"; continue; }
       r.size = sz;
       if (r.qualityRaw.isEmpty) { r.error = 'Missing quality'; continue; }

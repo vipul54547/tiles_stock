@@ -1,3 +1,5 @@
+import '../models/tile_size.dart';
+
 /// Canonical tile sizes supported by the system.
 /// Format: "WIDTHxHEIGHT mm"  (e.g. "800x1600 mm")
 const List<String> kAllowedSizes = [
@@ -56,4 +58,36 @@ String normaliseSize(String raw) {
       .replaceAll('X', 'x')
       .toLowerCase();
   return '$cleaned mm';
+}
+
+/// Order-independent numeric signature of a size token: the two numbers sorted
+/// ascending, units stripped. So "12X18", "18x12", "18 x 12 inch" all collapse
+/// to "12x18"; "2.5x5" stays "2.5x5". Returns null if no WxH is found.
+String? sizeSignature(String raw) {
+  final m =
+      RegExp(r'(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)').firstMatch(raw);
+  if (m == null) return null;
+  final a = double.tryParse(m.group(1)!);
+  final b = double.tryParse(m.group(2)!);
+  if (a == null || b == null || a <= 0 || b <= 0) return null;
+  final lo = a <= b ? a : b;
+  final hi = a <= b ? b : a;
+  String fmt(double v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+  return '${fmt(lo)}x${fmt(hi)}';
+}
+
+/// Resolves any incoming size token (mm / inch / feet, either orientation) to a
+/// canonical size NAME, by matching its [sizeSignature] against each admin size's
+/// own name and its aliases. Returns null when nothing matches.
+String? resolveCanonicalSize(String raw, List<TileSize> sizes) {
+  final sig = sizeSignature(raw);
+  if (sig == null) return null;
+  for (final s in sizes) {
+    if (sizeSignature(s.name) == sig) return s.name;
+    for (final a in s.aliases) {
+      if (sizeSignature(a) == sig) return s.name;
+    }
+  }
+  return null;
 }

@@ -80,19 +80,42 @@ class _State extends State<ManageSizesScreen> {
     await _run(() => _data.setTileSizeOrder(s.id, n));
   }
 
+  // Splits the comma-separated aliases field into a clean list.
+  List<String> _parseAliases(String raw) => raw
+      .split(RegExp(r'[,\n]'))
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+
   Future<void> _addDialog() async {
-    final ctrl = TextEditingController();
+    final nameCtrl = TextEditingController();
+    final aliasCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Add size'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Size (e.g. 800x1600 mm)',
-            border: OutlineInputBorder(),
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Size (e.g. 800x1600 mm)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: aliasCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Aliases (inch/feet) — comma separated',
+                hintText: '32x64, 2.5x5',
+                helperText: 'Either orientation is matched automatically.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -104,19 +127,41 @@ class _State extends State<ManageSizesScreen> {
         ],
       ),
     );
-    if (ok == true) await _run(() => _data.addTileSize(ctrl.text));
+    if (ok == true) {
+      await _run(() => _data.addTileSize(nameCtrl.text,
+          aliases: _parseAliases(aliasCtrl.text)));
+    }
   }
 
   Future<void> _renameDialog(TileSize s) async {
-    final ctrl = TextEditingController(text: s.name);
+    final nameCtrl = TextEditingController(text: s.name);
+    final aliasCtrl = TextEditingController(text: s.aliases.join(', '));
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Rename size'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
+        title: const Text('Edit size'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Size name',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: aliasCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Aliases (inch/feet) — comma separated',
+                hintText: '32x64, 2.5x5',
+                helperText: 'Either orientation is matched automatically.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -128,7 +173,14 @@ class _State extends State<ManageSizesScreen> {
         ],
       ),
     );
-    if (ok == true) await _run(() => _data.renameTileSize(s.id, ctrl.text));
+    if (ok == true) {
+      await _run(() async {
+        if (nameCtrl.text.trim() != s.name) {
+          await _data.renameTileSize(s.id, nameCtrl.text);
+        }
+        await _data.setTileSizeAliases(s.id, _parseAliases(aliasCtrl.text));
+      });
+    }
   }
 
   Future<void> _confirmDelete(TileSize s) async {
@@ -215,10 +267,22 @@ class _State extends State<ManageSizesScreen> {
           ),
           title: Text(s.name,
               style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text(s.isActive ? 'Visible' : 'Hidden',
-              style: TextStyle(
-                  fontSize: 11,
-                  color: s.isActive ? const Color(0xFF2E7D32) : Colors.grey)),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(s.isActive ? 'Visible' : 'Hidden',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color:
+                          s.isActive ? const Color(0xFF2E7D32) : Colors.grey)),
+              if (s.aliases.isNotEmpty)
+                Text('also: ${s.aliases.join(', ')}',
+                    style: TextStyle(
+                        fontSize: 11, color: Colors.grey.shade600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+            ],
+          ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

@@ -6,6 +6,7 @@ import '../../services/stock_service.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/tile_design.dart';
+import '../../models/tile_size.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -88,6 +89,7 @@ class _State extends State<UploadStockScreen> {
   // surface picker offers exactly the admin's finishes, not a hardcoded list).
   List<String>        _finishes = kFinishes;     // fallback until loaded
   List<String>        _sizes    = kAllowedSizes;  // admin master, loaded once
+  List<TileSize>      _tileSizes = [];           // full size rows (with aliases)
   Map<String, String> _aliases  = {};            // normalisedRaw → finish name
   bool _configLoaded = false;
 
@@ -103,7 +105,8 @@ class _State extends State<UploadStockScreen> {
     try {
       final types = await _dataSvc.getSurfaceTypes(activeOnly: true);
       final names = types.map((t) => t.name).toList();
-      final sizeNames = await _dataSvc.getActiveSizeNames();
+      final tileSizes = await _dataSvc.getTileSizes(activeOnly: true);
+      final sizeNames = tileSizes.map((s) => s.name).toList();
       final aliases = currentStockistUUID.isEmpty
           ? <String, String>{}
           : await _dataSvc.getSurfaceAliases(currentStockistUUID);
@@ -111,6 +114,7 @@ class _State extends State<UploadStockScreen> {
       setState(() {
         if (names.isNotEmpty) _finishes = names;
         if (sizeNames.isNotEmpty) _sizes = sizeNames;
+        _tileSizes = tileSizes;
         _aliases = aliases;
         _configLoaded = true;
       });
@@ -419,8 +423,11 @@ class _State extends State<UploadStockScreen> {
   // Ask the stockist to confirm size + quality (defaulted from the filename)
   // and enter how many designs they expect. Returns false if cancelled.
   Future<bool> _confirmDetails(PdfImportResult parsed) async {
-    // Pre-fill size from the filename when it maps to a supported size.
-    final parsedSize = normaliseSize(parsed.size);
+    // Pre-fill size from the filename/data. First map any inch/feet trade name
+    // (e.g. "12x18", "2x4") to its canonical mm size via the admin alias list,
+    // then fall back to a plain mm normalisation.
+    final resolved = resolveCanonicalSize(parsed.size, _tileSizes);
+    final parsedSize = resolved ?? normaliseSize(parsed.size);
     _size = _sizes.contains(parsedSize) ? parsedSize : _sizes.first;
     _quality = kQualities.contains(parsed.quality) ? parsed.quality : 'Standard';
     final countCtrl =
