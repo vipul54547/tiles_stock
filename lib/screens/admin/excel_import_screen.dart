@@ -418,7 +418,8 @@ class _ExcelImportScreenState extends State<ExcelImportScreen> {
         ),
         Expanded(
           child: ListView.builder(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.fromLTRB(
+                12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
             itemCount: _rows.length,
             itemBuilder: (_, i) => _rowCard(_rows[i]),
           ),

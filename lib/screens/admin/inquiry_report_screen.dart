@@ -114,7 +114,8 @@ class _State extends State<InquiryReportScreen> {
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.fromLTRB(
+                  12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
               children: [
                 Container(
                   width: double.infinity,

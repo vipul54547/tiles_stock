@@ -337,6 +337,8 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
   final _gst      = TextEditingController();
   final _priority = TextEditingController(text: '0.00');
   String _tier = ''; // '' = none; else Platinum/Gold/Silver (enduser_type)
+  final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
+  int _deviceCount = 0; // devices currently registered for this user
 
   bool _saving = false;
   String? _error;
@@ -356,18 +358,100 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
       _gst.text      = u.gstNumber;
       _priority.text = u.priority.toStringAsFixed(2);
       _tier = kStockistTiers.contains(u.endUserType) ? u.endUserType : '';
+      _deviceLimit.text = '${u.deviceLimit}';
+      _loadDeviceCount();
     }
+  }
+
+  Future<void> _loadDeviceCount() async {
+    final n = await _dataSvc.userDeviceCount('end_user', widget.existing!.uuid);
+    if (mounted) setState(() => _deviceCount = n);
   }
 
   @override
   void dispose() {
     for (final c in [
       _company, _email, _password, _contact, _phone, _code, _city, _gst,
-      _priority
+      _priority, _deviceLimit
     ]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _clearDevices() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear registered devices?'),
+        content: const Text(
+            'This logs the user out of all their devices on next app open and '
+            'frees every slot, so they can sign in fresh. Use this when they '
+            'changed/reinstalled their phone and are locked out.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Clear')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final n = await _dataSvc.clearUserDevices('end_user', widget.existing!.uuid);
+    if (!mounted) return;
+    setState(() => _deviceCount = 0);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Cleared $n device${n == 1 ? '' : 's'}.'),
+      backgroundColor: const Color(0xFF2E7D32),
+    ));
+  }
+
+  Widget _deviceSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        const Text('Device Limit',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        const SizedBox(height: 2),
+        Text(
+            'How many devices this login can be active on at once. 0 = unlimited. '
+            'Currently $_deviceCount registered.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            SizedBox(
+              width: 90,
+              child: TextFormField(
+                controller: _deviceLimit,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: 'Devices',
+                    isDense: true,
+                    border: OutlineInputBorder()),
+                validator: (v) {
+                  final t = (v ?? '').trim();
+                  if (t.isEmpty) return null;
+                  final n = int.tryParse(t);
+                  if (n == null || n < 0) return 'Invalid';
+                  return null;
+                },
+              ),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _deviceCount == 0 ? null : _clearDevices,
+              icon: const Icon(Icons.phonelink_erase, size: 16),
+              label: Text('Clear devices ($_deviceCount)'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
   }
 
   Future<void> _save() async {
@@ -387,6 +471,8 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
           endUserType:   _tier,
           priority:      double.tryParse(_priority.text.trim()) ?? 0,
         );
+        await _dataSvc.setDeviceLimit('end_user', widget.existing!.uuid,
+            int.tryParse(_deviceLimit.text.trim()) ?? 1);
         msg = 'End user updated.';
       } else {
         final id = await _dataSvc.addEndUser(
@@ -419,7 +505,10 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final mq = MediaQuery.of(context);
+    // Keyboard inset + the system navigation-bar inset, so the Save button
+    // clears the on-screen nav buttons (and the keyboard when open).
+    final bottom = mq.viewInsets.bottom + mq.viewPadding.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + bottom),
       child: SingleChildScrollView(
@@ -498,6 +587,7 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
                     if (t.isEmpty) return null;
                     return double.tryParse(t) == null ? 'Enter a number' : null;
                   }),
+              if (_isEdit) _deviceSection(),
 
               if (_error != null) ...[
                 const SizedBox(height: 6),

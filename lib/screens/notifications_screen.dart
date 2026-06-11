@@ -138,7 +138,8 @@ class _State extends State<NotificationsScreen> {
           return RefreshIndicator(
             onRefresh: _reload,
             child: ListView.separated(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.fromLTRB(
+                  12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (_, i) => _tile(items[i]),

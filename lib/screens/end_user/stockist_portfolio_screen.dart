@@ -173,7 +173,7 @@ class _State extends State<StockistPortfolioScreen> {
   Future<void> _load() async {
     final results = await Future.wait([
       _service.getDesignsByStockistSeqId(widget.stockistId),
-      _service.getAllStockists(),
+      _service.getMarketStockists(),
     ]);
     if (!mounted) return;
     final designs   = results[0] as List<TileDesign>;
@@ -736,8 +736,10 @@ class _State extends State<StockistPortfolioScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            20, 16, 20, MediaQuery.of(_).viewInsets.bottom + 32),
+        padding: EdgeInsets.fromLTRB(20, 16, 20,
+            MediaQuery.of(_).viewInsets.bottom +
+                MediaQuery.of(_).viewPadding.bottom +
+                24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

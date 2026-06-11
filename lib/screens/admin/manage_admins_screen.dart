@@ -185,7 +185,8 @@ class _AddAdminSheetState extends State<_AddAdminSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    final mq = MediaQuery.of(context);
+    final bottom = mq.viewInsets.bottom + mq.viewPadding.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + bottom),
       child: Form(

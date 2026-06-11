@@ -174,7 +174,7 @@ class _State extends State<StockistsOverviewScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final results = await Future.wait([
-      _service.getAllStockists(),
+      _service.getMarketStockists(),
       _service.getAllDesigns(),
     ]);
 
@@ -964,6 +964,8 @@ class _State extends State<StockistsOverviewScreen> {
                               ),
                             ),
                           ),
+                          // Clear the system navigation bar (edge-to-edge).
+                          SizedBox(height: MediaQuery.of(ctx).viewPadding.bottom),
                         ],
                       ),
                     ),

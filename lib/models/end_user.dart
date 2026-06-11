@@ -23,6 +23,10 @@ class EndUser {
 
   final bool isActive;
 
+  /// Max number of devices this login may be active on at once (admin-set,
+  /// editable). Default 1. 0 = unlimited.
+  final int deviceLimit;
+
   final int inquiriesToday;
   final DateTime lastInquiryDate;
   final DateTime createdAt;
@@ -40,6 +44,7 @@ class EndUser {
     this.priority = 0,
     this.endUserType = '',
     this.isActive = true,
+    this.deviceLimit = 1,
     this.inquiriesToday = 0,
     DateTime? lastInquiryDate,
     DateTime? createdAt,
@@ -59,6 +64,7 @@ class EndUser {
         priority:      (json['priority'] as num?)?.toDouble() ?? 0,
         endUserType:   json['enduser_type'] ?? '',
         isActive:      json['is_active'] ?? true,
+        deviceLimit:   json['device_limit'] ?? 1,
         inquiriesToday: json['inquiries_today'] ?? 0,
         lastInquiryDate: json['last_inquiry_date'] != null
             ? DateTime.tryParse(json['last_inquiry_date'].toString())

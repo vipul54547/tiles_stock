@@ -587,7 +587,8 @@ class _State extends State<StockistDashboardScreen> {
           )
         else
           SliverPadding(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.fromLTRB(
+                12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
             sliver: SliverMasonryGrid.count(
               crossAxisCount: 2,
               mainAxisSpacing: 12,

@@ -195,7 +195,8 @@ class _ManageRegistrationRequestsScreenState
                       : RefreshIndicator(
                           onRefresh: _load,
                           child: ListView.separated(
-                            padding: const EdgeInsets.all(12),
+                            padding: EdgeInsets.fromLTRB(12, 12, 12,
+                                12 + MediaQuery.viewPaddingOf(context).bottom),
                             itemCount: _filtered.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),

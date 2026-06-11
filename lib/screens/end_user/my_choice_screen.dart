@@ -31,7 +31,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   Future<void> _load() async {
     final results = await Future.wait([
       _service.getAllDesigns(),
-      _service.getAllStockists(),
+      _service.getMarketStockists(),
     ]);
     await loadMyChoices(); // restore saved selections
     if (!mounted) return;
@@ -94,8 +94,10 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            20, 16, 20, MediaQuery.of(_).viewInsets.bottom + 32),
+        padding: EdgeInsets.fromLTRB(20, 16, 20,
+            MediaQuery.of(_).viewInsets.bottom +
+                MediaQuery.of(_).viewPadding.bottom +
+                24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

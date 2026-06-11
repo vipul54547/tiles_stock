@@ -382,7 +382,8 @@ class _State extends State<AllDispatchesScreen> {
           ),
           Expanded(
             child: ListView.separated(
-              padding: const EdgeInsets.all(12),
+              padding: EdgeInsets.fromLTRB(
+                  12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
               itemCount: rows.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (_, i) => _dispatchCard(rows[i]),

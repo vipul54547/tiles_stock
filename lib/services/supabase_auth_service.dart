@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import '../main.dart';
 import '../models/choice_state.dart';
+import '../utils/device_id.dart';
 
 enum UserRole { admin, stockist, endUser }
 
@@ -26,7 +28,9 @@ class SupabaseAuthService {
       password: password,
     );
     if (res.user == null) throw 'No user returned from sign-in';
-    return _loadProfile(res.user!.id);
+    final role = await _loadProfile(res.user!.id);
+    await _enforceDeviceLimit(); // signs out + throws if over the device limit
+    return role;
   }
 
   /// Anonymous "browse as guest" sign-in. No profile/end_user row exists for
@@ -48,7 +52,9 @@ class SupabaseAuthService {
       return UserRole.endUser;
     }
     try {
-      return await _loadProfile(user.id);
+      final role = await _loadProfile(user.id);
+      await _enforceDeviceLimit(); // blocked restore → throws → treated as logged out
+      return role;
     } catch (_) {
       return null;
     }
@@ -113,6 +119,51 @@ class SupabaseAuthService {
     }
   }
 
+  /// Message surfaced on the login screen when a user is already signed in on
+  /// the maximum number of devices their admin allows.
+  static const deviceLimitMessage =
+      'This login is already active on the maximum number of devices allowed. '
+      'Log out on another device, or ask the administrator to reset your devices.';
+
+  String _deviceLabel() {
+    if (kIsWeb) return 'Web';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'Android';
+      case TargetPlatform.iOS:
+        return 'iOS';
+      case TargetPlatform.windows:
+        return 'Windows';
+      case TargetPlatform.macOS:
+        return 'macOS';
+      case TargetPlatform.linux:
+        return 'Linux';
+      default:
+        return 'Other';
+    }
+  }
+
+  /// Registers this install as an active device and enforces the per-user cap.
+  /// On 'blocked' it signs the user back out and throws [deviceLimitMessage].
+  /// Guests are never limited.
+  Future<void> _enforceDeviceLimit() async {
+    if (isGuest) return;
+    try {
+      final deviceId = await DeviceId.get();
+      final result = await supabase.rpc('register_device',
+          params: {'p_device_id': deviceId, 'p_label': _deviceLabel()});
+      if (result == 'blocked') {
+        await supabase.auth.signOut();
+        throw deviceLimitMessage;
+      }
+    } on String {
+      rethrow; // the deviceLimitMessage above
+    } catch (_) {
+      // Never lock a user out on a transient RPC/network error — allow the
+      // login through rather than failing closed on infrastructure hiccups.
+    }
+  }
+
   /// Deep link the password-reset email redirects back to. The matching scheme
   /// is registered in AndroidManifest.xml and must be added to the Supabase
   /// dashboard's "Redirect URLs" allow-list (Authentication → URL Configuration).
@@ -129,6 +180,11 @@ class SupabaseAuthService {
   }
 
   Future<void> logout() async {
+    // Free this device's slot so the user can sign in elsewhere.
+    try {
+      final deviceId = await DeviceId.get();
+      await supabase.rpc('unregister_device', params: {'p_device_id': deviceId});
+    } catch (_) {}
     await supabase.auth.signOut();
     _role = null;
     currentStockistId   = '';

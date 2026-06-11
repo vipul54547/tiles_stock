@@ -92,7 +92,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final finishes = await _service.getActiveFinishNames();
     final sizes = await _service.getActiveSizeNames();
     // Stockist seq-id → name (for the group confirm dialog). Empty for guests.
-    final stockists = await _service.getAllStockists();
+    // Masked: anonymized stockists surface as trade name + public code.
+    final stockists = await _service.getMarketStockists();
     if (!mounted) return;
     setState(() {
       _designs = ranked;
@@ -864,6 +865,9 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ],
                           ),
+                          // Clear the system navigation bar (edge-to-edge).
+                          SizedBox(
+                              height: MediaQuery.of(ctx).viewPadding.bottom),
                         ],
                       ),
                     ),

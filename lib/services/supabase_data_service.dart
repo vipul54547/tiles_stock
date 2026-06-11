@@ -56,9 +56,12 @@ class SupabaseDataService {
         boxPrice:     (d['box_price'] ?? 0).toDouble(),
         tileType:     d['tile_type'] ?? '',
         faceImageUrls: List<String>.from(d['face_image_urls'] ?? []),
-        stockistId:   d['stockists'] != null
-            ? (d['stockists']['sequential_id'] ?? seqId ?? '')
-            : (seqId ?? ''),
+        // market_designs exposes a flat (already-masked) `stockist_key`; the
+        // member/stockist `designs` join exposes the nested stockists row.
+        stockistId:   d['stockist_key'] ??
+            (d['stockists'] != null
+                ? (d['stockists']['sequential_id'] ?? seqId ?? '')
+                : (seqId ?? '')),
         catalogId:    d['catalog_id'] as String?,
         updatedAt:  DateTime.parse(d['updated_at']),
         quality:    d['quality']    ?? 'Standard',
@@ -78,23 +81,13 @@ class SupabaseDataService {
 
   Future<List<TileDesign>> getAllDesigns() async {
     try {
-      // Guests read the stockist-free `public_designs` view (they can't read the
-      // stockists table). Members get the normal join (drops deactivated
-      // stockists via the inner-join is_active filter).
-      if (isGuest) {
-        final data = await supabase
-            .from('public_designs')
-            .select()
-            .order('created_at', ascending: false);
-        return data.map<TileDesign>((d) => _toDesign(d)).toList();
-      }
+      // Both guests and members read the masked `market_designs` view: it
+      // already filters to active stockists + in-stock, market-visible designs,
+      // and exposes a masked `stockist_key`/`stockist_display_name` so an
+      // anonymized stockist's real name/id never reaches the buyer client.
       final data = await supabase
-          .from('designs')
-          .select('*, stockists!inner(sequential_id, is_active, is_listed, priority)')
-          .eq('stockists.is_active', true)
-          .eq('is_market_visible', true) // only public-catalog stock in the market
-          .neq('status', 'out_of_stock')
-          .gt('box_quantity', 0) // never show 0-stock to buyers
+          .from('market_designs')
+          .select()
           .order('created_at', ascending: false);
       return data.map<TileDesign>((d) => _toDesign(d)).toList();
     } catch (_) {
@@ -104,15 +97,15 @@ class SupabaseDataService {
 
   Future<List<TileDesign>> getDesignsByStockistSeqId(String seqId) async {
     try {
-      // Deactivated stockist → no portfolio for buyers.
-      final s = await supabase
-          .from('stockists')
-          .select('id')
-          .eq('sequential_id', seqId)
-          .eq('is_active', true)
-          .single();
-      // Buyer portfolio → only in-stock designs.
-      return getDesignsByStockist(s['id'] as String, inStockOnly: true);
+      // Buyer portfolio reads the masked `market_designs` view, keyed on the
+      // (possibly masked) `stockist_key`. The view already filters to active
+      // stockists + in-stock, market-visible (public) designs.
+      final data = await supabase
+          .from('market_designs')
+          .select()
+          .eq('stockist_key', seqId)
+          .order('created_at', ascending: false);
+      return data.map<TileDesign>((d) => _toDesign(d)).toList();
     } catch (_) {
       return [];
     }
@@ -155,26 +148,12 @@ class SupabaseDataService {
     int? maxQty,
   }) async {
     try {
-      // Guests query the stockist-free view; members get the active-stockist
-      // join. (Guests can't filter by stockist — they have no stockist info.)
-      var query = isGuest
-          ? supabase.from('public_designs').select()
-          : supabase
-              .from('designs')
-              .select('*, stockists!inner(sequential_id, is_active, is_listed, priority)')
-              .eq('stockists.is_active', true)
-              .eq('is_market_visible', true) // only public-catalog stock in market
-              .neq('status', 'out_of_stock')
-              .gt('box_quantity', 0); // never show 0-stock to buyers
-
-      // If filtering by stockist, look up UUID first (members only).
-      if (!isGuest && stockistSequentialId != null) {
-        final s = await supabase
-            .from('stockists')
-            .select('id')
-            .eq('sequential_id', stockistSequentialId)
-            .single();
-        query = query.eq('stockist_id', s['id']);
+      // Guests and members both read the masked `market_designs` view. Filter
+      // by stockist on the masked `stockist_key` (no base-table UUID lookup —
+      // that would leak the real id), which also accepts a masked public code.
+      var query = supabase.from('market_designs').select();
+      if (stockistSequentialId != null) {
+        query = query.eq('stockist_key', stockistSequentialId);
       }
       if (sizes        != null && sizes.isNotEmpty)        query = query.inFilter('size',         sizes);
       if (surfaceTypes != null && surfaceTypes.isNotEmpty) query = query.inFilter('surface_type',  surfaceTypes);
@@ -413,6 +392,24 @@ class SupabaseDataService {
     }
   }
 
+  /// Buyer-facing stockist directory (masked). Reads the `buyer_stockists`
+  /// view so an anonymized stockist surfaces as its trade name + public code;
+  /// the real name/sequential id never reach the buyer. Buyer screens (groups,
+  /// My Choice, portfolio, home, overview) use this instead of [getAllStockists].
+  Future<List<Stockist>> getMarketStockists() async {
+    if (isGuest) return [];
+    try {
+      final data = await supabase
+          .from('buyer_stockists')
+          .select()
+          .eq('is_active', true)
+          .order('sequential_id');
+      return data.map<Stockist>((s) => _toStockist(s)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Admin: update a stockist's editable fields (keyed by sequential id).
   Future<void> updateStockist({
     required String sequentialId,
@@ -458,6 +455,66 @@ class SupabaseDataService {
       String sequentialId, bool allowed) async {
     await supabase.rpc('admin_set_private_catalog',
         params: {'p_seq': sequentialId, 'p_allowed': allowed});
+  }
+
+  /// Admin: turn public anonymity on/off for a stockist. When on, a trade name
+  /// is required and a masked public code is minted on first enable. Returns
+  /// the live public code (or null when turned off).
+  Future<String?> setStockistAnonymous(
+      String sequentialId, bool on, String displayName) async {
+    final res = await supabase.rpc('admin_set_anonymous', params: {
+      'p_seq': sequentialId,
+      'p_on': on,
+      'p_display_name': displayName,
+    });
+    return res as String?;
+  }
+
+  /// Admin: mint a fresh masked public code (retires the old one to history).
+  Future<String?> regeneratePublicCode(String sequentialId) async {
+    final res = await supabase
+        .rpc('admin_regenerate_public_code', params: {'p_seq': sequentialId});
+    return res as String?;
+  }
+
+  /// Admin: set a user's concurrent-device limit. [role] is 'stockist' (key =
+  /// sequential id) or 'end_user' (key = end-user UUID). 0 = unlimited.
+  Future<void> setDeviceLimit(String role, String key, int limit) async {
+    await supabase.rpc('admin_set_device_limit',
+        params: {'p_role': role, 'p_key': key, 'p_limit': limit});
+  }
+
+  /// Admin: clear all registered devices for a user (frees every slot). Returns
+  /// how many were removed.
+  Future<int> clearUserDevices(String role, String key) async {
+    final res = await supabase.rpc('admin_clear_user_devices',
+        params: {'p_role': role, 'p_key': key});
+    return (res as int?) ?? 0;
+  }
+
+  /// Admin: how many devices the user currently has registered.
+  Future<int> userDeviceCount(String role, String key) async {
+    try {
+      final res = await supabase.rpc('admin_user_device_count',
+          params: {'p_role': role, 'p_key': key});
+      return (res as int?) ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Admin: reverse-lookup a (live or retired) public code → real stockist(s).
+  Future<List<Map<String, dynamic>>> resolvePublicCode(String code) async {
+    try {
+      final res = await supabase
+          .rpc('admin_resolve_public_code', params: {'p_code': code});
+      return (res as List?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ??
+          [];
+    } catch (_) {
+      return [];
+    }
   }
 
   /// The stockist UUID for a sequential id (catalogs are keyed by UUID, but
@@ -587,8 +644,9 @@ class SupabaseDataService {
 
   Future<Stockist?> getStockistBySequentialId(String seqId) async {
     try {
+      // Buyer-facing: masked view, keyed on the (possibly masked) public key.
       final s = await supabase
-          .from('stockists')
+          .from('buyer_stockists')
           .select()
           .eq('sequential_id', seqId)
           .single();
@@ -614,7 +672,12 @@ class SupabaseDataService {
         isListed:  s['is_listed'] ?? true,
         shareToken: s['share_token'] ?? '',
         canCreatePrivateCatalog: s['can_create_private_catalog'] ?? false,
-        createdAt: DateTime.parse(s['created_at']),
+        isAnonymous: s['is_anonymous'] ?? false,
+        publicDisplayName: s['public_display_name'] ?? '',
+        publicCode: s['public_code'] ?? '',
+        deviceLimit: s['device_limit'] ?? 1,
+        createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
+            DateTime.now(),
       );
 
   /// Creates a single stockist (auth login + profile + stockist row) via the
@@ -1236,9 +1299,11 @@ class SupabaseDataService {
     try {
       if (currentEndUserId.isEmpty) return false;
 
+      // Masked view → accepts the real id or the public code, and is the only
+      // stockist source buyers may read.
       final stockist = await supabase
-          .from('stockists')
-          .select('id')
+          .from('buyer_stockists')
+          .select('uuid')
           .eq('sequential_id', stockistSequentialId)
           .single();
 
@@ -1255,7 +1320,7 @@ class SupabaseDataService {
 
       await supabase.from('inquiries').insert({
         'end_user_id': currentEndUserId,
-        'stockist_id': stockist['id'],
+        'stockist_id': stockist['uuid'],
         'design_id':   designId,
         'message':     message,
       });

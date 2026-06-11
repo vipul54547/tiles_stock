@@ -43,7 +43,8 @@ class _State extends State<StockHistoryScreen> {
                   child: Text('No stock history found',
                       style: TextStyle(color: Colors.grey)))
               : ListView.separated(
-                  padding: const EdgeInsets.all(12),
+                  padding: EdgeInsets.fromLTRB(12, 12, 12,
+                      12 + MediaQuery.viewPaddingOf(context).bottom),
                   itemCount: _history.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {

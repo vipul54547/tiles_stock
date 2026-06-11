@@ -99,7 +99,7 @@ class _State extends State<StockistGroupScreen> {
   }
 
   Future<void> _load() async {
-    final stockists = await _service.getAllStockists();
+    final stockists = await _service.getMarketStockists();
     await loadStockistGroupsFromDb();
     if (!mounted) return;
     setState(() {
