@@ -827,6 +827,16 @@ class _State extends State<UploadStockScreen> {
         : '';
     final imageNote =
         imagesUploaded > 0 ? ' · $imagesUploaded photos added$libNote' : libNote;
+    // Make the destination catalog explicit (public = live in market, private =
+    // link-only) so the stockist always knows where the upload landed.
+    StockCatalog? cat;
+    for (final c in _catalogs) {
+      if (c.id == _catalogId) { cat = c; break; }
+    }
+    final catNote = cat == null
+        ? ''
+        : '\nUploaded to "${cat.name}"'
+            '${cat.isPrivate ? ' (private — link only).' : ' (public — live in marketplace).'}';
     // If photos were extracted but none uploaded, the upload itself is failing
     // (e.g. Cloudinary preset not set to "unsigned") — tell the user why.
     final failNote = imagesFailed > 0
@@ -835,7 +845,7 @@ class _State extends State<UploadStockScreen> {
         : '';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(total > 0
-          ? '$updated updated, $created new designs$imageNote.$failNote'
+          ? '$updated updated, $created new designs$imageNote.$catNote$failNote'
           : 'Nothing was processed. Please try again.$failNote'),
       backgroundColor: total > 0
           ? (imagesFailed > 0 ? Colors.orange.shade800 : const Color(0xFF2E7D32))

@@ -6,6 +6,7 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/app_config.dart';
 import '../../models/tile_design.dart';
+import '../../models/stock_catalog.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
@@ -45,6 +46,10 @@ const _filterStockTypes = ['One Time', 'Regular', 'Both'];
 class _State extends State<StockistDashboardScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
+  // The stockist's catalogs (Father & Child) — drives the Public/Private/Both
+  // inventory filter and the per-design "Private" badge.
+  List<StockCatalog> _catalogs = [];
+  String _catalogFilter = 'both'; // 'both' | 'public' | 'private'
   // Buyer My-Choice interest in this stockist's designs: designId → (buyers, boxes).
   Map<String, ({int buyers, int boxes})> _inquiries = {};
   // Boxes the stockist added that are held for admin approval (big-stock rule).
@@ -134,14 +139,24 @@ class _State extends State<StockistDashboardScreen> {
     final data = await _service.getDesignsByStockist(_myStockistId);
     final inquiries = await _service.getMyDesignInquiries();
     final pending = await _service.myPendingStockBoxes();
+    final catalogs = await _service.getCatalogs(_myStockistId);
     if (!mounted) return;
     setState(() {
       _designs = data;
       _inquiries = inquiries;
       _pendingBoxes = pending;
+      _catalogs = catalogs;
       _loading = false;
     });
   }
+
+  // Catalog helpers (Father & Child).
+  Set<String> get _privateCatalogIds =>
+      _catalogs.where((c) => c.isPrivate).map((c) => c.id).toSet();
+  bool get _hasPrivateCatalog =>
+      _catalogs.any((c) => c.isPrivate && c.isActive);
+  bool _isPrivate(TileDesign d) =>
+      d.catalogId != null && _privateCatalogIds.contains(d.catalogId);
 
   void _showShareSheet() {
     showModalBottomSheet<void>(
@@ -162,7 +177,14 @@ class _State extends State<StockistDashboardScreen> {
       _designs.where((d) => d.boxQuantity > 0).toList();
 
   List<TileDesign> get _filteredAndSorted {
-    final base = _inStockDesigns;
+    var base = _inStockDesigns;
+    // Public / Private / Both inventory filter (only meaningful with a private
+    // catalog; 'both' shows everything).
+    if (_catalogFilter == 'public') {
+      base = base.where((d) => !_isPrivate(d)).toList();
+    } else if (_catalogFilter == 'private') {
+      base = base.where((d) => _isPrivate(d)).toList();
+    }
     var result = _selectedQualities.isEmpty
         ? base
         : base
@@ -299,6 +321,10 @@ class _State extends State<StockistDashboardScreen> {
               children: [
                 _buildStatsBar(),  // pinned, slim
                 if (_pendingBoxes > 0) _buildPendingBanner(),
+                // Pinned Public/Private/Both inventory filter (Stock tab only,
+                // and only when the stockist has a private catalog).
+                if (_activeTab == 0 && _hasPrivateCatalog)
+                  _buildCatalogFilterRow(),
                 _buildChipRow(),   // pinned: tabs + quality chips
                 Expanded(
                   child: _activeTab == 0
@@ -307,6 +333,48 @@ class _State extends State<StockistDashboardScreen> {
                 ),
               ],
             ),
+    );
+  }
+
+  // ── Public / Private / Both filter row (pinned) ───────────────────────────
+  Widget _buildCatalogFilterRow() {
+    Widget btn(String value, String label) {
+      final sel = _catalogFilter == value;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => setState(() => _catalogFilter = value),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: sel ? const Color(0xFF1B4F72) : Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                  color: sel
+                      ? const Color(0xFF1B4F72)
+                      : Colors.grey.shade300),
+            ),
+            child: Text(label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: sel ? Colors.white : Colors.grey.shade700)),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+      child: Row(
+        children: [
+          btn('public', 'Public'),
+          btn('private', 'Private'),
+          btn('both', 'Both'),
+        ],
+      ),
     );
   }
 
@@ -573,6 +641,26 @@ class _State extends State<StockistDashboardScreen> {
                 ? () {}
                 : () => context.push('/stockist/stock/edit/${d.id}'),
           ),
+          // "Private" badge — this design is in a private (Most Exclusive)
+          // catalog, so it's link-only and not in the marketplace.
+          if (_isPrivate(d))
+            Positioned(
+              bottom: 6,
+              left: 6,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurple,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('Private',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ),
           if (outOfStock || lowStock)
             Positioned(
               top: 6,

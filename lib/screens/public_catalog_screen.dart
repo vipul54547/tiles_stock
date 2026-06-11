@@ -244,6 +244,10 @@ class _State extends State<PublicCatalogScreen> {
         lines.add('${n++}. $desc — $qty box${qty == 1 ? '' : 'es'}');
       }
     }
+    // Record this link enquiry (which catalog/visibility, selected designs) so
+    // the stockist/admin can see demand coming via links. Best-effort.
+    _svc.logLinkInquiry(widget.token, _selected.keys.toList());
+
     final msg = lines.join('\n');
     final uri = phone.isEmpty
         ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')

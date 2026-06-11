@@ -505,7 +505,15 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final fixNote = finishFixed > 0 ? ' · $finishFixed finish corrected' : '';
     final libNote =
         imagesFromLibrary > 0 ? ' · $imagesFromLibrary photos from library' : '';
-    _snack('Done — $updated updated, $created new$fixNote$libNote.', Colors.green);
+    StockCatalog? cat;
+    for (final c in _catalogs) {
+      if (c.id == _catalogId) { cat = c; break; }
+    }
+    final catNote = cat == null
+        ? ''
+        : ' → "${cat.name}"${cat.isPrivate ? ' (private)' : ' (public)'}';
+    _snack('Done — $updated updated, $created new$fixNote$libNote$catNote.',
+        Colors.green);
     if (updated + created > 0) Navigator.of(context).pop();
   }
 

@@ -270,6 +270,37 @@ class SupabaseDataService {
 
   // ── stock catalogs (Father & Child) ────────────────────────────────────────
 
+  /// Log an anonymous enquiry made through a share link (login-free web
+  /// catalog). Best-effort — silently ignores failures.
+  Future<void> logLinkInquiry(String token, List<String> designIds) async {
+    try {
+      await supabase.rpc('log_link_inquiry',
+          params: {'p_token': token, 'p_design_ids': designIds});
+    } catch (e, st) {
+      debugPrint('logLinkInquiry failed: $e\n$st');
+    }
+  }
+
+  /// Per-catalog link-enquiry counts for a stockist (catalogId → count).
+  /// Stockist-level link enquiries (no catalog) bucket under the key ''.
+  Future<Map<String, int>> getCatalogInquiryCounts(String stockistUUID) async {
+    try {
+      final rows = await supabase
+          .from('link_inquiries')
+          .select('catalog_id')
+          .eq('stockist_id', stockistUUID);
+      final out = <String, int>{};
+      for (final r in rows) {
+        final k = (r['catalog_id'] as String?) ?? '';
+        out[k] = (out[k] ?? 0) + 1;
+      }
+      return out;
+    } catch (e, st) {
+      debugPrint('getCatalogInquiryCounts failed: $e\n$st');
+      return {};
+    }
+  }
+
   /// Whether this stockist may create PRIVATE catalogs (admin-granted).
   Future<bool> canCreatePrivate(String stockistUUID) async {
     try {

@@ -21,6 +21,7 @@ const _navy = Color(0xFF1B4F72);
 class _State extends State<ManageCatalogsScreen> {
   final _data = SupabaseDataService();
   List<StockCatalog> _items = [];
+  Map<String, int> _inq = {}; // catalogId → link-enquiry count
   bool _canPrivate = false;
   bool _loading = true;
   bool _busy = false;
@@ -35,10 +36,12 @@ class _State extends State<ManageCatalogsScreen> {
     setState(() => _loading = true);
     final items = await _data.getCatalogs(currentStockistUUID);
     final canPriv = await _data.canCreatePrivate(currentStockistUUID);
+    final inq = await _data.getCatalogInquiryCounts(currentStockistUUID);
     if (!mounted) return;
     setState(() {
       _items = items;
       _canPrivate = canPriv;
+      _inq = inq;
       _loading = false;
     });
   }
@@ -261,6 +264,15 @@ class _State extends State<ManageCatalogsScreen> {
                     : (inMarket ? 'In marketplace + link' : 'Link only'),
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
               ),
+              if ((_inq[c.id] ?? 0) > 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('${_inq[c.id]} enquiries via this link',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: tagColor)),
+                ),
               // Marketplace toggle (public catalogs only).
               if (!private)
                 Row(
