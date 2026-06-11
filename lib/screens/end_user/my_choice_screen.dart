@@ -500,13 +500,25 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                       setState(() => setMyChoiceQty(d.id, qty - 1));
                     }
                   }),
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10),
-                    child: Text('$qty',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15)),
+                  // Tap the number to type a quantity directly — far quicker
+                  // than the steppers for large box counts.
+                  GestureDetector(
+                    onTap: () => _editQty(d, qty),
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 44),
+                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                            color: color.withValues(alpha: 0.3)),
+                      ),
+                      child: Text('$qty',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15)),
+                    ),
                   ),
                   _qtyBtn(Icons.add, color, () {
                     setState(() => setMyChoiceQty(d.id, qty + 1));
@@ -518,6 +530,42 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         ],
       ),
     );
+  }
+
+  // Manual quantity entry — tapping the number opens this so a buyer can type a
+  // large box count directly instead of holding the +/- steppers.
+  Future<void> _editQty(TileDesign d, int current) async {
+    final ctrl = TextEditingController(text: '$current');
+    final value = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Quantity (boxes)'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            hintText: 'Enter boxes',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v.trim())),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
+            child: const Text('Set'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (value != null && value > 0) {
+      setState(() => setMyChoiceQty(d.id, value));
+    }
   }
 
   Widget _qtyBtn(IconData icon, Color color, VoidCallback onTap) =>

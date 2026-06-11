@@ -32,6 +32,8 @@ class _State extends State<PublicCatalogScreen> {
 
   // Search + filters
   final _searchCtrl = TextEditingController();
+  final _minQtyCtrl = TextEditingController();
+  final _maxQtyCtrl = TextEditingController();
   String _query = '';
   bool _smart = true;
   final Set<String> _fSizes = {};
@@ -50,6 +52,8 @@ class _State extends State<PublicCatalogScreen> {
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _minQtyCtrl.dispose();
+    _maxQtyCtrl.dispose();
     super.dispose();
   }
 
@@ -90,7 +94,9 @@ class _State extends State<PublicCatalogScreen> {
       _fQualities.length +
       _fTypes.length +
       _fThickness.length +
-      _fStockTypes.length;
+      _fStockTypes.length +
+      (_minQtyCtrl.text.trim().isNotEmpty ? 1 : 0) +
+      (_maxQtyCtrl.text.trim().isNotEmpty ? 1 : 0);
 
   // Thickness band for a design, computed from box weight + pieces (sent by the
   // RPC now). Null when there's no weight data, so it just won't show a band.
@@ -141,6 +147,10 @@ class _State extends State<PublicCatalogScreen> {
     if (_fStockTypes.isNotEmpty) {
       r = r.where((d) => _fStockTypes.contains('${d['stock_type']}'));
     }
+    final mn = int.tryParse(_minQtyCtrl.text);
+    final mx = int.tryParse(_maxQtyCtrl.text);
+    if (mn != null) r = r.where((d) => ((d['boxes'] as num?) ?? 0) >= mn);
+    if (mx != null) r = r.where((d) => ((d['boxes'] as num?) ?? 0) <= mx);
     return r.toList();
   }
 
@@ -150,7 +160,12 @@ class _State extends State<PublicCatalogScreen> {
         if (_selected.containsKey(id)) {
           _selected.remove(id);
         } else {
-          _selected[id] = 1;
+          // Default the wanted quantity to the design's available stock, so the
+          // buyer starts from the full in-stock count and trims down as needed.
+          final d =
+              _all.firstWhere((e) => '${e['id']}' == id, orElse: () => const {});
+          final stock = (d['boxes'] as num?)?.toInt() ?? 1;
+          _selected[id] = stock > 0 ? stock : 1;
         }
       });
 
@@ -161,6 +176,40 @@ class _State extends State<PublicCatalogScreen> {
           _selected[id] = q;
         }
       });
+
+  // Manual quantity entry — tapping the number opens this so the buyer can type
+  // a large box count directly instead of holding the +/- steppers.
+  Future<void> _editQty(String id, int current) async {
+    final ctrl = TextEditingController(text: '$current');
+    final value = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Quantity (boxes)'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            hintText: 'Enter boxes',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, int.tryParse(v.trim())),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
+            child: const Text('Set'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (value != null && value > 0) _setQty(id, value);
+  }
 
   // ── WhatsApp enquiry (lists the selected designs) ──────────────────────────
 
@@ -412,12 +461,54 @@ class _State extends State<PublicCatalogScreen> {
                             _fTypes.clear();
                             _fThickness.clear();
                             _fStockTypes.clear();
+                            _minQtyCtrl.clear();
+                            _maxQtyCtrl.clear();
                           }),
                           child: const Text('Clear all'),
                         ),
                       ],
                     ),
                     const SizedBox(height: 8),
+                    const Text('Quantity (boxes)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _minQtyCtrl,
+                            keyboardType: TextInputType.number,
+                            onChanged: (_) => setSheet(() {}),
+                            decoration: InputDecoration(
+                              hintText: 'Min',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _maxQtyCtrl,
+                            keyboardType: TextInputType.number,
+                            onChanged: (_) => setSheet(() {}),
+                            decoration: InputDecoration(
+                              hintText: 'Max',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 10),
+                              border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
                     section('Size', _distinct('size'), _fSizes),
                     section('Finish', _distinct('surface'), _fFinishes),
                     section('Quality', _distinct('quality'), _fQualities),
@@ -787,12 +878,15 @@ class _State extends State<PublicCatalogScreen> {
       children: [
         btn(Icons.remove, () => _setQty(id, qty - 1)),
         Expanded(
-          child: Text('$qty box${qty == 1 ? '' : 'es'}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1B4F72))),
+          child: GestureDetector(
+            onTap: () => _editQty(id, qty),
+            child: Text('$qty box${qty == 1 ? '' : 'es'}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B4F72))),
+          ),
         ),
         btn(Icons.add, () => _setQty(id, qty + 1)),
       ],
