@@ -383,6 +383,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _picker = ImagePicker();
   String _logoUrl = ''; // Cloudinary URL of the uploaded logo ('' = none)
   bool _uploadingLogo = false;
+  String _bannerUrl = ''; // Cloudinary URL of the 3:1 header banner ('' = none)
+  bool _uploadingBanner = false;
   final _tagline = TextEditingController();
   String _brandColor = ''; // hex like #1B4F72 ('' = default theme colour)
   final _mapUrl = TextEditingController();
@@ -419,6 +421,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _publicCode = s.publicCode;
       _deviceLimit.text = '${s.deviceLimit}';
       _logoUrl = s.logoUrl;
+      _bannerUrl = s.bannerUrl;
       _tagline.text = s.tagline;
       _brandColor = s.brandColor;
       _mapUrl.text = s.mapUrl;
@@ -643,6 +646,31 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     }
   }
 
+  Future<void> _pickBanner() async {
+    try {
+      final x = await _picker.pickImage(
+          source: ImageSource.gallery, maxWidth: 2000, imageQuality: 90);
+      if (x == null || !mounted) return;
+      setState(() => _uploadingBanner = true);
+      final url = await CloudinaryService.uploadImage(x.path);
+      if (!mounted) return;
+      setState(() {
+        _uploadingBanner = false;
+        if (url != null) {
+          _bannerUrl = url;
+        } else {
+          _error = 'Banner upload failed. Please try again.';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _uploadingBanner = false;
+        _error = 'Banner upload failed: $e';
+      });
+    }
+  }
+
   Widget _brandingSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -705,7 +733,64 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 14),
+        // Banner: full-width 3:1 header image (centre-cropped on display).
+        Row(
+          children: [
+            const Text('Header banner',
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('3:1 · e.g. 1500×500 px',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
+            ),
+            if (_bannerUrl.isNotEmpty)
+              GestureDetector(
+                onTap: _uploadingBanner
+                    ? null
+                    : () => setState(() => _bannerUrl = ''),
+                child: const Text('Remove',
+                    style: TextStyle(fontSize: 12, color: Colors.redAccent)),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        GestureDetector(
+          onTap: _uploadingBanner ? null : _pickBanner,
+          child: AspectRatio(
+            aspectRatio: 3, // 3:1 — exactly how the public page renders it
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: _uploadingBanner
+                  ? const Center(
+                      child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2)))
+                  : _bannerUrl.isEmpty
+                      ? Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_photo_alternate_outlined,
+                                color: Colors.grey.shade400, size: 26),
+                            const SizedBox(height: 4),
+                            Text('Tap to upload banner',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey.shade500)),
+                          ],
+                        )
+                      : Image.network(
+                          CloudinaryService.bannerUrl(_bannerUrl, width: 900),
+                          fit: BoxFit.cover),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         _field(_tagline, 'Tagline (e.g. "Premium tiles since 2008")'),
         // Brand colour swatches.
         const SizedBox(height: 2),
@@ -805,6 +890,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
         await _dataSvc.setStockistBranding(
           widget.existing!.id,
           logoUrl: _logoUrl.trim(),
+          bannerUrl: _bannerUrl.trim(),
           tagline: _tagline.text.trim(),
           brandColor: _brandColor.trim(),
           mapUrl: _mapUrl.text.trim(),

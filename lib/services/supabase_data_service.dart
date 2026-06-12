@@ -476,6 +476,7 @@ class SupabaseDataService {
   Future<void> setStockistBranding(
     String sequentialId, {
     String logoUrl = '',
+    String bannerUrl = '',
     String tagline = '',
     String brandColor = '',
     String mapUrl = '',
@@ -483,6 +484,7 @@ class SupabaseDataService {
     await supabase.rpc('admin_set_branding', params: {
       'p_seq': sequentialId,
       'p_logo_url': logoUrl,
+      'p_banner_url': bannerUrl,
       'p_tagline': tagline,
       'p_brand_color': brandColor,
       'p_map_url': mapUrl,
@@ -696,6 +698,7 @@ class SupabaseDataService {
         publicCode: s['public_code'] ?? '',
         deviceLimit: s['device_limit'] ?? 1,
         logoUrl:    s['logo_url'] ?? '',
+        bannerUrl:  s['banner_url'] ?? '',
         tagline:    s['tagline'] ?? '',
         brandColor: s['brand_color'] ?? '',
         mapUrl:     s['map_url'] ?? '',

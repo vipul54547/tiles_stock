@@ -61,6 +61,7 @@ class Stockist {
   /// [mapUrl] a Google Maps link. Hidden for anonymous stockists (except
   /// tagline/brandColor) by the public_catalog RPC.
   final String logoUrl;
+  final String bannerUrl;
   final String tagline;
   final String brandColor;
   final String mapUrl;
@@ -110,6 +111,8 @@ class Stockist {
     this.deviceLimit = 1,
 
     this.logoUrl = '',
+
+    this.bannerUrl = '',
 
     this.tagline = '',
 
@@ -164,6 +167,8 @@ class Stockist {
     deviceLimit: json['device_limit'] ?? 1,
 
     logoUrl: json['logo_url'] ?? '',
+
+    bannerUrl: json['banner_url'] ?? '',
 
     tagline: json['tagline'] ?? '',
 

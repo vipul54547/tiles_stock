@@ -629,6 +629,7 @@ class _State extends State<PublicCatalogScreen> {
     final name = (_stockist['name'] ?? '').toString();
     final tagline = (_stockist['tagline'] ?? '').toString();
     final logo = (_stockist['logo_url'] ?? '').toString();
+    final banner = (_stockist['banner_url'] ?? '').toString();
     final address = (_stockist['address'] ?? '').toString();
     final city = (_stockist['city'] ?? '').toString();
     final mapUrl = (_stockist['map_url'] ?? '').toString();
@@ -637,10 +638,24 @@ class _State extends State<PublicCatalogScreen> {
     return Container(
       width: double.infinity,
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Full-width 3:1 header banner (centre-cropped via Cloudinary).
+          if (banner.isNotEmpty)
+            AspectRatio(
+              aspectRatio: 3,
+              child: Image.network(
+                CloudinaryService.bannerUrl(banner, width: 1500),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -710,9 +725,12 @@ class _State extends State<PublicCatalogScreen> {
               ],
             ),
           ],
-        ],
-      ),
-    );
+              ], // inner Column children
+            ),   // inner Column
+          ),     // Padding
+        ],       // outer Column children
+      ),         // outer Column
+    );           // Container
   }
 
   // Footer credit shown at the bottom of every catalog page.
