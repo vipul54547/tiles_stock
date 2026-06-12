@@ -31,10 +31,10 @@ import 'screens/end_user/stockist_portfolio_screen.dart';
 import 'screens/end_user/inquiry_screen.dart';
 
 import 'screens/stockist/stockist_dashboard_screen.dart';
+import 'screens/stockist/inquiries_screen.dart';
 
 import 'screens/stockist/add_edit_stock_screen.dart';
 
-import 'screens/stockist/received_inquiries_screen.dart';
 
 import 'screens/admin/admin_panel_screen.dart';
 import 'screens/admin/manage_surfaces_screen.dart';
@@ -144,6 +144,10 @@ final GoRouter _router = GoRouter(
         builder: (_, __) => const StockistDashboardScreen()),
 
     GoRoute(
+        path: '/stockist/inquiries',
+        builder: (_, __) => const InquiriesScreen()),
+
+    GoRoute(
 
         path: '/stockist/stock/add',
 
@@ -159,11 +163,6 @@ final GoRouter _router = GoRouter(
 
     ),
 
-    GoRoute(
-
-        path: '/stockist/inquiries',
-
-        builder: (_, __) => const ReceivedInquiriesScreen()),
 
     GoRoute(path: '/admin', builder: (_, __) => const AdminPanelScreen()),
     GoRoute(path: '/admin/surfaces', builder: (_, __) => const ManageSurfacesScreen()),

@@ -283,8 +283,8 @@ class _State extends State<StockistDashboardScreen> {
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.move_to_inbox_outlined),
-                  tooltip: 'Received inquiries',
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  tooltip: 'Inquiries (by buyer / date)',
                   onPressed: () => context.push('/stockist/inquiries'),
                 ),
                 const NotificationBell(),

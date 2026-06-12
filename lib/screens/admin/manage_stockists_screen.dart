@@ -46,6 +46,7 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
           .where((s) =>
               s.name.toLowerCase().contains(q) ||
               s.id.toLowerCase().contains(q) ||
+              s.email.toLowerCase().contains(q) ||
               s.city.toLowerCase().contains(q) ||
               s.phone.contains(q) ||
               // Reverse-lookup: find a stockist by their masked public code or
@@ -294,6 +295,26 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                     overflow: TextOverflow.ellipsis,
                   ),
+                  // Login email (the actual login ID — the A01-style code is just
+                  // a display id). Shown so admin can tie an ID to a real person.
+                  if (s.email.isNotEmpty) ...[
+                    const SizedBox(height: 1),
+                    Row(
+                      children: [
+                        Icon(Icons.alternate_email,
+                            size: 12, color: Colors.grey.shade500),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(
+                            s.email,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade600),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -959,6 +980,44 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                       : 'The stockist ID is generated automatically (e.g. A01).',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
               const SizedBox(height: 14),
+
+              // When editing, surface the login email read-only so the admin can
+              // see which person/login owns this ID (it can't be changed here).
+              if (_isEdit && widget.existing!.email.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.alternate_email,
+                          size: 16, color: Colors.grey.shade600),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Login email',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey.shade500)),
+                            Text(widget.existing!.email,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
 
               _field(_name, 'Name *', required: true),
               if (!_isEdit) ...[

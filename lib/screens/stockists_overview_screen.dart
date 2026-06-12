@@ -18,6 +18,8 @@ import '../utils/tile_types.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/notification_bell.dart';
 import '../utils/stockist_tiers.dart';
+import '../utils/guest_gate.dart';
+import '../models/claimed_catalog.dart';
 
 const _qualities = ['Premium', 'Standard'];
 // Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
@@ -58,6 +60,16 @@ class _State extends State<StockistsOverviewScreen> {
   List<String> _allSurfaces = [];
   bool _loading = true;
   bool _viewDesigns = false;
+
+  // Father & Child market context — a single global toggle that governs every
+  // buyer tab (Group / Stock / All Design). 'Public' = the Open Market,
+  // 'Private' = the buyer's claimed Closed Market, 'Both' = the two merged.
+  String _market = 'Public'; // 'Public' | 'Private' | 'Both'
+  // Claimed (Closed Market) designs and the per-stockist cards derived from them.
+  List<TileDesign> _privateDesigns = [];
+  List<_StockistData> _privateData = [];
+  // The buyer's claimed-catalog summaries (for the "Manage saved" remove list).
+  List<ClaimedCatalog> _claimedCatalogs = [];
 
   final _searchCtrl = TextEditingController();
   String _searchQuery  = '';
@@ -219,11 +231,59 @@ class _State extends State<StockistsOverviewScreen> {
       );
     }).toList();
 
+    // ── Private (Closed Market) — the buyer's claimed catalogs ───────────────
+    // Loaded for logged-in buyers only (guests have none). Designs come back in
+    // the same masked shape as the open market, so anonymity holds. We group
+    // them per stockist (using the claimed-catalog summary for the masked name /
+    // city) to build the same _StockistData cards the Stock view already renders.
+    var privateDesigns = <TileDesign>[];
+    var privateData = <_StockistData>[];
+    var claimedCatalogs = <ClaimedCatalog>[];
+    if (!isGuest) {
+      final priv = await _service.getMyPrivateDesigns();
+      final claimed = await _service.getMyClaimedCatalogs();
+      claimedCatalogs = claimed;
+      final infoByKey = <String, ClaimedCatalog>{};
+      for (final c in claimed) {
+        infoByKey[c.stockistKey] = c;
+      }
+      final byStockist = <String, List<TileDesign>>{};
+      for (final d in priv) {
+        byStockist.putIfAbsent(d.stockistId, () => []).add(d);
+      }
+      privateData = byStockist.entries.map((e) {
+        final info = infoByKey[e.key];
+        final s = Stockist(
+          id: e.key,
+          name: (info != null && info.stockistName.isNotEmpty)
+              ? info.stockistName
+              : e.key,
+          email: '',
+          phone: '',
+          city: info?.stockistCity ?? '',
+          state: '',
+          address: '',
+          createdAt: DateTime.now(),
+        );
+        return _StockistData(
+          stockist: s,
+          totalBoxes: e.value.fold(0, (sum, d) => sum + d.boxQuantity),
+          qualities: e.value.map((d) => d.quality).toSet(),
+          designs: e.value,
+        );
+      }).toList();
+      privateDesigns =
+          rankDesigns(priv, seed: DateTime.now().microsecondsSinceEpoch);
+    }
+
     setState(() {
       _allData = data;
       // Blended catalog ranking (fresh per-session seed) for the All-Design grid.
       _allDesigns =
           rankDesigns(designs, seed: DateTime.now().microsecondsSinceEpoch);
+      _privateDesigns = privateDesigns;
+      _privateData = privateData;
+      _claimedCatalogs = claimedCatalogs;
       _allSizes = sizes;
       _allSurfaces = surfaces;
       _loading = false;
@@ -261,8 +321,33 @@ class _State extends State<StockistsOverviewScreen> {
     return 4;
   }
 
+  // ── Market-aware base lists ───────────────────────────────────────────────
+  // Every tab reads these instead of the raw public lists, so switching the
+  // market toggle re-filters stockists *and* designs together.
+  List<_StockistData> get _marketData {
+    switch (_market) {
+      case 'Private':
+        return _privateData;
+      case 'Both':
+        return [..._allData, ..._privateData];
+      default:
+        return _allData;
+    }
+  }
+
+  List<TileDesign> get _marketDesigns {
+    switch (_market) {
+      case 'Private':
+        return _privateDesigns;
+      case 'Both':
+        return [..._allDesigns, ..._privateDesigns];
+      default:
+        return _allDesigns;
+    }
+  }
+
   List<_StockistData> get _filteredData {
-    var result = _allData;
+    var result = _marketData;
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       result = result
@@ -298,13 +383,13 @@ class _State extends State<StockistsOverviewScreen> {
   }
 
   List<TileDesign> get _filteredDesigns {
-    var result = _allDesigns;
+    var result = _marketDesigns;
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       if (_searchByDesign) {
         result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
       } else {
-        final matchingIds = _allData
+        final matchingIds = _marketData
             .where((sd) =>
                 sd.stockist.name.toLowerCase().contains(q) ||
                 sd.stockist.id.toLowerCase().contains(q))
@@ -444,13 +529,13 @@ class _State extends State<StockistsOverviewScreen> {
               );
 
           int previewCount() {
-            var r = _allDesigns;
+            var r = _marketDesigns;
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
               if (_searchByDesign) {
                 r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
               } else {
-                final ids = _allData
+                final ids = _marketData
                     .where((sd) =>
                         sd.stockist.name.toLowerCase().contains(q) ||
                         sd.stockist.id.toLowerCase().contains(q))
@@ -1107,6 +1192,12 @@ class _State extends State<StockistsOverviewScreen> {
             ),
       title: const Text('Tiles Stock'),
       actions: [
+        if (!isGuest)
+          IconButton(
+            icon: const Icon(Icons.add_link),
+            tooltip: 'Add a stock catalog link',
+            onPressed: _showAddCatalogDialog,
+          ),
         IconButton(
           icon: const Icon(Icons.refresh),
           tooltip: 'Refresh',
@@ -1167,11 +1258,20 @@ class _State extends State<StockistsOverviewScreen> {
 
     final filteredStockists = _filteredData;
     final filteredDesigns = _filteredDesigns;
+    // System navigation-bar height — added to the grid's bottom padding so the
+    // last row isn't clipped by the Android nav bar (edge-to-edge).
+    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
     return Scaffold(
       appBar: appBar,
       body: Column(
         children: [
+          if (!isGuest && !_searchActive) _buildMarketRow(),
+          if (!isGuest &&
+              !_searchActive &&
+              _market != 'Public' &&
+              _claimedCatalogs.isNotEmpty)
+            _buildManageSavedBar(),
           _buildQualityRow(),
           _buildGroupRow(
               _viewDesigns ? filteredDesigns.length : filteredStockists.length),
@@ -1182,11 +1282,9 @@ class _State extends State<StockistsOverviewScreen> {
           Expanded(
             child: _viewDesigns
                 ? filteredDesigns.isEmpty
-                    ? const Center(
-                        child: Text('No designs found',
-                            style: TextStyle(color: Colors.grey)))
+                    ? _marketEmpty(designs: true)
                     : MasonryGridView.count(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                        padding: EdgeInsets.fromLTRB(12, 4, 12, 12 + bottomInset),
                         crossAxisCount: 2,
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
@@ -1211,9 +1309,7 @@ class _State extends State<StockistsOverviewScreen> {
                         ),
                       )
                 : filteredStockists.isEmpty
-                    ? const Center(
-                        child: Text('No stockists found',
-                            style: TextStyle(color: Colors.grey)))
+                    ? _marketEmpty(designs: false)
                     : ListView.builder(
                         padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                         itemCount: filteredStockists.length,
@@ -1434,6 +1530,347 @@ class _State extends State<StockistsOverviewScreen> {
         ),
       ],
     );
+  }
+
+  // ── Market toggle (Father & Child) ───────────────────────────────────────
+  // One global control above every tab. Switching it re-filters the Group,
+  // Stock and All-Design views together. Hidden for guests, who have no
+  // claimed (Private / Closed Market) catalogs.
+  Widget _buildMarketRow() {
+    const labels = ['Public', 'Private', 'Both'];
+    const brand = Color(0xFF1B4F72);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: Row(
+        children: [
+          for (int i = 0; i < labels.length; i++) ...[
+            Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  _dismissKeyboard();
+                  setState(() => _market = labels[i]);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _market == labels[i] ? brand : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: _market == labels[i]
+                            ? brand
+                            : Colors.grey.shade300),
+                  ),
+                  child: Text(
+                    labels[i] == 'Private' && _privateDesigns.isNotEmpty
+                        ? 'Private (${_privateDesigns.length})'
+                        : labels[i],
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: _market == labels[i]
+                          ? Colors.white
+                          : Colors.grey.shade700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            if (i < labels.length - 1) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // A small "Manage saved" entry on the Private / Both market — lets the buyer
+  // remove a supplier's stock catalog they previously claimed.
+  Widget _buildManageSavedBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: TextButton.icon(
+          onPressed: _showManageSavedSheet,
+          icon: const Icon(Icons.bookmark_remove_outlined, size: 18),
+          label: Text('Manage saved (${_claimedCatalogs.length})'),
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFF1B4F72),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(0, 32),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Bottom sheet listing the buyer's saved (claimed) stock catalogs, each with a
+  // Remove action that un-claims it (drops it from the Private market).
+  Future<void> _showManageSavedSheet() async {
+    var changed = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final items = List<ClaimedCatalog>.from(_claimedCatalogs);
+        return StatefulBuilder(
+          builder: (ctx, setSheet) => SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const Text('Saved stock catalogs',
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 4),
+                  Text(
+                      'Remove a supplier to stop seeing their stock in your '
+                      'Private market. You can add it again with the link.',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  const SizedBox(height: 8),
+                  if (items.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: Text('No saved stock catalogs.',
+                            style: TextStyle(color: Colors.grey)),
+                      ),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) =>
+                            Divider(height: 1, color: Colors.grey.shade200),
+                        itemBuilder: (_, i) {
+                          final c = items[i];
+                          final title = c.stockistName.isNotEmpty
+                              ? c.stockistName
+                              : c.name;
+                          final sub = [
+                            if (c.name.isNotEmpty && c.name != title) c.name,
+                            '${c.designCount} design${c.designCount == 1 ? '' : 's'}',
+                            if (c.stockistCity.isNotEmpty) c.stockistCity,
+                          ].join('  ·  ');
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: CircleAvatar(
+                              backgroundColor:
+                                  const Color(0xFF1B4F72).withValues(alpha: 0.1),
+                              child: const Icon(Icons.storefront_outlined,
+                                  color: Color(0xFF1B4F72), size: 20),
+                            ),
+                            title: Text(title,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 14)),
+                            subtitle: Text(sub,
+                                style: const TextStyle(fontSize: 12)),
+                            trailing: TextButton.icon(
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: ctx,
+                                  builder: (dctx) => AlertDialog(
+                                    title: const Text('Remove saved catalog?'),
+                                    content: Text(
+                                        'Remove "$title" from your Private '
+                                        'market? You can add it again later '
+                                        'with their link.'),
+                                    actions: [
+                                      TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(dctx, false),
+                                          child: const Text('Cancel')),
+                                      TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(dctx, true),
+                                          child: const Text('Remove',
+                                              style: TextStyle(
+                                                  color: Colors.red))),
+                                    ],
+                                  ),
+                                );
+                                if (confirm != true) return;
+                                try {
+                                  await _service.unclaimCatalog(c.catalogId);
+                                  changed = true;
+                                  setSheet(() => items.removeAt(i));
+                                } catch (e) {
+                                  if (!ctx.mounted) return;
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                      SnackBar(
+                                          content: Text('$e'),
+                                          backgroundColor: Colors.red));
+                                }
+                              },
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                              label: const Text('Remove'),
+                              style: TextButton.styleFrom(
+                                  foregroundColor: Colors.red),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (changed && mounted) {
+      await _load(); // refresh the Private market + counts
+    }
+  }
+
+  // Per-market empty placeholder. On the Private market with nothing claimed,
+  // guide the buyer to paste a supplier's link instead of a bare "not found".
+  Widget _marketEmpty({required bool designs}) {
+    if (_market == 'Private' && _privateDesigns.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline, size: 40, color: Colors.grey.shade400),
+              const SizedBox(height: 12),
+              const Text('No private stock catalogs yet',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text(
+                  'When a supplier shares a private stock catalog link with you, '
+                  'tap "Add a stock catalog link" to save it here.',
+                  textAlign: TextAlign.center,
+                  style:
+                      TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: _showAddCatalogDialog,
+                icon: const Icon(Icons.add_link, size: 18),
+                label: const Text('Add stock catalog link'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return Center(
+      child: Text(designs ? 'No designs found' : 'No stockists found',
+          style: const TextStyle(color: Colors.grey)),
+    );
+  }
+
+  // Pull the share token out of whatever the buyer pasted. Accepts a full link
+  // containing /s/<token> or a bare alphanumeric token. Returns null for junk
+  // (e.g. a random URL with no /s/… path), so we can reject it before it ever
+  // reaches the server.
+  static String? _resolveCatalogToken(String input) {
+    final t = input.trim();
+    if (t.isEmpty) return null;
+    final m = RegExp(r'/s/([A-Za-z0-9]+)').firstMatch(t);
+    if (m != null) return m.group(1);
+    if (RegExp(r'^[A-Za-z0-9]+$').hasMatch(t)) return t; // a bare token
+    return null;
+  }
+
+  // Paste a share link → claim the stock catalog → it lands in the Private
+  // market. The input is validated locally first (must contain a /s/ token or
+  // be a bare token) so foreign/garbage URLs are rejected with a friendly
+  // message instead of being sent to the server.
+  Future<void> _showAddCatalogDialog() async {
+    if (blockIfGuest(context, feature: 'Saved stock catalogs')) return;
+    final ctrl = TextEditingController();
+    final token = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        String? error;
+        return StatefulBuilder(
+          builder: (ctx, setDialog) => AlertDialog(
+            title: const Text('Add a Stock Catalog'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                    'Paste the stock catalog link your supplier shared with '
+                    'you. It will be saved to your Private market.',
+                    style: TextStyle(fontSize: 12.5)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  onChanged: (_) {
+                    if (error != null) setDialog(() => error = null);
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'https://tilesdesign.in/s/…',
+                    isDense: true,
+                    errorText: error,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () {
+                    final resolved = _resolveCatalogToken(ctrl.text);
+                    if (resolved == null) {
+                      setDialog(() => error =
+                          "That doesn't look like a stock catalog link. "
+                          'Paste the full link your supplier shared (it '
+                          'contains /s/…).');
+                      return;
+                    }
+                    Navigator.pop(ctx, resolved);
+                  },
+                  child: const Text('Add')),
+            ],
+          ),
+        );
+      },
+    );
+    if (token == null) return;
+    try {
+      final res = await _service.claimCatalog(token);
+      final name = (res['catalog_name'] ?? 'Stock catalog').toString();
+      if (!mounted) return;
+      await _load(); // refresh the private market + cards
+      if (!mounted) return;
+      setState(() => _market = 'Private'); // jump to what they just added
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Saved "$name" to your Private market'),
+          backgroundColor: Colors.green));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
   }
 
   // ── Quality filter row + inline search toggle ────────────────────────────
@@ -1682,7 +2119,9 @@ class _State extends State<StockistsOverviewScreen> {
 
   Widget _buildLegend() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      // Bottom inset clears the Android system nav bar (edge-to-edge).
+      padding: EdgeInsets.fromLTRB(
+          16, 8, 16, 8 + MediaQuery.of(context).viewPadding.bottom),
       decoration: const BoxDecoration(
         color: Colors.white,
         boxShadow: [

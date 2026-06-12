@@ -447,18 +447,34 @@ class SupabaseDataService {
         params: {'p_catalog_id': catalogId, 'p_end_user_id': endUserId});
   }
 
+  /// Buyer: remove one of their own saved (claimed) catalogs from the Private
+  /// market. Deactivates the access row; re-claiming the link restores it.
+  Future<void> unclaimCatalog(String catalogId) async {
+    await supabase.rpc('unclaim_catalog', params: {'p_catalog_id': catalogId});
+  }
+
   // ── stockists ─────────────────────────────────────────────────────────────
 
-  /// All stockists. [activeOnly] true (the default) keeps the public/portfolio
-  /// behaviour; admin management passes false to also see deactivated ones.
+  /// All stockists (admin only). [activeOnly] true keeps just active ones;
+  /// admin management passes false to also see deactivated ones.
+  ///
+  /// Uses the admin-only `admin_list_stockists` RPC (mirrors end users) so each
+  /// row carries the login [email] from auth.users — which the client can't
+  /// read by querying the `stockists` table directly.
   Future<List<Stockist>> getAllStockists({bool activeOnly = true}) async {
     if (isGuest) return []; // guests never receive stockist data
     try {
-      var query = supabase.from('stockists').select();
-      if (activeOnly) query = query.eq('is_active', true);
-      final data = await query.order('sequential_id');
-      return data.map<Stockist>((s) => _toStockist(s)).toList();
-    } catch (_) {
+      final res = await supabase.rpc('admin_list_stockists');
+      final list = (res as List?) ?? const [];
+      var stockists = list
+          .map<Stockist>((s) => _toStockist(Map<String, dynamic>.from(s as Map)))
+          .toList();
+      if (activeOnly) {
+        stockists = stockists.where((s) => s.isActive).toList();
+      }
+      return stockists;
+    } catch (e, st) {
+      debugPrint('getAllStockists failed: $e\n$st');
       return [];
     }
   }
@@ -668,6 +684,36 @@ class SupabaseDataService {
     }
   }
 
+  /// A specific catalog's links: its always-on Permanent link plus every active
+  /// timed link bound to that catalog. Works for public AND private catalogs.
+  Future<List<ShareLink>> getCatalogShareLinks(String catalogId) async {
+    try {
+      final res = await supabase
+          .rpc('catalog_share_links', params: {'p_catalog_id': catalogId});
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => ShareLink.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getCatalogShareLinks($catalogId) failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Creates a timed link for one catalog. [duration] is one of
+  /// '1week','1month','3month','6month','1year' (Permanent is always-on, not
+  /// created here). Returns true on success.
+  Future<bool> createCatalogShareLink(String catalogId, String duration) async {
+    try {
+      await supabase.rpc('create_catalog_share_link',
+          params: {'p_catalog_id': catalogId, 'p_duration': duration});
+      return true;
+    } catch (e, st) {
+      debugPrint('createCatalogShareLink($catalogId,$duration) failed: $e\n$st');
+      return false;
+    }
+  }
+
   /// Revokes (deactivates) one of the calling stockist's create-on-demand links.
   Future<bool> revokeShareLink(String id) async {
     try {
@@ -751,7 +797,7 @@ class SupabaseDataService {
   Stockist _toStockist(Map<String, dynamic> s) => Stockist(
         id:        s['sequential_id'],
         name:      s['name'],
-        email:     '',
+        email:     s['email'] ?? '', // present only via admin_list_stockists
         phone:     s['phone'],
         countryCode: s['country_code'] ?? '+91',
         city:      s['city'],
@@ -905,6 +951,21 @@ class SupabaseDataService {
     } catch (e, st) {
       debugPrint('getMyDesignInquiries failed: $e\n$st');
       return {};
+    }
+  }
+
+  /// For the logged-in stockist: a flat list of every buyer interest (My Choice)
+  /// in their designs — one row per (buyer, design) with company/contact/phone/
+  /// city, design name/size, boxes and updated_at. The Inquiries screen groups
+  /// these by buyer / date / design. Empty unless the caller is a stockist.
+  Future<List<Map<String, dynamic>>> getMyInquiryList() async {
+    try {
+      final res = await supabase.rpc('my_inquiry_list');
+      final list = (res as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (e, st) {
+      debugPrint('getMyInquiryList failed: $e\n$st');
+      return [];
     }
   }
 
