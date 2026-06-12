@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../config/app_config.dart';
 import '../../models/choice_state.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/claimed_catalog.dart';
 import '../../services/supabase_data_service.dart';
 
 /// Stockist's stock catalogs (Father & Child): a default **public** catalog
@@ -22,6 +23,7 @@ class _State extends State<ManageCatalogsScreen> {
   final _data = SupabaseDataService();
   List<StockCatalog> _items = [];
   Map<String, int> _inq = {}; // catalogId → link-enquiry count
+  Map<String, List<CatalogClaimer>> _claimers = {}; // catalogId → dealers joined
   bool _canPrivate = false;
   bool _loading = true;
   bool _busy = false;
@@ -37,11 +39,17 @@ class _State extends State<ManageCatalogsScreen> {
     final items = await _data.getCatalogs(currentStockistUUID);
     final canPriv = await _data.canCreatePrivate(currentStockistUUID);
     final inq = await _data.getCatalogInquiryCounts(currentStockistUUID);
+    final claimerList = await _data.getMyCatalogClaimers();
+    final claimers = <String, List<CatalogClaimer>>{};
+    for (final c in claimerList) {
+      (claimers[c.catalogId] ??= []).add(c);
+    }
     if (!mounted) return;
     setState(() {
       _items = items;
       _canPrivate = canPriv;
       _inq = inq;
+      _claimers = claimers;
       _loading = false;
     });
   }
@@ -101,6 +109,128 @@ class _State extends State<ManageCatalogsScreen> {
       ),
     );
     if (ok == true) await _run(() => _data.renameCatalog(c.id, ctrl.text));
+  }
+
+  // Dealers (buyers) who have saved this catalog into their app, with a revoke
+  // action that removes the catalog from that dealer's Private tab.
+  Future<void> _showClaimers(StockCatalog c) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final list = _claimers[c.id] ?? const <CatalogClaimer>[];
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Text('Dealers in "${c.name}"',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 2),
+                  Text('${list.length} dealer${list.length == 1 ? '' : 's'} saved this catalog',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  const SizedBox(height: 10),
+                  if (list.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(child: Text('No dealers yet.')),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: list.length,
+                        separatorBuilder: (_, __) =>
+                            Divider(height: 1, color: Colors.grey.shade200),
+                        itemBuilder: (_, i) {
+                          final d = list[i];
+                          final sub = [
+                            if (d.contact.isNotEmpty) d.contact,
+                            if (d.city.isNotEmpty) d.city,
+                          ].join(' · ');
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                                d.company.isEmpty ? d.contact : d.company,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 14)),
+                            subtitle: sub.isEmpty
+                                ? null
+                                : Text(sub,
+                                    style: const TextStyle(fontSize: 12)),
+                            trailing: TextButton(
+                              onPressed: () async {
+                                final yes = await showDialog<bool>(
+                                  context: ctx,
+                                  builder: (dctx) => AlertDialog(
+                                    title: const Text('Remove dealer?'),
+                                    content: Text(
+                                        'Remove ${d.company.isEmpty ? d.contact : d.company} from "${c.name}"? '
+                                        'They will lose access to this catalog in their app.'),
+                                    actions: [
+                                      TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(dctx, false),
+                                          child: const Text('Cancel')),
+                                      TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(dctx, true),
+                                          child: const Text('Remove',
+                                              style: TextStyle(
+                                                  color: Colors.red))),
+                                    ],
+                                  ),
+                                );
+                                if (yes != true) return;
+                                try {
+                                  await _data.revokeCatalogAccess(
+                                      c.id, d.endUserId);
+                                  _claimers[c.id]?.removeWhere(
+                                      (x) => x.endUserId == d.endUserId);
+                                  setSheet(() {});
+                                  if (mounted) setState(() {});
+                                } catch (e) {
+                                  if (ctx.mounted) {
+                                    ScaffoldMessenger.of(ctx).showSnackBar(
+                                        SnackBar(
+                                            content: Text('$e'),
+                                            backgroundColor: Colors.red));
+                                  }
+                                }
+                              },
+                              child: const Text('Remove',
+                                  style: TextStyle(color: Colors.red)),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -223,6 +353,16 @@ class _State extends State<ManageCatalogsScreen> {
                         minimumSize: const Size(0, 36),
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                   ),
+                  if ((_claimers[c.id]?.length ?? 0) > 0)
+                    TextButton.icon(
+                      onPressed: _busy ? null : () => _showClaimers(c),
+                      icon: const Icon(Icons.people_outline, size: 18),
+                      label: Text('Dealers (${_claimers[c.id]!.length})'),
+                      style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          minimumSize: const Size(0, 36),
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                    ),
                   const Spacer(),
                   IconButton(
                     tooltip: c.isActive ? 'Hide' : 'Show',

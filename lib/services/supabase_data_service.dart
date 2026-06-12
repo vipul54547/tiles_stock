@@ -7,6 +7,7 @@ import '../models/app_notification.dart';
 import '../models/tile_size.dart';
 import '../models/stock_catalog.dart';
 import '../models/share_link.dart';
+import '../models/claimed_catalog.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
 import 'supabase_auth_service.dart';
@@ -374,6 +375,76 @@ class SupabaseDataService {
 
   Future<void> deleteCatalog(String id) async {
     await supabase.from('stock_catalogs').delete().eq('id', id);
+  }
+
+  // ── Father & Child Phase 2: claim/bind (buyer's Closed Market) ──────────────
+
+  /// Buyer claims a catalog from any share token (catalog / stockist permanent /
+  /// create-on-demand link). On success the catalog binds into the buyer's
+  /// Private (Closed Market) tab. Returns the claimed catalog summary; throws a
+  /// plain message string on failure (invalid link, not a buyer, inactive).
+  Future<Map<String, dynamic>> claimCatalog(String token) async {
+    final t = token.trim();
+    if (t.isEmpty) throw 'Paste a catalog link first.';
+    // Accept a full link (…/s/<token> or …/#/s/<token>) or a bare token.
+    final match = RegExp(r'/s/([A-Za-z0-9]+)').firstMatch(t);
+    final resolved = match != null ? match.group(1)! : t;
+    try {
+      final res = await supabase.rpc('claim_catalog', params: {'p_token': resolved});
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      // Surface the RPC's raise-exception message cleanly to the UI.
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Buyer: the catalogs they've claimed (the Closed Market list).
+  Future<List<ClaimedCatalog>> getMyClaimedCatalogs() async {
+    try {
+      final res = await supabase.rpc('my_claimed_catalogs');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => ClaimedCatalog.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyClaimedCatalogs failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Buyer: designs from all their claimed catalogs (the Private tab grid).
+  /// Returned in the same masked shape as the open market, so anonymity holds.
+  Future<List<TileDesign>> getMyPrivateDesigns() async {
+    try {
+      final res = await supabase.rpc('my_private_designs');
+      final list = (res as List?) ?? const [];
+      return list
+          .map<TileDesign>((d) => _toDesign(Map<String, dynamic>.from(d as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyPrivateDesigns failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Stockist: buyers who have claimed the calling stockist's catalogs.
+  Future<List<CatalogClaimer>> getMyCatalogClaimers() async {
+    try {
+      final res = await supabase.rpc('my_catalog_claimers');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => CatalogClaimer.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyCatalogClaimers failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Stockist: revoke a buyer's access to one of the stockist's catalogs.
+  Future<void> revokeCatalogAccess(String catalogId, String endUserId) async {
+    await supabase.rpc('revoke_catalog_access',
+        params: {'p_catalog_id': catalogId, 'p_end_user_id': endUserId});
   }
 
   // ── stockists ─────────────────────────────────────────────────────────────

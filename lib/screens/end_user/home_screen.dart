@@ -38,6 +38,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
+  // Father & Child: claimed private catalogs (the buyer's Closed Market) and the
+  // active market tab — 0 Public (Open Market), 1 Private (Closed Market), 2 Both.
+  List<TileDesign> _privateDesigns = [];
+  int _tab = 0;
   // Finish + size options for the filter, in the admin's master order.
   List<String> _surfaceOpts = kFinishes;
   List<String> _sizeOpts = _filterSizes;
@@ -89,6 +93,11 @@ class _HomeScreenState extends State<HomeScreen> {
     // varies each time the screen loads (app open / pull-to-refresh).
     final ranked =
         rankDesigns(designs, seed: DateTime.now().microsecondsSinceEpoch);
+    // Private (claimed) designs = the buyer's Closed Market. Guests have none.
+    final privateRanked = isGuest
+        ? <TileDesign>[]
+        : rankDesigns(await _service.getMyPrivateDesigns(),
+            seed: DateTime.now().microsecondsSinceEpoch);
     final finishes = await _service.getActiveFinishNames();
     final sizes = await _service.getActiveSizeNames();
     // Stockist seq-id → name (for the group confirm dialog). Empty for guests.
@@ -97,6 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     setState(() {
       _designs = ranked;
+      _privateDesigns = privateRanked;
       _surfaceOpts = finishes;
       _sizeOpts = sizes;
       _stockistNames = {for (final s in stockists) s.id: s.name};
@@ -107,8 +117,20 @@ class _HomeScreenState extends State<HomeScreen> {
   // Stockist display name for a sequential id (for the group confirm dialog).
   String _stockistName(String seqId) => _stockistNames[seqId] ?? '';
 
+  // The design pool feeding the grid, per the active market tab.
+  List<TileDesign> get _base {
+    switch (_tab) {
+      case 1:
+        return _privateDesigns; // Private (Closed Market)
+      case 2:
+        return [..._designs, ..._privateDesigns]; // Both (public first)
+      default:
+        return _designs; // Public (Open Market)
+    }
+  }
+
   List<TileDesign> get _filtered {
-    var result = _designs;
+    var result = _base;
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
@@ -209,7 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
     var localTypes     = Set<String>.from(_selectedTypes);
     var localThickness = Set<String>.from(_selectedThickness);
-    final thicknessBands = availableThicknessBands(_designs);
+    final thicknessBands = availableThicknessBands(_base);
     var localStockType = _stockType;
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     showModalBottomSheet<bool>(
@@ -263,7 +285,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // Live count of designs that the current (local) selections would show.
           int previewCount() {
-            var r = _designs;
+            var r = _base;
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
               r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
@@ -959,6 +981,142 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
+  // Public / Private / Both segmented tabs (Father & Child).
+  Widget _marketTabs() {
+    const labels = ['Public', 'Private', 'Both'];
+    const brand = Color(0xFF1B4F72);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: Row(
+        children: [
+          for (int i = 0; i < labels.length; i++) ...[
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _tab = i),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _tab == i ? brand : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: _tab == i ? brand : Colors.grey.shade300),
+                  ),
+                  child: Text(
+                    i == 1 && _privateDesigns.isNotEmpty
+                        ? 'Private (${_privateDesigns.length})'
+                        : labels[i],
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: _tab == i ? Colors.white : Colors.grey.shade700),
+                  ),
+                ),
+              ),
+            ),
+            if (i < labels.length - 1) const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Empty-grid placeholder. On the Private tab with nothing claimed yet, guide
+  // the buyer to add a supplier's catalog link.
+  Widget _emptyState() {
+    if (_tab == 1 && _privateDesigns.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_outline, size: 40, color: Colors.grey.shade400),
+              const SizedBox(height: 12),
+              const Text('No private catalogs yet',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Text(
+                  'When a supplier shares a private catalog link with you, '
+                  'tap "Add" to save it here.',
+                  textAlign: TextAlign.center,
+                  style:
+                      TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: _showAddCatalogDialog,
+                icon: const Icon(Icons.add_link, size: 18),
+                label: const Text('Add catalog'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return const Center(
+        child: Text('No designs found', style: TextStyle(color: Colors.grey)));
+  }
+
+  // Paste a share link → claim the catalog → it lands in the Private tab.
+  Future<void> _showAddCatalogDialog() async {
+    if (blockIfGuest(context, feature: 'Saved catalogs')) return;
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add a catalog'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+                'Paste the catalog link your supplier shared with you. '
+                'It will be saved to your Private tab.',
+                style: TextStyle(fontSize: 12.5)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: 'https://tilesdesign.in/s/…',
+                isDense: true,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final res = await _service.claimCatalog(ctrl.text);
+      final name = (res['catalog_name'] ?? 'Catalog').toString();
+      final priv = await _service.getMyPrivateDesigns();
+      if (!mounted) return;
+      setState(() {
+        _privateDesigns = rankDesigns(priv,
+            seed: DateTime.now().microsecondsSinceEpoch);
+        _tab = 1; // jump to Private so they see what they just added
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Saved "$name" to your Private tab'),
+          backgroundColor: Colors.green));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$e'), backgroundColor: Colors.red));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final fc = _filterCount;
@@ -970,6 +1128,12 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         title: const Text('All Designs'),
         actions: [
+          if (!isGuest)
+            IconButton(
+              tooltip: 'Add a catalog link',
+              icon: const Icon(Icons.add_link),
+              onPressed: _showAddCatalogDialog,
+            ),
           Stack(
             clipBehavior: Clip.none,
             children: [
@@ -1064,6 +1228,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
+                // Father & Child market tabs — Public / Private / Both. Hidden for
+                // guests (they can't claim private catalogs).
+                if (!isGuest) _marketTabs(),
                 // Row 1: quality chips + filter button + clear chip
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -1191,9 +1358,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     filters: _activeFilters(), onClearAll: _clearAllFilters),
                 Expanded(
                   child: _filtered.isEmpty
-                      ? const Center(
-                          child: Text('No designs found',
-                              style: TextStyle(color: Colors.grey)))
+                      ? _emptyState()
                       : MasonryGridView.count(
                           padding:
                               const EdgeInsets.fromLTRB(12, 4, 12, 12),
