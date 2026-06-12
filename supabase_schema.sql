@@ -516,9 +516,9 @@ create policy tile_sizes_admin_all on tile_sizes for all using (current_user_rol
 --   approve_registration_request(text,numeric,text)    -- +country_code carry, notifies new user
 --   admin_set_stockist_listing(text,numeric,text)      -- set tier + priority (by seq)
 --   admin_update_stockist(text,text,text,text,text,text,text,text,text,numeric)
---   admin_delete_stockist(text)                        -- hard delete (only when inactive)
+--   admin_delete_stockist(text)                        -- hard delete (only when inactive); also clears user_devices
 --   admin_update_end_user(uuid,text,text,text,text,text,text,text,numeric)
---   admin_delete_end_user(uuid)                        -- hard delete (only when inactive)
+--   admin_delete_end_user(uuid)                        -- hard delete (only when inactive); also clears user_devices
 --   admin_inquiry_report() -> jsonb                    -- all inquiries across stockists
 --   reorder_tile_sizes(uuid[])                         -- admin reorder sizes
 
