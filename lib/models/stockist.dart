@@ -56,6 +56,15 @@ class Stockist {
   /// editable). Default 1. 0 = unlimited.
   final int deviceLimit;
 
+  /// White-label branding for the public share-link catalog page. All optional.
+  /// [logoUrl] is a Cloudinary URL; [brandColor] a hex string (e.g. #1B4F72);
+  /// [mapUrl] a Google Maps link. Hidden for anonymous stockists (except
+  /// tagline/brandColor) by the public_catalog RPC.
+  final String logoUrl;
+  final String tagline;
+  final String brandColor;
+  final String mapUrl;
+
   final DateTime createdAt;
 
 
@@ -99,6 +108,14 @@ class Stockist {
     this.publicCode = '',
 
     this.deviceLimit = 1,
+
+    this.logoUrl = '',
+
+    this.tagline = '',
+
+    this.brandColor = '',
+
+    this.mapUrl = '',
 
     required this.createdAt,
 
@@ -145,6 +162,14 @@ class Stockist {
     publicCode: json['public_code'] ?? '',
 
     deviceLimit: json['device_limit'] ?? 1,
+
+    logoUrl: json['logo_url'] ?? '',
+
+    tagline: json['tagline'] ?? '',
+
+    brandColor: json['brand_color'] ?? '',
+
+    mapUrl: json['map_url'] ?? '',
 
     createdAt: DateTime.parse(json['created_at']),
 

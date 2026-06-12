@@ -72,8 +72,10 @@ class _State extends State<ManageCatalogsScreen> {
   }
 
   Future<void> _whatsapp(StockCatalog c) async {
-    final uri = Uri.parse('https://wa.me/?text='
-        '${Uri.encodeComponent('${c.name}: ${_urlFor(c.shareToken)}')}');
+    final text = '${c.name}: ${_urlFor(c.shareToken)}\n\n'
+        'Powered by Tiles Stock';
+    final uri =
+        Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 

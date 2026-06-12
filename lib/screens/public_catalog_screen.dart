@@ -76,6 +76,19 @@ class _State extends State<PublicCatalogScreen> {
     });
   }
 
+  // ── Branding ─────────────────────────────────────────────────────────────
+
+  // Default theme blue, overridden by the stockist's chosen brand colour.
+  static const Color _defaultBrand = Color(0xFF1B4F72);
+
+  /// The stockist's brand accent colour (hex from the RPC) or the default.
+  Color get _brand {
+    final hex = (_stockist['brand_color'] ?? '').toString().replaceAll('#', '').trim();
+    final v = int.tryParse(hex, radix: 16);
+    if (v == null || hex.length != 6) return _defaultBrand;
+    return Color(0xFF000000 | v);
+  }
+
   // ── Derived ────────────────────────────────────────────────────────────────
 
   List<String> _distinct(String key) {
@@ -248,6 +261,8 @@ class _State extends State<PublicCatalogScreen> {
     // the stockist/admin can see demand coming via links. Best-effort.
     _svc.logLinkInquiry(widget.token, _selected.keys.toList());
 
+    lines.add('');
+    lines.add('— Powered by Tiles Stock');
     final msg = lines.join('\n');
     final uri = phone.isEmpty
         ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')
@@ -388,7 +403,7 @@ class _State extends State<PublicCatalogScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: selected
                               ? const Color(0xFF2E7D32)
-                              : const Color(0xFF1B4F72),
+                              : _brand,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
@@ -529,7 +544,7 @@ class _State extends State<PublicCatalogScreen> {
                           Navigator.pop(ctx);
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1B4F72),
+                          backgroundColor: _brand,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                         ),
@@ -566,10 +581,11 @@ class _State extends State<PublicCatalogScreen> {
         slivers: [
           SliverAppBar(
             pinned: true,
-            backgroundColor: const Color(0xFF1B4F72),
+            backgroundColor: _brand,
             foregroundColor: Colors.white,
             title: Text(_stockist['name']?.toString() ?? 'Catalog'),
           ),
+          SliverToBoxAdapter(child: _brandHeader()),
           SliverToBoxAdapter(child: _searchRow()),
           SliverToBoxAdapter(
             child: Padding(
@@ -590,7 +606,7 @@ class _State extends State<PublicCatalogScreen> {
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 100),
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
               sliver: SliverMasonryGrid.count(
                 crossAxisCount: 2,
                 mainAxisSpacing: 12,
@@ -599,9 +615,119 @@ class _State extends State<PublicCatalogScreen> {
                 itemBuilder: (_, i) => _card(list[i]),
               ),
             ),
+          SliverToBoxAdapter(child: _poweredBy()),
         ],
       ),
       bottomNavigationBar: _enquireBar(),
+    );
+  }
+
+  // Branded white-label header: logo + name + tagline, then address + a Maps
+  // "Directions" link. Anonymity is enforced server-side (the RPC nulls logo/
+  // address/map for anonymous stockists), so we just render whatever arrives.
+  Widget _brandHeader() {
+    final name = (_stockist['name'] ?? '').toString();
+    final tagline = (_stockist['tagline'] ?? '').toString();
+    final logo = (_stockist['logo_url'] ?? '').toString();
+    final address = (_stockist['address'] ?? '').toString();
+    final city = (_stockist['city'] ?? '').toString();
+    final mapUrl = (_stockist['map_url'] ?? '').toString();
+    final place = [address, city].where((x) => x.trim().isNotEmpty).join(', ');
+
+    return Container(
+      width: double.infinity,
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (logo.isNotEmpty) ...[
+                // Distortion-free, colour-safe logo (BoxFit.contain + c_fit URL).
+                ConstrainedBox(
+                  constraints: const BoxConstraints(
+                      maxWidth: 72, maxHeight: 56, minWidth: 0),
+                  child: Image.network(
+                    CloudinaryService.logoUrl(logo, size: 160),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name.isEmpty ? 'Catalog' : name,
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: _brand)),
+                    if (tagline.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(tagline,
+                          style: TextStyle(
+                              fontSize: 12.5, color: Colors.grey.shade600)),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (place.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.location_on_outlined,
+                    size: 16, color: Colors.grey.shade500),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(place,
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                ),
+                if (mapUrl.isNotEmpty)
+                  GestureDetector(
+                    onTap: () => launchUrl(Uri.parse(mapUrl),
+                        mode: LaunchMode.externalApplication),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.directions, size: 15, color: _brand),
+                        const SizedBox(width: 2),
+                        Text('Directions',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _brand)),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Footer credit shown at the bottom of every catalog page.
+  Widget _poweredBy() {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          16, 8, 16, 16 + MediaQuery.viewPaddingOf(context).bottom),
+      child: Center(
+        child: Text('Powered by Tiles Stock',
+            style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade500,
+                letterSpacing: 0.3)),
+      ),
     );
   }
 
@@ -639,7 +765,7 @@ class _State extends State<PublicCatalogScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
               decoration: BoxDecoration(
-                color: _smart ? const Color(0xFF1B4F72) : Colors.grey.shade200,
+                color: _smart ? _brand : Colors.grey.shade200,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(Icons.auto_awesome,
@@ -655,7 +781,7 @@ class _State extends State<PublicCatalogScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
               decoration: BoxDecoration(
                 color: _filterCount > 0
-                    ? const Color(0xFF1B4F72)
+                    ? _brand
                     : Colors.grey.shade200,
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -705,7 +831,7 @@ class _State extends State<PublicCatalogScreen> {
               style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: count == 0 ? Colors.grey : const Color(0xFF1B4F72)),
+                  color: count == 0 ? Colors.grey : _brand),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -749,7 +875,7 @@ class _State extends State<PublicCatalogScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-              color: selected ? const Color(0xFF1B4F72) : Colors.grey.shade200,
+              color: selected ? _brand : Colors.grey.shade200,
               width: selected ? 2 : 1),
         ),
         clipBehavior: Clip.antiAlias,
@@ -817,7 +943,7 @@ class _State extends State<PublicCatalogScreen> {
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
                       color: selected
-                          ? const Color(0xFF1B4F72)
+                          ? _brand
                           : Colors.black.withValues(alpha: 0.35),
                       shape: BoxShape.circle,
                     ),
@@ -874,10 +1000,10 @@ class _State extends State<PublicCatalogScreen> {
           child: Container(
             padding: const EdgeInsets.all(2),
             decoration: BoxDecoration(
-              color: const Color(0xFF1B4F72).withValues(alpha: 0.1),
+              color: _brand.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Icon(icon, size: 18, color: const Color(0xFF1B4F72)),
+            child: Icon(icon, size: 18, color: _brand),
           ),
         );
     return Row(
@@ -888,10 +1014,10 @@ class _State extends State<PublicCatalogScreen> {
             onTap: () => _editQty(id, qty),
             child: Text('$qty box${qty == 1 ? '' : 'es'}',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF1B4F72))),
+                    color: _brand)),
           ),
         ),
         btn(Icons.add, () => _setQty(id, qty + 1)),

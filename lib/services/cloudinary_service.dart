@@ -129,4 +129,26 @@ class CloudinaryService {
     if (RegExp(r'^[a-z]{1,3}_').hasMatch(rest)) return url;
     return '${url.substring(0, insertAt)}w_$width,c_limit,q_auto,f_auto/$rest';
   }
+
+  /// Rewrites a Cloudinary URL into a **logo-safe** delivery for the branded
+  /// catalog page. Stockists upload logos at wildly different sizes/shapes, so
+  /// we normalise WITHOUT distorting or recolouring:
+  ///   • `c_fit` into a [size]×[size] box → scales DOWN preserving aspect ratio,
+  ///     never crops, never stretches (a wide logo stays wide, square stays
+  ///     square). `dpr_auto` keeps it crisp on retina.
+  ///   • Colour-safe: `q_100` (no lossy colour shift) and we DON'T use `f_auto`
+  ///     (which can flatten a transparent PNG onto white). PNG/transparency is
+  ///     preserved by leaving the format as uploaded.
+  /// Non-Cloudinary/empty URLs are returned unchanged.
+  static String logoUrl(String url, {int size = 240}) {
+    if (url.isEmpty) return url;
+    const marker = '/image/upload/';
+    final i = url.indexOf(marker);
+    if (i < 0) return url;
+    final insertAt = i + marker.length;
+    final rest = url.substring(insertAt);
+    if (RegExp(r'^[a-z]{1,3}_').hasMatch(rest)) return url; // already transformed
+    return '${url.substring(0, insertAt)}'
+        'c_fit,w_$size,h_$size,q_100,dpr_auto/$rest';
+  }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
+import '../../services/cloudinary_service.dart';
 import '../../widgets/phone_field.dart';
 import '../../utils/stockist_tiers.dart';
 import 'excel_import_screen.dart';
@@ -377,6 +379,20 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
 
+  // Branded catalog page (white-label share-link page).
+  final _picker = ImagePicker();
+  String _logoUrl = ''; // Cloudinary URL of the uploaded logo ('' = none)
+  bool _uploadingLogo = false;
+  final _tagline = TextEditingController();
+  String _brandColor = ''; // hex like #1B4F72 ('' = default theme colour)
+  final _mapUrl = TextEditingController();
+
+  // Preset brand-colour swatches (admin picks one; '' clears to the default).
+  static const _brandSwatches = <String>[
+    '#1B4F72', '#2E7D32', '#B71C1C', '#6A1B9A',
+    '#E65100', '#00695C', '#37474F', '#AD1457',
+  ];
+
   bool _saving = false;
   String? _error;
 
@@ -402,6 +418,10 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _tradeName.text = s.publicDisplayName;
       _publicCode = s.publicCode;
       _deviceLimit.text = '${s.deviceLimit}';
+      _logoUrl = s.logoUrl;
+      _tagline.text = s.tagline;
+      _brandColor = s.brandColor;
+      _mapUrl.text = s.mapUrl;
       _loadDeviceCount();
     }
   }
@@ -415,7 +435,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   void dispose() {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
-      _priority, _gst, _tradeName, _deviceLimit
+      _priority, _gst, _tradeName, _deviceLimit, _tagline, _mapUrl
     ]) {
       c.dispose();
     }
@@ -598,6 +618,161 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     );
   }
 
+  Future<void> _pickLogo() async {
+    try {
+      final x = await _picker.pickImage(
+          source: ImageSource.gallery, maxWidth: 1200, imageQuality: 100);
+      if (x == null || !mounted) return;
+      setState(() => _uploadingLogo = true);
+      final url = await CloudinaryService.uploadImage(x.path);
+      if (!mounted) return;
+      setState(() {
+        _uploadingLogo = false;
+        if (url != null) {
+          _logoUrl = url;
+        } else {
+          _error = 'Logo upload failed. Please try again.';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _uploadingLogo = false;
+        _error = 'Logo upload failed: $e';
+      });
+    }
+  }
+
+  Widget _brandingSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        const Text('Catalog Branding',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        const SizedBox(height: 2),
+        Text(
+            'Logo, tagline, colour & map shown on the share-link catalog page. '
+            'Hidden automatically while the stockist is anonymous (except '
+            'tagline & colour).',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        const SizedBox(height: 10),
+        // Logo: preview (fit, no distortion) + upload / change / remove.
+        Row(
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: _uploadingLogo
+                  ? const Center(
+                      child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2)))
+                  : _logoUrl.isEmpty
+                      ? Icon(Icons.image_outlined,
+                          color: Colors.grey.shade400, size: 26)
+                      : Image.network(
+                          CloudinaryService.logoUrl(_logoUrl, size: 128),
+                          fit: BoxFit.contain),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _uploadingLogo ? null : _pickLogo,
+                  icon: const Icon(Icons.upload, size: 16),
+                  label: Text(_logoUrl.isEmpty ? 'Upload logo' : 'Change logo'),
+                ),
+                if (_logoUrl.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: _uploadingLogo
+                        ? null
+                        : () => setState(() => _logoUrl = ''),
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text('Remove'),
+                    style:
+                        TextButton.styleFrom(foregroundColor: Colors.redAccent),
+                  ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _field(_tagline, 'Tagline (e.g. "Premium tiles since 2008")'),
+        // Brand colour swatches.
+        const SizedBox(height: 2),
+        const Text('Brand colour',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            // "None" / default.
+            GestureDetector(
+              onTap: () => setState(() => _brandColor = ''),
+              child: Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: _brandColor.isEmpty
+                          ? const Color(0xFF1B4F72)
+                          : Colors.grey.shade300,
+                      width: _brandColor.isEmpty ? 3 : 1),
+                ),
+                child: Icon(Icons.format_color_reset,
+                    size: 16, color: Colors.grey.shade500),
+              ),
+            ),
+            ..._brandSwatches.map((hex) {
+              final c = _hexToColor(hex);
+              final on = _brandColor.toUpperCase() == hex.toUpperCase();
+              return GestureDetector(
+                onTap: () => setState(() => _brandColor = hex),
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: c,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: on ? Colors.black : Colors.grey.shade300,
+                        width: on ? 3 : 1),
+                  ),
+                  child: on
+                      ? const Icon(Icons.check, size: 16, color: Colors.white)
+                      : null,
+                ),
+              );
+            }),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _field(_mapUrl, 'Google Maps link (optional)',
+            keyboard: TextInputType.url),
+      ],
+    );
+  }
+
+  // Parse '#RRGGBB' to a Color; falls back to the theme blue on bad input.
+  static Color _hexToColor(String hex) {
+    final h = hex.replaceAll('#', '').trim();
+    final v = int.tryParse(h, radix: 16);
+    if (v == null || h.length != 6) return const Color(0xFF1B4F72);
+    return Color(0xFF000000 | v);
+  }
+
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_isEdit && _anonymous && _tradeName.text.trim().isEmpty) {
@@ -627,6 +802,13 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             widget.existing!.id, _anonymous, _tradeName.text.trim());
         await _dataSvc.setDeviceLimit('stockist', widget.existing!.id,
             int.tryParse(_deviceLimit.text.trim()) ?? 1);
+        await _dataSvc.setStockistBranding(
+          widget.existing!.id,
+          logoUrl: _logoUrl.trim(),
+          tagline: _tagline.text.trim(),
+          brandColor: _brandColor.trim(),
+          mapUrl: _mapUrl.text.trim(),
+        );
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -765,6 +947,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                   ),
                 ),
               if (_isEdit) _anonymitySection(),
+              if (_isEdit) _brandingSection(),
               if (_isEdit) _deviceSection(),
               _field(_priority, 'Priority (0.00)',
                   keyboard: const TextInputType.numberWithOptions(decimal: true),

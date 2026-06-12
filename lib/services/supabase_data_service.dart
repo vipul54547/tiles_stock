@@ -470,6 +470,25 @@ class SupabaseDataService {
     return res as String?;
   }
 
+  /// Admin: set a stockist's white-label branding for the public catalog page
+  /// (logo, tagline, brand colour hex, Google-Maps link). Blank values clear the
+  /// field. Anonymity hiding is enforced server-side in the public_catalog RPC.
+  Future<void> setStockistBranding(
+    String sequentialId, {
+    String logoUrl = '',
+    String tagline = '',
+    String brandColor = '',
+    String mapUrl = '',
+  }) async {
+    await supabase.rpc('admin_set_branding', params: {
+      'p_seq': sequentialId,
+      'p_logo_url': logoUrl,
+      'p_tagline': tagline,
+      'p_brand_color': brandColor,
+      'p_map_url': mapUrl,
+    });
+  }
+
   /// Admin: mint a fresh masked public code (retires the old one to history).
   Future<String?> regeneratePublicCode(String sequentialId) async {
     final res = await supabase
@@ -676,6 +695,10 @@ class SupabaseDataService {
         publicDisplayName: s['public_display_name'] ?? '',
         publicCode: s['public_code'] ?? '',
         deviceLimit: s['device_limit'] ?? 1,
+        logoUrl:    s['logo_url'] ?? '',
+        tagline:    s['tagline'] ?? '',
+        brandColor: s['brand_color'] ?? '',
+        mapUrl:     s['map_url'] ?? '',
         createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
             DateTime.now(),
       );
