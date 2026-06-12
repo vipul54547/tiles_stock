@@ -1381,7 +1381,10 @@ class _State extends State<UploadStockScreen> {
   Widget _buildBottomBar() {
     final total = _rows.length;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+      // Add the system nav-bar inset so the button clears the Android nav
+      // buttons under edge-to-edge (targetSdk 36). See edge-to-edge convention.
+      padding: EdgeInsets.fromLTRB(
+          16, 12, 16, 20 + MediaQuery.viewPaddingOf(context).bottom),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [

@@ -829,7 +829,10 @@ class _State extends State<StockistPortfolioScreen> {
     final totalBoxes =
         chosen.fold(0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0));
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      // +nav-bar inset so the Send button clears the Android nav buttons
+      // (edge-to-edge, targetSdk 36).
+      padding: EdgeInsets.fromLTRB(
+          16, 12, 16, 24 + MediaQuery.viewPaddingOf(context).bottom),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
