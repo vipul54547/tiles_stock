@@ -69,7 +69,10 @@ class _State extends State<ManageCatalogsScreen> {
     }
   }
 
-  String _urlFor(String token) => '${AppConfig.shareBaseUrl}/#/s/$token';
+  // Path form (NOT hash) so WhatsApp/social crawlers can read the token and the
+  // Netlify edge function can serve a branded per-stockist preview card. The
+  // edge function redirects real browsers on to the hash-routed app.
+  String _urlFor(String token) => '${AppConfig.shareBaseUrl}/s/$token';
 
   Future<void> _copy(StockCatalog c) async {
     await Clipboard.setData(ClipboardData(text: _urlFor(c.shareToken)));

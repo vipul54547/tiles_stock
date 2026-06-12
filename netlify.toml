@@ -1,0 +1,10 @@
+# Netlify config for the Tiles Stock public web build (Flutter web + edge preview).
+[build]
+  publish = "build/web"
+  edge_functions = "netlify/edge-functions"
+
+# Per-stockist link preview: crawler hits to /s/<token> get branded OG tags, then
+# real browsers are redirected to the hash-routed app (/#/s/<token>).
+[[edge_functions]]
+  path = "/s/:token"
+  function = "catalog-preview"
