@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import 'package:go_router/go_router.dart';
@@ -14,6 +15,7 @@ import 'screens/login_screen.dart';
 
 import 'screens/notifications_screen.dart';
 import 'screens/public_catalog_screen.dart';
+import 'screens/web_landing_screen.dart';
 
 import 'screens/reset_password_screen.dart';
 
@@ -60,7 +62,22 @@ final GoRouter _router = GoRouter(
 
   initialLocation: '/splash',
 
+  // On the WEB build, only the public share-link catalog (and the password reset
+  // that may arrive by email) are reachable — every other route is redirected to
+  // a minimal landing so login / admin / the buyer+stockist app never appear on
+  // the public domain. The mobile app is unaffected (kIsWeb is false there).
+  redirect: (context, state) {
+    if (!kIsWeb) return null;
+    final loc = state.matchedLocation;
+    final allowed = loc.startsWith('/s/') ||
+        loc == '/reset-password' ||
+        loc == '/web';
+    return allowed ? null : '/web';
+  },
+
   routes: [
+
+    GoRoute(path: '/web', builder: (_, __) => const WebLandingScreen()),
 
     GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
 
