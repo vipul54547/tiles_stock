@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/brand.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
@@ -44,6 +45,9 @@ class _State extends State<StockistDashboardScreen> {
   // inventory filter and the per-design "Private" badge.
   List<StockCatalog> _catalogs = [];
   String _catalogFilter = 'both'; // 'both' | 'public' | 'private'
+  // Brands (multi-brand). Switcher shown only when the stockist has >1 brand.
+  List<Brand> _brands = [];
+  String _brandFilter = 'all'; // 'all' | <brandId>
   // Buyer My-Choice interest in this stockist's designs: designId → (buyers, boxes).
   Map<String, ({int buyers, int boxes})> _inquiries = {};
   // Boxes the stockist added that are held for admin approval (big-stock rule).
@@ -131,15 +135,27 @@ class _State extends State<StockistDashboardScreen> {
     final inquiries = await _service.getMyDesignInquiries();
     final pending = await _service.myPendingStockBoxes();
     final catalogs = await _service.getCatalogs(_myStockistId);
+    final brands = await _service.getMyBrands();
     if (!mounted) return;
     setState(() {
       _designs = data;
       _inquiries = inquiries;
       _pendingBoxes = pending;
       _catalogs = catalogs;
+      _brands = brands;
+      // Drop a stale brand filter if that brand no longer exists.
+      if (_brandFilter != 'all' && !_brands.any((b) => b.id == _brandFilter)) {
+        _brandFilter = 'all';
+      }
       _loading = false;
     });
   }
+
+  // design → its catalogue's brand id (multi-brand). Null when unknown.
+  Map<String, String?> get _catalogBrand =>
+      {for (final c in _catalogs) c.id: c.brandId};
+  String? _designBrandId(TileDesign d) =>
+      d.catalogId == null ? null : _catalogBrand[d.catalogId];
 
   // Catalog helpers (Father & Child).
   Set<String> get _privateCatalogIds =>
@@ -155,8 +171,13 @@ class _State extends State<StockistDashboardScreen> {
   // Out-of-stock (0-box) designs are hidden from the dashboard's stock list,
   // its counts and filters. They still surface in the Inquiry tab if a buyer
   // wants them, so the stockist knows what to restock.
-  List<TileDesign> get _inStockDesigns =>
-      _designs.where((d) => d.boxQuantity > 0).toList();
+  List<TileDesign> get _inStockDesigns {
+    var list = _designs.where((d) => d.boxQuantity > 0);
+    if (_brandFilter != 'all') {
+      list = list.where((d) => _designBrandId(d) == _brandFilter);
+    }
+    return list.toList();
+  }
 
   List<TileDesign> get _filteredAndSorted {
     var base = _inStockDesigns;
@@ -298,6 +319,7 @@ class _State extends State<StockistDashboardScreen> {
                 if (_pendingBoxes > 0) _buildPendingBanner(),
                 // Pinned Public/Private/Both inventory filter (Stock tab only,
                 // and only when the stockist has a private catalog).
+                if (_brands.length > 1) _buildBrandFilterRow(),
                 if (_hasPrivateCatalog) _buildCatalogFilterRow(),
                 _buildChipRow(),   // pinned: Stock + Inquiry buttons + quality chips
                 Expanded(child: _buildMyStockScroll()),
@@ -307,6 +329,59 @@ class _State extends State<StockistDashboardScreen> {
   }
 
   // ── Public / Private / Both filter row (pinned) ───────────────────────────
+  // Brand switcher (multi-brand) — All + one chip per brand. Filters the whole
+  // stock view (stats, list, facets) to the selected brand's stock.
+  Widget _buildBrandFilterRow() {
+    Widget chip(String value, String label) {
+      final sel = _brandFilter == value;
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
+        child: GestureDetector(
+          onTap: () => setState(() => _brandFilter = value),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: sel ? const Color(0xFF6A1B9A) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                  color: sel ? const Color(0xFF6A1B9A) : Colors.grey.shade400),
+            ),
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: sel ? Colors.white : Colors.grey.shade700)),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(10, 8, 4, 2),
+      child: Row(
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(right: 6),
+            child: Icon(Icons.sell_outlined, size: 15, color: Color(0xFF6A1B9A)),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  chip('all', 'All brands'),
+                  for (final b in _brands)
+                    if (b.isActive) chip(b.id, b.name),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCatalogFilterRow() {
     Widget btn(String value, String label) {
       final sel = _catalogFilter == value;
