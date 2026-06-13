@@ -1058,12 +1058,28 @@ class SupabaseDataService {
   /// Dispatch a locked order by token. [lines] is the full current line set —
   /// each `{ 'design_id': <uuid>, 'dispatch': <boxes> }`; omitted designs are
   /// removed, new design_ids are added. Over-stock dispatch is allowed (system
-  /// stock clamps at 0). Returns the new status + outstanding/dispatched totals.
+  /// stock clamps at 0). The note metadata (invoice/vehicle/transporter/date)
+  /// is saved as a Dispatch Note so a report can be sent to the buyer. Returns
+  /// the new status, outstanding/dispatched totals and the dispatch_no.
   Future<Map<String, dynamic>> dispatchInquiry(
-      String id, List<Map<String, dynamic>> lines) async {
+    String id,
+    List<Map<String, dynamic>> lines, {
+    String invoiceNo = '',
+    String vehicleNo = '',
+    String transporter = '',
+    String note = '',
+    DateTime? date,
+  }) async {
     try {
-      final res = await supabase
-          .rpc('dispatch_inquiry', params: {'p_inquiry': id, 'p_lines': lines});
+      final res = await supabase.rpc('dispatch_inquiry', params: {
+        'p_inquiry': id,
+        'p_lines': lines,
+        'p_invoice': invoiceNo,
+        'p_vehicle': vehicleNo,
+        'p_transporter': transporter,
+        'p_note': note,
+        'p_date': (date ?? DateTime.now()).toIso8601String().substring(0, 10),
+      });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();

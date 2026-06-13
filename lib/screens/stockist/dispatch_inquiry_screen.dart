@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
@@ -16,8 +17,15 @@ class DispatchInquiryScreen extends StatefulWidget {
   final String inquiryId;
   final String? token;
   final String? company;
+  final String? phone;       // buyer phone — to send the dispatch report
+  final String? countryCode; // buyer dialling code (e.g. +91)
   const DispatchInquiryScreen(
-      {super.key, required this.inquiryId, this.token, this.company});
+      {super.key,
+      required this.inquiryId,
+      this.token,
+      this.company,
+      this.phone,
+      this.countryCode});
   @override
   State<DispatchInquiryScreen> createState() => _State();
 }
@@ -53,6 +61,13 @@ class _State extends State<DispatchInquiryScreen> {
   bool _saving = false;
   bool _dirty = false;
 
+  // Dispatch-note metadata (sent to the buyer in the WhatsApp report).
+  final _invoiceCtrl = TextEditingController();
+  final _vehicleCtrl = TextEditingController();
+  final _transporterCtrl = TextEditingController();
+  final _noteCtrl = TextEditingController();
+  DateTime _date = DateTime.now();
+
   @override
   void initState() {
     super.initState();
@@ -65,8 +80,18 @@ class _State extends State<DispatchInquiryScreen> {
     for (final l in _lines) {
       l.ctrl.dispose();
     }
+    _invoiceCtrl.dispose();
+    _vehicleCtrl.dispose();
+    _transporterCtrl.dispose();
+    _noteCtrl.dispose();
     super.dispose();
   }
+
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  String _fmtDate(DateTime d) => '${d.day} ${_months[d.month - 1]} ${d.year}';
 
   void _markDirty() {
     if (!_dirty) setState(() => _dirty = true);
@@ -216,26 +241,158 @@ class _State extends State<DispatchInquiryScreen> {
     final payload = _lines
         .map((l) => {'design_id': l.designId, 'dispatch': l.dispatchNow})
         .toList();
+    final totalNow = _lines.fold(0, (s, l) => s + l.dispatchNow);
+    final dispatchedLines = _lines.where((l) => l.dispatchNow > 0).toList();
 
     setState(() => _saving = true);
     try {
-      final res = await _data.dispatchInquiry(widget.inquiryId, payload);
+      final res = await _data.dispatchInquiry(
+        widget.inquiryId, payload,
+        invoiceNo: _invoiceCtrl.text.trim(),
+        vehicleNo: _vehicleCtrl.text.trim(),
+        transporter: _transporterCtrl.text.trim(),
+        note: _noteCtrl.text.trim(),
+        date: _date,
+      );
       if (!mounted) return;
       _dirty = false;
       final status = (res['status'] ?? '').toString();
-      Navigator.pop(context, true);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(status == 'completed'
-            ? '$_token completed — all boxes dispatched.'
-            : '$_token dispatched (partial).'),
-        backgroundColor: const Color(0xFF2E7D32),
-      ));
+      final outstanding = (res['outstanding'] as num?)?.toInt() ?? 0;
+      final dispatchNo = (res['dispatch_no'] ?? '').toString();
+      if (totalNow > 0) {
+        final report =
+            _buildReport(dispatchNo, dispatchedLines, totalNow, outstanding);
+        await _showReportSheet(report, status);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Order updated.'),
+            backgroundColor: Color(0xFF2E7D32)));
+      }
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
     }
+  }
+
+  // Builds the WhatsApp dispatch-report text (no rates, by design).
+  String _buildReport(
+      String dispatchNo, List<_Line> lines, int total, int outstanding) {
+    final b = StringBuffer();
+    b.writeln('Dispatch update — Order $_token');
+    if (dispatchNo.isNotEmpty) b.writeln('Dispatch No: $dispatchNo');
+    b.writeln('Date: ${_fmtDate(_date)}');
+    if (_invoiceCtrl.text.trim().isNotEmpty) {
+      b.writeln('Invoice No: ${_invoiceCtrl.text.trim()}');
+    }
+    if (_vehicleCtrl.text.trim().isNotEmpty) {
+      b.writeln('Vehicle No: ${_vehicleCtrl.text.trim()}');
+    }
+    if (_transporterCtrl.text.trim().isNotEmpty) {
+      b.writeln('Transporter: ${_transporterCtrl.text.trim()}');
+    }
+    b.writeln();
+    b.writeln('Dispatched now:');
+    for (var i = 0; i < lines.length; i++) {
+      final l = lines[i];
+      b.writeln(
+          '${i + 1}. ${l.name} (${l.size.replaceAll(' mm', '')}) — ${l.dispatchNow} boxes');
+    }
+    b.writeln('Total dispatched: $total boxes');
+    if (outstanding > 0) b.writeln('Balance pending: $outstanding boxes');
+    if (_noteCtrl.text.trim().isNotEmpty) {
+      b.writeln();
+      b.writeln('Note: ${_noteCtrl.text.trim()}');
+    }
+    return b.toString();
+  }
+
+  // Post-dispatch: preview the report and let the stockist send it to the buyer.
+  Future<void> _showReportSheet(String report, String status) async {
+    final digits = '${widget.countryCode ?? ''}${widget.phone ?? ''}'
+        .replaceAll(RegExp(r'[^0-9]'), '');
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            16, 16, 16, 16 + MediaQuery.of(ctx).viewPadding.bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+              const SizedBox(width: 8),
+              Text(
+                  status == 'completed'
+                      ? 'Order completed'
+                      : 'Dispatch recorded',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
+            ]),
+            const SizedBox(height: 10),
+            const Text('Dispatch report for the buyer:',
+                style: TextStyle(fontSize: 12.5)),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxHeight: 260),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: SingleChildScrollView(
+                child: Text(report,
+                    style: const TextStyle(fontSize: 12.5, height: 1.5)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            if (digits.isNotEmpty)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    final uri = Uri.parse(
+                        'https://wa.me/$digits?text=${Uri.encodeComponent(report)}');
+                    await launchUrl(uri,
+                        mode: LaunchMode.externalApplication);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  icon: const Icon(Icons.chat_rounded, size: 18),
+                  label: const Text('Send report via WhatsApp'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF25D366),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                  ),
+                ),
+              )
+            else
+              const Text('No buyer phone on file — report not sent.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Done')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _dispatchAllRemaining() {
+    setState(() {
+      for (final l in _lines) {
+        l.ctrl.text = l.remaining > 0 ? '${l.remaining}' : '';
+      }
+      _dirty = true;
+    });
   }
 
   @override
@@ -270,30 +427,128 @@ class _State extends State<DispatchInquiryScreen> {
                               fontWeight: FontWeight.w600, color: _navy)),
                     ),
                   Expanded(
-                    child: _lines.isEmpty
-                        ? const Center(
-                            child: Text('No items on this order',
-                                style: TextStyle(color: Colors.grey)))
-                        : ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                            itemCount: _lines.length,
-                            itemBuilder: (_, i) => _lineCard(_lines[i]),
-                          ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                    child: OutlinedButton.icon(
-                      onPressed: _addDesign,
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text('Add a design'),
-                      style: OutlinedButton.styleFrom(
-                          foregroundColor: _navy,
-                          minimumSize: const Size.fromHeight(44)),
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                      children: [
+                        _metaSection(),
+                        const SizedBox(height: 12),
+                        if (_lines.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Center(
+                                child: Text('No items on this order',
+                                    style: TextStyle(color: Colors.grey))),
+                          )
+                        else
+                          ..._lines.map(_lineCard),
+                        const SizedBox(height: 4),
+                        OutlinedButton.icon(
+                          onPressed: _addDesign,
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Add a design'),
+                          style: OutlinedButton.styleFrom(
+                              foregroundColor: _navy,
+                              minimumSize: const Size.fromHeight(44)),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
             ),
+    );
+  }
+
+  // Dispatch-note details (Invoice / Vehicle / Date / Transporter / Note) +
+  // a one-tap "All remaining" that fills every line's Send box.
+  Widget _metaSection() {
+    InputDecoration dec(String label) => InputDecoration(
+          labelText: label,
+          isDense: true,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        );
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Text('Dispatch details',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _lines.isEmpty ? null : _dispatchAllRemaining,
+                icon: const Icon(Icons.done_all, size: 16),
+                label: const Text('All remaining',
+                    style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _invoiceCtrl,
+                  onChanged: (_) => _markDirty(),
+                  decoration: dec('Invoice No'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _vehicleCtrl,
+                  onChanged: (_) => _markDirty(),
+                  decoration: dec('Vehicle / Truck No'),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: _date,
+                      firstDate: DateTime(2025),
+                      lastDate: DateTime.now().add(const Duration(days: 1)),
+                    );
+                    if (d != null) setState(() { _date = d; _dirty = true; });
+                  },
+                  icon: const Icon(Icons.event, size: 16),
+                  label: Text('Date: ${_fmtDate(_date)}',
+                      style: const TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: _navy,
+                      minimumSize: const Size.fromHeight(44)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _transporterCtrl,
+                  onChanged: (_) => _markDirty(),
+                  decoration: dec('Transporter (optional)'),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _noteCtrl,
+              onChanged: (_) => _markDirty(),
+              maxLines: 2,
+              decoration: dec('Note (optional)'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

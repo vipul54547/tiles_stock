@@ -156,6 +156,8 @@ final GoRouter _router = GoRouter(
           inquiryId: (e['id'] ?? '').toString(),
           token: e['token']?.toString(),
           company: e['company']?.toString(),
+          phone: e['phone']?.toString(),
+          countryCode: e['country_code']?.toString(),
         );
       },
     ),

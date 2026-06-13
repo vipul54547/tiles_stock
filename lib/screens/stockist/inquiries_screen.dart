@@ -627,8 +627,13 @@ class _State extends State<InquiriesScreen> {
   }
 
   Future<void> _dispatch(InquiryOrder o) async {
-    final changed = await context.push<bool>('/stockist/inquiry/dispatch',
-        extra: {'id': o.id, 'token': o.token, 'company': o.company});
+    final changed = await context.push<bool>('/stockist/inquiry/dispatch', extra: {
+      'id': o.id,
+      'token': o.token,
+      'company': o.company,
+      'phone': o.phone,
+      'country_code': o.countryCode,
+    });
     if (changed == true && mounted) _load();
   }
 
