@@ -4,15 +4,16 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/app_config.dart';
 import '../../models/choice_state.dart';
+import '../../models/brand.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/claimed_catalog.dart';
 import '../../models/share_link.dart';
 import '../../services/supabase_data_service.dart';
 
-/// Stockist's stock catalogs (Father & Child): a default **public** catalog
-/// (shown in the marketplace) plus, when the admin has granted it, **private**
-/// catalogs shared only via their own link. Designs are assigned to a catalog at
-/// upload time.
+/// Stockist's stock lists, grouped by brand. Each brand holds up to the
+/// admin-set `stock_list_limit` named lists (default: Premium / Standard /
+/// OneTime). A design is assigned to exactly one list at upload time, and each
+/// list is shared via its own link.
 class ManageCatalogsScreen extends StatefulWidget {
   const ManageCatalogsScreen({super.key});
   @override
@@ -24,10 +25,11 @@ const _navy = Color(0xFF1B4F72);
 class _State extends State<ManageCatalogsScreen> {
   final _data = SupabaseDataService();
   List<StockCatalog> _items = [];
+  List<Brand> _brands = [];
+  int _listLimit = 3; // admin-set stock lists allowed per brand
   Map<String, int> _inq = {}; // catalogId → link-enquiry count
   Map<String, List<CatalogClaimer>> _claimers = {}; // catalogId → dealers joined
   Map<String, List<ShareLink>> _catLinks = {}; // catalogId → its share links
-  bool _canPrivate = false;
   bool _loading = true;
   bool _busy = false;
 
@@ -40,14 +42,15 @@ class _State extends State<ManageCatalogsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final items = await _data.getCatalogs(currentStockistUUID);
-    final canPriv = await _data.canCreatePrivate(currentStockistUUID);
+    final brands = await _data.getMyBrands();
+    final limit = await _data.myStockListLimit();
     final inq = await _data.getCatalogInquiryCounts(currentStockistUUID);
     final claimerList = await _data.getMyCatalogClaimers();
     final claimers = <String, List<CatalogClaimer>>{};
     for (final c in claimerList) {
       (claimers[c.catalogId] ??= []).add(c);
     }
-    // Each catalog's share links (permanent + timed), fetched in parallel.
+    // Each list's share links (permanent + timed), fetched in parallel.
     final linkLists = await Future.wait(
         items.map((it) => _data.getCatalogShareLinks(it.id)));
     final catLinks = <String, List<ShareLink>>{
@@ -56,12 +59,67 @@ class _State extends State<ManageCatalogsScreen> {
     if (!mounted) return;
     setState(() {
       _items = items;
-      _canPrivate = canPriv;
+      _brands = brands;
+      _listLimit = limit;
       _inq = inq;
       _claimers = claimers;
       _catLinks = catLinks;
       _loading = false;
     });
+  }
+
+  /// Lists belonging to a brand, in display order.
+  List<StockCatalog> _listsFor(String brandId) =>
+      _items.where((c) => c.brandId == brandId).toList();
+
+  // Create a new stock list under a brand (server enforces the per-brand cap).
+  Future<void> _newListDialog(Brand brand) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('New stock list — ${brand.name}'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+              hintText: 'e.g. Clearance, Festival',
+              border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Create')),
+        ],
+      ),
+    );
+    if (ok != true || ctrl.text.trim().isEmpty) return;
+    await _run(() => _data.createStockList(brand.id, ctrl.text.trim()));
+  }
+
+  Future<void> _deleteList(StockCatalog c) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete stock list?'),
+        content: Text('Delete "${c.name}"? Its share links stop working. '
+            'Designs in it are NOT deleted but will need reassigning to '
+            'another list.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (yes == true) await _run(() => _data.deleteCatalog(c.id));
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -364,7 +422,7 @@ class _State extends State<ManageCatalogsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Rename stock catalogue'),
+        title: const Text('Rename stock list'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -509,7 +567,7 @@ class _State extends State<ManageCatalogsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Share My Stock Catalogues'),
+        title: const Text('My Stock Lists'),
         actions: [
           IconButton(
             icon: const Icon(Icons.sell_outlined),
@@ -523,33 +581,70 @@ class _State extends State<ManageCatalogsScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(4, 4, 4, 6),
                   child: Text(
-                    'Public stock catalogues show in the app marketplace and via their link. '
-                    'Private stock catalogues are shared only by their own link.'
-                    '${_canPrivate ? '' : ' (Private stock catalogues are admin-enabled.)'}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    'Organise your stock into lists and share each by its own link. '
+                    'A design lives in one list — send a customer the list(s) you '
+                    'want them to see.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
-                Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
-                    itemCount: _items.length,
-                    itemBuilder: (_, i) => _tile(_items[i]),
-                  ),
-                ),
+                for (final b in _brands) ..._brandSection(b),
               ],
             ),
     );
   }
 
+  // A brand header (name + lists count/limit + add button) followed by its
+  // stock-list cards.
+  List<Widget> _brandSection(Brand b) {
+    final lists = _listsFor(b.id);
+    final atCap = lists.length >= _listLimit;
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
+        child: Row(
+          children: [
+            const Icon(Icons.sell_outlined, size: 18, color: _navy),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(b.name,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: _navy)),
+            ),
+            Text('${lists.length}/$_listLimit lists',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+            const SizedBox(width: 2),
+            IconButton(
+              tooltip: atCap
+                  ? 'List limit reached — ask the admin for more'
+                  : 'New stock list',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.add_circle,
+                  color: atCap ? Colors.grey.shade400 : _navy),
+              onPressed: (_busy || atCap) ? null : () => _newListDialog(b),
+            ),
+          ],
+        ),
+      ),
+      if (lists.isEmpty)
+        const Padding(
+          padding: EdgeInsets.fromLTRB(8, 0, 8, 8),
+          child: Text('No lists yet — tap + to add one.',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+        )
+      else
+        for (final c in lists) _tile(c),
+    ];
+  }
+
   Widget _tile(StockCatalog c) {
-    final private = c.isPrivate;
-    final inMarket = !private && c.showInMarketplace;
-    final tagColor = private ? Colors.deepPurple : _navy;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Opacity(
@@ -566,53 +661,30 @@ class _State extends State<ManageCatalogsScreen> {
                         style: const TextStyle(
                             fontWeight: FontWeight.w600, fontSize: 15)),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: tagColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
+                  if (!c.isActive)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Text('HIDDEN',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey)),
                     ),
-                    child: Text(private ? 'PRIVATE' : 'PUBLIC',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: tagColor)),
-                  ),
                 ],
-              ),
-              const SizedBox(height: 2),
-              Text(
-                private
-                    ? 'Link only — not in marketplace'
-                    : (inMarket ? 'In marketplace + link' : 'Link only'),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
               ),
               if ((_inq[c.id] ?? 0) > 0)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Text('${_inq[c.id]} enquiries via this link',
-                      style: TextStyle(
+                      style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: tagColor)),
-                ),
-              // Marketplace toggle (public catalogs only).
-              if (!private)
-                Row(
-                  children: [
-                    const Text('Show in marketplace',
-                        style: TextStyle(fontSize: 12)),
-                    const Spacer(),
-                    Switch(
-                      value: c.showInMarketplace,
-                      activeThumbColor: _navy,
-                      onChanged: _busy
-                          ? null
-                          : (v) =>
-                              _run(() => _data.setCatalogMarketplace(c.id, v)),
-                    ),
-                  ],
+                          color: _navy)),
                 ),
               const Divider(height: 12),
               Row(
@@ -670,6 +742,15 @@ class _State extends State<ManageCatalogsScreen> {
                     padding: const EdgeInsets.all(6),
                     icon: const Icon(Icons.edit_outlined, size: 20),
                     onPressed: _busy ? null : () => _renameDialog(c),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(6),
+                    icon: const Icon(Icons.delete_outline,
+                        size: 20, color: Colors.red),
+                    onPressed: _busy ? null : () => _deleteList(c),
                   ),
                 ],
               ),

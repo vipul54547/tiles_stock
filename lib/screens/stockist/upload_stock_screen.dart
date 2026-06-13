@@ -476,10 +476,10 @@ class _State extends State<UploadStockScreen> {
                   Text('File: $_filename',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
                   const SizedBox(height: 14),
-                  // Catalog (which stock this upload goes into) — only when the
-                  // stockist has more than the default catalog.
+                  // Which stock list this upload goes into — only when the
+                  // stockist has more than one list.
                   if (_catalogs.length > 1) ...[
-                    const Text('Add to stock catalogue',
+                    const Text('Add to stock list',
                         style: TextStyle(
                             fontSize: 12, fontWeight: FontWeight.w600)),
                     DropdownButton<String>(
@@ -487,9 +487,7 @@ class _State extends State<UploadStockScreen> {
                       value: _catalogId,
                       items: _catalogs
                           .map((c) => DropdownMenuItem(
-                              value: c.id,
-                              child: Text(
-                                  '${c.name}${c.isPrivate ? '  (private)' : ''}')))
+                              value: c.id, child: Text(c.name)))
                           .toList(),
                       onChanged: (v) =>
                           setLocal(() => _catalogId = v ?? _catalogId),
@@ -831,16 +829,12 @@ class _State extends State<UploadStockScreen> {
         : '';
     final imageNote =
         imagesUploaded > 0 ? ' · $imagesUploaded photos added$libNote' : libNote;
-    // Make the destination catalog explicit (public = live in market, private =
-    // link-only) so the stockist always knows where the upload landed.
+    // Name the destination stock list so the stockist knows where it landed.
     StockCatalog? cat;
     for (final c in _catalogs) {
       if (c.id == _catalogId) { cat = c; break; }
     }
-    final catNote = cat == null
-        ? ''
-        : '\nUploaded to "${cat.name}"'
-            '${cat.isPrivate ? ' (private — link only).' : ' (public — live in marketplace).'}';
+    final catNote = cat == null ? '' : '\nUploaded to "${cat.name}".';
     // If photos were extracted but none uploaded, the upload itself is failing
     // (e.g. Cloudinary preset not set to "unsigned") — tell the user why.
     final failNote = imagesFailed > 0

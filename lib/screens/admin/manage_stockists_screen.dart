@@ -464,6 +464,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   final _brandLimit = TextEditingController(text: '1'); // brands they may create
+  final _stockListLimit =
+      TextEditingController(text: '3'); // stock lists per brand
 
   // Branded catalog page (white-label share-link page).
   final _picker = ImagePicker();
@@ -507,6 +509,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _publicCode = s.publicCode;
       _deviceLimit.text = '${s.deviceLimit}';
       _brandLimit.text = '${s.brandLimit}';
+      _stockListLimit.text = '${s.stockListLimit}';
       _logoUrl = s.logoUrl;
       _bannerUrl = s.bannerUrl;
       _tagline.text = s.tagline;
@@ -525,7 +528,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   void dispose() {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
-      _priority, _gst, _tradeName, _deviceLimit, _brandLimit, _tagline, _mapUrl
+      _priority, _gst, _tradeName, _deviceLimit, _brandLimit, _stockListLimit,
+      _tagline, _mapUrl
     ]) {
       c.dispose();
     }
@@ -664,6 +668,33 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             keyboardType: TextInputType.number,
             decoration: const InputDecoration(
                 labelText: 'Brands',
+                isDense: true,
+                border: OutlineInputBorder()),
+            validator: (v) {
+              final t = (v ?? '').trim();
+              if (t.isEmpty) return null;
+              final n = int.tryParse(t);
+              if (n == null || n < 1) return 'Min 1';
+              return null;
+            },
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text('Stock Lists per Brand',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        const SizedBox(height: 2),
+        Text(
+            'How many stock lists this stockist may create inside each brand '
+            '(e.g. Premium / Standard / OneTime). Default 3.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: 90,
+          child: TextFormField(
+            controller: _stockListLimit,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+                labelText: 'Lists',
                 isDense: true,
                 border: OutlineInputBorder()),
             validator: (v) {
@@ -1014,6 +1045,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             int.tryParse(_deviceLimit.text.trim()) ?? 1);
         await _dataSvc.setBrandLimit(
             widget.existing!.id, int.tryParse(_brandLimit.text.trim()) ?? 1);
+        await _dataSvc.setStockListLimit(widget.existing!.id,
+            int.tryParse(_stockListLimit.text.trim()) ?? 3);
         await _dataSvc.setStockistBranding(
           widget.existing!.id,
           logoUrl: _logoUrl.trim(),

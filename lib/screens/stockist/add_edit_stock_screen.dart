@@ -80,7 +80,7 @@ class _State extends State<AddEditStockScreen> {
     if (isEdit) await _loadExisting();
   }
 
-  // The stockist's catalogs; default a NEW design to the first public catalog.
+  // The stockist's stock lists; default a NEW design to the first list.
   Future<void> _loadCatalogs() async {
     if (currentStockistUUID.isEmpty) return;
     final cats = await _service.getCatalogs(currentStockistUUID);
@@ -88,9 +88,6 @@ class _State extends State<AddEditStockScreen> {
     setState(() {
       _catalogs = cats.where((c) => c.isActive).toList();
       if (!isEdit) {
-        for (final c in _catalogs) {
-          if (!c.isPrivate) { _catalogId = c.id; break; }
-        }
         _catalogId ??= _catalogs.isEmpty ? null : _catalogs.first.id;
       }
     });
@@ -631,9 +628,7 @@ class _State extends State<AddEditStockScreen> {
               underline: const SizedBox.shrink(),
               items: _catalogs
                   .map((c) => DropdownMenuItem(
-                      value: c.id,
-                      child: Text(
-                          '${c.name}${c.isPrivate ? '  (private)' : ''}')))
+                      value: c.id, child: Text(c.name)))
                   .toList(),
               onChanged: (v) => setState(() {
                 _catalogId = v ?? _catalogId;

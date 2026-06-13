@@ -517,9 +517,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     for (final c in _catalogs) {
       if (c.id == _catalogId) { cat = c; break; }
     }
-    final catNote = cat == null
-        ? ''
-        : ' → "${cat.name}"${cat.isPrivate ? ' (private)' : ' (public)'}';
+    final catNote = cat == null ? '' : ' → "${cat.name}"';
     _snack('Done — $updated updated, $created new$fixNote$libNote$catNote.',
         Colors.green);
     if (updated + created > 0) Navigator.of(context).pop();

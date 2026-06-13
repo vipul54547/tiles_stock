@@ -297,7 +297,23 @@ class SupabaseDataService {
     }
   }
 
-  /// A stockist's catalogs (public + private), in display order.
+  /// The calling stockist's admin-set stock-list limit (per brand). Default 3.
+  Future<int> myStockListLimit() async {
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return 3;
+      final s = await supabase
+          .from('stockists')
+          .select('stock_list_limit')
+          .eq('user_id', uid)
+          .maybeSingle();
+      return (s?['stock_list_limit'] as int?) ?? 3;
+    } catch (_) {
+      return 3;
+    }
+  }
+
+  /// A stockist's stock lists (catalogs), in display order.
   Future<List<StockCatalog>> getCatalogs(String stockistUUID) async {
     try {
       final data = await supabase
@@ -371,6 +387,25 @@ class SupabaseDataService {
   Future<void> setBrandLimit(String sequentialId, int limit) async {
     await supabase.rpc('admin_set_brand_limit',
         params: {'p_seq': sequentialId, 'p_limit': limit});
+  }
+
+  /// Admin: set how many stock lists per brand a stockist may create.
+  Future<void> setStockListLimit(String sequentialId, int limit) async {
+    await supabase.rpc('admin_set_stock_list_limit',
+        params: {'p_seq': sequentialId, 'p_limit': limit});
+  }
+
+  /// Stockist creates a stock list under a brand (server enforces the admin-set
+  /// stock_list_limit per brand). Returns the new list id. Throws the server
+  /// message on failure.
+  Future<String> createStockList(String brandId, String name) async {
+    try {
+      final res = await supabase.rpc('create_stock_list',
+          params: {'p_brand_id': brandId, 'p_name': name});
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
   }
 
   /// The stockist's default public catalog (the one new uploads target by

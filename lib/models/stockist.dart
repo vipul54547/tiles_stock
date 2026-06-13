@@ -65,6 +65,10 @@ class Stockist {
   /// Brands currently created (admin list view only).
   final int brandCount;
 
+  /// Max number of stock lists per brand this stockist may create (admin-set).
+  /// Default 3 (Premium / Standard / OneTime).
+  final int stockListLimit;
+
   /// White-label branding for the public share-link catalog page. All optional.
   /// [logoUrl] is a Cloudinary URL; [brandColor] a hex string (e.g. #1B4F72);
   /// [mapUrl] a Google Maps link. Hidden for anonymous stockists (except
@@ -124,6 +128,8 @@ class Stockist {
     this.brandLimit = 1,
 
     this.brandCount = 0,
+
+    this.stockListLimit = 3,
 
     this.logoUrl = '',
 
@@ -186,6 +192,8 @@ class Stockist {
     brandLimit: json['brand_limit'] ?? 1,
 
     brandCount: json['brand_count'] ?? 0,
+
+    stockListLimit: json['stock_list_limit'] ?? 3,
 
     logoUrl: json['logo_url'] ?? '',
 
