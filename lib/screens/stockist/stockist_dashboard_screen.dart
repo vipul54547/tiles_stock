@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
-import '../../services/cloudinary_service.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/notification_bell.dart';
 import '../../models/choice_state.dart';
@@ -52,9 +50,6 @@ class _State extends State<StockistDashboardScreen> {
   int _pendingBoxes = 0;
   bool _loading = true;
   String get _myStockistId => currentStockistUUID;
-
-  // Tab
-  int _activeTab = 0; // 0 = My Stock, 1 = Buyer Interest
 
   // Multi-select / delete mode
   bool _selectMode = false;
@@ -282,11 +277,6 @@ class _State extends State<StockistDashboardScreen> {
                     _load();
                   },
                 ),
-                IconButton(
-                  icon: const Icon(Icons.receipt_long_outlined),
-                  tooltip: 'Inquiries (by buyer / date)',
-                  onPressed: () => context.push('/stockist/inquiries'),
-                ),
                 const NotificationBell(),
                 IconButton(
                   icon: const Icon(Icons.logout),
@@ -308,14 +298,9 @@ class _State extends State<StockistDashboardScreen> {
                 if (_pendingBoxes > 0) _buildPendingBanner(),
                 // Pinned Public/Private/Both inventory filter (Stock tab only,
                 // and only when the stockist has a private catalog).
-                if (_activeTab == 0 && _hasPrivateCatalog)
-                  _buildCatalogFilterRow(),
-                _buildChipRow(),   // pinned: tabs + quality chips
-                Expanded(
-                  child: _activeTab == 0
-                      ? _buildMyStockScroll() // buttons + search/filter collapse
-                      : _buildBuyerInterestTab(),
-                ),
+                if (_hasPrivateCatalog) _buildCatalogFilterRow(),
+                _buildChipRow(),   // pinned: Stock + Inquiry buttons + quality chips
+                Expanded(child: _buildMyStockScroll()),
               ],
             ),
     );
@@ -464,11 +449,15 @@ class _State extends State<StockistDashboardScreen> {
         clipBehavior: Clip.none,
         child: Row(
           children: [
-            _tabPill('Stock', Icons.inventory_2_outlined, _activeTab == 0,
-                () => setState(() => _activeTab = 0)),
+            _tabPill('Stock', Icons.inventory_2_outlined, true, () {}),
             const SizedBox(width: 6),
-            _tabPill('Inquiry', Icons.bookmark_outlined, _activeTab == 1,
-                () => setState(() => _activeTab = 1), badge: interestCount),
+            // The Inquiry pill opens the full inquiry hub (tokens, filters by
+            // status/date/buyer/design, lock/dispatch) — the single place for
+            // orders. Reloads the dashboard badge on return.
+            _tabPill('Inquiry', Icons.receipt_long_outlined, false, () async {
+              await context.push('/stockist/inquiries');
+              if (mounted) _load();
+            }, badge: interestCount),
             // Gap kept clear of the Inquiry badge while staying compact enough
             // that all four items fit one screen width without scrolling.
             Container(
@@ -1268,422 +1257,4 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // ── Buyer Interest tab ────────────────────────────────────────────────────
-
-  Widget _buildBuyerInterestTab() {
-    final interests = _buyerInterestDesigns;
-
-    if (interests.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.bookmark_outline_rounded,
-                size: 72, color: Colors.grey.shade300),
-            const SizedBox(height: 16),
-            Text('No inquiries yet',
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade500)),
-            const SizedBox(height: 8),
-            Text(
-              'When buyers bookmark your designs,\nthey will appear here.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 13, color: Colors.grey.shade400),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final totalBuyerBoxes = interests.fold(
-        0, (sum, d) => sum + (_inquiries[d.id]?.boxes ?? 0));
-
-    return Column(
-      children: [
-        // Summary strip
-        Container(
-          margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          padding:
-              const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF2E7D32).withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: const Color(0xFF2E7D32).withValues(alpha: 0.2)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _interestStat('${interests.length}', 'Designs'),
-              Container(
-                  width: 1,
-                  height: 28,
-                  color: Colors.grey.shade300),
-              _interestStat('$totalBuyerBoxes', 'Boxes Wanted'),
-              Container(
-                  width: 1,
-                  height: 28,
-                  color: Colors.grey.shade300),
-              _interestStat(
-                  '₹${_estimatedOrderValue >= 1000 ? '${(_estimatedOrderValue / 1000).toStringAsFixed(1)}k' : _estimatedOrderValue.toStringAsFixed(0)}',
-                  'Est. Value'),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            itemCount: interests.length,
-            itemBuilder: (_, i) => _buildInterestCard(interests[i]),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _interestStat(String value, String label) => Column(
-        children: [
-          Text(value,
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  color: Color(0xFF2E7D32))),
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 10, color: Colors.grey)),
-        ],
-      );
-
-  Widget _buildInterestCard(TileDesign d) {
-    final inq = _inquiries[d.id];
-    final buyerQty = inq?.boxes ?? 0;
-    final buyers = inq?.buyers ?? 0;
-    final available = d.boxQuantity;
-    final canFulfill = available >= buyerQty;
-    final imageUrl = d.faceImageUrls.isNotEmpty ? d.faceImageUrls.first : '';
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 6)
-        ],
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: imageUrl.isEmpty
-                ? Container(
-                    width: 68, height: 68,
-                    color: Colors.grey.shade100,
-                    child: Icon(Icons.add_photo_alternate_outlined,
-                        size: 28, color: Colors.grey.shade400),
-                  )
-                : CachedNetworkImage(
-                    imageUrl: CloudinaryService.thumbUrl(imageUrl, width: 300),
-                    width: 68,
-                    height: 68,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) =>
-                        Container(color: Colors.grey.shade200),
-                    errorWidget: (_, __, ___) => Container(
-                        color: Colors.grey.shade200,
-                        child: const Icon(Icons.image_not_supported,
-                            size: 28)),
-                  ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(d.name,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 14),
-                    overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 3),
-                Text(
-                    '${d.size.replaceAll(' mm', '')} · ${d.surfaceType} · ${d.quality}',
-                    style: const TextStyle(
-                        fontSize: 11, color: Colors.grey)),
-                const SizedBox(height: 7),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    _badge('$buyers buyer${buyers == 1 ? '' : 's'}',
-                        const Color(0xFF6A1B9A),
-                        const Color(0xFFF3E5F5)),
-                    _badge('Wants: $buyerQty boxes',
-                        const Color(0xFF1565C0),
-                        const Color(0xFFE3F2FD)),
-                    _badge(
-                        'Available: $available',
-                        canFulfill
-                            ? const Color(0xFF2E7D32)
-                            : Colors.red.shade700,
-                        canFulfill
-                            ? const Color(0xFFE8F5E9)
-                            : const Color(0xFFFFEBEE)),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _interestAction('Buyers', Icons.people_alt_outlined,
-                  const Color(0xFF6A1B9A), () => _showBuyersSheet(d)),
-              const SizedBox(height: 6),
-              _interestAction(
-                  'Dispatch', Icons.local_shipping_outlined, Colors.red.shade700,
-                  () async {
-                await context.push('/stockist/stock/dispatch', extra: d.id);
-                _load();
-              }),
-              const SizedBox(height: 6),
-              _interestAction('Reject', Icons.block_outlined,
-                  Colors.grey.shade700, () => _confirmRejectAll(d)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _interestAction(
-          String label, IconData icon, Color color, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 78,
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Column(
-            children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(height: 1),
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: color)),
-            ],
-          ),
-        ),
-      );
-
-  // Bottom sheet: which companies want this design and how many boxes, with a
-  // per-buyer Reject that removes that buyer's inquiry (My Choice).
-  void _showBuyersSheet(TileDesign d) async {
-    final fetched = await _service.getDesignBuyers(d.id);
-    if (!mounted) return;
-    if (fetched.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No buyers for this design')));
-      return;
-    }
-    final buyers = List<Map<String, dynamic>>.from(fetched);
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => StatefulBuilder(
-        builder: (sheetCtx, setSheet) => DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.5,
-          maxChildSize: 0.85,
-          builder: (ctx, scrollCtrl) => Column(
-            children: [
-              Container(
-                width: 40, height: 4,
-                margin: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2)),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.people_alt_outlined,
-                        color: Color(0xFF6A1B9A), size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text('Buyers for ${d.name}',
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15),
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: buyers.isEmpty
-                    ? const Center(
-                        child: Text('All inquiries rejected',
-                            style: TextStyle(color: Colors.grey)))
-                    : ListView.separated(
-                        controller: scrollCtrl,
-                        padding: const EdgeInsets.all(12),
-                        itemCount: buyers.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 6),
-                        itemBuilder: (_, i) {
-                          final b = buyers[i];
-                          final contact = (b['contact'] ?? '').toString();
-                          final phone = (b['phone'] ?? '').toString();
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey.shade200),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text((b['company'] ?? '').toString(),
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 14)),
-                                      if (contact.isNotEmpty || phone.isNotEmpty)
-                                        Text(
-                                            [contact, phone]
-                                                .where((x) => x.isNotEmpty)
-                                                .join('  ·  '),
-                                            style: TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.grey.shade600)),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 5),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF1565C0)
-                                        .withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text('${b['boxes']} boxes',
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFF1565C0))),
-                                ),
-                                IconButton(
-                                  icon: Icon(Icons.block_outlined,
-                                      size: 20, color: Colors.red.shade400),
-                                  tooltip: 'Reject this inquiry',
-                                  onPressed: () async {
-                                    final ok = await _confirmRejectBuyer(d, b);
-                                    if (ok) setSheet(() => buyers.removeAt(i));
-                                  },
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    _load(); // refresh dashboard inquiry counts after the sheet closes
-  }
-
-  // Confirms + rejects one buyer's inquiry; returns true if it was rejected.
-  Future<bool> _confirmRejectBuyer(
-      TileDesign d, Map<String, dynamic> b) async {
-    final company = (b['company'] ?? 'this buyer').toString();
-    final endUserId = (b['end_user_id'] ?? '').toString();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Reject inquiry'),
-        content: Text(
-            'Reject $company\'s request for "${d.name}"? '
-            'This removes their inquiry.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Reject',
-                  style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-    if (confirmed != true) return false;
-    await _service.rejectInquiry(d.id, endUserId);
-    return true;
-  }
-
-  // Confirms + rejects every buyer's inquiry for a design, then refreshes.
-  Future<void> _confirmRejectAll(TileDesign d) async {
-    final inq = _inquiries[d.id];
-    final buyers = inq?.buyers ?? 0;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Reject all inquiries'),
-        content: Text(
-            'Reject all $buyers buyer${buyers == 1 ? '' : 's'} for "${d.name}"? '
-            'This removes every inquiry for this design.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Reject all',
-                  style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    await _service.rejectDesignInquiries(d.id);
-    await _load();
-  }
-
-  Widget _badge(String label, Color fg, Color bg) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 10,
-                color: fg,
-                fontWeight: FontWeight.w600)),
-      );
 }

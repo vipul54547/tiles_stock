@@ -6,6 +6,7 @@ import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
+import '../../models/inquiry_order.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/my_choice.dart';
 
@@ -19,6 +20,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _allDesigns = [];
   List<Stockist> _allStockists = [];
+  List<InquiryOrder> _orders = []; // one tokenised order per stockist
   bool _loading = true;
   String? _filterStockistId;
 
@@ -34,12 +36,70 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
       _service.getMarketStockists(),
     ]);
     await loadMyChoices(); // restore saved selections
+    final orders = await _service.getMyOrders();
     if (!mounted) return;
     setState(() {
       _allDesigns = results[0] as List<TileDesign>;
       _allStockists = results[1] as List<Stockist>;
+      _orders = orders;
       _loading = false;
     });
+  }
+
+  // The order (token) for a stockist group. Designs are grouped by the stockist
+  // display key (sequential id / masked code), which is the order's stockist_key.
+  InquiryOrder? _orderFor(String stockistDisplayId) {
+    for (final o in _orders) {
+      if (o.stockistKey == stockistDisplayId) return o;
+    }
+    return null;
+  }
+
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  String _fmtDateTime(DateTime d) {
+    final l = d.toLocal();
+    final h = l.hour % 12 == 0 ? 12 : l.hour % 12;
+    final m = l.minute.toString().padLeft(2, '0');
+    final ap = l.hour < 12 ? 'AM' : 'PM';
+    return '${l.day} ${_months[l.month - 1]} ${l.year}, $h:$m $ap';
+  }
+
+  Future<void> _confirmOrder(InquiryOrder o, Stockist stockist) async {
+    if (blockIfGuest(context, feature: 'Confirming orders')) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Confirm this order?'),
+        content: Text(
+            'Confirm order ${o.token} to ${stockist.name}? This tells the '
+            'supplier your selection is final. You can still edit it until they '
+            'lock it.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Confirm')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _service.confirmInquiry(o.id);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${o.token} confirmed.'),
+          backgroundColor: const Color(0xFF2E7D32)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
   }
 
   List<TileDesign> get _chosenDesigns =>
@@ -68,6 +128,15 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     final buffer = StringBuffer();
     buffer.writeln('Hello ${stockist.name},');
     buffer.writeln();
+    final order = designs.isEmpty ? null : _orderFor(designs.first.stockistId);
+    if (order != null) {
+      buffer.writeln('Order No: ${order.token}');
+      buffer.writeln('Generated: ${_fmtDateTime(order.createdAt)}');
+      if (order.updatedAt.difference(order.createdAt).inSeconds.abs() > 1) {
+        buffer.writeln('Modified: ${_fmtDateTime(order.updatedAt)}');
+      }
+      buffer.writeln();
+    }
     buffer.writeln('Order Request:');
     int total = 0;
     for (int i = 0; i < designs.length; i++) {
@@ -360,6 +429,8 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     const color = Color(0xFF1B4F72);
     final sectionBoxes = designs.fold(
         0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0));
+    final order = _orderFor(stockistId);
+    final editable = order?.buyerEditable ?? true;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -411,13 +482,99 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
             ],
           ),
         ),
-        ...designs.map((d) => _buildDesignRow(d)),
+        if (order != null) _buildOrderStrip(order, stockist),
+        ...designs.map((d) => _buildDesignRow(d, editable)),
         Divider(color: Colors.grey.shade200, height: 20),
       ],
     );
   }
 
-  Widget _buildDesignRow(TileDesign d) {
+  // Token + lifecycle status + Generated/Modified times for a stockist's order,
+  // with a Confirm action while it's still a draft and a "locked" note once the
+  // supplier has frozen it.
+  Widget _buildOrderStrip(InquiryOrder o, Stockist? stockist) {
+    final (Color fg, Color bg) = switch (o.status) {
+      'confirmed'   => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
+      'locked'      => (const Color(0xFF6A1B9A), const Color(0xFFF3E5F5)),
+      'dispatching' => (const Color(0xFFE65100), const Color(0xFFFFF3E0)),
+      'completed'   => (const Color(0xFF2E7D32), const Color(0xFFE8F5E9)),
+      'rejected'    => (Colors.red.shade700, const Color(0xFFFFEBEE)),
+      _             => (Colors.grey.shade700, const Color(0xFFF5F5F5)),
+    };
+    final modified = o.updatedAt.difference(o.createdAt).inSeconds.abs() > 1;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.receipt_long_outlined,
+                  size: 15, color: Color(0xFF1B4F72)),
+              const SizedBox(width: 6),
+              Text(o.token,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                    color: bg, borderRadius: BorderRadius.circular(20)),
+                child: Text(o.statusLabel,
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: fg)),
+              ),
+              const Spacer(),
+              if (o.isDraft && stockist != null)
+                TextButton.icon(
+                  onPressed: () => _confirmOrder(o, stockist),
+                  icon: const Icon(Icons.check_circle_outline, size: 16),
+                  label: const Text('Confirm',
+                      style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF2E7D32),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Generated: ${_fmtDateTime(o.createdAt)}'
+            '${modified ? '   ·   Modified: ${_fmtDateTime(o.updatedAt)}' : ''}',
+            style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+          ),
+          if (!o.buyerEditable)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                o.isLocked || o.isDispatching
+                    ? 'Locked by the supplier — this order can no longer be changed.'
+                    : 'This order is ${o.statusLabel.toLowerCase()}.',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    fontStyle: FontStyle.italic,
+                    color: Colors.grey.shade600),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesignRow(TileDesign d, [bool editable = true]) {
     final qty = myChoiceQuantities[d.id] ?? d.boxQuantity;
     const color = Color(0xFF1B4F72);
 
@@ -475,14 +632,15 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                     style: const TextStyle(
                         fontSize: 11, color: Colors.grey)),
                 const SizedBox(height: 4),
-                GestureDetector(
-                  onTap: () => setState(() => removeMyChoice(d.id)),
-                  child: Text('Remove',
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.red.shade400,
-                          fontWeight: FontWeight.w600)),
-                ),
+                if (editable)
+                  GestureDetector(
+                    onTap: () => setState(() => removeMyChoice(d.id)),
+                    child: Text('Remove',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.red.shade400,
+                            fontWeight: FontWeight.w600)),
+                  ),
               ],
             ),
           ),
@@ -494,39 +652,55 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                   style:
                       TextStyle(fontSize: 10, color: Colors.grey)),
               const SizedBox(height: 4),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _qtyBtn(Icons.remove, color, () {
-                    if (qty > 1) {
-                      setState(() => setMyChoiceQty(d.id, qty - 1));
-                    }
-                  }),
-                  // Tap the number to type a quantity directly — far quicker
-                  // than the steppers for large box counts.
-                  GestureDetector(
-                    onTap: () => _editQty(d, qty),
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 44),
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 3),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                            color: color.withValues(alpha: 0.3)),
-                      ),
-                      child: Text('$qty',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15)),
-                    ),
+              if (!editable)
+                Container(
+                  constraints: const BoxConstraints(minWidth: 44),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: color.withValues(alpha: 0.2)),
                   ),
-                  _qtyBtn(Icons.add, color, () {
-                    setState(() => setMyChoiceQty(d.id, qty + 1));
-                  }),
-                ],
-              ),
+                  child: Text('$qty',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
+                )
+              else
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _qtyBtn(Icons.remove, color, () {
+                      if (qty > 1) {
+                        setState(() => setMyChoiceQty(d.id, qty - 1));
+                      }
+                    }),
+                    // Tap the number to type a quantity directly — far quicker
+                    // than the steppers for large box counts.
+                    GestureDetector(
+                      onTap: () => _editQty(d, qty),
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 44),
+                        margin: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: color.withValues(alpha: 0.3)),
+                        ),
+                        child: Text('$qty',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 15)),
+                      ),
+                    ),
+                    _qtyBtn(Icons.add, color, () {
+                      setState(() => setMyChoiceQty(d.id, qty + 1));
+                    }),
+                  ],
+                ),
             ],
           ),
         ],

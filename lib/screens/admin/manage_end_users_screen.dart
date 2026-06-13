@@ -339,6 +339,7 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
   String _tier = ''; // '' = none; else Platinum/Gold/Silver (enduser_type)
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
+  bool _canClaimPrivate = false; // may add (claim) catalog links
 
   bool _saving = false;
   String? _error;
@@ -359,6 +360,7 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
       _priority.text = u.priority.toStringAsFixed(2);
       _tier = kStockistTiers.contains(u.endUserType) ? u.endUserType : '';
       _deviceLimit.text = '${u.deviceLimit}';
+      _canClaimPrivate = u.canClaimPrivate;
       _loadDeviceCount();
     }
   }
@@ -470,6 +472,7 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
           gstNumber:     _gst.text.trim(),
           endUserType:   _tier,
           priority:      double.tryParse(_priority.text.trim()) ?? 0,
+          canClaimPrivate: _canClaimPrivate,
         );
         await _dataSvc.setDeviceLimit('end_user', widget.existing!.uuid,
             int.tryParse(_deviceLimit.text.trim()) ?? 1);
@@ -587,6 +590,22 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
                     if (t.isEmpty) return null;
                     return double.tryParse(t) == null ? 'Enter a number' : null;
                   }),
+              if (_isEdit)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _canClaimPrivate,
+                    activeThumbColor: Colors.deepPurple,
+                    title: const Text('Allow private links'),
+                    subtitle: Text(
+                        _canClaimPrivate
+                            ? 'Can save catalog links — sees the Public / Private / Both tabs and the add-link button.'
+                            : 'No link feature shown. Buyer browses the public market only and never sees these options.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _canClaimPrivate = v),
+                  ),
+                ),
               if (_isEdit) _deviceSection(),
 
               if (_error != null) ...[

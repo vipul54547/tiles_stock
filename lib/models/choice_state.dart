@@ -9,6 +9,10 @@ String currentStockistUUID = '';  // Supabase UUID  (DB query use)
 
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID
+// Admin-set: may this buyer add (claim) catalog links? Drives whether the
+// Public/Private/Both market tabs and the add-link button are shown at all.
+// Guests and not-permitted buyers stay false → silent public-only mode.
+bool currentEndUserCanClaimPrivate = false;
 
 // Buyer search mode shared across all buyer screens for the session:
 // true  = SMART (synonym/multi-language expansion, e.g. bianco = white),

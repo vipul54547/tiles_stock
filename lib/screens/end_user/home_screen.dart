@@ -1128,7 +1128,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         title: const Text('All Designs'),
         actions: [
-          if (!isGuest)
+          if (!isGuest && currentEndUserCanClaimPrivate)
             IconButton(
               tooltip: 'Add a catalog link',
               icon: const Icon(Icons.add_link),

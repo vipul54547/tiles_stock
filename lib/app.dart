@@ -32,6 +32,7 @@ import 'screens/end_user/inquiry_screen.dart';
 
 import 'screens/stockist/stockist_dashboard_screen.dart';
 import 'screens/stockist/inquiries_screen.dart';
+import 'screens/stockist/dispatch_inquiry_screen.dart';
 
 import 'screens/stockist/add_edit_stock_screen.dart';
 
@@ -146,6 +147,18 @@ final GoRouter _router = GoRouter(
     GoRoute(
         path: '/stockist/inquiries',
         builder: (_, __) => const InquiriesScreen()),
+
+    GoRoute(
+      path: '/stockist/inquiry/dispatch',
+      builder: (_, state) {
+        final e = (state.extra as Map?) ?? const {};
+        return DispatchInquiryScreen(
+          inquiryId: (e['id'] ?? '').toString(),
+          token: e['token']?.toString(),
+          company: e['company']?.toString(),
+        );
+      },
+    ),
 
     GoRoute(
 

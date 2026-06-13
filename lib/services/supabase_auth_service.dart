@@ -39,6 +39,7 @@ class SupabaseAuthService {
     await supabase.auth.signInAnonymously();
     _role = UserRole.endUser;
     currentEndUserId = '';
+    currentEndUserCanClaimPrivate = false;
     return UserRole.endUser;
   }
 
@@ -49,6 +50,7 @@ class SupabaseAuthService {
     if (user.isAnonymous) {
       _role = UserRole.endUser; // restored guest session
       currentEndUserId = '';
+      currentEndUserCanClaimPrivate = false;
       return UserRole.endUser;
     }
     try {
@@ -102,11 +104,12 @@ class SupabaseAuthService {
 
     final eu = await supabase
         .from('end_users')
-        .select('id, is_active')
+        .select('id, is_active, can_claim_private')
         .eq('user_id', userId)
         .single();
     await _ensureActive(eu['is_active']);
     currentEndUserId = eu['id'] as String;
+    currentEndUserCanClaimPrivate = eu['can_claim_private'] as bool? ?? false;
     _role = UserRole.endUser;
     return _role;
   }
@@ -190,6 +193,7 @@ class SupabaseAuthService {
     currentStockistId   = '';
     currentStockistUUID = '';
     currentEndUserId    = '';
+    currentEndUserCanClaimPrivate = false;
     myChoiceQuantities.clear();
   }
 

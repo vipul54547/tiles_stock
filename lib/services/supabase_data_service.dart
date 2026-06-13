@@ -8,6 +8,7 @@ import '../models/tile_size.dart';
 import '../models/stock_catalog.dart';
 import '../models/share_link.dart';
 import '../models/claimed_catalog.dart';
+import '../models/inquiry_order.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
 import 'supabase_auth_service.dart';
@@ -736,6 +737,7 @@ class SupabaseDataService {
     String gstNumber = '',
     String endUserType = '',
     double priority = 0,
+    bool canClaimPrivate = false,
   }) async {
     await supabase.rpc('admin_update_end_user', params: {
       'p_id':           uuid,
@@ -747,6 +749,7 @@ class SupabaseDataService {
       'p_gst':          gstNumber,
       'p_enduser_type': endUserType,
       'p_priority':     priority,
+      'p_can_claim_private': canClaimPrivate,
     });
   }
 
@@ -966,6 +969,102 @@ class SupabaseDataService {
     } catch (e, st) {
       debugPrint('getMyInquiryList failed: $e\n$st');
       return [];
+    }
+  }
+
+  // ── tokenised orders (inquiries) ────────────────────────────────────────────
+
+  /// Buyer: my own orders (one per stockist I'm ordering from), each with token,
+  /// lifecycle status and Generated/Modified times. Empty for guests.
+  Future<List<InquiryOrder>> getMyOrders() async {
+    if (currentEndUserId.isEmpty) return [];
+    try {
+      final res = await supabase.rpc('my_orders');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => InquiryOrder.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyOrders failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Stockist: orders placed with me (token, buyer, status, timestamps, totals).
+  Future<List<InquiryOrder>> getMyInquiries() async {
+    try {
+      final res = await supabase.rpc('my_inquiries');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => InquiryOrder.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyInquiries failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// One order's header + lines (caller must be its buyer, stockist or admin).
+  /// Lines come from the live basket while draft/confirmed, else the frozen items.
+  Future<Map<String, dynamic>?> getInquiryDetail(String id) async {
+    try {
+      final res = await supabase.rpc('inquiry_detail', params: {'p_id': id});
+      return res == null ? null : Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('getInquiryDetail failed ($id): $e\n$st');
+      return null;
+    }
+  }
+
+  /// Buyer confirms their draft order. Throws the server message on failure.
+  Future<void> confirmInquiry(String id) async {
+    try {
+      await supabase.rpc('confirm_inquiry', params: {'p_id': id});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist locks an agreed order (freezes the buyer out, snapshots the lines).
+  Future<void> lockInquiry(String id) async {
+    try {
+      await supabase.rpc('lock_inquiry', params: {'p_id': id});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist reopens a locked (not yet dispatched) order so the buyer can edit.
+  Future<void> unlockInquiry(String id) async {
+    try {
+      await supabase.rpc('unlock_inquiry', params: {'p_id': id});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist rejects a whole order: marks it rejected and clears the buyer's
+  /// basket lines for this stockist.
+  Future<void> rejectOrder(String id) async {
+    try {
+      await supabase.rpc('reject_order', params: {'p_id': id});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Dispatch a locked order by token. [lines] is the full current line set —
+  /// each `{ 'design_id': <uuid>, 'dispatch': <boxes> }`; omitted designs are
+  /// removed, new design_ids are added. Over-stock dispatch is allowed (system
+  /// stock clamps at 0). Returns the new status + outstanding/dispatched totals.
+  Future<Map<String, dynamic>> dispatchInquiry(
+      String id, List<Map<String, dynamic>> lines) async {
+    try {
+      final res = await supabase
+          .rpc('dispatch_inquiry', params: {'p_inquiry': id, 'p_lines': lines});
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 

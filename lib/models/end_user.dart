@@ -27,6 +27,11 @@ class EndUser {
   /// editable). Default 1. 0 = unlimited.
   final int deviceLimit;
 
+  /// Admin-set: may this buyer add (claim) catalog links? When false the buyer
+  /// sees no Public/Private/Both market tabs and no add-link button — they run
+  /// silently in public-only mode and never learn the feature exists.
+  final bool canClaimPrivate;
+
   final int inquiriesToday;
   final DateTime lastInquiryDate;
   final DateTime createdAt;
@@ -45,6 +50,7 @@ class EndUser {
     this.endUserType = '',
     this.isActive = true,
     this.deviceLimit = 1,
+    this.canClaimPrivate = false,
     this.inquiriesToday = 0,
     DateTime? lastInquiryDate,
     DateTime? createdAt,
@@ -65,6 +71,7 @@ class EndUser {
         endUserType:   json['enduser_type'] ?? '',
         isActive:      json['is_active'] ?? true,
         deviceLimit:   json['device_limit'] ?? 1,
+        canClaimPrivate: json['can_claim_private'] ?? false,
         inquiriesToday: json['inquiries_today'] ?? 0,
         lastInquiryDate: json['last_inquiry_date'] != null
             ? DateTime.tryParse(json['last_inquiry_date'].toString())

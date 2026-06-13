@@ -239,7 +239,7 @@ class _State extends State<StockistsOverviewScreen> {
     var privateDesigns = <TileDesign>[];
     var privateData = <_StockistData>[];
     var claimedCatalogs = <ClaimedCatalog>[];
-    if (!isGuest) {
+    if (!isGuest && currentEndUserCanClaimPrivate) {
       final priv = await _service.getMyPrivateDesigns();
       final claimed = await _service.getMyClaimedCatalogs();
       claimedCatalogs = claimed;
@@ -1192,7 +1192,7 @@ class _State extends State<StockistsOverviewScreen> {
             ),
       title: const Text('Tiles Stock'),
       actions: [
-        if (!isGuest)
+        if (!isGuest && currentEndUserCanClaimPrivate)
           IconButton(
             icon: const Icon(Icons.add_link),
             tooltip: 'Add a stock catalog link',
@@ -1266,8 +1266,10 @@ class _State extends State<StockistsOverviewScreen> {
       appBar: appBar,
       body: Column(
         children: [
-          if (!isGuest && !_searchActive) _buildMarketRow(),
+          if (!isGuest && currentEndUserCanClaimPrivate && !_searchActive)
+            _buildMarketRow(),
           if (!isGuest &&
+              currentEndUserCanClaimPrivate &&
               !_searchActive &&
               _market != 'Public' &&
               _claimedCatalogs.isNotEmpty)
