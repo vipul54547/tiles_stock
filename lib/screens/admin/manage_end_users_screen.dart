@@ -266,6 +266,16 @@ class _ManageEndUsersScreenState extends State<ManageEndUsersScreen> {
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                       overflow: TextOverflow.ellipsis,
                     ),
+                    const SizedBox(height: 5),
+                    // At-a-glance toggle state + active device count.
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
+                      children: [
+                        _dot('Private links', u.canClaimPrivate),
+                        _deviceChip(u.deviceCount, u.deviceLimit),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -301,6 +311,41 @@ class _ManageEndUsersScreenState extends State<ManageEndUsersScreen> {
         ),
       ),
       );
+
+  // A small on/off status dot + label (● green = on, ○ grey = off).
+  Widget _dot(String label, bool on) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(on ? Icons.circle : Icons.circle_outlined,
+              size: 9,
+              color: on ? const Color(0xFF2E7D32) : Colors.grey.shade400),
+          const SizedBox(width: 4),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: on ? const Color(0xFF2E7D32) : Colors.grey.shade500)),
+        ],
+      );
+
+  // Active devices / allowed limit (0 limit = unlimited → ∞).
+  Widget _deviceChip(int count, int limit) {
+    final lim = limit == 0 ? '∞' : '$limit';
+    final over = limit > 0 && count > limit;
+    final color = over
+        ? Colors.red
+        : (count > 0 ? const Color(0xFF1565C0) : Colors.grey.shade500);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.devices, size: 11, color: color),
+        const SizedBox(width: 4),
+        Text('$count/$lim',
+            style: TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w600, color: color)),
+      ],
+    );
+  }
 
   Future<void> _openAddForm() async {
     final created = await showModalBottomSheet<bool>(

@@ -56,6 +56,9 @@ class Stockist {
   /// editable). Default 1. 0 = unlimited.
   final int deviceLimit;
 
+  /// Devices currently registered for this login (admin list view only).
+  final int deviceCount;
+
   /// White-label branding for the public share-link catalog page. All optional.
   /// [logoUrl] is a Cloudinary URL; [brandColor] a hex string (e.g. #1B4F72);
   /// [mapUrl] a Google Maps link. Hidden for anonymous stockists (except
@@ -109,6 +112,8 @@ class Stockist {
     this.publicCode = '',
 
     this.deviceLimit = 1,
+
+    this.deviceCount = 0,
 
     this.logoUrl = '',
 
@@ -165,6 +170,8 @@ class Stockist {
     publicCode: json['public_code'] ?? '',
 
     deviceLimit: json['device_limit'] ?? 1,
+
+    deviceCount: json['device_count'] ?? 0,
 
     logoUrl: json['logo_url'] ?? '',
 

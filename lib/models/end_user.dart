@@ -32,6 +32,9 @@ class EndUser {
   /// silently in public-only mode and never learn the feature exists.
   final bool canClaimPrivate;
 
+  /// Devices currently registered for this login (admin list view only).
+  final int deviceCount;
+
   final int inquiriesToday;
   final DateTime lastInquiryDate;
   final DateTime createdAt;
@@ -51,6 +54,7 @@ class EndUser {
     this.isActive = true,
     this.deviceLimit = 1,
     this.canClaimPrivate = false,
+    this.deviceCount = 0,
     this.inquiriesToday = 0,
     DateTime? lastInquiryDate,
     DateTime? createdAt,
@@ -72,6 +76,7 @@ class EndUser {
         isActive:      json['is_active'] ?? true,
         deviceLimit:   json['device_limit'] ?? 1,
         canClaimPrivate: json['can_claim_private'] ?? false,
+        deviceCount:   json['device_count'] ?? 0,
         inquiriesToday: json['inquiries_today'] ?? 0,
         lastInquiryDate: json['last_inquiry_date'] != null
             ? DateTime.tryParse(json['last_inquiry_date'].toString())
