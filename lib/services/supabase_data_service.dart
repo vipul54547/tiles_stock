@@ -811,6 +811,20 @@ class SupabaseDataService {
     }
   }
 
+  /// Creates a timed link for one stock list valid for [days] days. Returns the
+  /// new token on success, or null on failure.
+  Future<String?> createCatalogShareLinkDays(String catalogId, int days) async {
+    try {
+      final res = await supabase.rpc('create_catalog_share_link_days',
+          params: {'p_catalog_id': catalogId, 'p_days': days});
+      final map = res is Map ? Map<String, dynamic>.from(res) : null;
+      return map?['token'] as String?;
+    } catch (e, st) {
+      debugPrint('createCatalogShareLinkDays($catalogId,$days) failed: $e\n$st');
+      return null;
+    }
+  }
+
   /// Revokes (deactivates) one of the calling stockist's create-on-demand links.
   Future<bool> revokeShareLink(String id) async {
     try {

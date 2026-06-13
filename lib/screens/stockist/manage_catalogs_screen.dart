@@ -30,6 +30,7 @@ class _State extends State<ManageCatalogsScreen> {
   Map<String, int> _inq = {}; // catalogId → link-enquiry count
   Map<String, List<CatalogClaimer>> _claimers = {}; // catalogId → dealers joined
   Map<String, List<ShareLink>> _catLinks = {}; // catalogId → its share links
+  final Map<String, TextEditingController> _daysCtrls = {}; // per-list days box
   bool _loading = true;
   bool _busy = false;
 
@@ -37,6 +38,14 @@ class _State extends State<ManageCatalogsScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _daysCtrls.values) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -164,20 +173,9 @@ class _State extends State<ManageCatalogsScreen> {
   ];
   String _fmtDate(DateTime d) => '${d.day} ${_months[d.month - 1]} ${d.year}';
 
-  // ── Per-catalog share links (Father & Child) ──────────────────────────────
-  // Every catalog (public OR private) has an expandable Links panel with 6 rows:
-  // Permanent + 1 week / 1 month / 3 / 6 months / 1 year. Permanent is the
-  // always-on catalog link (view/copy only); each timed row can create multiple
-  // links (+) and view/copy/delete them (eye).
-  static const _linkRows = <({String value, String label})>[
-    (value: 'permanent', label: 'Permanent'),
-    (value: '1week', label: '1 week'),
-    (value: '1month', label: '1 month'),
-    (value: '3month', label: '3 months'),
-    (value: '6month', label: '6 months'),
-    (value: '1year', label: '1 year'),
-  ];
-
+  // ── Per-list share links ──────────────────────────────────────────────────
+  // Each stock list has an expandable Links panel: a Permanent (always-on) link
+  // plus a Custom-days generator, then every timed link already created for it.
   Future<void> _reloadLinks(String catalogId) async {
     final l = await _data.getCatalogShareLinks(catalogId);
     if (!mounted) return;
@@ -192,12 +190,22 @@ class _State extends State<ManageCatalogsScreen> {
     }
   }
 
-  Future<void> _createLink(String catalogId, String duration) async {
+  // Generate a custom-days link for one list from its days text box.
+  Future<void> _generateDays(String catalogId, TextEditingController ctrl) async {
+    final days = int.tryParse(ctrl.text.trim());
+    if (days == null || days < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Enter the number of days (1 or more).')));
+      return;
+    }
     setState(() => _busy = true);
-    final ok = await _data.createCatalogShareLink(catalogId, duration);
-    if (ok) await _reloadLinks(catalogId);
+    final token = await _data.createCatalogShareLinkDays(catalogId, days);
+    if (token != null) {
+      ctrl.clear();
+      await _reloadLinks(catalogId);
+    }
     if (!mounted) return;
-    if (!ok) {
+    if (token == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Could not create link.'),
           backgroundColor: Colors.red));
@@ -205,9 +213,150 @@ class _State extends State<ManageCatalogsScreen> {
     setState(() => _busy = false);
   }
 
-  // Eye popup: lists the links for one duration row, each with copy + delete.
-  Future<void> _showDurationLinks(
-      StockCatalog c, ({String value, String label}) row) async {
+  // A single timed link row: status + copy + delete.
+  Widget _timedLinkRow(StockCatalog c, ShareLink l) {
+    final status = l.expired
+        ? 'Expired'
+        : (l.expiresAt == null
+            ? 'Never expires'
+            : 'Expires ${_fmtDate(l.expiresAt!)}');
+    return Padding(
+      padding: const EdgeInsets.only(left: 12, top: 1, bottom: 1),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, size: 16, color: l.expired ? Colors.grey : _navy),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(status,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: l.expired ? Colors.red : Colors.grey.shade700)),
+          ),
+          IconButton(
+            tooltip: 'Copy link',
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(),
+            padding: const EdgeInsets.all(6),
+            icon: const Icon(Icons.copy, size: 18),
+            onPressed: l.expired ? null : () => _copyToken(l.token),
+          ),
+          if (l.revocable)
+            IconButton(
+              tooltip: 'Delete link',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(),
+              padding: const EdgeInsets.all(6),
+              icon:
+                  const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      final ok = await _data.revokeShareLink(l.id!);
+                      if (ok) await _reloadLinks(c.id);
+                    },
+            ),
+        ],
+      ),
+    );
+  }
+
+  // The expandable Links panel: Permanent link + a Custom-days generator, then
+  // every timed link already created for this list.
+  Widget _linksPanel(StockCatalog c) {
+    final timed = (_catLinks[c.id] ?? const <ShareLink>[])
+        .where((l) => l.revocable)
+        .toList();
+    final activeCount = timed.where((l) => !l.expired).length;
+    final ctrl = _daysCtrls.putIfAbsent(c.id, () => TextEditingController());
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 4),
+        leading: const Icon(Icons.link, size: 20, color: _navy),
+        title: Text(
+            activeCount == 0 ? 'Share links' : 'Share links ($activeCount active)',
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        children: [
+          // Permanent (always-on) link.
+          Row(
+            children: [
+              const SizedBox(
+                  width: 86,
+                  child: Text('Permanent',
+                      style: TextStyle(
+                          fontSize: 12.5, fontWeight: FontWeight.w500))),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _busy ? null : () => _whatsapp(c),
+                icon: const Icon(Icons.share, size: 16),
+                label: const Text('Share', style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              ),
+              IconButton(
+                tooltip: 'Copy permanent link',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.copy, size: 18),
+                onPressed: _busy ? null : () => _copy(c),
+              ),
+            ],
+          ),
+          // Custom-days generator.
+          Row(
+            children: [
+              const SizedBox(
+                  width: 86,
+                  child: Text('Custom',
+                      style: TextStyle(
+                          fontSize: 12.5, fontWeight: FontWeight.w500))),
+              SizedBox(
+                width: 54,
+                child: TextField(
+                  controller: ctrl,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                      border: OutlineInputBorder()),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Text('days', style: TextStyle(fontSize: 12)),
+              const Spacer(),
+              ElevatedButton(
+                onPressed: _busy ? null : () => _generateDays(c.id, ctrl),
+                style: ElevatedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12)),
+                child: const Text('Generate', style: TextStyle(fontSize: 12)),
+              ),
+            ],
+          ),
+          for (final l in timed) _timedLinkRow(c, l),
+        ],
+      ),
+    );
+  }
+
+  // Multi-list generate: tick several lists + one validity → make all links at
+  // once (e.g. a builder who wants every list for 15 days). Permanent uses each
+  // list's own always-on token; Custom-days mints a fresh timed link per list.
+  Future<void> _multiGenerateSheet() async {
+    final selected = <String>{};
+    bool permanent = true;
+    final daysCtrl = TextEditingController(text: '15');
+    List<({String name, String url})>? results;
+    bool busy = false;
+
+    String allText() =>
+        '${results!.map((r) => '${r.name}: ${r.url}').join('\n')}'
+        '\n\nPowered by Tiles Stock';
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -216,13 +365,42 @@ class _State extends State<ManageCatalogsScreen> {
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
-          final links = (_catLinks[c.id] ?? const <ShareLink>[])
-              .where((l) => l.label == row.label)
-              .toList();
+          Future<void> generate() async {
+            if (selected.isEmpty) return;
+            int days = 0;
+            if (!permanent) {
+              final d = int.tryParse(daysCtrl.text.trim());
+              if (d == null || d < 1) {
+                ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                    content: Text('Enter the number of days (1 or more).')));
+                return;
+              }
+              days = d;
+            }
+            setSheet(() => busy = true);
+            final out = <({String name, String url})>[];
+            for (final id in selected) {
+              final c = _items.firstWhere((x) => x.id == id);
+              if (permanent) {
+                out.add((name: c.name, url: _urlFor(c.shareToken)));
+              } else {
+                final token = await _data.createCatalogShareLinkDays(id, days);
+                if (token != null) out.add((name: c.name, url: _urlFor(token)));
+              }
+            }
+            await _load();
+            if (!ctx.mounted) return;
+            setSheet(() {
+              results = out;
+              busy = false;
+            });
+          }
+
           return SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+              padding: EdgeInsets.fromLTRB(
+                  16, 10, 16, 14 + MediaQuery.of(ctx).viewInsets.bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -233,116 +411,162 @@ class _State extends State<ManageCatalogsScreen> {
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
-                  Text(
-                      '${row.label} link${row.value == 'permanent' ? '' : 's'}'
-                      '  ·  ${c.name}',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 15)),
+                  const Text('Send several lists at once',
+                      style:
+                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 8),
-                  if (links.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      child: Text(
-                          'No ${row.label} links yet. Close this and tap + to '
-                          'create one.',
-                          style: TextStyle(color: Colors.grey.shade600)),
-                    )
-                  else
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: links.length,
-                        separatorBuilder: (_, __) =>
-                            Divider(height: 1, color: Colors.grey.shade200),
-                        itemBuilder: (_, i) {
-                          final l = links[i];
-                          final status = l.expired
-                              ? 'Expired'
-                              : (l.expiresAt == null
-                                  ? 'Never expires'
-                                  : 'Expires ${_fmtDate(l.expiresAt!)}');
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Icon(
-                                l.expiresAt == null
-                                    ? Icons.all_inclusive
-                                    : Icons.schedule,
-                                color: l.expired ? Colors.grey : _navy),
-                            title: Text(status,
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: l.expired ? Colors.red : null)),
-                            subtitle: l.createdAt == null
-                                ? null
-                                : Text('Created ${_fmtDate(l.createdAt!)}',
-                                    style: const TextStyle(fontSize: 11)),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: 'Copy link',
-                                  visualDensity: VisualDensity.compact,
-                                  icon: const Icon(Icons.copy, size: 20),
-                                  onPressed:
-                                      l.expired ? null : () => _copyToken(l.token),
-                                ),
-                                if (l.revocable)
-                                  IconButton(
-                                    tooltip: 'Delete',
-                                    visualDensity: VisualDensity.compact,
-                                    icon: const Icon(Icons.delete_outline,
-                                        size: 20, color: Colors.red),
-                                    onPressed: () async {
-                                      final confirm = await showDialog<bool>(
-                                        context: ctx,
-                                        builder: (dctx) => AlertDialog(
-                                          title: const Text('Delete link?'),
-                                          content: const Text(
-                                              'This link will stop working '
-                                              'immediately. Anyone who already '
-                                              'saved it keeps their copy.'),
-                                          actions: [
-                                            TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(dctx, false),
-                                                child: const Text('Cancel')),
-                                            TextButton(
-                                                onPressed: () =>
-                                                    Navigator.pop(dctx, true),
-                                                child: const Text('Delete',
-                                                    style: TextStyle(
-                                                        color: Colors.red))),
-                                          ],
-                                        ),
-                                      );
-                                      if (confirm != true) return;
-                                      final ok =
-                                          await _data.revokeShareLink(l.id!);
-                                      if (!ctx.mounted) return;
-                                      if (ok) {
-                                        await _reloadLinks(c.id);
-                                        setSheet(() {});
-                                      } else {
-                                        ScaffoldMessenger.of(ctx).showSnackBar(
-                                            const SnackBar(
-                                                content:
-                                                    Text('Could not delete.'),
-                                                backgroundColor: Colors.red));
-                                      }
-                                    },
-                                  ),
-                              ],
+                  if (results == null) ...[
+                    // Validity: Permanent or Custom days.
+                    Row(
+                      children: [
+                        ChoiceChip(
+                          label: const Text('Permanent'),
+                          selected: permanent,
+                          onSelected: (_) => setSheet(() => permanent = true),
+                        ),
+                        const SizedBox(width: 8),
+                        ChoiceChip(
+                          label: const Text('Custom days'),
+                          selected: !permanent,
+                          onSelected: (_) => setSheet(() => permanent = false),
+                        ),
+                        const SizedBox(width: 10),
+                        if (!permanent)
+                          SizedBox(
+                            width: 60,
+                            child: TextField(
+                              controller: daysCtrl,
+                              keyboardType: TextInputType.number,
+                              textAlign: TextAlign.center,
+                              decoration: const InputDecoration(
+                                  isDense: true,
+                                  suffixText: 'd',
+                                  border: OutlineInputBorder()),
                             ),
-                          );
-                        },
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final b in _brands) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6, bottom: 2),
+                              child: Text(b.name,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: _navy)),
+                            ),
+                            for (final c in _listsFor(b.id))
+                              CheckboxListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                title: Text(c.name,
+                                    style: const TextStyle(fontSize: 13)),
+                                value: selected.contains(c.id),
+                                onChanged: (v) => setSheet(() {
+                                  if (v == true) {
+                                    selected.add(c.id);
+                                  } else {
+                                    selected.remove(c.id);
+                                  }
+                                }),
+                              ),
+                          ],
+                        ],
                       ),
                     ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed:
+                            (busy || selected.isEmpty) ? null : generate,
+                        child: Text(busy
+                            ? 'Generating…'
+                            : 'Generate ${selected.length} link'
+                                '${selected.length == 1 ? '' : 's'}'),
+                      ),
+                    ),
+                  ] else ...[
+                    Text('${results!.length} link'
+                        '${results!.length == 1 ? '' : 's'} ready',
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade600)),
+                    const SizedBox(height: 6),
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final r in results!)
+                            ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(r.name,
+                                  style: const TextStyle(fontSize: 13)),
+                              subtitle: Text(r.url,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11)),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.copy, size: 18),
+                                onPressed: () async {
+                                  await Clipboard.setData(
+                                      ClipboardData(text: r.url));
+                                  if (ctx.mounted) {
+                                    ScaffoldMessenger.of(ctx).showSnackBar(
+                                        const SnackBar(
+                                            content: Text('Link copied.')));
+                                  }
+                                },
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: const Icon(Icons.share, size: 18),
+                            label: const Text('Share all'),
+                            onPressed: () async {
+                              final uri = Uri.parse(
+                                  'https://wa.me/?text=${Uri.encodeComponent(allText())}');
+                              await launchUrl(uri,
+                                  mode: LaunchMode.externalApplication);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.copy_all, size: 18),
+                            label: const Text('Copy all'),
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                  ClipboardData(text: allText()));
+                              if (ctx.mounted) {
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                        content: Text('All links copied.')));
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -350,71 +574,7 @@ class _State extends State<ManageCatalogsScreen> {
         },
       ),
     );
-  }
-
-  // The expandable 6-row Links panel shown on a catalog card.
-  Widget _linksPanel(StockCatalog c) {
-    final all = _catLinks[c.id] ?? const <ShareLink>[];
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        childrenPadding: const EdgeInsets.only(bottom: 4),
-        leading: const Icon(Icons.link, size: 20, color: _navy),
-        title: const Text('Links',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-        children: [
-          for (final row in _linkRows)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 1),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 78,
-                    child: Text(row.label,
-                        style: const TextStyle(
-                            fontSize: 12.5, fontWeight: FontWeight.w500)),
-                  ),
-                  if (all
-                          .where((l) => l.label == row.label && !l.expired)
-                          .isNotEmpty)
-                    Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: _navy.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                          '${all.where((l) => l.label == row.label && !l.expired).length}',
-                          style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: _navy)),
-                    ),
-                  const Spacer(),
-                  if (row.value != 'permanent')
-                    IconButton(
-                      tooltip: 'Create ${row.label} link',
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.add_circle_outline,
-                          size: 22, color: _navy),
-                      onPressed:
-                          _busy ? null : () => _createLink(c.id, row.value),
-                    ),
-                  IconButton(
-                    tooltip: 'View ${row.label} link'
-                        '${row.value == 'permanent' ? '' : 's'}',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.visibility_outlined, size: 21),
-                    onPressed: () => _showDurationLinks(c, row),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
+    daysCtrl.dispose();
   }
 
   Future<void> _renameDialog(StockCatalog c) async {
@@ -569,6 +729,12 @@ class _State extends State<ManageCatalogsScreen> {
       appBar: AppBar(
         title: const Text('My Stock Lists'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.playlist_add_check),
+            tooltip: 'Send several lists at once',
+            onPressed:
+                (_loading || _items.isEmpty) ? null : _multiGenerateSheet,
+          ),
           IconButton(
             icon: const Icon(Icons.sell_outlined),
             tooltip: 'Manage brands',

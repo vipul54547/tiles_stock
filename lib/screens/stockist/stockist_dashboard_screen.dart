@@ -44,7 +44,7 @@ class _State extends State<StockistDashboardScreen> {
   // The stockist's catalogs (Father & Child) — drives the Public/Private/Both
   // inventory filter and the per-design "Private" badge.
   List<StockCatalog> _catalogs = [];
-  String _catalogFilter = 'both'; // 'both' | 'public' | 'private'
+  String _catalogFilter = 'all'; // 'all' or a specific stock-list (catalog) id
   // Brands (multi-brand). Switcher shown only when the stockist has >1 brand.
   List<Brand> _brands = [];
   String _brandFilter = 'all'; // 'all' | <brandId>
@@ -157,13 +157,19 @@ class _State extends State<StockistDashboardScreen> {
   String? _designBrandId(TileDesign d) =>
       d.catalogId == null ? null : _catalogBrand[d.catalogId];
 
-  // Catalog helpers (Father & Child).
-  Set<String> get _privateCatalogIds =>
-      _catalogs.where((c) => c.isPrivate).map((c) => c.id).toSet();
-  bool get _hasPrivateCatalog =>
-      _catalogs.any((c) => c.isPrivate && c.isActive);
-  bool _isPrivate(TileDesign d) =>
-      d.catalogId != null && _privateCatalogIds.contains(d.catalogId);
+  // Stock-list helpers. The active lists in the current brand view drive the
+  // dashboard's "filter by list" row; the name map labels each design's card.
+  Map<String, String> get _catalogName =>
+      {for (final c in _catalogs) c.id: c.name};
+  String? _designListName(TileDesign d) =>
+      d.catalogId == null ? null : _catalogName[d.catalogId];
+  List<StockCatalog> get _filterLists {
+    var cs = _catalogs.where((c) => c.isActive);
+    if (_brandFilter != 'all') {
+      cs = cs.where((c) => c.brandId == _brandFilter);
+    }
+    return cs.toList()..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
 
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -181,12 +187,9 @@ class _State extends State<StockistDashboardScreen> {
 
   List<TileDesign> get _filteredAndSorted {
     var base = _inStockDesigns;
-    // Public / Private / Both inventory filter (only meaningful with a private
-    // catalog; 'both' shows everything).
-    if (_catalogFilter == 'public') {
-      base = base.where((d) => !_isPrivate(d)).toList();
-    } else if (_catalogFilter == 'private') {
-      base = base.where((d) => _isPrivate(d)).toList();
+    // Filter by stock list (catalog). 'all' shows every list.
+    if (_catalogFilter != 'all') {
+      base = base.where((d) => d.catalogId == _catalogFilter).toList();
     }
     var result = _selectedQualities.isEmpty
         ? base
@@ -320,7 +323,7 @@ class _State extends State<StockistDashboardScreen> {
                 // Pinned Public/Private/Both inventory filter (Stock tab only,
                 // and only when the stockist has a private catalog).
                 if (_brands.length > 1) _buildBrandFilterRow(),
-                if (_hasPrivateCatalog) _buildCatalogFilterRow(),
+                if (_filterLists.length > 1) _buildCatalogFilterRow(),
                 _buildChipRow(),   // pinned: Stock + Inquiry buttons + quality chips
                 Expanded(child: _buildMyStockScroll()),
               ],
@@ -382,27 +385,27 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
+  // Filter the stock view by stock list (All + one chip per list in the current
+  // brand). Shown only when the brand has more than one list.
   Widget _buildCatalogFilterRow() {
-    Widget btn(String value, String label) {
+    Widget chip(String value, String label) {
       final sel = _catalogFilter == value;
-      return Expanded(
+      return Padding(
+        padding: const EdgeInsets.only(right: 6),
         child: GestureDetector(
           onTap: () => setState(() => _catalogFilter = value),
           child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
               color: sel ? const Color(0xFF1B4F72) : Colors.white,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                  color: sel
-                      ? const Color(0xFF1B4F72)
-                      : Colors.grey.shade300),
+                  color:
+                      sel ? const Color(0xFF1B4F72) : Colors.grey.shade300),
             ),
             child: Text(label,
-                textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 12.5,
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
                     color: sel ? Colors.white : Colors.grey.shade700)),
           ),
@@ -412,12 +415,24 @@ class _State extends State<StockistDashboardScreen> {
 
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+      padding: const EdgeInsets.fromLTRB(10, 4, 4, 2),
       child: Row(
         children: [
-          btn('public', 'Public'),
-          btn('private', 'Private'),
-          btn('both', 'Both'),
+          const Padding(
+            padding: EdgeInsets.only(right: 6),
+            child: Icon(Icons.list_alt, size: 15, color: Color(0xFF1B4F72)),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  chip('all', 'All lists'),
+                  for (final c in _filterLists) chip(c.id, c.name),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -691,9 +706,9 @@ class _State extends State<StockistDashboardScreen> {
                 ? () {}
                 : () => context.push('/stockist/stock/edit/${d.id}'),
           ),
-          // "Private" badge — this design is in a private (Most Exclusive)
-          // catalog, so it's link-only and not in the marketplace.
-          if (_isPrivate(d))
+          // Stock-list badge — which list this design belongs to (shown only
+          // when the brand has more than one list, so it carries information).
+          if (_filterLists.length > 1 && _designListName(d) != null)
             Positioned(
               bottom: 6,
               left: 6,
@@ -701,13 +716,13 @@ class _State extends State<StockistDashboardScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
-                  color: Colors.deepPurple,
+                  color: Colors.black54,
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: const Text('Private',
-                    style: TextStyle(
+                child: Text(_designListName(d)!,
+                    style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 10,
+                        fontSize: 9,
                         fontWeight: FontWeight.bold)),
               ),
             ),
@@ -757,17 +772,17 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Default upload target: the first active public catalog, else the first.
+  // Default upload target: the first active stock list.
   String? _defaultUploadCatalogId() {
     for (final c in _catalogs) {
-      if (!c.isPrivate && c.isActive) return c.id;
+      if (c.isActive) return c.id;
     }
     return _catalogs.isEmpty ? null : _catalogs.first.id;
   }
 
-  // The Upload button asks WHERE to upload (Public / Most Exclusive — only when
-  // a private catalog exists) and then which source (PDF report or Excel list).
-  // The chosen catalog is passed to the import screen.
+  // The Upload button asks WHICH stock list to upload into (only when the
+  // stockist has more than one list) and then which source (PDF or Excel).
+  // The chosen list is passed to the import screen.
   void _showUploadSourceSheet() {
     var catId = _defaultUploadCatalogId();
     final activeCatalogs = _catalogs.where((c) => c.isActive).toList();
@@ -781,10 +796,10 @@ class _State extends State<StockistDashboardScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (_hasPrivateCatalog) ...[
+              if (activeCatalogs.length > 1) ...[
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
-                  child: Text('Upload to which stock?',
+                  child: Text('Upload to which stock list?',
                       style: TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 14)),
                 ),
@@ -795,12 +810,10 @@ class _State extends State<StockistDashboardScreen> {
                     children: [
                       for (final c in activeCatalogs)
                         ChoiceChip(
-                          label: Text(
-                              '${c.name}${c.isPrivate ? ' (private)' : ''}'),
+                          label: Text(c.name),
                           selected: catId == c.id,
-                          selectedColor: c.isPrivate
-                              ? Colors.deepPurple.shade100
-                              : const Color(0xFF1B4F72).withValues(alpha: 0.15),
+                          selectedColor: const Color(0xFF1B4F72)
+                              .withValues(alpha: 0.15),
                           onSelected: (_) => setS(() => catId = c.id),
                         ),
                     ],
