@@ -25,6 +25,9 @@ class _State extends State<PublicCatalogScreen> {
   bool _loading = true;
   bool _invalid = false;
   Map<String, dynamic> _stockist = {};
+  // Non-default brand identity (multi-brand): shown as the header, with the
+  // company name as a "by …" subtitle. Empty for single-brand stockists.
+  Map<String, dynamic> _brandInfo = {};
   List<Map<String, dynamic>> _all = [];
 
   // Selection: designId -> box quantity wanted.
@@ -69,6 +72,9 @@ class _State extends State<PublicCatalogScreen> {
     }
     setState(() {
       _stockist = Map<String, dynamic>.from(data['stockist'] ?? {});
+      _brandInfo = data['brand'] != null
+          ? Map<String, dynamic>.from(data['brand'])
+          : {};
       _all = ((data['designs'] as List?) ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
@@ -583,7 +589,10 @@ class _State extends State<PublicCatalogScreen> {
             pinned: true,
             backgroundColor: _brand,
             foregroundColor: Colors.white,
-            title: Text(_stockist['name']?.toString() ?? 'Stock Catalogue'),
+            title: Text(
+                (_brandInfo['name'] ?? '').toString().isNotEmpty
+                    ? _brandInfo['name'].toString()
+                    : (_stockist['name']?.toString() ?? 'Stock Catalogue')),
           ),
           SliverToBoxAdapter(child: _brandHeader()),
           SliverToBoxAdapter(child: _searchRow()),
@@ -626,9 +635,16 @@ class _State extends State<PublicCatalogScreen> {
   // "Directions" link. Anonymity is enforced server-side (the RPC nulls logo/
   // address/map for anonymous stockists), so we just render whatever arrives.
   Widget _brandHeader() {
-    final name = (_stockist['name'] ?? '').toString();
+    final company = (_stockist['name'] ?? '').toString();
+    final brandName = (_brandInfo['name'] ?? '').toString();
+    final brandLogo = (_brandInfo['logo_url'] ?? '').toString();
+    final hasBrand = brandName.isNotEmpty;
+    // Multi-brand: lead with the brand (logo + name), company as a subtitle.
+    final name = hasBrand ? brandName : company;
     final tagline = (_stockist['tagline'] ?? '').toString();
-    final logo = (_stockist['logo_url'] ?? '').toString();
+    final logo = hasBrand && brandLogo.isNotEmpty
+        ? brandLogo
+        : (_stockist['logo_url'] ?? '').toString();
     final banner = (_stockist['banner_url'] ?? '').toString();
     final address = (_stockist['address'] ?? '').toString();
     final city = (_stockist['city'] ?? '').toString();
@@ -681,6 +697,14 @@ class _State extends State<PublicCatalogScreen> {
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
                             color: _brand)),
+                    if (hasBrand && company.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text('by $company',
+                          style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.grey.shade700)),
+                    ],
                     if (tagline.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Text(tagline,

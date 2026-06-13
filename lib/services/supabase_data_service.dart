@@ -348,6 +348,16 @@ class SupabaseDataService {
     }
   }
 
+  /// Sets a brand's logo (Cloudinary URL); pass '' to clear.
+  Future<void> setBrandLogo(String id, String logoUrl) async {
+    try {
+      await supabase
+          .rpc('set_brand_logo', params: {'p_id': id, 'p_logo': logoUrl});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   Future<void> setBrandActive(String id, bool active) async {
     try {
       await supabase

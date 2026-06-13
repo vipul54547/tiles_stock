@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/brand.dart';
 import '../../services/supabase_data_service.dart';
+import '../../services/cloudinary_service.dart';
 
 /// Stockist's brands (multi-brand). A manufacturer can run several brands; each
 /// brand is a parent of its own stock catalogue(s) — own design names + stock.
@@ -16,8 +19,10 @@ const _navy = Color(0xFF1B4F72);
 
 class _State extends State<ManageBrandsScreen> {
   final _data = SupabaseDataService();
+  final _picker = ImagePicker();
   List<Brand> _brands = [];
   bool _loading = true;
+  String? _uploadingBrandId;
 
   @override
   void initState() {
@@ -50,6 +55,27 @@ class _State extends State<ManageBrandsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _pickLogo(Brand b) async {
+    final x = await _picker.pickImage(
+        source: ImageSource.gallery, maxWidth: 1024, imageQuality: 85);
+    if (x == null) return;
+    setState(() => _uploadingBrandId = b.id);
+    final url = await CloudinaryService.uploadImage(x.path);
+    if (url != null) {
+      try {
+        await _data.setBrandLogo(b.id, url);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() => _uploadingBrandId = null);
+    await _load();
+    if (!mounted) return;
+    if (url == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Logo upload failed.'), backgroundColor: Colors.red));
     }
   }
 
@@ -151,11 +177,49 @@ class _State extends State<ManageBrandsScreen> {
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: const Color(0xFF6A1B9A).withValues(alpha: 0.1),
-              child: const Icon(Icons.sell_outlined,
-                  size: 18, color: Color(0xFF6A1B9A)),
+            GestureDetector(
+              onTap: _uploadingBrandId == null ? () => _pickLogo(b) : null,
+              child: Stack(
+                alignment: Alignment.bottomRight,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: b.logoUrl.isEmpty
+                        ? Container(
+                            width: 40, height: 40,
+                            color: const Color(0xFF6A1B9A).withValues(alpha: 0.1),
+                            child: const Icon(Icons.sell_outlined,
+                                size: 18, color: Color(0xFF6A1B9A)))
+                        : CachedNetworkImage(
+                            imageUrl: b.logoUrl,
+                            width: 40, height: 40, fit: BoxFit.cover,
+                            placeholder: (_, __) =>
+                                Container(color: Colors.grey.shade200),
+                            errorWidget: (_, __, ___) =>
+                                Container(color: Colors.grey.shade200)),
+                  ),
+                  if (_uploadingBrandId == b.id)
+                    const Positioned.fill(
+                      child: ColoredBox(
+                        color: Color(0x88000000),
+                        child: Center(
+                          child: SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white)),
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                          color: Color(0xFF6A1B9A), shape: BoxShape.circle),
+                      child: const Icon(Icons.edit,
+                          size: 9, color: Colors.white),
+                    ),
+                ],
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(

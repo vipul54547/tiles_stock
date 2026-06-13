@@ -10,6 +10,10 @@ class ClaimedCatalog {
   final String stockistKey; // masked when the stockist is anonymous
   final String stockistName; // masked display name when anonymous
   final String stockistCity;
+  /// Non-default brand name + logo (multi-brand). Empty when the catalogue is on
+  /// the stockist's default brand (single-brand → show the company as before).
+  final String brandName;
+  final String brandLogo;
   final int designCount;
   final DateTime? claimedAt;
 
@@ -20,6 +24,8 @@ class ClaimedCatalog {
     required this.stockistKey,
     required this.stockistName,
     required this.stockistCity,
+    this.brandName = '',
+    this.brandLogo = '',
     required this.designCount,
     required this.claimedAt,
   });
@@ -33,6 +39,8 @@ class ClaimedCatalog {
         stockistKey: (j['stockist_key'] as String?) ?? '',
         stockistName: (j['stockist_display_name'] as String?) ?? '',
         stockistCity: (j['stockist_city'] as String?) ?? '',
+        brandName: (j['brand_name'] as String?) ?? '',
+        brandLogo: (j['brand_logo'] as String?) ?? '',
         designCount: (j['design_count'] as num?)?.toInt() ?? 0,
         claimedAt: j['claimed_at'] != null
             ? DateTime.tryParse(j['claimed_at'].toString())

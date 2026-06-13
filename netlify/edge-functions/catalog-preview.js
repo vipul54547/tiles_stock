@@ -27,6 +27,7 @@ export default async (request, context) => {
   if (!token) return Response.redirect(`${url.origin}/`, 302);
 
   let stockist = null;
+  let brand = null;
   let designCount = 0;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/public_catalog`, {
@@ -41,6 +42,7 @@ export default async (request, context) => {
     if (res.ok) {
       const data = await res.json();
       stockist = data && data.stockist ? data.stockist : null;
+      brand = data && data.brand ? data.brand : null;
       designCount = data && Array.isArray(data.designs) ? data.designs.length : 0;
     }
   } catch (_) {
@@ -54,15 +56,21 @@ export default async (request, context) => {
     });
   }
 
-  const name = (stockist.name && String(stockist.name).trim()) || 'Tile Catalog';
+  // Multi-brand: lead with the brand name/logo when present; the stockist is the
+  // company shown as "by …".
+  const brandName = brand && brand.name ? String(brand.name).trim() : '';
+  const company = (stockist.name && String(stockist.name).trim()) || 'Tile Catalog';
+  const name = brandName || company;
   const taglineBase =
     stockist.tagline && String(stockist.tagline).trim()
       ? String(stockist.tagline).trim()
       : `${designCount} tile design${designCount === 1 ? '' : 's'} in stock`;
-  const description = `${taglineBase} · Powered by TilesDesign`;
-  // Anonymous stockists return null logo/banner → fall back to the Tiles Stock
-  // mark, which matches the "anonymous → Tiles Stock leads" branding rule.
-  const image = stockist.banner_url || stockist.logo_url || fallbackImg;
+  const byLine = brandName ? `by ${company} · ` : '';
+  const description = `${byLine}${taglineBase} · Powered by TilesDesign`;
+  // Prefer the stockist banner, then the brand logo, then the stockist logo, then
+  // the TilesDesign mark. (Anonymous stockists return null logo/banner.)
+  const image = stockist.banner_url ||
+    (brand && brand.logo_url) || stockist.logo_url || fallbackImg;
 
   const html = `<!doctype html>
 <html lang="en">
