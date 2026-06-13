@@ -10,6 +10,8 @@ class StockCatalog {
   final String shareToken; // the catalog's own /s/<token> link
   final int sortOrder;
   final bool isActive;
+  /// The brand this catalogue belongs to (multi-brand). Null for legacy rows.
+  final String? brandId;
 
   const StockCatalog({
     required this.id,
@@ -20,6 +22,7 @@ class StockCatalog {
     required this.shareToken,
     required this.sortOrder,
     required this.isActive,
+    this.brandId,
   });
 
   bool get isPrivate => visibility == 'private';
@@ -33,5 +36,6 @@ class StockCatalog {
         shareToken: (j['share_token'] as String?) ?? '',
         sortOrder: j['sort_order'] as int? ?? 0,
         isActive: j['is_active'] as bool? ?? true,
+        brandId: j['brand_id'] as String?,
       );
 }

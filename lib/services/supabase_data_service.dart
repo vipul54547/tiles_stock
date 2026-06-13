@@ -8,6 +8,7 @@ import '../models/tile_size.dart';
 import '../models/stock_catalog.dart';
 import '../models/share_link.dart';
 import '../models/claimed_catalog.dart';
+import '../models/brand.dart';
 import '../models/inquiry_order.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
@@ -310,6 +311,56 @@ class SupabaseDataService {
       debugPrint('getCatalogs failed ($stockistUUID): $e\n$st');
       return [];
     }
+  }
+
+  // ── brands (multi-brand) ────────────────────────────────────────────────────
+
+  /// The calling stockist's brands (with catalogue counts).
+  Future<List<Brand>> getMyBrands() async {
+    try {
+      final res = await supabase.rpc('my_brands');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => Brand.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyBrands failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Stockist creates a brand (server enforces the admin-set brand_limit).
+  /// Returns the new brand id. Throws the server message on failure.
+  Future<String> createBrand(String name) async {
+    try {
+      final res = await supabase.rpc('create_brand', params: {'p_name': name});
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  Future<void> renameBrand(String id, String name) async {
+    try {
+      await supabase.rpc('rename_brand', params: {'p_id': id, 'p_name': name});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  Future<void> setBrandActive(String id, bool active) async {
+    try {
+      await supabase
+          .rpc('set_brand_active', params: {'p_id': id, 'p_active': active});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Admin: set a stockist's brand limit (by display/sequential id).
+  Future<void> setBrandLimit(String sequentialId, int limit) async {
+    await supabase.rpc('admin_set_brand_limit',
+        params: {'p_seq': sequentialId, 'p_limit': limit});
   }
 
   /// The stockist's default public catalog (the one new uploads target by

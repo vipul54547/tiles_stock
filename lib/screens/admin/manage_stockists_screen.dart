@@ -325,6 +325,8 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
                       _dot('Private', s.canCreatePrivateCatalog),
                       _dot('Anonymous', s.isAnonymous),
                       _deviceChip(s.deviceCount, s.deviceLimit),
+                      if (s.brandLimit > 1 || s.brandCount > 1)
+                        _brandChip(s.brandCount, s.brandLimit),
                     ],
                   ),
                 ],
@@ -403,6 +405,21 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
     );
   }
 
+  // Brands created / allowed (shown only for multi-brand stockists).
+  Widget _brandChip(int count, int limit) {
+    const color = Color(0xFF6A1B9A);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.sell_outlined, size: 11, color: color),
+        const SizedBox(width: 4),
+        Text('$count/$limit brands',
+            style: const TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w600, color: color)),
+      ],
+    );
+  }
+
   Future<void> _openAddForm() async {
     final created = await showModalBottomSheet<bool>(
       context: context,
@@ -446,6 +463,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   String _publicCode = ''; // current masked code (read-only, server-minted)
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
+  final _brandLimit = TextEditingController(text: '1'); // brands they may create
 
   // Branded catalog page (white-label share-link page).
   final _picker = ImagePicker();
@@ -488,6 +506,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _tradeName.text = s.publicDisplayName;
       _publicCode = s.publicCode;
       _deviceLimit.text = '${s.deviceLimit}';
+      _brandLimit.text = '${s.brandLimit}';
       _logoUrl = s.logoUrl;
       _bannerUrl = s.bannerUrl;
       _tagline.text = s.tagline;
@@ -506,7 +525,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   void dispose() {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
-      _priority, _gst, _tradeName, _deviceLimit, _tagline, _mapUrl
+      _priority, _gst, _tradeName, _deviceLimit, _brandLimit, _tagline, _mapUrl
     ]) {
       c.dispose();
     }
@@ -617,6 +636,44 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
               label: Text('Clear devices ($_deviceCount)'),
             ),
           ],
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  // Admin-set cap on how many brands this (manufacturer) stockist may create.
+  Widget _brandSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        const Text('Brand Limit',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        const SizedBox(height: 2),
+        Text(
+            'How many brands this stockist may create (for manufacturers selling '
+            'the same stock under different brand names). 1 = single brand. '
+            'Currently ${widget.existing!.brandCount} created.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: 90,
+          child: TextFormField(
+            controller: _brandLimit,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+                labelText: 'Brands',
+                isDense: true,
+                border: OutlineInputBorder()),
+            validator: (v) {
+              final t = (v ?? '').trim();
+              if (t.isEmpty) return null;
+              final n = int.tryParse(t);
+              if (n == null || n < 1) return 'Min 1';
+              return null;
+            },
+          ),
         ),
         const SizedBox(height: 16),
       ],
@@ -955,6 +1012,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             widget.existing!.id, _anonymous, _tradeName.text.trim());
         await _dataSvc.setDeviceLimit('stockist', widget.existing!.id,
             int.tryParse(_deviceLimit.text.trim()) ?? 1);
+        await _dataSvc.setBrandLimit(
+            widget.existing!.id, int.tryParse(_brandLimit.text.trim()) ?? 1);
         await _dataSvc.setStockistBranding(
           widget.existing!.id,
           logoUrl: _logoUrl.trim(),
@@ -1141,6 +1200,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
               if (_isEdit) _anonymitySection(),
               if (_isEdit) _brandingSection(),
               if (_isEdit) _deviceSection(),
+              if (_isEdit) _brandSection(),
               _field(_priority, 'Priority (0.00)',
                   keyboard: const TextInputType.numberWithOptions(decimal: true),
                   validator: (v) {

@@ -59,6 +59,12 @@ class Stockist {
   /// Devices currently registered for this login (admin list view only).
   final int deviceCount;
 
+  /// Max number of brands this stockist may create (admin-set). Default 1.
+  final int brandLimit;
+
+  /// Brands currently created (admin list view only).
+  final int brandCount;
+
   /// White-label branding for the public share-link catalog page. All optional.
   /// [logoUrl] is a Cloudinary URL; [brandColor] a hex string (e.g. #1B4F72);
   /// [mapUrl] a Google Maps link. Hidden for anonymous stockists (except
@@ -114,6 +120,10 @@ class Stockist {
     this.deviceLimit = 1,
 
     this.deviceCount = 0,
+
+    this.brandLimit = 1,
+
+    this.brandCount = 0,
 
     this.logoUrl = '',
 
@@ -172,6 +182,10 @@ class Stockist {
     deviceLimit: json['device_limit'] ?? 1,
 
     deviceCount: json['device_count'] ?? 0,
+
+    brandLimit: json['brand_limit'] ?? 1,
+
+    brandCount: json['brand_count'] ?? 0,
 
     logoUrl: json['logo_url'] ?? '',
 

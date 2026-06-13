@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../config/app_config.dart';
 import '../../models/choice_state.dart';
@@ -507,7 +508,19 @@ class _State extends State<ManageCatalogsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Share My Stock Catalogues')),
+      appBar: AppBar(
+        title: const Text('Share My Stock Catalogues'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.sell_outlined),
+            tooltip: 'Manage brands',
+            onPressed: () async {
+              await context.push('/stockist/brands');
+              if (mounted) _load();
+            },
+          ),
+        ],
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
