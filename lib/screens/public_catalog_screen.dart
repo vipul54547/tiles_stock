@@ -262,7 +262,7 @@ class _State extends State<PublicCatalogScreen> {
     _svc.logLinkInquiry(widget.token, _selected.keys.toList());
 
     lines.add('');
-    lines.add('— Powered by Tiles Stock');
+    lines.add('— Powered by TilesDesign');
     final msg = lines.join('\n');
     final uri = phone.isEmpty
         ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')
@@ -739,7 +739,7 @@ class _State extends State<PublicCatalogScreen> {
       padding: EdgeInsets.fromLTRB(
           16, 8, 16, 16 + MediaQuery.viewPaddingOf(context).bottom),
       child: Center(
-        child: Text('Powered by Tiles Stock',
+        child: Text('Powered by TilesDesign',
             style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,

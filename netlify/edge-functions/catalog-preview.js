@@ -22,7 +22,7 @@ export default async (request, context) => {
   const url = new URL(request.url);
   const token = (url.pathname.split('/s/')[1] || '').split('/')[0].split('?')[0];
   const appUrl = `${url.origin}/#/s/${encodeURIComponent(token)}`;
-  const fallbackImg = `${url.origin}/icons/Icon-512.png`;
+  const fallbackImg = `${url.origin}/tilesdesign-og.png`;
 
   if (!token) return Response.redirect(`${url.origin}/`, 302);
 
@@ -59,7 +59,7 @@ export default async (request, context) => {
     stockist.tagline && String(stockist.tagline).trim()
       ? String(stockist.tagline).trim()
       : `${designCount} tile design${designCount === 1 ? '' : 's'} in stock`;
-  const description = `${taglineBase} · Powered by Tiles Stock`;
+  const description = `${taglineBase} · Powered by TilesDesign`;
   // Anonymous stockists return null logo/banner → fall back to the Tiles Stock
   // mark, which matches the "anonymous → Tiles Stock leads" branding rule.
   const image = stockist.banner_url || stockist.logo_url || fallbackImg;
@@ -69,9 +69,9 @@ export default async (request, context) => {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(name)} — Tiles Stock</title>
+<title>${esc(name)} — TilesDesign</title>
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Tiles Stock">
+<meta property="og:site_name" content="TilesDesign">
 <meta property="og:title" content="${esc(name)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:image" content="${esc(image)}">

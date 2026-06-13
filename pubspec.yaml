@@ -61,6 +61,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/brand/
     - assets/images/600x600/Matt/
     - assets/images/600x600/Glossy/
     - assets/images/600x600/Satin/

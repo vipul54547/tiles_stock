@@ -8,27 +8,25 @@ class WebLandingScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const brand = Color(0xFF1B4F72);
+    // TilesDesign brand is cream-on-charcoal, so the landing uses a dark canvas.
+    const bg = Color(0xFF222222);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: bg,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.grid_view_rounded, size: 56, color: brand),
-              const SizedBox(height: 16),
-              const Text('Tiles Stock',
-                  style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: brand)),
-              const SizedBox(height: 10),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Image.asset('assets/brand/tilesdesign_wide.png'),
+              ),
+              const SizedBox(height: 18),
               Text(
                 'This page opens a tile catalog shared with you by your supplier.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade300),
               ),
               const SizedBox(height: 6),
               Text(
