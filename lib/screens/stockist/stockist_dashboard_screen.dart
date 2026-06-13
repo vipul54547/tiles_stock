@@ -271,7 +271,7 @@ class _State extends State<StockistDashboardScreen> {
                 // icons (stockists understand "share" best).
                 IconButton(
                   icon: const Icon(Icons.share_outlined),
-                  tooltip: 'Share my catalog',
+                  tooltip: 'Share my stock catalogue',
                   onPressed: () async {
                     await context.push('/stockist/catalogs');
                     _load();

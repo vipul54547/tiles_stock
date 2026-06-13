@@ -616,7 +616,7 @@ class _State extends State<AddEditStockScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Catalog',
+          const Text('Stock Catalogue',
               style: TextStyle(fontSize: 13, color: Colors.grey)),
           const SizedBox(height: 4),
           Container(

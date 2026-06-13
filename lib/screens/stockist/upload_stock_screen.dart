@@ -479,7 +479,7 @@ class _State extends State<UploadStockScreen> {
                   // Catalog (which stock this upload goes into) — only when the
                   // stockist has more than the default catalog.
                   if (_catalogs.length > 1) ...[
-                    const Text('Add to catalog',
+                    const Text('Add to stock catalogue',
                         style: TextStyle(
                             fontSize: 12, fontWeight: FontWeight.w600)),
                     DropdownButton<String>(

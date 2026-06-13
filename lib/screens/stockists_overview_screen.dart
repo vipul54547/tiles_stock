@@ -1195,7 +1195,7 @@ class _State extends State<StockistsOverviewScreen> {
         if (!isGuest && currentEndUserCanClaimPrivate)
           IconButton(
             icon: const Icon(Icons.add_link),
-            tooltip: 'Add a stock catalog link',
+            tooltip: 'Add a stock catalogue link',
             onPressed: _showAddCatalogDialog,
           ),
         IconButton(
@@ -1639,7 +1639,7 @@ class _State extends State<StockistsOverviewScreen> {
                       ),
                     ),
                   ),
-                  const Text('Saved stock catalogs',
+                  const Text('Saved stock catalogues',
                       style:
                           TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 4),
@@ -1653,7 +1653,7 @@ class _State extends State<StockistsOverviewScreen> {
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 24),
                       child: Center(
-                        child: Text('No saved stock catalogs.',
+                        child: Text('No saved stock catalogues.',
                             style: TextStyle(color: Colors.grey)),
                       ),
                     )
@@ -1692,7 +1692,7 @@ class _State extends State<StockistsOverviewScreen> {
                                 final confirm = await showDialog<bool>(
                                   context: ctx,
                                   builder: (dctx) => AlertDialog(
-                                    title: const Text('Remove saved catalog?'),
+                                    title: const Text('Remove saved stock catalogue?'),
                                     content: Text(
                                         'Remove "$title" from your Private '
                                         'market? You can add it again later '
@@ -1757,12 +1757,12 @@ class _State extends State<StockistsOverviewScreen> {
             children: [
               Icon(Icons.lock_outline, size: 40, color: Colors.grey.shade400),
               const SizedBox(height: 12),
-              const Text('No private stock catalogs yet',
+              const Text('No private stock catalogues yet',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text(
-                  'When a supplier shares a private stock catalog link with you, '
-                  'tap "Add a stock catalog link" to save it here.',
+                  'When a supplier shares a private stock catalogue link with you, '
+                  'tap "Add a stock catalogue link" to save it here.',
                   textAlign: TextAlign.center,
                   style:
                       TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
@@ -1770,7 +1770,7 @@ class _State extends State<StockistsOverviewScreen> {
               OutlinedButton.icon(
                 onPressed: _showAddCatalogDialog,
                 icon: const Icon(Icons.add_link, size: 18),
-                label: const Text('Add stock catalog link'),
+                label: const Text('Add stock catalogue link'),
               ),
             ],
           ),
@@ -1801,7 +1801,7 @@ class _State extends State<StockistsOverviewScreen> {
   // be a bare token) so foreign/garbage URLs are rejected with a friendly
   // message instead of being sent to the server.
   Future<void> _showAddCatalogDialog() async {
-    if (blockIfGuest(context, feature: 'Saved stock catalogs')) return;
+    if (blockIfGuest(context, feature: 'Saved stock catalogues')) return;
     final ctrl = TextEditingController();
     final token = await showDialog<String>(
       context: context,
@@ -1809,13 +1809,13 @@ class _State extends State<StockistsOverviewScreen> {
         String? error;
         return StatefulBuilder(
           builder: (ctx, setDialog) => AlertDialog(
-            title: const Text('Add a Stock Catalog'),
+            title: const Text('Add a Stock Catalogue'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                    'Paste the stock catalog link your supplier shared with '
+                    'Paste the stock catalogue link your supplier shared with '
                     'you. It will be saved to your Private market.',
                     style: TextStyle(fontSize: 12.5)),
                 const SizedBox(height: 12),
@@ -1860,7 +1860,7 @@ class _State extends State<StockistsOverviewScreen> {
     if (token == null) return;
     try {
       final res = await _service.claimCatalog(token);
-      final name = (res['catalog_name'] ?? 'Stock catalog').toString();
+      final name = (res['catalog_name'] ?? 'Stock catalogue').toString();
       if (!mounted) return;
       await _load(); // refresh the private market + cards
       if (!mounted) return;

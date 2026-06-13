@@ -1033,11 +1033,11 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Icon(Icons.lock_outline, size: 40, color: Colors.grey.shade400),
               const SizedBox(height: 12),
-              const Text('No private catalogs yet',
+              const Text('No private stock catalogues yet',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text(
-                  'When a supplier shares a private catalog link with you, '
+                  'When a supplier shares a private stock catalogue link with you, '
                   'tap "Add" to save it here.',
                   textAlign: TextAlign.center,
                   style:
@@ -1046,7 +1046,7 @@ class _HomeScreenState extends State<HomeScreen> {
               OutlinedButton.icon(
                 onPressed: _showAddCatalogDialog,
                 icon: const Icon(Icons.add_link, size: 18),
-                label: const Text('Add catalog'),
+                label: const Text('Add stock catalogue'),
               ),
             ],
           ),
@@ -1059,18 +1059,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Paste a share link → claim the catalog → it lands in the Private tab.
   Future<void> _showAddCatalogDialog() async {
-    if (blockIfGuest(context, feature: 'Saved catalogs')) return;
+    if (blockIfGuest(context, feature: 'Saved stock catalogues')) return;
     final ctrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Add a catalog'),
+        title: const Text('Add a stock catalogue'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-                'Paste the catalog link your supplier shared with you. '
+                'Paste the stock catalogue link your supplier shared with you. '
                 'It will be saved to your Private tab.',
                 style: TextStyle(fontSize: 12.5)),
             const SizedBox(height: 12),
@@ -1099,7 +1099,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (ok != true) return;
     try {
       final res = await _service.claimCatalog(ctrl.text);
-      final name = (res['catalog_name'] ?? 'Catalog').toString();
+      final name = (res['catalog_name'] ?? 'Stock catalogue').toString();
       final priv = await _service.getMyPrivateDesigns();
       if (!mounted) return;
       setState(() {
@@ -1130,7 +1130,7 @@ class _HomeScreenState extends State<HomeScreen> {
         actions: [
           if (!isGuest && currentEndUserCanClaimPrivate)
             IconButton(
-              tooltip: 'Add a catalog link',
+              tooltip: 'Add a stock catalogue link',
               icon: const Icon(Icons.add_link),
               onPressed: _showAddCatalogDialog,
             ),

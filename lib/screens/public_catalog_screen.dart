@@ -238,11 +238,11 @@ class _State extends State<PublicCatalogScreen> {
 
     final lines = <String>[];
     if (_selected.isEmpty) {
-      lines.add('Hello $who, I saw your catalog and would like to enquire '
+      lines.add('Hello $who, I saw your stock catalogue and would like to enquire '
           'about some designs.');
     } else {
       lines.add('Hello $who, I would like to enquire about these designs '
-          'from your catalog:');
+          'from your stock catalogue:');
       lines.add('');
       var n = 1;
       for (final d in _all) {
@@ -583,7 +583,7 @@ class _State extends State<PublicCatalogScreen> {
             pinned: true,
             backgroundColor: _brand,
             foregroundColor: Colors.white,
-            title: Text(_stockist['name']?.toString() ?? 'Catalog'),
+            title: Text(_stockist['name']?.toString() ?? 'Stock Catalogue'),
           ),
           SliverToBoxAdapter(child: _brandHeader()),
           SliverToBoxAdapter(child: _searchRow()),
@@ -676,7 +676,7 @@ class _State extends State<PublicCatalogScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name.isEmpty ? 'Catalog' : name,
+                    Text(name.isEmpty ? 'Stock Catalogue' : name,
                         style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
@@ -1053,7 +1053,7 @@ class _Unavailable extends StatelessWidget {
           children: [
             Icon(Icons.link_off_rounded, size: 72, color: Colors.grey.shade300),
             const SizedBox(height: 16),
-            Text('Catalog not available',
+            Text('Stock catalogue not available',
                 style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,

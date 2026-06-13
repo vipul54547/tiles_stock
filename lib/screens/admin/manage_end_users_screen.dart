@@ -645,7 +645,7 @@ class _AddEndUserSheetState extends State<_AddEndUserSheet> {
                     title: const Text('Allow private links'),
                     subtitle: Text(
                         _canClaimPrivate
-                            ? 'Can save catalog links — sees the Public / Private / Both tabs and the add-link button.'
+                            ? 'Can save stock catalogue links — sees the Public / Private / Both tabs and the add-link button.'
                             : 'No link feature shown. Buyer browses the public market only and never sees these options.',
                         style: const TextStyle(fontSize: 11)),
                     onChanged: (v) => setState(() => _canClaimPrivate = v),

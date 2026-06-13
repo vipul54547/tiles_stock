@@ -24,13 +24,13 @@ class WebLandingScreen extends StatelessWidget {
               ),
               const SizedBox(height: 18),
               Text(
-                'This page opens a tile catalog shared with you by your supplier.',
+                'This page opens a stock catalogue shared with you by your supplier.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade300),
               ),
               const SizedBox(height: 6),
               Text(
-                'Please open the catalog link your supplier sent you.',
+                'Please open the stock catalogue link your supplier sent you.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
               ),

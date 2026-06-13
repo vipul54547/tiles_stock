@@ -363,7 +363,7 @@ class _State extends State<ManageCatalogsScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Rename catalog'),
+        title: const Text('Rename stock catalogue'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -416,7 +416,7 @@ class _State extends State<ManageCatalogsScreen> {
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 2),
-                  Text('${list.length} dealer${list.length == 1 ? '' : 's'} saved this catalog',
+                  Text('${list.length} dealer${list.length == 1 ? '' : 's'} saved this stock catalogue',
                       style:
                           TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                   const SizedBox(height: 10),
@@ -456,7 +456,7 @@ class _State extends State<ManageCatalogsScreen> {
                                     title: const Text('Remove dealer?'),
                                     content: Text(
                                         'Remove ${d.company.isEmpty ? d.contact : d.company} from "${c.name}"? '
-                                        'They will lose access to this catalog in their app.'),
+                                        'They will lose access to this stock catalogue in their app.'),
                                     actions: [
                                       TextButton(
                                           onPressed: () =>
@@ -507,7 +507,7 @@ class _State extends State<ManageCatalogsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Share My Catalogs')),
+      appBar: AppBar(title: const Text('Share My Stock Catalogues')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -515,9 +515,9 @@ class _State extends State<ManageCatalogsScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Text(
-                    'Public catalogs show in the app marketplace and via their link. '
-                    'Private catalogs are shared only by their own link.'
-                    '${_canPrivate ? '' : ' (Private catalogs are admin-enabled.)'}',
+                    'Public stock catalogues show in the app marketplace and via their link. '
+                    'Private stock catalogues are shared only by their own link.'
+                    '${_canPrivate ? '' : ' (Private stock catalogues are admin-enabled.)'}',
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),

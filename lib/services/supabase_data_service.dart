@@ -327,7 +327,7 @@ class SupabaseDataService {
   Future<String?> addCatalog(String stockistUUID, String name,
       {bool private = false}) async {
     final trimmed = name.trim();
-    if (trimmed.isEmpty) throw 'Catalog name cannot be empty.';
+    if (trimmed.isEmpty) throw 'Stock catalogue name cannot be empty.';
     try {
       final existing = await supabase
           .from('stock_catalogs')
@@ -357,7 +357,7 @@ class SupabaseDataService {
 
   Future<void> renameCatalog(String id, String name) async {
     final trimmed = name.trim();
-    if (trimmed.isEmpty) throw 'Catalog name cannot be empty.';
+    if (trimmed.isEmpty) throw 'Stock catalogue name cannot be empty.';
     await supabase.from('stock_catalogs').update({'name': trimmed}).eq('id', id);
   }
 
@@ -386,7 +386,7 @@ class SupabaseDataService {
   /// plain message string on failure (invalid link, not a buyer, inactive).
   Future<Map<String, dynamic>> claimCatalog(String token) async {
     final t = token.trim();
-    if (t.isEmpty) throw 'Paste a catalog link first.';
+    if (t.isEmpty) throw 'Paste a stock catalogue link first.';
     // Accept a full link (…/s/<token> or …/#/s/<token>) or a bare token.
     final match = RegExp(r'/s/([A-Za-z0-9]+)').firstMatch(t);
     final resolved = match != null ? match.group(1)! : t;

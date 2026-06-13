@@ -744,11 +744,11 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(height: 24),
-        const Text('Catalog Branding',
+        const Text('Stock Catalogue Branding',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
         const SizedBox(height: 2),
         Text(
-            'Logo, tagline, colour & map shown on the share-link catalog page. '
+            'Logo, tagline, colour & map shown on the share-link stock catalogue page. '
             'Hidden automatically while the stockist is anonymous (except '
             'tagline & colour).',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
@@ -1129,11 +1129,11 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                     contentPadding: EdgeInsets.zero,
                     value: _canPrivate,
                     activeThumbColor: Colors.deepPurple,
-                    title: const Text('Allow private catalogs'),
+                    title: const Text('Allow private stock catalogues'),
                     subtitle: Text(
                         _canPrivate
-                            ? 'Can create private ("Most Exclusive") catalogs — link-only stock.'
-                            : 'Public catalogs only. Turn on for premium/trusted stockists.',
+                            ? 'Can create private ("Most Exclusive") stock catalogues — link-only stock.'
+                            : 'Public stock catalogues only. Turn on for premium/trusted stockists.',
                         style: const TextStyle(fontSize: 11)),
                     onChanged: (v) => setState(() => _canPrivate = v),
                   ),
