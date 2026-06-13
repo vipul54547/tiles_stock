@@ -55,6 +55,7 @@ class _State extends State<InquiriesScreen> {
   String _q = '';
   String? _buyerId;
   String? _designId;
+  String? _brandName; // multi-brand filter (non-default brand name)
   DateTime? _from;
   DateTime? _to;
   final _searchCtrl = TextEditingController();
@@ -88,8 +89,19 @@ class _State extends State<InquiriesScreen> {
   int get _filterCount =>
       (_buyerId != null ? 1 : 0) +
       (_designId != null ? 1 : 0) +
+      (_brandName != null ? 1 : 0) +
       (_from != null ? 1 : 0) +
       (_to != null ? 1 : 0);
+
+  // Distinct non-default brand names across all orders (for the brand filter).
+  List<String> get _allBrandNames {
+    final s = <String>{};
+    for (final o in _orders) {
+      s.addAll(o.brands);
+    }
+    final l = s.toList()..sort();
+    return l;
+  }
 
   List<InquiryOrder> get _filtered {
     var list = _orders;
@@ -101,6 +113,9 @@ class _State extends State<InquiriesScreen> {
       list = list
           .where((o) => o.designs.any((d) => d['id'] == _designId))
           .toList();
+    }
+    if (_brandName != null) {
+      list = list.where((o) => o.brands.contains(_brandName)).toList();
     }
     if (_from != null) {
       list = list
@@ -336,6 +351,8 @@ class _State extends State<InquiriesScreen> {
             chip('Buyer: ${buyer.company}', () => setState(() => _buyerId = null)),
           if (designName != null)
             chip('Design: $designName', () => setState(() => _designId = null)),
+          if (_brandName != null)
+            chip('Brand: $_brandName', () => setState(() => _brandName = null)),
           if (_from != null)
             chip('From ${_fmtDate(_from)}', () => setState(() => _from = null)),
           if (_to != null)
@@ -355,8 +372,10 @@ class _State extends State<InquiriesScreen> {
         designs[(d['id'] ?? '').toString()] = (d['name'] ?? '').toString();
       }
     }
+    final brandNames = _allBrandNames;
     String? buyerId = _buyerId;
     String? designId = _designId;
+    String? brandName = _brandName;
     DateTime? from = _from;
     DateTime? to = _to;
 
@@ -414,6 +433,23 @@ class _State extends State<InquiriesScreen> {
                 ],
                 onChanged: (v) => setSheet(() => designId = v),
               ),
+              if (brandNames.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String?>(
+                  initialValue: brandName,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                      labelText: 'Brand', isDense: true,
+                      border: OutlineInputBorder()),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('Any brand')),
+                    ...brandNames.map((b) => DropdownMenuItem(
+                        value: b,
+                        child: Text(b, overflow: TextOverflow.ellipsis))),
+                  ],
+                  onChanged: (v) => setSheet(() => brandName = v),
+                ),
+              ],
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -457,6 +493,7 @@ class _State extends State<InquiriesScreen> {
                     onPressed: () => setSheet(() {
                       buyerId = null;
                       designId = null;
+                      brandName = null;
                       from = null;
                       to = null;
                     }),
@@ -469,6 +506,7 @@ class _State extends State<InquiriesScreen> {
                       setState(() {
                         _buyerId = buyerId;
                         _designId = designId;
+                        _brandName = brandName;
                         _from = from;
                         _to = to;
                       });
@@ -548,6 +586,34 @@ class _State extends State<InquiriesScreen> {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 11.5),
+              ),
+            ],
+            if (o.brands.isNotEmpty) ...[
+              const SizedBox(height: 5),
+              Wrap(
+                spacing: 5,
+                runSpacing: 4,
+                children: [
+                  for (final br in o.brands)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF6A1B9A).withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.sell_outlined,
+                            size: 11, color: Color(0xFF6A1B9A)),
+                        const SizedBox(width: 3),
+                        Text(br,
+                            style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF6A1B9A))),
+                      ]),
+                    ),
+                ],
               ),
             ],
             const SizedBox(height: 8),

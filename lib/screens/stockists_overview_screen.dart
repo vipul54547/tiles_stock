@@ -1666,22 +1666,42 @@ class _State extends State<StockistsOverviewScreen> {
                             Divider(height: 1, color: Colors.grey.shade200),
                         itemBuilder: (_, i) {
                           final c = items[i];
-                          final title = c.stockistName.isNotEmpty
-                              ? c.stockistName
-                              : c.name;
+                          // Multi-brand: lead with the brand, company as "by …".
+                          final hasBrand = c.brandName.isNotEmpty;
+                          final title = hasBrand
+                              ? c.brandName
+                              : (c.stockistName.isNotEmpty
+                                  ? c.stockistName
+                                  : c.name);
                           final sub = [
-                            if (c.name.isNotEmpty && c.name != title) c.name,
+                            if (hasBrand && c.stockistName.isNotEmpty)
+                              'by ${c.stockistName}',
+                            if (!hasBrand && c.name.isNotEmpty && c.name != title)
+                              c.name,
                             '${c.designCount} design${c.designCount == 1 ? '' : 's'}',
                             if (c.stockistCity.isNotEmpty) c.stockistCity,
                           ].join('  ·  ');
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading: CircleAvatar(
-                              backgroundColor:
-                                  const Color(0xFF1B4F72).withValues(alpha: 0.1),
-                              child: const Icon(Icons.storefront_outlined,
-                                  color: Color(0xFF1B4F72), size: 20),
-                            ),
+                            leading: (hasBrand && c.brandLogo.isNotEmpty)
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: CachedNetworkImage(
+                                      imageUrl: CloudinaryService.thumbUrl(
+                                          c.brandLogo, width: 120),
+                                      width: 40, height: 40, fit: BoxFit.cover,
+                                      placeholder: (_, __) =>
+                                          Container(color: Colors.grey.shade200),
+                                      errorWidget: (_, __, ___) =>
+                                          Container(color: Colors.grey.shade200),
+                                    ),
+                                  )
+                                : CircleAvatar(
+                                    backgroundColor: const Color(0xFF1B4F72)
+                                        .withValues(alpha: 0.1),
+                                    child: const Icon(Icons.storefront_outlined,
+                                        color: Color(0xFF1B4F72), size: 20),
+                                  ),
                             title: Text(title,
                                 style: const TextStyle(
                                     fontWeight: FontWeight.w600, fontSize: 14)),

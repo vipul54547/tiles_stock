@@ -35,6 +35,9 @@ class InquiryOrder {
   /// Designs in this order ({id, name}), for the hub's design filter/preview.
   final List<Map<String, dynamic>> designs;
 
+  /// Non-default brand names present in this order (multi-brand hub filter).
+  final List<String> brands;
+
   InquiryOrder({
     required this.id,
     required this.token,
@@ -55,6 +58,7 @@ class InquiryOrder {
     this.lineCount = 0,
     this.totalBoxes = 0,
     this.designs = const [],
+    this.brands = const [],
   });
 
   static DateTime _dt(dynamic v) =>
@@ -83,6 +87,10 @@ class InquiryOrder {
         totalBoxes:   (j['total_boxes'] as num?)?.toInt() ?? 0,
         designs:      (j['designs'] as List?)
                 ?.map((e) => Map<String, dynamic>.from(e as Map))
+                .toList() ??
+            const [],
+        brands:       (j['brands'] as List?)
+                ?.map((e) => e.toString())
                 .toList() ??
             const [],
       );
