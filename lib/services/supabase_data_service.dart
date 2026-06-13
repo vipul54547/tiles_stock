@@ -1016,16 +1016,18 @@ class SupabaseDataService {
     }
   }
 
-  /// Buyer confirms their draft order. Throws the server message on failure.
-  Future<void> confirmInquiry(String id) async {
+  /// Buyer marks their inquiry as Sent when they send it to the stockist
+  /// (draft -> sent; re-send just bumps Modified). Fire-and-forget.
+  Future<void> markInquirySent(String id) async {
     try {
-      await supabase.rpc('confirm_inquiry', params: {'p_id': id});
-    } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      await supabase.rpc('mark_inquiry_sent', params: {'p_id': id});
+    } catch (e, st) {
+      debugPrint('markInquirySent failed ($id): $e\n$st');
     }
   }
 
-  /// Stockist locks an agreed order (freezes the buyer out, snapshots the lines).
+  /// Stockist confirms an order (locks it): freezes the buyer out and snapshots
+  /// the lines. (Shown to the stockist as "Confirm Order".)
   Future<void> lockInquiry(String id) async {
     try {
       await supabase.rpc('lock_inquiry', params: {'p_id': id});

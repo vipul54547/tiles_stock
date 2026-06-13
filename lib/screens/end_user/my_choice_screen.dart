@@ -67,40 +67,6 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     return '${l.day} ${_months[l.month - 1]} ${l.year}, $h:$m $ap';
   }
 
-  Future<void> _confirmOrder(InquiryOrder o, Stockist stockist) async {
-    if (blockIfGuest(context, feature: 'Confirming orders')) return;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Confirm this order?'),
-        content: Text(
-            'Confirm order ${o.token} to ${stockist.name}? This tells the '
-            'supplier your selection is final. You can still edit it until they '
-            'lock it.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Confirm')),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    try {
-      await _service.confirmInquiry(o.id);
-      await _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${o.token} confirmed.'),
-          backgroundColor: const Color(0xFF2E7D32)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: Colors.red));
-    }
-  }
 
   List<TileDesign> get _chosenDesigns =>
       _allDesigns.where((d) => myChoiceQuantities.containsKey(d.id)).toList();
@@ -212,8 +178,13 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                   final ok = await launchUrl(uri,
                       mode: LaunchMode.externalApplication);
                   if (ok) {
-                    // Auto-alert the stockist that a buyer reached out.
+                    // Alert the stockist + mark this inquiry as Sent.
                     await _service.notifyStockist(stockist.id);
+                    final order = designs.isEmpty
+                        ? null
+                        : _orderFor(designs.first.stockistId);
+                    if (order != null) await _service.markInquirySent(order.id);
+                    if (mounted) _load();
                   } else if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Could not open WhatsApp')),
@@ -482,18 +453,18 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
             ],
           ),
         ),
-        if (order != null) _buildOrderStrip(order, stockist),
+        if (order != null) _buildOrderStrip(order),
         ...designs.map((d) => _buildDesignRow(d, editable)),
         Divider(color: Colors.grey.shade200, height: 20),
       ],
     );
   }
 
-  // Token + lifecycle status + Generated/Modified times for a stockist's order,
-  // with a Confirm action while it's still a draft and a "locked" note once the
-  // supplier has frozen it.
-  Widget _buildOrderStrip(InquiryOrder o, Stockist? stockist) {
+  // Token + lifecycle status + Generated/Modified times for a stockist's order.
+  // Read-only: the buyer "sends" the inquiry via WhatsApp; the supplier confirms.
+  Widget _buildOrderStrip(InquiryOrder o) {
     final (Color fg, Color bg) = switch (o.status) {
+      'sent'        => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
       'confirmed'   => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
       'locked'      => (const Color(0xFF6A1B9A), const Color(0xFFF3E5F5)),
       'dispatching' => (const Color(0xFFE65100), const Color(0xFFFFF3E0)),
@@ -533,21 +504,6 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                         fontWeight: FontWeight.bold,
                         color: fg)),
               ),
-              const Spacer(),
-              if (o.isDraft && stockist != null)
-                TextButton.icon(
-                  onPressed: () => _confirmOrder(o, stockist),
-                  icon: const Icon(Icons.check_circle_outline, size: 16),
-                  label: const Text('Confirm',
-                      style: TextStyle(fontSize: 12)),
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF2E7D32),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
             ],
           ),
           const SizedBox(height: 4),
@@ -561,7 +517,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
               padding: const EdgeInsets.only(top: 3),
               child: Text(
                 o.isLocked || o.isDispatching
-                    ? 'Locked by the supplier — this order can no longer be changed.'
+                    ? 'Confirmed by the supplier — this order can no longer be changed.'
                     : 'This order is ${o.statusLabel.toLowerCase()}.',
                 style: TextStyle(
                     fontSize: 10.5,

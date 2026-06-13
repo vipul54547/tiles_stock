@@ -92,20 +92,24 @@ class InquiryOrder {
       designs.map((d) => (d['name'] ?? '').toString()).where((s) => s.isNotEmpty).join(', ');
 
   bool get isDraft       => status == 'draft';
-  bool get isConfirmed   => status == 'confirmed';
+  bool get isSent        => status == 'sent';
   bool get isLocked      => status == 'locked';
   bool get isDispatching => status == 'dispatching';
   bool get isCompleted   => status == 'completed';
   bool get isRejected    => status == 'rejected';
 
-  /// The buyer can still edit the basket only while draft/confirmed.
-  bool get buyerEditable => status == 'draft' || status == 'confirmed';
+  /// The buyer can still edit the basket only while it's an open inquiry
+  /// (draft/sent). Once the stockist confirms (locked) it is frozen.
+  bool get buyerEditable =>
+      status == 'draft' || status == 'sent' || status == 'confirmed';
 
-  /// Short human label for the status chip.
+  /// Short human label for the status chip. The buyer "sends" an inquiry; the
+  /// stockist's lock is the real "Confirmed" (the supplier accepted it).
   String get statusLabel {
     switch (status) {
-      case 'confirmed':   return 'Confirmed';
-      case 'locked':      return 'Locked';
+      case 'sent':        return 'Sent';
+      case 'confirmed':   return 'Sent';        // legacy buyer-confirm == sent
+      case 'locked':      return 'Confirmed';   // supplier accepted the order
       case 'dispatching': return 'Dispatching';
       case 'completed':   return 'Completed';
       case 'rejected':    return 'Rejected';

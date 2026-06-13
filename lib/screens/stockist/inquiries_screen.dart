@@ -25,12 +25,25 @@ const _months = [
 
 // status → (foreground, background) for the chip.
 (Color, Color) _statusColors(String s) => switch (s) {
+      'sent'        => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
       'confirmed'   => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
       'locked'      => (const Color(0xFF6A1B9A), const Color(0xFFF3E5F5)),
       'dispatching' => (const Color(0xFFE65100), const Color(0xFFFFF3E0)),
       'completed'   => (const Color(0xFF2E7D32), const Color(0xFFE8F5E9)),
       'rejected'    => (const Color(0xFFC62828), const Color(0xFFFFEBEE)),
       _             => (Colors.grey.shade700, const Color(0xFFF5F5F5)),
+    };
+
+// Filter-chip / status display name. The buyer "sends" an inquiry; the stockist's
+// lock ('locked') is shown as the real "Confirmed".
+String _statusName(String s) => switch (s) {
+      'sent'        => 'Sent',
+      'confirmed'   => 'Sent',
+      'locked'      => 'Confirmed',
+      'dispatching' => 'Dispatching',
+      'completed'   => 'Completed',
+      'rejected'    => 'Rejected',
+      _             => 'Draft',
     };
 
 class _State extends State<InquiriesScreen> {
@@ -47,7 +60,7 @@ class _State extends State<InquiriesScreen> {
   final _searchCtrl = TextEditingController();
 
   static const _statuses = [
-    'all', 'draft', 'confirmed', 'locked', 'dispatching', 'completed', 'rejected'
+    'all', 'draft', 'sent', 'locked', 'dispatching', 'completed', 'rejected'
   ];
 
   @override
@@ -189,9 +202,7 @@ class _State extends State<InquiriesScreen> {
       child: Row(
         children: _statuses.map((s) {
           final sel = _status == s;
-          final label =
-              (s == 'all' ? 'All' : s[0].toUpperCase() + s.substring(1)) +
-                  count(s);
+          final label = (s == 'all' ? 'All' : _statusName(s)) + count(s);
           return Padding(
             padding: const EdgeInsets.only(right: 6),
             child: GestureDetector(
@@ -553,12 +564,12 @@ class _State extends State<InquiriesScreen> {
       if (o.phone.isNotEmpty)
         _actionChip('WhatsApp', Icons.chat, const Color(0xFF25D366),
             () => _whatsapp(o)),
-      if (o.status == 'draft' || o.status == 'confirmed')
-        _actionChip('Lock', Icons.lock_outline, const Color(0xFF6A1B9A),
-            () => _lock(o)),
+      if (o.status == 'draft' || o.status == 'sent')
+        _actionChip('Confirm Order', Icons.check_circle_outline,
+            const Color(0xFF2E7D32), () => _confirmOrder(o)),
       if (o.status == 'locked')
-        _actionChip('Unlock', Icons.lock_open_outlined, const Color(0xFFE65100),
-            () => _unlock(o)),
+        _actionChip('Reopen', Icons.lock_open_outlined, const Color(0xFFE65100),
+            () => _reopen(o)),
       if (o.status == 'locked' || o.status == 'dispatching')
         _actionChip('Dispatch', Icons.local_shipping_outlined,
             const Color(0xFF00695C), () => _dispatch(o)),
@@ -599,17 +610,18 @@ class _State extends State<InquiriesScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  Future<void> _lock(InquiryOrder o) async {
-    final ok = await _confirm('Lock ${o.token}?',
-        'Locking freezes this order — the buyer can no longer change it, and it '
-        'becomes ready for dispatch. You can reopen it before dispatching.');
+  Future<void> _confirmOrder(InquiryOrder o) async {
+    final ok = await _confirm('Confirm ${o.token}?',
+        'Confirming accepts this as a firm order and freezes it — the buyer can '
+        'no longer change it, and it becomes ready for dispatch. You can reopen '
+        'it before dispatching.');
     if (!ok) return;
-    await _run(() => _data.lockInquiry(o.id), '${o.token} locked.');
+    await _run(() => _data.lockInquiry(o.id), '${o.token} confirmed.');
   }
 
-  Future<void> _unlock(InquiryOrder o) async {
+  Future<void> _reopen(InquiryOrder o) async {
     final ok = await _confirm('Reopen ${o.token}?',
-        'This lets the buyer edit the order again and clears the locked copy.');
+        'This lets the buyer change the order again and clears the confirmed copy.');
     if (!ok) return;
     await _run(() => _data.unlockInquiry(o.id), '${o.token} reopened.');
   }
