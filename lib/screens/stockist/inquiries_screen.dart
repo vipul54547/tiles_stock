@@ -612,9 +612,10 @@ class _State extends State<InquiriesScreen> {
 
   Future<void> _confirmOrder(InquiryOrder o) async {
     final ok = await _confirm('Confirm ${o.token}?',
-        'Confirming accepts this as a firm order and freezes it — the buyer can '
-        'no longer change it, and it becomes ready for dispatch. You can reopen '
-        'it before dispatching.');
+        'Call the buyer and agree the order first. Confirming locks it — the '
+        'buyer can no longer change it and it becomes ready for dispatch.\n\n'
+        'Please confirm only after you are sure: cancelling or rejecting an order '
+        'after confirming it can lower your profile score.');
     if (!ok) return;
     await _run(() => _data.lockInquiry(o.id), '${o.token} confirmed.');
   }

@@ -163,7 +163,34 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
               child: Text(message,
                   style: const TextStyle(fontSize: 12, height: 1.6)),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+            // Profile-score note: encourages serious inquiries.
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFFE082)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline,
+                      size: 16, color: Colors.orange.shade800),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Please inquire seriously. We compare your inquiries with '
+                      'how many boxes are actually dispatched, and that affects '
+                      'your profile score.',
+                      style: TextStyle(
+                          fontSize: 11.5, color: Colors.orange.shade900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -178,8 +205,9 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                   final ok = await launchUrl(uri,
                       mode: LaunchMode.externalApplication);
                   if (ok) {
-                    // Alert the stockist + mark this inquiry as Sent.
-                    await _service.notifyStockist(stockist.id);
+                    // Mark the inquiry Sent — this also notifies the stockist
+                    // (token-aware: "New inquiry" on first send, "Order updated"
+                    // on a re-send), so no separate notify call is needed.
                     final order = designs.isEmpty
                         ? null
                         : _orderFor(designs.first.stockistId);
