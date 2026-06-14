@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/supabase_auth_service.dart';
+import '../widgets/powered_by_tiles_stock.dart';
 
 
 
@@ -319,6 +320,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
 
               ),
+
+              const SizedBox(height: 28),
+
+              const Center(child: PoweredByTilesStock()),
 
             ],
 

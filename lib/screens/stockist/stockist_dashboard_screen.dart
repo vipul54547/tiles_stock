@@ -8,6 +8,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
 import '../../widgets/filter_section.dart';
+import '../../widgets/powered_by_tiles_stock.dart';
 import '../../widgets/notification_bell.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_types.dart';
@@ -327,6 +328,18 @@ class _State extends State<StockistDashboardScreen> {
                 _buildChipRow(),   // pinned: Stock + Inquiry buttons + quality chips
                 Expanded(child: _buildMyStockScroll()),
               ],
+            ),
+      // Slim platform co-brand footer (hidden during multi-select).
+      bottomNavigationBar: _selectMode
+          ? null
+          : SafeArea(
+              top: false,
+              child: Container(
+                color: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: const Center(
+                    child: PoweredByTilesStock(logoHeight: 18)),
+              ),
             ),
     );
   }

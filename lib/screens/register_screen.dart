@@ -4,6 +4,7 @@ import '../services/supabase_data_service.dart';
 import '../widgets/phone_field.dart';
 import '../widgets/save_bar.dart';
 import '../widgets/unsaved_changes.dart';
+import '../widgets/powered_by_tiles_stock.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -124,6 +125,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             _field(_cityCtrl,    'City',             Icons.location_city_outlined, required: true),
             _field(_gstCtrl,     'GST Number',      Icons.receipt_outlined),
             _field(_passCtrl,    'Password',         Icons.lock_outline,         required: true, obscure: true),
+            const SizedBox(height: 12),
+            const Center(child: PoweredByTilesStock()),
           ],
         ),
       ),

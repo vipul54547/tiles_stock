@@ -27,12 +27,21 @@ class ManageCatalogsScreen extends StatefulWidget {
 const _navy = Color(0xFF1B4F72); // brand accent / primary
 const _brandBg = Color(0xFFE8F0FE); // brand box background (blue family)
 const _brandBorder = Color(0xFF1B4F72);
-const _listBg = Color(0xFFE0F2F1); // stock-list box background (teal family)
-const _listBorder = Color(0xFF00897B);
-const _teal = Color(0xFF00897B);
 const _amberBg = Color(0xFFFFF8E1); // "make custom link" zone (amber)
 const _greenBg = Color(0xFFE8F5E9); // a live generated link (green)
 const _green = Color(0xFF2E7D32);
+
+// Each stock list gets its OWN background colour (cycled by position) so several
+// lists in a brand are easy to tell apart. Hues avoid the amber custom zone +
+// green link rows nested inside, so those still stand out.
+const _listPalette = <({Color bg, Color border})>[
+  (bg: Color(0xFFE0F2F1), border: Color(0xFF00897B)), // teal
+  (bg: Color(0xFFF3E5F5), border: Color(0xFF8E24AA)), // purple
+  (bg: Color(0xFFFCE4EC), border: Color(0xFFD81B60)), // pink
+  (bg: Color(0xFFE8EAF6), border: Color(0xFF3949AB)), // indigo
+  (bg: Color(0xFFEFEBE9), border: Color(0xFF6D4C41)), // brown
+  (bg: Color(0xFFECEFF1), border: Color(0xFF546E7A)), // blue-grey
+];
 
 class _State extends State<ManageCatalogsScreen> {
   final _data = SupabaseDataService();
@@ -46,6 +55,7 @@ class _State extends State<ManageCatalogsScreen> {
   final Map<String, TextEditingController> _daysCtrls = {}; // per-list days box
   final Set<String> _expandedBrands = {}; // collapsible brand boxes (open set)
   final Set<String> _customOpen = {}; // per-list "make custom link" expanded
+  final Set<String> _showExpired = {}; // per-list "show expired links" revealed
   bool _loading = true;
   bool _busy = false;
 
@@ -246,13 +256,106 @@ class _State extends State<ManageCatalogsScreen> {
         mode: LaunchMode.externalApplication);
   }
 
-  // Brand-level "Share all links": one message bundling every list's permanent
-  // link in this brand.
+  // Brand-level "Share all links": bundle every list in this brand into one
+  // message. First asks Permanent or Custom-days — Custom mints a fresh timed
+  // link (same validity) for each list, then shares them all together.
   Future<void> _shareAllForBrand(Brand b) async {
     final lists = _listsFor(b.id);
     if (lists.isEmpty) return;
-    final body = lists.map((c) => '${c.name}: ${_urlFor(c.shareToken)}').join('\n');
-    final text = '${b.name}\n$body\n\nPowered by Tiles Stock';
+    final daysCtrl = TextEditingController(text: '60');
+    bool permanent = true;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: Text('Share all — ${b.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sends the link of all ${lists.length} list'
+                  '${lists.length == 1 ? '' : 's'} in this brand.',
+                  style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('Permanent'),
+                    selected: permanent,
+                    onSelected: (_) => setS(() => permanent = true),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('Custom days'),
+                    selected: !permanent,
+                    onSelected: (_) => setS(() => permanent = false),
+                  ),
+                ],
+              ),
+              if (!permanent)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 60,
+                        child: TextField(
+                          controller: daysCtrl,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(
+                              isDense: true, border: OutlineInputBorder()),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('days'),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Share')),
+          ],
+        ),
+      ),
+    );
+    if (go != true) {
+      daysCtrl.dispose();
+      return;
+    }
+
+    final entries = <String>[];
+    if (permanent) {
+      for (final c in lists) {
+        entries.add('${c.name}: ${_urlFor(c.shareToken)}');
+      }
+    } else {
+      final days = int.tryParse(daysCtrl.text.trim());
+      daysCtrl.dispose();
+      if (days == null || days < 1) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Enter the number of days (1 or more).')));
+        }
+        return;
+      }
+      setState(() => _busy = true);
+      for (final c in lists) {
+        final token = await _data.createCatalogShareLinkDays(c.id, days);
+        if (token != null) entries.add('${c.name}: ${_urlFor(token)}');
+      }
+      await _load();
+      if (mounted) setState(() => _busy = false);
+    }
+    if (permanent) daysCtrl.dispose();
+    if (entries.isEmpty) return;
+    final text = '${b.name}\n${entries.join('\n')}\n\nPowered by Tiles Stock';
     await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'),
         mode: LaunchMode.externalApplication);
   }
@@ -684,7 +787,10 @@ class _State extends State<ManageCatalogsScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                 child: Column(
-                  children: [for (final c in lists) _listBox(c)],
+                  children: [
+                    for (final e in lists.asMap().entries)
+                      _listBox(e.value, e.key)
+                  ],
                 ),
               ),
           ],
@@ -693,13 +799,20 @@ class _State extends State<ManageCatalogsScreen> {
     );
   }
 
-  // A STOCK-LIST box (teal family) nested inside its brand box.
-  Widget _listBox(StockCatalog c) {
+  // A STOCK-LIST box nested inside its brand box. Each list gets its own colour
+  // from [_listPalette], cycled by its position in the brand.
+  Widget _listBox(StockCatalog c, int index) {
+    final pal = _listPalette[index % _listPalette.length];
     final dealers = _claimers[c.id]?.length ?? 0;
     final enq = _inq[c.id] ?? 0;
     final timed = (_catLinks[c.id] ?? const <ShareLink>[])
         .where((l) => l.revocable)
         .toList();
+    // Expired timed links are auto-hidden from the main view (they already stop
+    // working everywhere); the row is kept in the DB for records and can be
+    // peeked via "Show expired".
+    final liveLinks = timed.where((l) => !l.expired).toList();
+    final expiredLinks = timed.where((l) => l.expired).toList();
     final customOpen = _customOpen.contains(c.id);
     final ctrl =
         _daysCtrls.putIfAbsent(c.id, () => TextEditingController(text: '60'));
@@ -709,9 +822,9 @@ class _State extends State<ManageCatalogsScreen> {
       child: Container(
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: _listBg,
+          color: pal.bg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: _listBorder, width: 1.1),
+          border: Border.all(color: pal.border, width: 1.1),
         ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
@@ -723,10 +836,10 @@ class _State extends State<ManageCatalogsScreen> {
                 children: [
                   Expanded(
                     child: Text(c.name,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 14.5,
-                            color: _teal)),
+                            color: pal.border)),
                   ),
                   if (!c.isActive)
                     Container(
@@ -743,7 +856,7 @@ class _State extends State<ManageCatalogsScreen> {
                               fontWeight: FontWeight.bold,
                               color: Colors.grey)),
                     ),
-                  _rowIcon(Icons.grid_view_rounded, 'Preview designs', _teal,
+                  _rowIcon(Icons.grid_view_rounded, 'Preview designs', pal.border,
                       () => _previewDesigns(c)),
                   _rowIcon(Icons.edit_outlined, 'Rename', _navy,
                       _busy ? null : () => _renameDialog(c)),
@@ -780,10 +893,10 @@ class _State extends State<ManageCatalogsScreen> {
                         InkWell(
                           onTap: () => _showClaimers(c),
                           child: Text('Dealers ($dealers)',
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w600,
-                                  color: _teal,
+                                  color: pal.border,
                                   decoration: TextDecoration.underline)),
                         ),
                     ],
@@ -894,8 +1007,10 @@ class _State extends State<ManageCatalogsScreen> {
                     ],
                   ),
                 ),
-              // Generated (live/expired) timed links.
-              for (final l in timed) _timedLinkRow(c, l),
+              // Live generated links (with remaining days).
+              for (final l in liveLinks) _liveLinkRow(c, l),
+              // Expired links: auto-hidden, peekable for records.
+              if (expiredLinks.isNotEmpty) _expiredSection(c, expiredLinks),
             ],
           ),
         ),
@@ -903,41 +1018,127 @@ class _State extends State<ManageCatalogsScreen> {
     );
   }
 
-  // A single generated timed link row (green = live): expiry + Share/Copy/Delete.
-  Widget _timedLinkRow(StockCatalog c, ShareLink l) {
-    final status = l.expired
-        ? 'Expired'
-        : (l.expiresAt == null
-            ? 'Never expires'
-            : 'Expires ${_fmtDate(l.expiresAt!)}');
+  // A live generated link (green): expiry + remaining days + Share/Copy/Delete.
+  // Delete here is a deliberate early-revoke; expiry handles the rest on its own.
+  Widget _liveLinkRow(StockCatalog c, ShareLink l) {
+    final exp = l.expiresAt;
+    String status;
+    if (exp == null) {
+      status = 'Never expires';
+    } else {
+      final diff = exp.difference(DateTime.now());
+      if (diff.inHours < 24) {
+        status = 'Expires ${_fmtDate(exp)} · expires today';
+      } else {
+        final d = (diff.inHours / 24).ceil();
+        status = 'Expires ${_fmtDate(exp)} · $d days left';
+      }
+    }
     return Container(
       margin: const EdgeInsets.only(top: 6, right: 4),
       padding: const EdgeInsets.fromLTRB(8, 2, 2, 2),
       decoration: BoxDecoration(
-        color: l.expired ? Colors.grey.shade200 : _greenBg,
+        color: _greenBg,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         children: [
-          Icon(Icons.schedule,
-              size: 15, color: l.expired ? Colors.grey : _green),
+          const Icon(Icons.schedule, size: 15, color: _green),
           const SizedBox(width: 6),
           Expanded(
             child: Text(status,
-                style: TextStyle(
+                style: const TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
-                    color: l.expired ? Colors.red : _green)),
+                    color: _green)),
           ),
-          _miniBtn(Icons.share, 'Share',
-              l.expired ? null : () => _shareToken(c.name, l.token)),
-          _miniBtn(Icons.copy, 'Copy',
-              l.expired ? null : () => _copyToken(l.token)),
+          _miniBtn(Icons.share, 'Share', () => _shareToken(c.name, l.token)),
+          _miniBtn(Icons.copy, 'Copy', () => _copyToken(l.token)),
           _miniBtn(Icons.delete_outline, 'Delete',
               _busy ? null : () => _deleteLink(c, l), color: Colors.red),
         ],
       ),
     );
+  }
+
+  // Collapsed "Show expired (N)" peek — expired links are kept for records only.
+  Widget _expiredSection(StockCatalog c, List<ShareLink> expired) {
+    final open = _showExpired.contains(c.id);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: () => setState(() {
+            if (open) {
+              _showExpired.remove(c.id);
+            } else {
+              _showExpired.add(c.id);
+            }
+          }),
+          child: Padding(
+            padding: const EdgeInsets.only(top: 6, left: 2),
+            child: Row(
+              children: [
+                Icon(open ? Icons.expand_more : Icons.chevron_right,
+                    size: 16, color: Colors.grey.shade600),
+                Icon(Icons.history, size: 14, color: Colors.grey.shade600),
+                const SizedBox(width: 4),
+                Text('Expired links (${expired.length})',
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600)),
+              ],
+            ),
+          ),
+        ),
+        if (open) for (final l in expired) _expiredRow(c, l),
+      ],
+    );
+  }
+
+  // A read-only expired link row (kept for records) + one-tap "Generate again".
+  Widget _expiredRow(StockCatalog c, ShareLink l) {
+    final exp = l.expiresAt;
+    final agoDays = exp == null ? 0 : DateTime.now().difference(exp).inDays;
+    final when = exp == null ? '' : _fmtDate(exp);
+    return Container(
+      margin: const EdgeInsets.only(top: 4, left: 14, right: 4),
+      padding: const EdgeInsets.fromLTRB(8, 2, 2, 2),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.link_off, size: 14, color: Colors.grey.shade500),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+                'Expired${when.isEmpty ? '' : ' $when'}'
+                '${agoDays > 0 ? ' · ${agoDays}d ago' : ''}',
+                style: TextStyle(
+                    fontSize: 11, color: Colors.grey.shade600)),
+          ),
+          _miniBtn(Icons.refresh, 'Generate again',
+              _busy ? null : () => _regenerate(c, l)),
+        ],
+      ),
+    );
+  }
+
+  // Re-issue a fresh link for the same duration as the expired one. Falls back
+  // to opening the custom generator if the duration can't be read from its label.
+  Future<void> _regenerate(StockCatalog c, ShareLink l) async {
+    final n = int.tryParse(l.label.split(' ').first);
+    if (n == null || n < 1) {
+      setState(() => _customOpen.add(c.id));
+      return;
+    }
+    setState(() => _busy = true);
+    final token = await _data.createCatalogShareLinkDays(c.id, n);
+    if (token != null) await _reloadLinks(c.id);
+    if (mounted) setState(() => _busy = false);
   }
 
   Future<void> _deleteLink(StockCatalog c, ShareLink l) async {
