@@ -14,7 +14,7 @@ import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 
 import 'screens/notifications_screen.dart';
-import 'screens/public_catalog_screen.dart';
+import 'screens/share_link_handler_screen.dart';
 import 'screens/web_landing_screen.dart';
 
 import 'screens/reset_password_screen.dart';
@@ -89,11 +89,12 @@ final GoRouter _router = GoRouter(
 
     GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
 
-    // Public, login-free stockist catalog (share link → Flutter web build).
+    // Supplier share link. On the app a logged-in buyer auto-adds the supplier
+    // to My Suppliers; web/guests/stockists get the login-free public catalog.
     GoRoute(
       path: '/s/:token',
       builder: (_, state) =>
-          PublicCatalogScreen(token: state.pathParameters['token']!),
+          ShareLinkHandlerScreen(token: state.pathParameters['token']!),
     ),
 
     GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),

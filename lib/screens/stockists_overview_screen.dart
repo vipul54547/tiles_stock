@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
@@ -77,6 +78,12 @@ class _State extends State<StockistsOverviewScreen> {
   // banner doesn't nag.
   String? _clipboardToken;
   final Set<String> _dismissedClipboard = {};
+
+  // Progressive group tip: once the buyer has a handful of suppliers and still
+  // has no group, suggest grouping ONCE (then never again). Persisted so it
+  // doesn't reappear. See project_buyer_onboarding_funnel Scenario 1.
+  static const _groupTipThreshold = 7;
+  bool _groupTipDismissed = false;
 
   final _searchCtrl = TextEditingController();
   String _searchQuery  = '';
@@ -179,7 +186,32 @@ class _State extends State<StockistsOverviewScreen> {
           ? 'Private'
           : 'Public';
     }
+    _loadGroupTipFlag();
     _load();
+  }
+
+  Future<void> _loadGroupTipFlag() async {
+    final prefs = await SharedPreferences.getInstance();
+    if ((prefs.getBool('group_tip_shown') ?? false) && mounted) {
+      setState(() => _groupTipDismissed = true);
+    }
+  }
+
+  // One-time "group your suppliers" suggestion — only once the buyer has enough
+  // suppliers (a flat list gets annoying), still has no group, and hasn't been
+  // shown it before. Silent for the first few suppliers (frictionless).
+  bool get _showGroupTip =>
+      !isGuest &&
+      !_searchActive &&
+      _market == 'Private' &&
+      _privateData.length >= _groupTipThreshold &&
+      stockistGroups.isEmpty &&
+      !_groupTipDismissed;
+
+  Future<void> _dismissGroupTip() async {
+    setState(() => _groupTipDismissed = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('group_tip_shown', true);
   }
 
   @override
@@ -307,8 +339,37 @@ class _State extends State<StockistsOverviewScreen> {
       _allSurfaces = surfaces;
       _loading = false;
     });
+    // Confirm a deep-link auto-add (Scenario 1) if one just happened.
+    _maybeShowSupplierAdded();
     // Offer a one-tap "add" if the buyer has a supplier link on their clipboard.
     await _checkClipboardForLink();
+  }
+
+  // After a supplier's /s/ link auto-added them to My Suppliers (deep link), show
+  // a one-time confirmation. The group suggestion is separate + progressive (it
+  // only appears once the buyer has ~7 suppliers — see _maybeShowGroupTip).
+  void _maybeShowSupplierAdded() {
+    final name = pendingSupplierAdded;
+    if (name == null) return;
+    pendingSupplierAdded = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: const Icon(Icons.check_circle,
+              color: Color(0xFF2E7D32), size: 40),
+          title: Text('"$name" added'),
+          content: const Text(
+              'This supplier is now in My Suppliers — their latest stock stays '
+              'up to date here, no more PDFs.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+    });
   }
 
   // If the buyer copied a supplier's /s/ link, surface a one-tap banner to add
@@ -1323,6 +1384,8 @@ class _State extends State<StockistsOverviewScreen> {
               !_searchActive &&
               _market == 'Private')
             _buildAddSupplierBar(),
+          // Progressive one-time suggestion to group suppliers (after ~7).
+          if (_showGroupTip) _buildGroupTip(),
           _buildQualityRow(),
           _buildGroupRow(
               _viewDesigns ? filteredDesigns.length : filteredStockists.length),
@@ -1634,6 +1697,64 @@ class _State extends State<StockistsOverviewScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  // One-time, dismissible suggestion to organise suppliers into groups. Reuses
+  // the existing buyer-group screen (where they name + fill the group).
+  Widget _buildGroupTip() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.amber.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.lightbulb_outline,
+                  color: Color(0xFFF57F17), size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('You have ${_privateData.length} suppliers',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    const Text(
+                        'Group them to compare stock from many suppliers in one view.',
+                        style: TextStyle(fontSize: 11.5)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                  onPressed: _dismissGroupTip,
+                  child: const Text('Maybe later')),
+              const SizedBox(width: 4),
+              FilledButton(
+                onPressed: () async {
+                  await context.push('/stockist-groups');
+                  await _dismissGroupTip();
+                  if (mounted) _load();
+                },
+                style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact),
+                child: const Text('Create a group'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

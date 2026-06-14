@@ -19,6 +19,11 @@ bool currentEndUserCanClaimPrivate = false;
 // dormant — every public/anonymity control is hidden. Loaded once at startup/login.
 bool publicMarketLive = false;
 
+// Set by the share-link handler when a buyer opened a supplier's /s/ link and we
+// auto-added it to My Suppliers. The My Suppliers screen reads it once (on next
+// build) to show the "supplier added" confirmation, then clears it.
+String? pendingSupplierAdded;
+
 // Buyer search mode shared across all buyer screens for the session:
 // true  = SMART (synonym/multi-language expansion, e.g. bianco = white),
 // false = NORMAL (plain literal text match). Toggled from the search bar.
