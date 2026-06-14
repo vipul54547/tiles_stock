@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 
 // Super-admin-only screen: create and manage sub-admins. Sub-admins have all
@@ -14,6 +15,9 @@ class _ManageAdminsScreenState extends State<ManageAdminsScreen> {
   final _dataSvc = SupabaseDataService();
   List<Map<String, dynamic>> _admins = [];
   bool _loading = true;
+  // Public-market go-live switch (super-admin-only, app-wide).
+  bool _publicEnabled = false;
+  bool _publicSaving = false;
 
   @override
   void initState() {
@@ -24,8 +28,115 @@ class _ManageAdminsScreenState extends State<ManageAdminsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final list = await _dataSvc.getAllAdmins();
+    final pub = await _dataSvc.getPublicMarketEnabled();
     if (!mounted) return;
-    setState(() { _admins = list; _loading = false; });
+    setState(() {
+      _admins = list;
+      _publicEnabled = pub;
+      publicMarketLive = pub;
+      _loading = false;
+    });
+  }
+
+  // Flip the single app-wide public-market / anonymity switch. Enabling reveals
+  // the public market + anonymity controls everywhere, so confirm first.
+  Future<void> _setPublic(bool value) async {
+    if (value) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Go live with the public market?'),
+          content: const Text(
+              'This reveals the public market and stockist anonymity controls '
+              'across the whole app for every admin and buyer. Only do this on '
+              'launch day. You can turn it back off here.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Go live')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    setState(() => _publicSaving = true);
+    try {
+      final v = await _dataSvc.setPublicMarketEnabled(value);
+      if (!mounted) return;
+      setState(() {
+        _publicEnabled = v;
+        publicMarketLive = v;
+        _publicSaving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(v
+              ? 'Public market is now LIVE.'
+              : 'Public market is OFF (private-first).')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _publicSaving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
+  }
+
+  // "Public Market — Go Live" section, shown above the admins list. Its own
+  // labelled card so it reads as an app-wide launch setting, not an admin row.
+  Widget _goLiveCard() {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: _publicEnabled
+            ? const Color(0xFFE8F5E9)
+            : const Color(0xFFF3E5F5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: _publicEnabled
+                ? const Color(0xFF2E7D32)
+                : const Color(0xFF6A1B9A),
+            width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.rocket_launch_outlined,
+                    size: 18, color: Color(0xFF6A1B9A)),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text('Public Market — Go Live',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
+                ),
+                if (_publicSaving)
+                  const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                else
+                  Switch(
+                    value: _publicEnabled,
+                    activeThumbColor: const Color(0xFF2E7D32),
+                    onChanged: _setPublic,
+                  ),
+              ],
+            ),
+            Text(
+                _publicEnabled
+                    ? 'LIVE: public market + stockist anonymity controls are visible app-wide.'
+                    : 'OFF (private-first): no public market or anonymity anywhere. '
+                        'Buyers still reach stock via the share links they are sent.',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _toggleActive(Map<String, dynamic> a, bool active) async {
@@ -60,19 +171,33 @@ class _ManageAdminsScreenState extends State<ManageAdminsScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _admins.isEmpty
-              ? const Center(
-                  child: Text('No admins found.',
-                      style: TextStyle(color: Colors.grey)))
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
-                    itemCount: _admins.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (_, i) => _adminTile(_admins[i]),
+          : RefreshIndicator(
+              onRefresh: _load,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 90),
+                children: [
+                  _goLiveCard(),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(2, 4, 2, 8),
+                    child: Text('Admins',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
-                ),
+                  if (_admins.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                          child: Text('No admins found.',
+                              style: TextStyle(color: Colors.grey))),
+                    )
+                  else
+                    for (final a in _admins) ...[
+                      _adminTile(a),
+                      const SizedBox(height: 6),
+                    ],
+                ],
+              ),
+            ),
     );
   }
 

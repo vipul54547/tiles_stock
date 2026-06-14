@@ -43,7 +43,6 @@ import 'screens/admin/manage_sizes_screen.dart';
 import 'screens/admin/manage_stockists_screen.dart';
 import 'screens/admin/manage_end_users_screen.dart';
 import 'screens/admin/manage_admins_screen.dart';
-import 'screens/admin/go_live_screen.dart';
 import 'screens/admin/manage_registration_requests_screen.dart';
 import 'screens/admin/send_notification_screen.dart';
 import 'screens/admin/pending_stock_screen.dart';
@@ -191,7 +190,6 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/admin/pending-stock', builder: (_, __) => const PendingStockScreen()),
     GoRoute(path: '/admin/inquiry-report', builder: (_, __) => const InquiryReportScreen()),
     GoRoute(path: '/admin/admins', builder: (_, __) => const ManageAdminsScreen()),
-    GoRoute(path: '/admin/go-live', builder: (_, __) => const GoLiveScreen()),
     GoRoute(path: '/stockists-overview', builder: (_, __) => const StockistsOverviewScreen()), // legacy alias
     GoRoute(path: '/stockist-groups', builder: (_, __) => const StockistGroupScreen()),
     GoRoute(path: '/my-choices', builder: (_, __) => const MyChoiceScreen()),

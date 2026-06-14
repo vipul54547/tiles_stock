@@ -288,7 +288,7 @@ class _State extends State<StockistDashboardScreen> {
               ],
             )
           : AppBar(
-              title: const Text('Stock Dashboard'),
+              title: const Text('My Dashboard'),
               actions: [
                 // Single "Share" entry → the catalog screen (public + private
                 // links live there). Replaces the old separate catalogs + share

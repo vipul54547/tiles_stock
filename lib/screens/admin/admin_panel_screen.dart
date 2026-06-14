@@ -81,17 +81,11 @@ class AdminPanelScreen extends StatelessWidget {
               'Review large stock additions (10,000+ boxes/day)',
               const Color(0xFFD84315),
               onTap: () => context.push('/admin/pending-stock')),
-          // Only the super admin can create / manage sub-admins.
+          // Super-admin-only: sub-admins + the app-wide public-market launch switch.
           if (isSuperAdmin)
-            _adminCard(Icons.admin_panel_settings_outlined, 'Manage Admins',
-                'Create sub-admins & set access', const Color(0xFF6A1B9A),
+            _adminCard(Icons.admin_panel_settings_outlined, 'Super Admin',
+                'Sub-admins & launch settings', const Color(0xFF6A1B9A),
                 onTap: () => context.push('/admin/admins')),
-          // Hidden launch switch — only the super admin sees it.
-          if (isSuperAdmin)
-            _adminCard(Icons.rocket_launch_outlined, 'Public Market (Go Live)',
-                'Launch switch for the public market + anonymity',
-                const Color(0xFF00695C),
-                onTap: () => context.push('/admin/go-live')),
           _adminCard(Icons.bar_chart_outlined, 'Inquiry Reports',
               'All inquiries across stockists', Colors.purple,
               onTap: () => context.push('/admin/inquiry-report')),
