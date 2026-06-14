@@ -20,6 +20,14 @@ bool get isSuperAdmin =>
 /// but cannot inquire, see stockist IDs/contacts, or create groups.
 bool get isGuest => supabase.auth.currentUser?.isAnonymous ?? false;
 
+/// Days since the current session was created — drives the guest-trial's
+/// ~1-month "create your login" prompt. Null when unknown.
+int? get sessionAgeDays {
+  final c = supabase.auth.currentUser?.createdAt;
+  final d = c == null ? null : DateTime.tryParse(c);
+  return d == null ? null : DateTime.now().difference(d).inDays;
+}
+
 class SupabaseAuthService {
   UserRole? _role;
   UserRole? get currentRole => _role;

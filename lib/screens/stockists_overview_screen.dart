@@ -88,6 +88,13 @@ class _State extends State<StockistsOverviewScreen> {
       int.fromEnvironment('GROUP_TIP_THRESHOLD', defaultValue: 7);
   bool _groupTipDismissed = false;
 
+  // Guest-trial ~1-month convert prompt — shown once when an old-enough guest
+  // still has suppliers and hasn't created a login. Default 30 days; lower it
+  // (--dart-define=GUEST_TRIAL_DAYS=0) for testing.
+  static const _trialDays =
+      int.fromEnvironment('GUEST_TRIAL_DAYS', defaultValue: 30);
+  bool _trialPromptShown = false;
+
   final _searchCtrl = TextEditingController();
   String _searchQuery  = '';
   bool _searchActive   = false;
@@ -195,9 +202,54 @@ class _State extends State<StockistsOverviewScreen> {
 
   Future<void> _loadGroupTipFlag() async {
     final prefs = await SharedPreferences.getInstance();
-    if ((prefs.getBool('group_tip_shown') ?? false) && mounted) {
-      setState(() => _groupTipDismissed = true);
+    final group = prefs.getBool('group_tip_shown') ?? false;
+    final trial = prefs.getBool('guest_trial_prompt_shown') ?? false;
+    if (mounted) {
+      setState(() {
+        _groupTipDismissed = group;
+        _trialPromptShown = trial;
+      });
     }
+  }
+
+  // ~1-month guest-trial nudge: once an old-enough guest with saved suppliers
+  // (who hasn't created a login) opens My Suppliers, show a one-time stronger
+  // prompt to convert. The persistent guest banner stays for ongoing nudging.
+  void _maybeShowTrialPrompt() {
+    if (_trialPromptShown || !isGuest || _privateData.isEmpty) return;
+    final age = sessionAgeDays;
+    if (age == null || age < _trialDays) return;
+    _trialPromptShown = true;
+    SharedPreferences.getInstance()
+        .then((p) => p.setBool('guest_trial_prompt_shown', true));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final n = _privateData.length;
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: const Icon(Icons.verified_user_outlined,
+              color: Color(0xFF1B4F72), size: 40),
+          title: const Text('Keep your suppliers safe'),
+          content: Text(
+              "You've been using Tiles Stock for a while. Create your free "
+              'login so your $n supplier${n == 1 ? '' : 's'} stay with you on '
+              'any phone — it only takes a moment.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Later')),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                context.push('/create-login');
+              },
+              child: const Text('Create login'),
+            ),
+          ],
+        ),
+      );
+    });
   }
 
   // One-time "group your suppliers" suggestion — only once the buyer has enough
@@ -343,6 +395,8 @@ class _State extends State<StockistsOverviewScreen> {
     });
     // Confirm a deep-link auto-add (Scenario 1) if one just happened.
     _maybeShowSupplierAdded();
+    // ~1-month guest-trial convert nudge.
+    _maybeShowTrialPrompt();
     // Offer a one-tap "add" if the buyer has a supplier link on their clipboard.
     await _checkClipboardForLink();
   }
