@@ -2,29 +2,29 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/supabase_auth_service.dart';
 
-/// Guest gating for member-only actions (inquiry, stockist contact, groups,
-/// placing orders). If the current session is an anonymous guest, shows a
-/// "register to unlock" prompt and returns true (caller should stop). Returns
-/// false for real members (caller proceeds).
-bool blockIfGuest(BuildContext context, {String feature = 'This feature'}) {
+/// Guest-trial gate for actions that need a real account (inquiry, placing
+/// orders). A guest can browse + save suppliers freely, but these actions prompt
+/// them to create a free phone login first — their saved suppliers carry over.
+/// Returns true for guests (caller should stop), false for real members.
+bool blockIfGuest(BuildContext context, {String feature = 'This'}) {
   if (!isGuest) return false;
   showDialog<void>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('Members only'),
+      title: const Text('Create your login'),
       content: Text(
-          '$feature is available once you register and an admin approves your '
-          'account.'),
+          '$feature needs a quick login. Create one free with your mobile '
+          'number — your saved suppliers stay with you.'),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK')),
+            child: const Text('Not now')),
         FilledButton(
           onPressed: () {
             Navigator.pop(ctx);
-            context.push('/register');
+            context.push('/create-login');
           },
-          child: const Text('Register'),
+          child: const Text('Create login'),
         ),
       ],
     ),

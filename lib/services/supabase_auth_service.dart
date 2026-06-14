@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show UserAttributes, OtpType;
 import '../main.dart';
 import '../models/choice_state.dart';
 import '../utils/device_id.dart';
@@ -213,6 +214,46 @@ class SupabaseAuthService {
       email.trim(),
       redirectTo: passwordResetRedirect,
     );
+  }
+
+  // ── Guest-trial: convert a guest to a permanent phone login (OTP) ──────────
+  // Sends a phone-change OTP. Upgrades the anonymous account → permanent on
+  // verify, keeping the SAME user_id so saved suppliers carry over. Throws a
+  // friendly message if phone auth isn't wired yet (no SMS provider configured).
+  Future<void> sendConvertOtp(String phoneE164) async {
+    try {
+      await supabase.auth.updateUser(UserAttributes(phone: phoneE164));
+    } catch (e) {
+      throw _otpError(e);
+    }
+  }
+
+  /// Verifies the OTP (finishing guest→permanent) then promotes the guest
+  /// end_user row to a real member. isGuest auto-flips false once the phone is
+  /// linked; currentEndUserId is unchanged (same end_user row).
+  Future<void> verifyConvertOtp(
+      String phoneE164, String code, String company) async {
+    try {
+      await supabase.auth.verifyOTP(
+          phone: phoneE164, token: code, type: OtpType.phoneChange);
+    } catch (e) {
+      throw _otpError(e);
+    }
+    await supabase.rpc('promote_guest_end_user',
+        params: {'p_company': company, 'p_phone': phoneE164});
+  }
+
+  String _otpError(Object e) {
+    final s = e.toString().toLowerCase();
+    if (s.contains('provider') ||
+        s.contains('not enabled') ||
+        s.contains('unsupported') ||
+        s.contains('sms') ||
+        s.contains('disabled')) {
+      return 'Phone login isn\'t available yet. Please try again later or '
+          'tap "Need help?" to reach us on WhatsApp.';
+    }
+    return e.toString().replaceAll('AuthException:', '').trim();
   }
 
   Future<void> logout() async {

@@ -1373,6 +1373,8 @@ class _State extends State<StockistsOverviewScreen> {
           // (The old Public/Private/Both selector is replaced by the two-mode
           // bottom nav — My Suppliers · Discover — shown when the public market
           // is live. project_two_mode_marketplace Phase 2 #9.)
+          // Guest-trial: nudge guests to create a permanent login.
+          if (isGuest && _market == 'Private') _buildGuestBanner(),
           // One-tap "add" if a supplier link is sitting on the clipboard.
           if (currentEndUserCanClaimPrivate && _clipboardToken != null)
             _buildClipboardBanner(),
@@ -1748,6 +1750,42 @@ class _State extends State<StockistsOverviewScreen> {
                 child: const Text('Create a group'),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Guest-trial banner: a guest can save suppliers freely, but is nudged to
+  // create a permanent phone login so they keep them on any phone.
+  Widget _buildGuestBanner() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F0FE),
+        borderRadius: BorderRadius.circular(10),
+        border:
+            Border.all(color: const Color(0xFF1B4F72).withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.verified_user_outlined,
+              color: Color(0xFF1B4F72), size: 20),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+                "You're on a free guest account. Create a login to keep your "
+                "suppliers on any phone.",
+                style: TextStyle(fontSize: 12)),
+          ),
+          const SizedBox(width: 6),
+          FilledButton(
+            onPressed: () => context.push('/create-login'),
+            style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: const Color(0xFF1B4F72)),
+            child: const Text('Create login'),
           ),
         ],
       ),

@@ -20,6 +20,7 @@ import 'screens/web_landing_screen.dart';
 import 'screens/reset_password_screen.dart';
 
 import 'screens/register_screen.dart';
+import 'screens/create_login_screen.dart';
 
 import 'screens/end_user/home_screen.dart';
 
@@ -104,6 +105,8 @@ final GoRouter _router = GoRouter(
     ),
 
     GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
+
+    GoRoute(path: '/create-login', builder: (_, __) => const CreateLoginScreen()),
 
     GoRoute(path: '/home', builder: (_, __) => const StockistsOverviewScreen()),
     GoRoute(path: '/all-designs', builder: (_, __) => const HomeScreen()),
