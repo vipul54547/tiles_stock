@@ -48,6 +48,10 @@ class SupabaseAuthService {
 
   // Called on app start to restore an existing session
   Future<UserRole?> checkExistingSession() async {
+    // Load the global public-market flag on every cold start, even with no
+    // session, so the login screen (e.g. the "Browse as guest" option) can
+    // reflect whether the public market is live.
+    await _loadAppSettings();
     final user = supabase.auth.currentUser;
     if (user == null) return null;
     if (user.isAnonymous) {

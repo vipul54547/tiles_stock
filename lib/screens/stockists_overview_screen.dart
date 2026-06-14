@@ -373,6 +373,11 @@ class _State extends State<StockistsOverviewScreen> {
     }
   }
 
+  // Masked stockist keys the buyer has already saved into My Suppliers — used
+  // to flag a "saved" seller while browsing Discover (the upgrade loop).
+  Set<String> get _savedStockistKeys =>
+      _claimedCatalogs.map((c) => c.stockistKey).toSet();
+
   List<TileDesign> get _marketDesigns {
     switch (_market) {
       case 'Private':
@@ -1388,6 +1393,11 @@ class _State extends State<StockistsOverviewScreen> {
                                   _market == 'Private')
                               ? () => _removeSupplier(filteredStockists[i])
                               : null,
+                          // Closes the discover→save loop: in Discover, flag a
+                          // seller the buyer has already saved into My Suppliers.
+                          alreadySaved: _market != 'Private' &&
+                              _savedStockistKeys
+                                  .contains(filteredStockists[i].stockist.id),
                         ),
                       ),
           ),
@@ -2168,6 +2178,8 @@ class _StockistCard extends StatelessWidget {
   final void Function(int groupIndex) onToggleGroup;
   /// Non-null only for My Suppliers (claimed) cards → shows a Remove action.
   final VoidCallback? onRemove;
+  /// True in Discover when this seller is already saved in My Suppliers.
+  final bool alreadySaved;
 
   const _StockistCard({
     required this.data,
@@ -2180,6 +2192,7 @@ class _StockistCard extends StatelessWidget {
     required this.onViewProfile,
     required this.onToggleGroup,
     this.onRemove,
+    this.alreadySaved = false,
   });
 
   // Returns (boxTable, countTable, totalBoxes, totalDesigns). Only designs that
@@ -2239,9 +2252,42 @@ class _StockistCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(s.name,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 15)),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(s.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 15)),
+                          ),
+                          if (alreadySaved) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2E7D32)
+                                    .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle,
+                                      size: 11, color: Color(0xFF2E7D32)),
+                                  SizedBox(width: 2),
+                                  Text('In My Suppliers',
+                                      style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF2E7D32))),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                       Text('ID: ${s.id}',
                           style: const TextStyle(
                               color: Colors.grey, fontSize: 12)),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/supabase_auth_service.dart';
+import '../models/choice_state.dart';
 import '../widgets/powered_by_tiles_stock.dart';
 
 
@@ -307,19 +308,23 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 4),
 
-              Center(
+              // "Browse as guest" only makes sense once the public market is
+              // live; during the private-first runway there's nothing public to
+              // browse, so it's hidden (buyers enter via a supplier's link).
+              if (publicMarketLive)
+                Center(
 
-                child: OutlinedButton.icon(
+                  child: OutlinedButton.icon(
 
-                  onPressed: _loading ? null : _browseAsGuest,
+                    onPressed: _loading ? null : _browseAsGuest,
 
-                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
 
-                  label: const Text('Browse as guest'),
+                    label: const Text('Browse as guest'),
+
+                  ),
 
                 ),
-
-              ),
 
               const SizedBox(height: 28),
 
