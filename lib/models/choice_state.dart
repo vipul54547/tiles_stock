@@ -14,6 +14,11 @@ String currentEndUserId = '';  // Supabase UUID
 // Guests and not-permitted buyers stay false → silent public-only mode.
 bool currentEndUserCanClaimPrivate = false;
 
+// Super-admin "go live" switch (app_settings.public_market_enabled). While false
+// (the ~1yr private-first runway) the public market AND stockist anonymity stay
+// dormant — every public/anonymity control is hidden. Loaded once at startup/login.
+bool publicMarketLive = false;
+
 // Buyer search mode shared across all buyer screens for the session:
 // true  = SMART (synonym/multi-language expansion, e.g. bianco = white),
 // false = NORMAL (plain literal text match). Toggled from the search bar.

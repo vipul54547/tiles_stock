@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/stockist.dart';
+import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/phone_field.dart';
@@ -321,9 +322,11 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
                     spacing: 12,
                     runSpacing: 4,
                     children: [
-                      _dot('Market', s.isListed),
+                      // Public market + anonymity are hidden until the super
+                      // admin flips the go-live switch (private-first runway).
+                      if (publicMarketLive) _dot('Market', s.isListed),
                       _dot('Private', s.canCreatePrivateCatalog),
-                      _dot('Anonymous', s.isAnonymous),
+                      if (publicMarketLive) _dot('Anonymous', s.isAnonymous),
                       _deviceChip(s.deviceCount, s.deviceLimit),
                       if (s.brandLimit > 1 || s.brandCount > 1)
                         _brandChip(s.brandCount, s.brandLimit),
@@ -1198,7 +1201,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                   onChanged: (v) => setState(() => _tier = v ?? ''),
                 ),
               ),
-              if (_isEdit)
+              if (_isEdit && publicMarketLive)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: SwitchListTile(
@@ -1230,7 +1233,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                     onChanged: (v) => setState(() => _canPrivate = v),
                   ),
                 ),
-              if (_isEdit) _anonymitySection(),
+              if (_isEdit && publicMarketLive) _anonymitySection(),
               if (_isEdit) _brandingSection(),
               if (_isEdit) _deviceSection(),
               if (_isEdit) _brandSection(),

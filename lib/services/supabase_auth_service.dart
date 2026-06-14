@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../main.dart';
 import '../models/choice_state.dart';
 import '../utils/device_id.dart';
+import 'supabase_data_service.dart';
 
 enum UserRole { admin, stockist, endUser }
 
@@ -30,6 +31,7 @@ class SupabaseAuthService {
     if (res.user == null) throw 'No user returned from sign-in';
     final role = await _loadProfile(res.user!.id);
     await _enforceDeviceLimit(); // signs out + throws if over the device limit
+    await _loadAppSettings();
     return role;
   }
 
@@ -40,6 +42,7 @@ class SupabaseAuthService {
     _role = UserRole.endUser;
     currentEndUserId = '';
     currentEndUserCanClaimPrivate = false;
+    await _loadAppSettings();
     return UserRole.endUser;
   }
 
@@ -51,11 +54,13 @@ class SupabaseAuthService {
       _role = UserRole.endUser; // restored guest session
       currentEndUserId = '';
       currentEndUserCanClaimPrivate = false;
+      await _loadAppSettings();
       return UserRole.endUser;
     }
     try {
       final role = await _loadProfile(user.id);
       await _enforceDeviceLimit(); // blocked restore → throws → treated as logged out
+      await _loadAppSettings();
       return role;
     } catch (_) {
       return null;
@@ -167,6 +172,17 @@ class SupabaseAuthService {
     }
   }
 
+  /// Loads global, user-independent app settings into session state. Currently
+  /// just the super-admin "go live" switch ([publicMarketLive]). Never throws —
+  /// falls back to the safe private-first default (false) on any error.
+  Future<void> _loadAppSettings() async {
+    try {
+      publicMarketLive = await SupabaseDataService().getPublicMarketEnabled();
+    } catch (_) {
+      publicMarketLive = false;
+    }
+  }
+
   /// Deep link the password-reset email redirects back to. The matching scheme
   /// is registered in AndroidManifest.xml and must be added to the Supabase
   /// dashboard's "Redirect URLs" allow-list (Authentication → URL Configuration).
@@ -194,6 +210,7 @@ class SupabaseAuthService {
     currentStockistUUID = '';
     currentEndUserId    = '';
     currentEndUserCanClaimPrivate = false;
+    publicMarketLive = false;
     myChoiceQuantities.clear();
   }
 

@@ -86,6 +86,12 @@ class AdminPanelScreen extends StatelessWidget {
             _adminCard(Icons.admin_panel_settings_outlined, 'Manage Admins',
                 'Create sub-admins & set access', const Color(0xFF6A1B9A),
                 onTap: () => context.push('/admin/admins')),
+          // Hidden launch switch — only the super admin sees it.
+          if (isSuperAdmin)
+            _adminCard(Icons.rocket_launch_outlined, 'Public Market (Go Live)',
+                'Launch switch for the public market + anonymity',
+                const Color(0xFF00695C),
+                onTap: () => context.push('/admin/go-live')),
           _adminCard(Icons.bar_chart_outlined, 'Inquiry Reports',
               'All inquiries across stockists', Colors.purple,
               onTap: () => context.push('/admin/inquiry-report')),

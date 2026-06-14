@@ -633,6 +633,20 @@ class SupabaseDataService {
         params: {'p_seq': sequentialId, 'p_is_listed': listed});
   }
 
+  /// Super-admin "go live" switch — reads the single app_settings flag that
+  /// gates the public market + anonymity across the whole app. Safe for anyone.
+  Future<bool> getPublicMarketEnabled() async {
+    final res = await supabase.rpc('get_public_market_enabled');
+    return res == true;
+  }
+
+  /// Flips the go-live switch. Server enforces super-admin-only (throws otherwise).
+  Future<bool> setPublicMarketEnabled(bool enabled) async {
+    final res = await supabase
+        .rpc('set_public_market_enabled', params: {'p_enabled': enabled});
+    return res == true;
+  }
+
   /// Admin: grant/revoke a stockist's permission to create PRIVATE catalogs
   /// (the Father & Child gate — also the hook for paid/special features).
   Future<void> setStockistPrivateCatalog(
