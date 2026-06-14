@@ -82,7 +82,10 @@ class _State extends State<StockistsOverviewScreen> {
   // Progressive group tip: once the buyer has a handful of suppliers and still
   // has no group, suggest grouping ONCE (then never again). Persisted so it
   // doesn't reappear. See project_buyer_onboarding_funnel Scenario 1.
-  static const _groupTipThreshold = 7;
+  // Default 7; overridable at build time (--dart-define=GROUP_TIP_THRESHOLD=1)
+  // for quick testing of the group tip without claiming many suppliers.
+  static const _groupTipThreshold =
+      int.fromEnvironment('GROUP_TIP_THRESHOLD', defaultValue: 7);
   bool _groupTipDismissed = false;
 
   final _searchCtrl = TextEditingController();
