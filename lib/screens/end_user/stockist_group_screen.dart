@@ -120,7 +120,8 @@ class _State extends State<StockistGroupScreen> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) =>
-          const _RenameGroupDialog(initialName: '', title: 'New Group'),
+          const _RenameGroupDialog(
+              initialName: '', title: 'New Group', showPresets: true),
     );
     if (!mounted || name == null || name.trim().isEmpty) return;
     final id = await _service.createGroup(name.trim());
@@ -719,8 +720,13 @@ class _State extends State<StockistGroupScreen> {
 class _RenameGroupDialog extends StatefulWidget {
   final String initialName;
   final String title;
+  /// Show quick name suggestions (new group only). Tapping one fills the field,
+  /// which stays fully editable so the buyer can rename it.
+  final bool showPresets;
   const _RenameGroupDialog(
-      {required this.initialName, this.title = 'Rename Group'});
+      {required this.initialName,
+      this.title = 'Rename Group',
+      this.showPresets = false});
 
   @override
   State<_RenameGroupDialog> createState() => _RenameGroupDialogState();
@@ -745,15 +751,43 @@ class _RenameGroupDialogState extends State<_RenameGroupDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.title),
-      content: TextField(
-        controller: _ctrl,
-        autofocus: true,
-        textCapitalization: TextCapitalization.words,
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          hintText: 'Enter group name',
-        ),
-        onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'Enter group name',
+            ),
+            onSubmitted: (v) => Navigator.of(context).pop(v.trim()),
+          ),
+          if (widget.showPresets) ...[
+            const SizedBox(height: 10),
+            Text('Suggestions — tap one, then edit if you like:',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (final p in const ['Premium', 'Standard', 'One-Time'])
+                  ActionChip(
+                    label: Text(p),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() {
+                      _ctrl.text = p;
+                      _ctrl.selection =
+                          TextSelection.collapsed(offset: p.length);
+                    }),
+                  ),
+              ],
+            ),
+          ],
+        ],
       ),
       actions: [
         TextButton(

@@ -60,6 +60,12 @@ import 'screens/stockist/stock_history_screen.dart';
 
 
 
+// TEST ONLY: build with `--dart-define=WEB_FULL_APP=true` to run the WHOLE app
+// (login/buyer/stockist/admin) in a browser — handy for testing several users at
+// once across Chrome profiles / incognito windows. NEVER deploy a build with this
+// flag to the public domain; production web must stay locked to /s/ only.
+const bool kWebFullApp = bool.fromEnvironment('WEB_FULL_APP');
+
 final GoRouter _router = GoRouter(
 
   initialLocation: '/splash',
@@ -69,7 +75,7 @@ final GoRouter _router = GoRouter(
   // a minimal landing so login / admin / the buyer+stockist app never appear on
   // the public domain. The mobile app is unaffected (kIsWeb is false there).
   redirect: (context, state) {
-    if (!kIsWeb) return null;
+    if (!kIsWeb || kWebFullApp) return null;
     final loc = state.matchedLocation;
     final allowed = loc.startsWith('/s/') ||
         loc == '/reset-password' ||
