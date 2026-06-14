@@ -65,6 +65,9 @@ class SupabaseDataService {
             (d['stockists'] != null
                 ? (d['stockists']['sequential_id'] ?? seqId ?? '')
                 : (seqId ?? '')),
+        // Already-masked seller name from market_designs (real or trade name).
+        stockistName: d['stockist_display_name'] ??
+            (d['stockists'] != null ? (d['stockists']['name'] ?? '') : ''),
         catalogId:    d['catalog_id'] as String?,
         updatedAt:  DateTime.parse(d['updated_at']),
         quality:    d['quality']    ?? 'Standard',

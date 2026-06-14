@@ -164,10 +164,21 @@ class TileCard extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text('ID: ${design.stockistId}',
-                                  style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Color(0xFF1B4F72))),
+                              // Seller name (real, or masked trade name when the
+                              // stockist is anonymous); falls back to the ID/code.
+                              ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 96),
+                                child: Text(
+                                    design.stockistName.isNotEmpty
+                                        ? design.stockistName
+                                        : 'ID: ${design.stockistId}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontSize: 10,
+                                        color: Color(0xFF1B4F72))),
+                              ),
                               if (onStockistTap != null) ...[
                                 const SizedBox(width: 2),
                                 const Icon(Icons.arrow_forward_ios_rounded,

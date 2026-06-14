@@ -17,6 +17,10 @@ class TileDesign {
   final String tileType;
   final List<String> faceImageUrls;
   final String stockistId;
+  /// The seller's display name as the buyer should see it — the real name, or
+  /// the masked trade name when the stockist is anonymous (from the
+  /// `market_designs` view's `stockist_display_name`). Empty when unknown.
+  final String stockistName;
   /// The stock catalog this design belongs to (Father & Child). Null for legacy
   /// rows; the stockist's default public catalog otherwise.
   final String? catalogId;
@@ -45,6 +49,7 @@ class TileDesign {
     this.tileType = '',
     required this.faceImageUrls,
     required this.stockistId,
+    this.stockistName = '',
     this.catalogId,
     required this.updatedAt,
     required this.quality,
@@ -68,6 +73,7 @@ class TileDesign {
         tileType: json['tile_type'] ?? '',
         faceImageUrls: List<String>.from(json['face_image_urls']),
         stockistId: json['stockist_id'],
+        stockistName: json['stockist_display_name'] ?? '',
         catalogId: json['catalog_id'] as String?,
         updatedAt: DateTime.parse(json['updated_at']),
         quality: json['quality'] ?? 'Standard',
