@@ -902,6 +902,56 @@ class _State extends State<ManageCatalogsScreen> {
                     ],
                   ),
                 ),
+              // "Show in Discover" — per-list public-market visibility. Only
+              // appears once the super admin has taken the public market live;
+              // default off, so nothing is public without intent. (Phase 2 #8 —
+              // project_two_mode_marketplace.) Same stock, no second upload.
+              if (publicMarketLive)
+                Container(
+                  margin: const EdgeInsets.only(top: 6, right: 4),
+                  padding: const EdgeInsets.fromLTRB(8, 0, 4, 0),
+                  decoration: BoxDecoration(
+                    color: c.showInMarketplace
+                        ? _greenBg
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                          c.showInMarketplace
+                              ? Icons.travel_explore
+                              : Icons.lock_outline,
+                          size: 16,
+                          color: c.showInMarketplace
+                              ? _green
+                              : Colors.grey.shade600),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                            c.showInMarketplace
+                                ? 'Shown in Discover (public market)'
+                                : 'Private — link only',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: c.showInMarketplace
+                                    ? _green
+                                    : Colors.grey.shade700)),
+                      ),
+                      Switch(
+                        value: c.showInMarketplace,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                        activeThumbColor: _green,
+                        onChanged: _busy
+                            ? null
+                            : (v) => _run(
+                                () => _data.setCatalogMarketplace(c.id, v)),
+                      ),
+                    ],
+                  ),
+                ),
               const Divider(height: 12),
               // Permanent link row.
               Padding(
