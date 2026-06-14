@@ -20,7 +20,6 @@ import '../utils/tile_types.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/notification_bell.dart';
 import '../utils/stockist_tiers.dart';
-import '../utils/guest_gate.dart';
 import '../models/claimed_catalog.dart';
 
 const _qualities = ['Premium', 'Standard'];
@@ -204,7 +203,6 @@ class _State extends State<StockistsOverviewScreen> {
   // suppliers (a flat list gets annoying), still has no group, and hasn't been
   // shown it before. Silent for the first few suppliers (frictionless).
   bool get _showGroupTip =>
-      !isGuest &&
       !_searchActive &&
       _market == 'Private' &&
       _privateData.length >= _groupTipThreshold &&
@@ -293,7 +291,7 @@ class _State extends State<StockistsOverviewScreen> {
     var privateDesigns = <TileDesign>[];
     var privateData = <_StockistData>[];
     var claimedCatalogs = <ClaimedCatalog>[];
-    if (!isGuest && currentEndUserCanClaimPrivate) {
+    if (currentEndUserCanClaimPrivate) {
       final priv = await _service.getMyPrivateDesigns();
       final claimed = await _service.getMyClaimedCatalogs();
       claimedCatalogs = claimed;
@@ -379,7 +377,7 @@ class _State extends State<StockistsOverviewScreen> {
   // it to My Suppliers. Only the explicit /s/ form is offered (not bare tokens)
   // to avoid false positives from ordinary copied text.
   Future<void> _checkClipboardForLink() async {
-    if (isGuest || !currentEndUserCanClaimPrivate) return;
+    if (!currentEndUserCanClaimPrivate) return;
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final text = data?.text ?? '';
@@ -1376,14 +1374,11 @@ class _State extends State<StockistsOverviewScreen> {
           // bottom nav — My Suppliers · Discover — shown when the public market
           // is live. project_two_mode_marketplace Phase 2 #9.)
           // One-tap "add" if a supplier link is sitting on the clipboard.
-          if (!isGuest &&
-              currentEndUserCanClaimPrivate &&
-              _clipboardToken != null)
+          if (currentEndUserCanClaimPrivate && _clipboardToken != null)
             _buildClipboardBanner(),
           // Labeled "Add supplier" button — the primary manual entry on My
           // Suppliers (replaces the old hidden app-bar link icon).
-          if (!isGuest &&
-              currentEndUserCanClaimPrivate &&
+          if (currentEndUserCanClaimPrivate &&
               !_searchActive &&
               _market == 'Private')
             _buildAddSupplierBar(),
@@ -1454,8 +1449,7 @@ class _State extends State<StockistsOverviewScreen> {
                             if (changed && mounted) setState(() {});
                           },
                           // Per-card Remove only on My Suppliers (claimed) cards.
-                          onRemove: (!isGuest &&
-                                  currentEndUserCanClaimPrivate &&
+                          onRemove: (currentEndUserCanClaimPrivate &&
                                   _market == 'Private')
                               ? () => _removeSupplier(filteredStockists[i])
                               : null,
@@ -1479,8 +1473,7 @@ class _State extends State<StockistsOverviewScreen> {
   // one surface, so no nav. Switching to Discover is product-first (the design
   // grid). Killed the old "Both". project_two_mode_marketplace Phase 2 #9.
   Widget? _buildModeNav() {
-    if (isGuest ||
-        !publicMarketLive ||
+    if (!publicMarketLive ||
         !currentEndUserCanClaimPrivate ||
         _searchActive) {
       return null;
@@ -1916,7 +1909,8 @@ class _State extends State<StockistsOverviewScreen> {
   // be a bare token) so foreign/garbage URLs are rejected with a friendly
   // message instead of being sent to the server.
   Future<void> _showAddCatalogDialog() async {
-    if (blockIfGuest(context, feature: 'My Suppliers')) return;
+    // Guests CAN save suppliers (the trial value) — no block here. Inquiring/
+    // ordering is what triggers the convert prompt (guest-trial scope).
     final ctrl = TextEditingController();
     final token = await showDialog<String>(
       context: context,

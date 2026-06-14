@@ -137,15 +137,16 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // Anonymous "browse as guest" — limited end-user view (no inquiry / stockist
-  // contact / groups). Requires Anonymous sign-ins enabled in Supabase Auth.
+  // Anonymous "browse as guest" — guest-trial: can browse + SAVE suppliers, but
+  // inquiring/ordering triggers the convert prompt. Lands on the same My
+  // Suppliers home as a real buyer (the guest now has a lightweight identity).
   void _browseAsGuest() async {
     setState(() => _loading = true);
     try {
       await SupabaseAuthService().loginAsGuest();
       if (!mounted) return;
       setState(() => _loading = false);
-      context.go('/all-designs'); // guests land on the design catalog
+      context.go('/home');
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);

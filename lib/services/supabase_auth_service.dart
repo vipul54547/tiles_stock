@@ -40,10 +40,24 @@ class SupabaseAuthService {
   Future<UserRole> loginAsGuest() async {
     await supabase.auth.signInAnonymously();
     _role = UserRole.endUser;
-    currentEndUserId = '';
-    currentEndUserCanClaimPrivate = false;
+    await _loadGuestIdentity();
     await _loadAppSettings();
     return UserRole.endUser;
+  }
+
+  // Guest-trial: a guest gets a lightweight end_user identity so they can SAVE
+  // suppliers during the free trial (browse + save only; inquiring/ordering
+  // triggers the convert prompt). Converting to a permanent phone login later
+  // keeps the same user_id, so their saved suppliers carry over.
+  Future<void> _loadGuestIdentity() async {
+    try {
+      final id = await supabase.rpc('ensure_guest_end_user');
+      currentEndUserId = (id ?? '').toString();
+      currentEndUserCanClaimPrivate = true;
+    } catch (_) {
+      currentEndUserId = '';
+      currentEndUserCanClaimPrivate = false;
+    }
   }
 
   // Called on app start to restore an existing session
@@ -56,8 +70,7 @@ class SupabaseAuthService {
     if (user == null) return null;
     if (user.isAnonymous) {
       _role = UserRole.endUser; // restored guest session
-      currentEndUserId = '';
-      currentEndUserCanClaimPrivate = false;
+      await _loadGuestIdentity();
       await _loadAppSettings();
       return UserRole.endUser;
     }
