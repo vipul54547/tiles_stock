@@ -329,16 +329,21 @@ class _State extends State<StockistDashboardScreen> {
                 Expanded(child: _buildMyStockScroll()),
               ],
             ),
-      // Slim platform co-brand footer (hidden during multi-select).
+      // Slim platform co-brand footer (hidden during multi-select). Uses
+      // Align(heightFactor: 1) — NOT Center — so the bar sizes to the chip's
+      // height; a Center here would expand to fill the screen and hide the body.
       bottomNavigationBar: _selectMode
           ? null
-          : SafeArea(
-              top: false,
-              child: Container(
-                color: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: const Center(
-                    child: PoweredByTilesStock(logoHeight: 18)),
+          : Container(
+              color: Colors.white,
+              child: const SafeArea(
+                top: false,
+                minimum: EdgeInsets.symmetric(vertical: 6),
+                child: Align(
+                  alignment: Alignment.center,
+                  heightFactor: 1,
+                  child: PoweredByTilesStock(logoHeight: 18),
+                ),
               ),
             ),
     );
