@@ -167,13 +167,18 @@ class _State extends State<StockistsOverviewScreen> {
   @override
   void initState() {
     super.initState();
-    // Private-first: while the public market is off, a logged-in BUYER's only
-    // surface is "My Suppliers" (their claimed catalogs). The Public/Private/Both
-    // selector and the public Open Market return only when the super admin flips
-    // publicMarketLive on (Phase 2 Discover). Admins/guests reuse this screen as
-    // the all-stock overview, so they stay on the public list. currentEndUserId
-    // is set only for a logged-in end user. See project_two_mode_marketplace.
-    if (!publicMarketLive && currentEndUserId.isNotEmpty) _market = 'Private';
+    // Buyers land on My Suppliers (their relationships) by default. A buyer with
+    // no private access starts on Discover (public) when it's live; while the
+    // public market is off, everyone is on the single My Suppliers surface and
+    // switches via the two-mode bottom nav once it's live. Admins/guests reuse
+    // this screen as the all-stock overview, so they stay on the public list.
+    // currentEndUserId is set only for a logged-in end user.
+    // See project_two_mode_marketplace.
+    if (currentEndUserId.isNotEmpty) {
+      _market = (currentEndUserCanClaimPrivate || !publicMarketLive)
+          ? 'Private'
+          : 'Public';
+    }
     _load();
   }
 
@@ -1223,10 +1228,9 @@ class _State extends State<StockistsOverviewScreen> {
                 if (context.mounted) context.go('/login');
               },
             ),
-      title: Text(
-          (!publicMarketLive && currentEndUserId.isNotEmpty)
-              ? 'My Suppliers'
-              : 'Tiles Stock'),
+      title: Text(currentEndUserId.isNotEmpty
+          ? (_market == 'Private' ? 'My Suppliers' : 'Discover')
+          : 'Tiles Stock'),
       actions: [
         // "Add supplier" lives as a labeled button in the body now (retired the
         // hidden link icon — see project_two_mode_marketplace Phase 1.2).
@@ -1299,12 +1303,9 @@ class _State extends State<StockistsOverviewScreen> {
       body: Column(
         children: [
           // Public/Private/Both selector only appears once the public market is
-          // live; in private-first the buyer is always on their My Suppliers.
-          if (!isGuest &&
-              currentEndUserCanClaimPrivate &&
-              !_searchActive &&
-              publicMarketLive)
-            _buildMarketRow(),
+          // (The old Public/Private/Both selector is replaced by the two-mode
+          // bottom nav — My Suppliers · Discover — shown when the public market
+          // is live. project_two_mode_marketplace Phase 2 #9.)
           // One-tap "add" if a supplier link is sitting on the clipboard.
           if (!isGuest &&
               currentEndUserCanClaimPrivate &&
@@ -1393,6 +1394,49 @@ class _State extends State<StockistsOverviewScreen> {
           if (!_viewDesigns) _buildLegend(),
         ],
       ),
+      bottomNavigationBar: _buildModeNav(),
+    );
+  }
+
+  // Two-mode bottom nav — My Suppliers · Discover — shown to a permitted buyer
+  // once the public market is live. While it's off (private-first) there's only
+  // one surface, so no nav. Switching to Discover is product-first (the design
+  // grid). Killed the old "Both". project_two_mode_marketplace Phase 2 #9.
+  Widget? _buildModeNav() {
+    if (isGuest ||
+        !publicMarketLive ||
+        !currentEndUserCanClaimPrivate ||
+        _searchActive) {
+      return null;
+    }
+    return NavigationBar(
+      height: 60,
+      selectedIndex: _market == 'Private' ? 0 : 1,
+      onDestinationSelected: (i) {
+        _dismissKeyboard();
+        setState(() {
+          if (i == 0) {
+            _market = 'Private'; // My Suppliers
+          } else {
+            _market = 'Public'; // Discover
+            _viewDesigns = true; // product-first
+          }
+        });
+      },
+      destinations: [
+        NavigationDestination(
+          icon: const Icon(Icons.storefront_outlined),
+          selectedIcon: const Icon(Icons.storefront),
+          label: _privateDesigns.isEmpty
+              ? 'My Suppliers'
+              : 'My Suppliers (${_privateData.length})',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.travel_explore_outlined),
+          selectedIcon: Icon(Icons.travel_explore),
+          label: 'Discover',
+        ),
+      ],
     );
   }
 
@@ -1580,57 +1624,6 @@ class _State extends State<StockistsOverviewScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  // ── Market toggle (Father & Child) ───────────────────────────────────────
-  // One global control above every tab. Switching it re-filters the Group,
-  // Stock and All-Design views together. Hidden for guests, who have no
-  // claimed (Private / Closed Market) catalogs.
-  Widget _buildMarketRow() {
-    const labels = ['Public', 'Private', 'Both'];
-    const brand = Color(0xFF1B4F72);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-      child: Row(
-        children: [
-          for (int i = 0; i < labels.length; i++) ...[
-            Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  _dismissKeyboard();
-                  setState(() => _market = labels[i]);
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  decoration: BoxDecoration(
-                    color: _market == labels[i] ? brand : Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color: _market == labels[i]
-                            ? brand
-                            : Colors.grey.shade300),
-                  ),
-                  child: Text(
-                    labels[i] == 'Private' && _privateDesigns.isNotEmpty
-                        ? 'Private (${_privateDesigns.length})'
-                        : labels[i],
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: _market == labels[i]
-                          ? Colors.white
-                          : Colors.grey.shade700,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (i < labels.length - 1) const SizedBox(width: 8),
-          ],
-        ],
-      ),
     );
   }
 
