@@ -20,6 +20,7 @@ import '../utils/tile_types.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/notification_bell.dart';
 import '../utils/stockist_tiers.dart';
+import '../utils/guest_gate.dart';
 import '../models/claimed_catalog.dart';
 
 const _qualities = ['Premium', 'Standard'];
@@ -1291,6 +1292,11 @@ class _State extends State<StockistsOverviewScreen> {
               icon: const Icon(Icons.logout),
               tooltip: 'Logout',
               onPressed: () async {
+                // Guest with saved suppliers → double-confirm (logout is
+                // permanent for them) with a Create-login / Help rescue.
+                final ok = await confirmGuestLogout(context,
+                    supplierCount: _privateData.length);
+                if (!ok) return;
                 await SupabaseAuthService().logout();
                 if (context.mounted) context.go('/login');
               },
