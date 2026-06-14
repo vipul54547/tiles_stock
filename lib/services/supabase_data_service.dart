@@ -421,39 +421,6 @@ class SupabaseDataService {
     return all.isEmpty ? null : all.first;
   }
 
-  /// Create a catalog. Private creation is gated by the stockist's admin-granted
-  /// `can_create_private_catalog` (enforced here and by RLS on the column).
-  Future<String?> addCatalog(String stockistUUID, String name,
-      {bool private = false}) async {
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) throw 'Stock catalogue name cannot be empty.';
-    try {
-      final existing = await supabase
-          .from('stock_catalogs')
-          .select('sort_order')
-          .eq('stockist_id', stockistUUID)
-          .order('sort_order', ascending: false)
-          .limit(1);
-      final nextOrder =
-          (existing.isEmpty ? 0 : (existing.first['sort_order'] as int)) + 10;
-      final row = await supabase
-          .from('stock_catalogs')
-          .insert({
-            'stockist_id': stockistUUID,
-            'name': trimmed,
-            'visibility': private ? 'private' : 'public',
-            'show_in_marketplace': !private, // private never in marketplace
-            'sort_order': nextOrder,
-          })
-          .select('id')
-          .single();
-      return row['id'] as String?;
-    } catch (e, st) {
-      debugPrint('addCatalog failed ($name): $e\n$st');
-      rethrow;
-    }
-  }
-
   Future<void> renameCatalog(String id, String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw 'Stock catalogue name cannot be empty.';
@@ -769,34 +736,6 @@ class SupabaseDataService {
   }
 
   // ── Stockist share links (permanent + create-on-demand, optional expiry) ────
-
-  /// The calling stockist's share links: the always-on Permanent (from
-  /// share_token) first, then any active create-on-demand links.
-  Future<List<ShareLink>> getMyShareLinks() async {
-    try {
-      final res = await supabase.rpc('my_share_links');
-      final list = (res as List?) ?? const [];
-      return list
-          .map((e) => ShareLink.fromJson(Map<String, dynamic>.from(e as Map)))
-          .toList();
-    } catch (e, st) {
-      debugPrint('getMyShareLinks failed: $e\n$st');
-      return [];
-    }
-  }
-
-  /// Creates a new share link for the calling stockist. [duration] is one of
-  /// 'permanent','1week','1month','3month','6month','1year'. Returns true on
-  /// success.
-  Future<bool> createShareLink(String duration) async {
-    try {
-      await supabase.rpc('create_share_link', params: {'p_duration': duration});
-      return true;
-    } catch (e, st) {
-      debugPrint('createShareLink($duration) failed: $e\n$st');
-      return false;
-    }
-  }
 
   /// A specific catalog's links: its always-on Permanent link plus every active
   /// timed link bound to that catalog. Works for public AND private catalogs.
