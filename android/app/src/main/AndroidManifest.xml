@@ -25,9 +25,29 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Let Flutter route incoming deep / app links through go_router
+                 (e.g. /s/<token>). Required for the App Link filter below. -->
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Android App Link: https://tilesdesign.in/s/<token> opens the app
+                 directly when installed (verified against
+                 https://tilesdesign.in/.well-known/assetlinks.json), and falls
+                 back to the browser catalog when it isn't. autoVerify lets
+                 Android confirm domain ownership silently at install time.
+                 The iOS equivalent (Universal Links) will add an
+                 apple-app-site-association file in the same /.well-known/ folder. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"
+                      android:host="tilesdesign.in"
+                      android:pathPrefix="/s/"/>
             </intent-filter>
             <!-- Password-reset deep link. Supabase sends an email whose link
                  redirects to tilesstock://reset-password-callback; this filter

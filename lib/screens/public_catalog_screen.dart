@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/app_config.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
 import '../services/cloudinary_service.dart';
@@ -757,18 +759,71 @@ class _State extends State<PublicCatalogScreen> {
     );           // Container
   }
 
-  // Footer credit shown at the bottom of every catalog page.
+  // The right app-store URL for the browser visitor's platform (Android → Play,
+  // iOS → App Store), falling back to the site/store-fallback when there's no
+  // listing for that platform yet. Web-only (defaultTargetPlatform reflects the
+  // browser's host OS on the web build).
+  String get _storeUrl {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return AppConfig.androidStoreUrl.isNotEmpty
+            ? AppConfig.androidStoreUrl
+            : AppConfig.storeFallbackUrl;
+      case TargetPlatform.iOS:
+      case TargetPlatform.macOS:
+        return AppConfig.iosStoreUrl.isNotEmpty
+            ? AppConfig.iosStoreUrl
+            : AppConfig.storeFallbackUrl;
+      default:
+        return AppConfig.storeFallbackUrl;
+    }
+  }
+
+  // Footer credit shown at the bottom of every catalog page. On the WEB build we
+  // also show a quiet "download the app" nudge — buyers reaching this page in a
+  // browser (no app) get sent to the right store for their device. Hidden in the
+  // app itself and until at least one store link is configured.
   Widget _poweredBy() {
+    final showNudge = kIsWeb && AppConfig.hasAnyStoreLink;
     return Padding(
       padding: EdgeInsets.fromLTRB(
           16, 8, 16, 16 + MediaQuery.viewPaddingOf(context).bottom),
-      child: Center(
-        child: Text('Powered by TilesDesign',
-            style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey.shade500,
-                letterSpacing: 0.3)),
+      child: Column(
+        children: [
+          if (showNudge) ...[
+            GestureDetector(
+              onTap: () => launchUrl(Uri.parse(_storeUrl),
+                  mode: LaunchMode.externalApplication),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.smartphone, size: 14, color: _brand),
+                  const SizedBox(width: 5),
+                  Text.rich(
+                    TextSpan(
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                      children: [
+                        const TextSpan(text: 'Get the app for a better experience — '),
+                        TextSpan(
+                          text: 'Download',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, color: _brand),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Text('Powered by TilesDesign',
+              style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade500,
+                  letterSpacing: 0.3)),
+        ],
       ),
     );
   }
