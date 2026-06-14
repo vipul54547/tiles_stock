@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
@@ -70,6 +71,12 @@ class _State extends State<StockistsOverviewScreen> {
   List<_StockistData> _privateData = [];
   // The buyer's claimed-catalog summaries (for the "Manage saved" remove list).
   List<ClaimedCatalog> _claimedCatalogs = [];
+
+  // Clipboard auto-detect: a /s/ link found on the clipboard that the buyer can
+  // add to My Suppliers with one tap, plus tokens they've dismissed so the
+  // banner doesn't nag.
+  String? _clipboardToken;
+  final Set<String> _dismissedClipboard = {};
 
   final _searchCtrl = TextEditingController();
   String _searchQuery  = '';
@@ -160,6 +167,13 @@ class _State extends State<StockistsOverviewScreen> {
   @override
   void initState() {
     super.initState();
+    // Private-first: while the public market is off, a logged-in BUYER's only
+    // surface is "My Suppliers" (their claimed catalogs). The Public/Private/Both
+    // selector and the public Open Market return only when the super admin flips
+    // publicMarketLive on (Phase 2 Discover). Admins/guests reuse this screen as
+    // the all-stock overview, so they stay on the public list. currentEndUserId
+    // is set only for a logged-in end user. See project_two_mode_marketplace.
+    if (!publicMarketLive && currentEndUserId.isNotEmpty) _market = 'Private';
     _load();
   }
 
@@ -288,6 +302,25 @@ class _State extends State<StockistsOverviewScreen> {
       _allSurfaces = surfaces;
       _loading = false;
     });
+    // Offer a one-tap "add" if the buyer has a supplier link on their clipboard.
+    await _checkClipboardForLink();
+  }
+
+  // If the buyer copied a supplier's /s/ link, surface a one-tap banner to add
+  // it to My Suppliers. Only the explicit /s/ form is offered (not bare tokens)
+  // to avoid false positives from ordinary copied text.
+  Future<void> _checkClipboardForLink() async {
+    if (isGuest || !currentEndUserCanClaimPrivate) return;
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final text = data?.text ?? '';
+      if (!text.contains('/s/')) return;
+      final token = _resolveCatalogToken(text);
+      if (token == null || _dismissedClipboard.contains(token)) return;
+      if (mounted) setState(() => _clipboardToken = token);
+    } catch (_) {
+      // Clipboard can throw on some platforms — never block the screen on it.
+    }
   }
 
   List<TileDesign> _stockistDesigns(_StockistData d) =>
@@ -1190,14 +1223,13 @@ class _State extends State<StockistsOverviewScreen> {
                 if (context.mounted) context.go('/login');
               },
             ),
-      title: const Text('Tiles Stock'),
+      title: Text(
+          (!publicMarketLive && currentEndUserId.isNotEmpty)
+              ? 'My Suppliers'
+              : 'Tiles Stock'),
       actions: [
-        if (!isGuest && currentEndUserCanClaimPrivate)
-          IconButton(
-            icon: const Icon(Icons.add_link),
-            tooltip: 'Add a stock catalogue link',
-            onPressed: _showAddCatalogDialog,
-          ),
+        // "Add supplier" lives as a labeled button in the body now (retired the
+        // hidden link icon — see project_two_mode_marketplace Phase 1.2).
         IconButton(
           icon: const Icon(Icons.refresh),
           tooltip: 'Refresh',
@@ -1266,14 +1298,25 @@ class _State extends State<StockistsOverviewScreen> {
       appBar: appBar,
       body: Column(
         children: [
-          if (!isGuest && currentEndUserCanClaimPrivate && !_searchActive)
-            _buildMarketRow(),
+          // Public/Private/Both selector only appears once the public market is
+          // live; in private-first the buyer is always on their My Suppliers.
           if (!isGuest &&
               currentEndUserCanClaimPrivate &&
               !_searchActive &&
-              _market != 'Public' &&
-              _claimedCatalogs.isNotEmpty)
-            _buildManageSavedBar(),
+              publicMarketLive)
+            _buildMarketRow(),
+          // One-tap "add" if a supplier link is sitting on the clipboard.
+          if (!isGuest &&
+              currentEndUserCanClaimPrivate &&
+              _clipboardToken != null)
+            _buildClipboardBanner(),
+          // Labeled "Add supplier" button — the primary manual entry on My
+          // Suppliers (replaces the old hidden app-bar link icon).
+          if (!isGuest &&
+              currentEndUserCanClaimPrivate &&
+              !_searchActive &&
+              _market == 'Private')
+            _buildAddSupplierBar(),
           _buildQualityRow(),
           _buildGroupRow(
               _viewDesigns ? filteredDesigns.length : filteredStockists.length),
@@ -1338,6 +1381,12 @@ class _State extends State<StockistsOverviewScreen> {
                             );
                             if (changed && mounted) setState(() {});
                           },
+                          // Per-card Remove only on My Suppliers (claimed) cards.
+                          onRemove: (!isGuest &&
+                                  currentEndUserCanClaimPrivate &&
+                                  _market == 'Private')
+                              ? () => _removeSupplier(filteredStockists[i])
+                              : null,
                         ),
                       ),
           ),
@@ -1585,185 +1634,103 @@ class _State extends State<StockistsOverviewScreen> {
     );
   }
 
-  // A small "Manage saved" entry on the Private / Both market — lets the buyer
-  // remove a supplier's stock catalog they previously claimed.
-  Widget _buildManageSavedBar() {
+  // Labeled "Add supplier" button — the primary manual way to add a supplier's
+  // shared link to My Suppliers.
+  Widget _buildAddSupplierBar() {
+    const brand = Color(0xFF1B4F72);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: TextButton.icon(
-          onPressed: _showManageSavedSheet,
-          icon: const Icon(Icons.bookmark_remove_outlined, size: 18),
-          label: Text('Manage saved (${_claimedCatalogs.length})'),
-          style: TextButton.styleFrom(
-            foregroundColor: const Color(0xFF1B4F72),
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            minimumSize: const Size(0, 32),
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: _showAddCatalogDialog,
+          icon: const Icon(Icons.add_link, size: 18),
+          label: const Text('Add supplier'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: brand,
+            side: BorderSide(color: brand.withValues(alpha: 0.5)),
           ),
         ),
       ),
     );
   }
 
-  // Bottom sheet listing the buyer's saved (claimed) stock catalogs, each with a
-  // Remove action that un-claims it (drops it from the Private market).
-  Future<void> _showManageSavedSheet() async {
-    var changed = false;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        final items = List<ClaimedCatalog>.from(_claimedCatalogs);
-        return StatefulBuilder(
-          builder: (ctx, setSheet) => SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const Text('Saved stock catalogues',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 4),
-                  Text(
-                      'Remove a supplier to stop seeing their stock in your '
-                      'Private market. You can add it again with the link.',
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  const SizedBox(height: 8),
-                  if (items.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text('No saved stock catalogues.',
-                            style: TextStyle(color: Colors.grey)),
-                      ),
-                    )
-                  else
-                    Flexible(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: items.length,
-                        separatorBuilder: (_, __) =>
-                            Divider(height: 1, color: Colors.grey.shade200),
-                        itemBuilder: (_, i) {
-                          final c = items[i];
-                          // Multi-brand: lead with the brand, company as "by …".
-                          final hasBrand = c.brandName.isNotEmpty;
-                          final title = hasBrand
-                              ? c.brandName
-                              : (c.stockistName.isNotEmpty
-                                  ? c.stockistName
-                                  : c.name);
-                          final sub = [
-                            if (hasBrand && c.stockistName.isNotEmpty)
-                              'by ${c.stockistName}',
-                            if (!hasBrand && c.name.isNotEmpty && c.name != title)
-                              c.name,
-                            '${c.designCount} design${c.designCount == 1 ? '' : 's'}',
-                            if (c.stockistCity.isNotEmpty) c.stockistCity,
-                          ].join('  ·  ');
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: (hasBrand && c.brandLogo.isNotEmpty)
-                                ? ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: CachedNetworkImage(
-                                      imageUrl: CloudinaryService.thumbUrl(
-                                          c.brandLogo, width: 120),
-                                      width: 40, height: 40, fit: BoxFit.cover,
-                                      placeholder: (_, __) =>
-                                          Container(color: Colors.grey.shade200),
-                                      errorWidget: (_, __, ___) =>
-                                          Container(color: Colors.grey.shade200),
-                                    ),
-                                  )
-                                : CircleAvatar(
-                                    backgroundColor: const Color(0xFF1B4F72)
-                                        .withValues(alpha: 0.1),
-                                    child: const Icon(Icons.storefront_outlined,
-                                        color: Color(0xFF1B4F72), size: 20),
-                                  ),
-                            title: Text(title,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 14)),
-                            subtitle: Text(sub,
-                                style: const TextStyle(fontSize: 12)),
-                            trailing: TextButton.icon(
-                              onPressed: () async {
-                                final confirm = await showDialog<bool>(
-                                  context: ctx,
-                                  builder: (dctx) => AlertDialog(
-                                    title: const Text('Remove saved stock catalogue?'),
-                                    content: Text(
-                                        'Remove "$title" from your Private '
-                                        'market? You can add it again later '
-                                        'with their link.'),
-                                    actions: [
-                                      TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(dctx, false),
-                                          child: const Text('Cancel')),
-                                      TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(dctx, true),
-                                          child: const Text('Remove',
-                                              style: TextStyle(
-                                                  color: Colors.red))),
-                                    ],
-                                  ),
-                                );
-                                if (confirm != true) return;
-                                try {
-                                  await _service.unclaimCatalog(c.catalogId);
-                                  changed = true;
-                                  setSheet(() => items.removeAt(i));
-                                } catch (e) {
-                                  if (!ctx.mounted) return;
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                      SnackBar(
-                                          content: Text('$e'),
-                                          backgroundColor: Colors.red));
-                                }
-                              },
-                              icon: const Icon(Icons.delete_outline, size: 18),
-                              label: const Text('Remove'),
-                              style: TextButton.styleFrom(
-                                  foregroundColor: Colors.red),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
+  // Clipboard nudge: the buyer copied a supplier's /s/ link → offer a one-tap
+  // add, with a dismiss that stops re-prompting for that link.
+  Widget _buildClipboardBanner() {
+    const brand = Color(0xFF1B4F72);
+    return Container(
+      color: const Color(0xFFE3F2FD),
+      padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
+      child: Row(
+        children: [
+          const Icon(Icons.content_paste_go, color: brand, size: 20),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text('You copied a supplier link. Add it to My Suppliers?',
+                style: TextStyle(fontSize: 12.5)),
           ),
-        );
-      },
+          TextButton(
+            onPressed: () => _claimToken(_clipboardToken!),
+            child: const Text('Add'),
+          ),
+          IconButton(
+            tooltip: 'Dismiss',
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => setState(() {
+              _dismissedClipboard.add(_clipboardToken!);
+              _clipboardToken = null;
+            }),
+          ),
+        ],
+      ),
     );
-    if (changed && mounted) {
-      await _load(); // refresh the Private market + counts
+  }
+
+  // Per-card Remove: drop a supplier from My Suppliers. Un-claims every catalog
+  // saved from that stockist (matched by masked stockist key), then refreshes.
+  Future<void> _removeSupplier(_StockistData data) async {
+    final key = data.stockist.id;
+    final cats =
+        _claimedCatalogs.where((c) => c.stockistKey == key).toList();
+    if (cats.isEmpty) return;
+    final name = data.stockist.name;
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Remove supplier?'),
+        content: Text(
+            'Remove "$name" from My Suppliers? You will stop seeing their '
+            'stock. You can add them again with their link.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(dctx, true),
+              child: const Text('Remove',
+                  style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    try {
+      for (final c in cats) {
+        await _service.unclaimCatalog(c.catalogId);
+      }
+      if (!mounted) return;
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Removed "$name" from My Suppliers')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: Colors.red));
     }
   }
+
 
   // Per-market empty placeholder. On the Private market with nothing claimed,
   // guide the buyer to paste a supplier's link instead of a bare "not found".
@@ -1775,14 +1742,15 @@ class _State extends State<StockistsOverviewScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock_outline, size: 40, color: Colors.grey.shade400),
+              Icon(Icons.storefront_outlined,
+                  size: 40, color: Colors.grey.shade400),
               const SizedBox(height: 12),
-              const Text('No private stock catalogues yet',
+              const Text('No suppliers yet',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               Text(
-                  'When a supplier shares a private stock catalogue link with you, '
-                  'tap "Add a stock catalogue link" to save it here.',
+                  'When a supplier shares their catalog link with you, tap '
+                  '"Add supplier" to save them here.',
                   textAlign: TextAlign.center,
                   style:
                       TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
@@ -1790,7 +1758,7 @@ class _State extends State<StockistsOverviewScreen> {
               OutlinedButton.icon(
                 onPressed: _showAddCatalogDialog,
                 icon: const Icon(Icons.add_link, size: 18),
-                label: const Text('Add stock catalogue link'),
+                label: const Text('Add supplier'),
               ),
             ],
           ),
@@ -1821,7 +1789,7 @@ class _State extends State<StockistsOverviewScreen> {
   // be a bare token) so foreign/garbage URLs are rejected with a friendly
   // message instead of being sent to the server.
   Future<void> _showAddCatalogDialog() async {
-    if (blockIfGuest(context, feature: 'Saved stock catalogues')) return;
+    if (blockIfGuest(context, feature: 'My Suppliers')) return;
     final ctrl = TextEditingController();
     final token = await showDialog<String>(
       context: context,
@@ -1829,14 +1797,14 @@ class _State extends State<StockistsOverviewScreen> {
         String? error;
         return StatefulBuilder(
           builder: (ctx, setDialog) => AlertDialog(
-            title: const Text('Add a Stock Catalogue'),
+            title: const Text('Add a supplier'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                    'Paste the stock catalogue link your supplier shared with '
-                    'you. It will be saved to your Private market.',
+                    'Paste the link your supplier shared with you. '
+                    "They'll be saved to My Suppliers.",
                     style: TextStyle(fontSize: 12.5)),
                 const SizedBox(height: 12),
                 TextField(
@@ -1864,7 +1832,7 @@ class _State extends State<StockistsOverviewScreen> {
                     final resolved = _resolveCatalogToken(ctrl.text);
                     if (resolved == null) {
                       setDialog(() => error =
-                          "That doesn't look like a stock catalog link. "
+                          "That doesn't look like a supplier link. "
                           'Paste the full link your supplier shared (it '
                           'contains /s/…).');
                       return;
@@ -1878,15 +1846,25 @@ class _State extends State<StockistsOverviewScreen> {
       },
     );
     if (token == null) return;
+    await _claimToken(token);
+  }
+
+  // Claim a supplier link by token → it lands in My Suppliers. Shared by the
+  // paste dialog and the clipboard "Add" banner.
+  Future<void> _claimToken(String token) async {
     try {
       final res = await _service.claimCatalog(token);
-      final name = (res['catalog_name'] ?? 'Stock catalogue').toString();
+      final name = (res['catalog_name'] ?? 'Supplier').toString();
+      _dismissedClipboard.add(token); // don't re-prompt for what we just added
       if (!mounted) return;
-      await _load(); // refresh the private market + cards
+      await _load(); // refresh My Suppliers + cards
       if (!mounted) return;
-      setState(() => _market = 'Private'); // jump to what they just added
+      setState(() {
+        _market = 'Private'; // jump to what they just added
+        _clipboardToken = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Saved "$name" to your Private market'),
+          content: Text('Added "$name" to My Suppliers'),
           backgroundColor: Colors.green));
     } catch (e) {
       if (!mounted) return;
@@ -2195,6 +2173,8 @@ class _StockistCard extends StatelessWidget {
   final bool Function(TileDesign) matches;
   final VoidCallback onViewProfile;
   final void Function(int groupIndex) onToggleGroup;
+  /// Non-null only for My Suppliers (claimed) cards → shows a Remove action.
+  final VoidCallback? onRemove;
 
   const _StockistCard({
     required this.data,
@@ -2206,6 +2186,7 @@ class _StockistCard extends StatelessWidget {
     required this.matches,
     required this.onViewProfile,
     required this.onToggleGroup,
+    this.onRemove,
   });
 
   // Returns (boxTable, countTable, totalBoxes, totalDesigns). Only designs that
@@ -2301,6 +2282,30 @@ class _StockistCard extends StatelessWidget {
                       ),
                   ],
                 ),
+                // My Suppliers cards get a direct Remove (⋮ → Remove supplier).
+                if (onRemove != null)
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, size: 20),
+                    padding: EdgeInsets.zero,
+                    tooltip: 'Supplier options',
+                    onSelected: (v) {
+                      if (v == 'remove') onRemove!();
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'remove',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline,
+                                size: 18, color: Colors.red),
+                            SizedBox(width: 8),
+                            Text('Remove supplier',
+                                style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
             const SizedBox(height: 8),
