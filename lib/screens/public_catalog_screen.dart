@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, Tar
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
@@ -275,7 +276,68 @@ class _State extends State<PublicCatalogScreen> {
     final uri = phone.isEmpty
         ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')
         : Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
+
+    // High-intent moment: on the web, the FIRST time a browser visitor sends an
+    // enquiry, offer the app (once). The enquiry is NEVER blocked — "Skip & send"
+    // and "Download" both proceed to WhatsApp; Download also opens the store with
+    // the supplier token so the install auto-reconnects (Scenario 2).
+    if (kIsWeb && AppConfig.hasAnyStoreLink) {
+      final prefs = await SharedPreferences.getInstance();
+      if (!(prefs.getBool('app_prompt_shown') ?? false)) {
+        await prefs.setBool('app_prompt_shown', true);
+        if (!mounted) return;
+        final supplier = (_brandInfo['name'] ?? '').toString().isNotEmpty
+            ? _brandInfo['name'].toString()
+            : name;
+        final choice = await _showGetAppDialog(supplier);
+        if (choice == 'download') {
+          launchUrl(Uri.parse(_downloadUrl()),
+              mode: LaunchMode.externalApplication);
+        }
+      }
+    }
+
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  // The store URL for this visitor's platform, with the supplier token appended
+  // as a Play Store install referrer so a fresh install reconnects them to this
+  // exact supplier (Scenario 2). Other platforms just get the plain store URL.
+  String _downloadUrl() {
+    final base = _storeUrl;
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        AppConfig.androidStoreUrl.isNotEmpty) {
+      final sep = base.contains('?') ? '&' : '?';
+      return '$base${sep}referrer=${Uri.encodeComponent('token=${widget.token}')}';
+    }
+    return base;
+  }
+
+  // One-time "get the app" prompt shown at the enquiry moment. Returns
+  // 'download' or 'skip' (or null if dismissed). Never blocks the enquiry.
+  Future<String?> _showGetAppDialog(String supplier) {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(Icons.smartphone, color: _brand, size: 36),
+        title: const Text('Get the app for the best experience'),
+        content: Text(
+            '${supplier.isEmpty ? 'Save this supplier' : 'Save $supplier'} and '
+            'see their latest stock anytime — no more PDFs.'),
+        actionsAlignment: MainAxisAlignment.spaceBetween,
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, 'skip'),
+              child: const Text('Skip & send')),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'download'),
+            icon: const Icon(Icons.download, size: 18),
+            label: const Text('Download app'),
+            style: FilledButton.styleFrom(backgroundColor: _brand),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Tile detail bottom sheet ───────────────────────────────────────────────
