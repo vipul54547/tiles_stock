@@ -24,4 +24,8 @@ class AppConfig {
   /// it only appears when there's actually somewhere to send people.
   static bool get hasAnyStoreLink =>
       androidStoreUrl.isNotEmpty || iosStoreUrl.isNotEmpty;
+
+  /// Tiles Stock team WhatsApp for buyer "Help" / support — digits only with
+  /// country code (no +), opened via wa.me/$supportWhatsApp.
+  static const supportWhatsApp = '919726966906';
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../services/supabase_auth_service.dart';
 import '../models/choice_state.dart';
+import '../utils/support.dart';
 import '../widgets/powered_by_tiles_stock.dart';
 
 
@@ -326,7 +327,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 ),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 12),
+
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => contactSupport(),
+                  icon: const Icon(Icons.chat_outlined, size: 18),
+                  label: const Text('Need help? Chat on WhatsApp'),
+                  style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF25D366)),
+                ),
+              ),
+
+              const SizedBox(height: 16),
 
               const Center(child: PoweredByTilesStock()),
 
