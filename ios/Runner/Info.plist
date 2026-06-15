@@ -4,6 +4,12 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Tiles Stock uses the camera to photograph tile designs you add to your stock catalogue.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Tiles Stock needs access to your photos to upload tile design images to your stock catalogue.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Tiles Stock saves catalogue images you download to your photo library.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
