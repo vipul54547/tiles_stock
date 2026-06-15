@@ -475,6 +475,36 @@ class SupabaseDataService {
     await supabase.from('banners').delete().eq('id', id);
   }
 
+  /// Admin: a stockist's brands with each brand's assigned banner + settings.
+  /// Returns {stockist_name, brands:[{brand_id,name,is_default,use_pool_banner,
+  /// website_url,banner_url}]} or null if the stockist isn't found.
+  Future<Map<String, dynamic>?> adminStockistBannerSlots(String seq) async {
+    try {
+      final res =
+          await supabase.rpc('admin_stockist_banner_slots', params: {'p_seq': seq});
+      if (res == null) return null;
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('adminStockistBannerSlots($seq) failed: $e\n$st');
+      return null;
+    }
+  }
+
+  Future<void> adminSetBrandBanner(String brandId, String imageUrl) =>
+      supabase.rpc('admin_set_brand_banner',
+          params: {'p_brand_id': brandId, 'p_image_url': imageUrl});
+
+  Future<void> adminClearBrandBanner(String brandId) =>
+      supabase.rpc('admin_clear_brand_banner', params: {'p_brand_id': brandId});
+
+  Future<void> adminSetBrandUsePool(String brandId, bool use) =>
+      supabase.rpc('admin_set_brand_use_pool',
+          params: {'p_brand_id': brandId, 'p_use': use});
+
+  Future<void> adminSetBrandWebsite(String brandId, String url) =>
+      supabase.rpc('admin_set_brand_website',
+          params: {'p_brand_id': brandId, 'p_url': url});
+
   Future<void> setCatalogActive(String id, bool active) async {
     await supabase
         .from('stock_catalogs')

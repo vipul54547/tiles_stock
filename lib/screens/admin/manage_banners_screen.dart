@@ -2,24 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../models/stockist.dart';
+import 'stockist_banners_screen.dart';
 
-/// Admin: the Default / Anonymous banner pool — the hand-made 1500×600 (2.5:1)
-/// banners shown on anonymous lists and as the fallback for any list with no
-/// brand banner assigned. The catalog page picks one deterministically per day
-/// (server-side pick_generic_banner), so this is just the library to fill.
-///
-/// (Brand-specific banners are assigned per stockist/brand in a later step.)
+/// Admin: catalog banners. Two tabs —
+///  • Default / Anonymous: the hand-made 1500×600 (2.5:1) pool shown on anonymous
+///    lists and as the fallback; the page picks one per day (pick_generic_banner).
+///  • By Stockist: pick a stockist to assign a finished BRANDED banner per brand.
+/// (project_admin_banner_system)
 class ManageBannersScreen extends StatefulWidget {
   const ManageBannersScreen({super.key});
   @override
   State<ManageBannersScreen> createState() => _State();
 }
 
-class _State extends State<ManageBannersScreen> {
+class _State extends State<ManageBannersScreen>
+    with SingleTickerProviderStateMixin {
   final _data = SupabaseDataService();
   final _picker = ImagePicker();
+  late final TabController _tabs;
 
   List<Map<String, dynamic>> _banners = [];
+  List<Stockist> _stockists = [];
   bool _loading = true;
   bool _uploading = false;
 
@@ -28,20 +32,31 @@ class _State extends State<ManageBannersScreen> {
   @override
   void initState() {
     super.initState();
+    _tabs = TabController(length: 2, vsync: this)
+      ..addListener(() => setState(() {})); // refresh FAB visibility per tab
     _load();
   }
 
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    final b = await _data.getGenericBanners();
+    final results = await Future.wait([
+      _data.getGenericBanners(),
+      _data.getAllStockists(),
+    ]);
     if (!mounted) return;
     setState(() {
-      _banners = b;
+      _banners = results[0] as List<Map<String, dynamic>>;
+      _stockists = results[1] as List<Stockist>;
       _loading = false;
     });
   }
 
   Future<void> _upload() async {
-    // Banners are 2.5:1; upload at a generous width so 1500-wide art stays crisp.
     final x = await _picker.pickImage(
         source: ImageSource.gallery, maxWidth: 2000, imageQuality: 88);
     if (x == null) return;
@@ -63,7 +78,7 @@ class _State extends State<ManageBannersScreen> {
   Future<void> _toggle(Map<String, dynamic> b) async {
     final id = b['id'] as String;
     final next = !(b['is_active'] as bool? ?? true);
-    setState(() => b['is_active'] = next); // optimistic
+    setState(() => b['is_active'] = next);
     try {
       await _data.setBannerActive(id, next);
     } catch (e) {
@@ -78,8 +93,8 @@ class _State extends State<ManageBannersScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete banner?'),
         content: const Text(
-            'This removes it from the pool. Catalog pages that picked it today '
-            'will fall back to another banner.'),
+            'This removes it from the pool. Pages that picked it today fall '
+            'back to another banner.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -108,78 +123,128 @@ class _State extends State<ManageBannersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final activeCount = _banners.where((b) => b['is_active'] == true).length;
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(title: const Text('Catalog Banners')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _uploading ? null : _upload,
-        backgroundColor: _navy,
-        icon: _uploading
-            ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white))
-            : const Icon(Icons.add_photo_alternate_outlined),
-        label: Text(_uploading ? 'Uploading…' : 'Upload banner'),
+      appBar: AppBar(
+        title: const Text('Catalog Banners'),
+        bottom: TabBar(
+          controller: _tabs,
+          tabs: const [
+            Tab(text: 'Default / Anonymous'),
+            Tab(text: 'By Stockist'),
+          ],
+        ),
       ),
+      floatingActionButton: _tabs.index == 0
+          ? FloatingActionButton.extended(
+              onPressed: _uploading ? null : _upload,
+              backgroundColor: _navy,
+              icon: _uploading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(_uploading ? 'Uploading…' : 'Upload banner'),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: EdgeInsets.fromLTRB(
-                  16, 16, 16, 90 + MediaQuery.viewPaddingOf(context).bottom),
-              children: [
-                _intro(activeCount),
-                const SizedBox(height: 14),
-                if (_banners.isEmpty)
-                  _empty()
-                else
-                  ..._banners.map(_tile),
-              ],
+          : TabBarView(
+              controller: _tabs,
+              children: [_poolTab(), _byStockistTab()],
             ),
     );
   }
 
-  Widget _intro(int activeCount) => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: _navy.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.theater_comedy, color: _navy),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Default / Anonymous pool — $activeCount active. Shown on '
-                'anonymous lists and as the fallback. One is picked automatically '
-                'per day, so upload several (1500×600, 2.5:1).',
-                style: const TextStyle(fontSize: 12.5, color: _navy),
+  Widget _poolTab() {
+    final activeCount = _banners.where((b) => b['is_active'] == true).length;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, 90 + MediaQuery.viewPaddingOf(context).bottom),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _navy.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.theater_comedy, color: _navy),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                    'Default / Anonymous pool — $activeCount active. Shown on '
+                    'anonymous lists and as the fallback. One is picked per day, '
+                    'so upload several (1500×600, 2.5:1).',
+                    style: const TextStyle(fontSize: 12.5, color: _navy)),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      );
+        const SizedBox(height: 14),
+        if (_banners.isEmpty)
+          _empty('No banners yet', 'Tap “Upload banner” to add the first one.')
+        else
+          ..._banners.map(_poolTile),
+      ],
+    );
+  }
 
-  Widget _empty() => Padding(
+  Widget _byStockistTab() {
+    if (_stockists.isEmpty) {
+      return _empty('No stockists', 'Add stockists first.');
+    }
+    return ListView.separated(
+      padding: EdgeInsets.fromLTRB(
+          12, 12, 12, 24 + MediaQuery.viewPaddingOf(context).bottom),
+      itemCount: _stockists.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 2),
+      itemBuilder: (_, i) {
+        final s = _stockists[i];
+        return Card(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          child: ListTile(
+            leading: CircleAvatar(
+              backgroundColor: _navy.withValues(alpha: 0.12),
+              child: Text(s.id,
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.bold, color: _navy)),
+            ),
+            title: Text(s.name,
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text(s.city.isNotEmpty ? s.city : 'Assign brand banners'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => StockistBannersScreen(
+                        seq: s.id, stockistName: s.name))),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _empty(String title, String subtitle) => Padding(
         padding: const EdgeInsets.only(top: 60),
         child: Column(
           children: [
             Icon(Icons.image_outlined, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 12),
-            Text('No banners yet',
+            Text(title,
                 style: TextStyle(
                     fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
             const SizedBox(height: 4),
-            Text('Tap “Upload banner” to add the first one.',
+            Text(subtitle,
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
           ],
         ),
       );
 
-  Widget _tile(Map<String, dynamic> b) {
+  Widget _poolTile(Map<String, dynamic> b) {
     final active = b['is_active'] as bool? ?? true;
     final url = (b['image_url'] ?? '').toString();
     return Container(
