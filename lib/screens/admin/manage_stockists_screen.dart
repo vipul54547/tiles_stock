@@ -325,7 +325,7 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
                       // Public market + anonymity are hidden until the super
                       // admin flips the go-live switch (private-first runway).
                       if (publicMarketLive) _dot('Market', s.isListed),
-                      _dot('Private', s.canCreatePrivateCatalog),
+                      if (publicMarketLive) _dot('Private', s.canCreatePrivateCatalog),
                       if (publicMarketLive) _dot('Anonymous', s.isAnonymous),
                       _deviceChip(s.deviceCount, s.deviceLimit),
                       if (s.brandLimit > 1 || s.brandCount > 1)
@@ -1217,7 +1217,10 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                     onChanged: (v) => setState(() => _listed = v),
                   ),
                 ),
-              if (_isEdit)
+              // Hidden during the private-first runway — it only makes sense once
+              // the public market is live (the public/private-catalogue split is
+              // a public-market concept). Reappears with the go-live switch.
+              if (_isEdit && publicMarketLive)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: SwitchListTile(
