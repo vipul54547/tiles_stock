@@ -11,7 +11,6 @@ class TileDesign {
   final double boxWeightKg;
   final double thicknessMm;
   final String colour;
-  final double boxPrice;
   /// Body type (PGVT & GVT, Porcelain, Ceramic, Full Body, DC, Colour Body).
   /// Empty for legacy designs uploaded before this field existed.
   final String tileType;
@@ -45,7 +44,6 @@ class TileDesign {
     required this.boxWeightKg,
     required this.thicknessMm,
     required this.colour,
-    required this.boxPrice,
     this.tileType = '',
     required this.faceImageUrls,
     required this.stockistId,
@@ -69,7 +67,6 @@ class TileDesign {
         boxWeightKg: (json['box_weight_kg'] as num).toDouble(),
         thicknessMm: (json['thickness_mm'] as num).toDouble(),
         colour: json['colour'],
-        boxPrice: (json['box_price'] as num).toDouble(),
         tileType: json['tile_type'] ?? '',
         faceImageUrls: List<String>.from(json['face_image_urls']),
         stockistId: json['stockist_id'],
@@ -96,7 +93,6 @@ class TileDesign {
         'box_weight_kg': boxWeightKg,
         'thickness_mm': thicknessMm,
         'colour': colour,
-        'box_price': boxPrice,
         'tile_type': tileType,
         'face_image_urls': faceImageUrls,
         'stockist_id': stockistId,

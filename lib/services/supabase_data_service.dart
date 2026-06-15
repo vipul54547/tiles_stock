@@ -56,7 +56,6 @@ class SupabaseDataService {
         boxWeightKg:  (d['box_weight_kg']  ?? 0).toDouble(),
         thicknessMm:  (d['thickness_mm']   ?? 0).toDouble(),
         colour:       d['colour']    ?? '',
-        boxPrice:     (d['box_price'] ?? 0).toDouble(),
         tileType:     d['tile_type'] ?? '',
         faceImageUrls: List<String>.from(d['face_image_urls'] ?? []),
         // market_designs exposes a flat (already-masked) `stockist_key`; the
@@ -189,7 +188,6 @@ class SupabaseDataService {
     required int    piecesPerBox,
     required double boxWeightKg,
     required double thicknessMm,
-    required double boxPrice,
     String tileType = '',
     required List<String> faceImageUrls,
     String? finishLabel,
@@ -210,7 +208,6 @@ class SupabaseDataService {
         'pieces_per_box': piecesPerBox,
         'box_weight_kg': boxWeightKg,
         'thickness_mm':  thicknessMm,
-        'box_price':     boxPrice,
         'tile_type':     tileType,
         'face_image_urls': faceImageUrls,
       }).select().single();

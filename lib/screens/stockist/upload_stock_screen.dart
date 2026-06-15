@@ -783,7 +783,6 @@ class _State extends State<UploadStockScreen> {
           boxWeightKg:   _boxWeightKg,
           thicknessMm:
               approxThicknessMm(_size, _piecesPerBox, _boxWeightKg, _tileType) ?? 0,
-          boxPrice:      0,
           tileType:      _tileType,
           faceImageUrls: imageUrls,
           finishLabel:   r.row.finishLabel,

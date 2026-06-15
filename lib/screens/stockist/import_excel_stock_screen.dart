@@ -43,7 +43,6 @@ const Map<String, List<String>> _headerSynonyms = {
   'weight':   ['weight', 'box weight', 'box weight (kg)', 'weight kg', 'wt', 'weight/box'],
   'pieces':   ['pieces', 'pieces/box', 'pcs', 'pcs/box', 'pieces per box', 'piece', 'pc'],
   'colour':   ['colour', 'color', 'shade'],
-  'price':    ['price', 'box price', 'rate', 'mrp', 'price/box'],
 };
 
 // One parsed spreadsheet row + its resolution against existing stock.
@@ -52,7 +51,7 @@ class _XlsRow {
   String name, sizeRaw, qualityRaw, surfaceRaw, tileType, colour;
   int qty;
   int? pieces;
-  double? weight, price;
+  double? weight;
 
   String? error;          // non-null → invalid, skipped from import
   String size = '';       // canonical master size (after validation)
@@ -75,7 +74,6 @@ class _XlsRow {
     required this.qty,
     required this.pieces,
     required this.weight,
-    required this.price,
   });
 
   bool get valid => error == null;
@@ -250,7 +248,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         qty: _toInt(cell(row, 'qty')) ?? -1,
         pieces: _toInt(cell(row, 'pieces')),
         weight: _toDouble(cell(row, 'weight')),
-        price: _toDouble(cell(row, 'price')),
       ));
     }
 
@@ -468,7 +465,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                   r.size, r.pieces ?? 0, r.weight ?? 0,
                   kTileTypes.contains(r.tileType) ? r.tileType : kTileTypes.first) ??
               0,
-          boxPrice: r.price ?? 0,
           tileType: kTileTypes.contains(r.tileType) ? r.tileType : '',
           faceImageUrls: libUrl != null ? [libUrl] : const [],
           finishLabel: r.surfaceRaw.trim().isEmpty ? null : r.surfaceRaw.trim(),
@@ -632,7 +628,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       ('Box Weight', 'optional — for thickness', false),
       ('Pieces/Box', 'optional — for sq.ft', false),
       ('Colour', 'optional', false),
-      ('Box Price', 'optional', false),
     ];
     return Container(
       decoration: BoxDecoration(

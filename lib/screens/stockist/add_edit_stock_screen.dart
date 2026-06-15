@@ -30,7 +30,6 @@ class _State extends State<AddEditStockScreen> {
 
   final _nameCtrl      = TextEditingController();
   final _qtyCtrl       = TextEditingController();
-  final _priceCtrl     = TextEditingController();
   final _piecesCtrl    = TextEditingController();
   final _weightCtrl    = TextEditingController();
   final _thicknessCtrl = TextEditingController();
@@ -128,7 +127,7 @@ class _State extends State<AddEditStockScreen> {
   @override
   void dispose() {
     _nameCtrl.dispose();      _qtyCtrl.dispose();
-    _priceCtrl.dispose();     _piecesCtrl.dispose();
+    _piecesCtrl.dispose();
     _weightCtrl.dispose();    _thicknessCtrl.dispose();
     _colourCtrl.dispose();    _finishAliasCtrl.dispose();
     super.dispose();
@@ -151,7 +150,6 @@ class _State extends State<AddEditStockScreen> {
   void _fill(TileDesign d) {
     _nameCtrl.text      = d.name;
     _qtyCtrl.text       = d.boxQuantity.toString();
-    _priceCtrl.text     = d.boxPrice.toString();
     _piecesCtrl.text    = d.piecesPerBox.toString();
     _weightCtrl.text    = d.boxWeightKg.toString();
     _thicknessCtrl.text = d.thicknessMm.toString();
@@ -284,7 +282,6 @@ class _State extends State<AddEditStockScreen> {
         'thickness_mm':  approxThicknessMm(_size,
                 int.tryParse(_piecesCtrl.text) ?? 0,
                 double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
-        'box_price':     double.tryParse(_priceCtrl.text)     ?? 0,
         'face_image_urls': finalUrls,
         if (_catalogId != null) 'catalog_id': _catalogId,
       });
@@ -304,7 +301,6 @@ class _State extends State<AddEditStockScreen> {
         thicknessMm:   approxThicknessMm(_size,
                 int.tryParse(_piecesCtrl.text) ?? 0,
                 double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
-        boxPrice:      double.tryParse(_priceCtrl.text)     ?? 0,
         faceImageUrls: finalUrls,
         catalogId:     _catalogId,
       );
@@ -518,7 +514,6 @@ class _State extends State<AddEditStockScreen> {
                     const SizedBox(width: 12),
                     Expanded(child: _buildThicknessField()),
                   ]),
-                  _field(_priceCtrl, 'Box Price (₹)', numeric: true, required: true),
                 ],
               ),
             ),

@@ -133,7 +133,6 @@ class MockDataService implements DataService {
         piecesPerBox: _piecesPerBox[size] ?? 4,
         boxWeightKg:  18.0 + (i % 10) * 0.5,
         thicknessMm:  8.0 + (i % 3),
-        boxPrice:     800.0 + (i % 20) * 50.0,
         updatedAt:    DateTime.now().subtract(Duration(days: i % 60)),
       ));
       i++;
@@ -166,7 +165,6 @@ class MockDataService implements DataService {
           piecesPerBox: [4, 6, 8][g % 3],
           boxWeightKg:  18.5 + (g % 10) * 0.5,
           thicknessMm:  8.0 + (g % 3),
-          boxPrice:     800.0 + (g % 20) * 50.0,
           updatedAt:    DateTime.now().subtract(Duration(days: g % 60)),
         ));
         g++;

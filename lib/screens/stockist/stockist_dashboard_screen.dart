@@ -252,9 +252,6 @@ class _State extends State<StockistDashboardScreen> {
   List<TileDesign> get _buyerInterestDesigns =>
       _designs.where((d) => _inquiries.containsKey(d.id)).toList();
 
-  double get _estimatedOrderValue => _buyerInterestDesigns.fold(
-      0.0, (sum, d) => sum + d.boxPrice * (_inquiries[d.id]?.boxes ?? 0));
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -470,7 +467,6 @@ class _State extends State<StockistDashboardScreen> {
   // ── Stats bar ─────────────────────────────────────────────────────────────
 
   Widget _buildStatsBar() {
-    final estValue = _estimatedOrderValue;
     // Counts reflect in-stock designs only (out-of-stock are hidden here).
     // Inquiry count already lives on the Inquiry tab badge, so the stats bar
     // shows total boxes in stock instead (a number not surfaced elsewhere).
@@ -487,12 +483,6 @@ class _State extends State<StockistDashboardScreen> {
           _divider(),
           _statItem('$totalBoxes', 'Boxes',
               Icons.inventory_2_rounded, const Color(0xFF2E7D32)),
-          _divider(),
-          _statItem(
-              '₹${estValue >= 1000 ? '${(estValue / 1000).toStringAsFixed(1)}k' : estValue.toStringAsFixed(0)}',
-              'Est. Value',
-              Icons.currency_rupee_rounded,
-              const Color(0xFF6A1B9A)),
         ],
       ),
     );

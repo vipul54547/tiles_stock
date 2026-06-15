@@ -234,27 +234,12 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Boxes & Price highlight cards ────────────────────────
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatCard(
-                          icon: Icons.inventory_2_outlined,
-                          value: '${design.boxQuantity}',
-                          sub: 'Boxes Available',
-                          color: const Color(0xFF1B4F72),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _StatCard(
-                          icon: Icons.currency_rupee_rounded,
-                          value: design.boxPrice.toStringAsFixed(0),
-                          sub: 'Price / Box',
-                          color: const Color(0xFF2E7D32),
-                        ),
-                      ),
-                    ],
+                  // ── Boxes highlight card ─────────────────────────────────
+                  _StatCard(
+                    icon: Icons.inventory_2_outlined,
+                    value: '${design.boxQuantity}',
+                    sub: 'Boxes Available',
+                    color: const Color(0xFF1B4F72),
                   ),
                   const SizedBox(height: 16),
 
