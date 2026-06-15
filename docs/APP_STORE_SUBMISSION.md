@@ -12,8 +12,7 @@ written so you can copy-paste. Drafted 2026-06-15.
 
 > ⚠️ **You must confirm these 3 before submitting** (placeholders used in the drafts):
 > 1. **Legal/seller name** shown on the store (currently "TilesDesign").
-> 2. **Support email** — privacy page uses `support@tilesdesign.in`; make sure that
->    inbox exists, or change it (a Gmail is fine for a small business).
+> 2. **Support email** — privacy page uses `tilesfinders@gmail.com` (confirmed by user 2026-06-15).
 > 3. **Screenshots** — must be captured from a real build (TestFlight/Codemagic). See Phase 4/5.
 
 ---
