@@ -12,6 +12,7 @@ import '../../widgets/powered_by_tiles_stock.dart';
 import '../../widgets/notification_bell.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_types.dart';
+import '../../utils/account_actions.dart';
 
 class StockistDashboardScreen extends StatefulWidget {
   const StockistDashboardScreen({super.key});
@@ -310,6 +311,16 @@ class _State extends State<StockistDashboardScreen> {
                     if (!context.mounted) return;
                     context.go('/login');
                   },
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Account',
+                  onSelected: (v) {
+                    if (v == 'delete') confirmDeleteAccount(context);
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                        value: 'delete', child: Text('Delete account')),
+                  ],
                 ),
               ],
             ),

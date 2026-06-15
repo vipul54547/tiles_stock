@@ -13,6 +13,7 @@ import '../../utils/guest_gate.dart';
 import '../../utils/design_ranking.dart';
 import '../../utils/my_choice.dart';
 import '../../utils/tile_types.dart';
+import '../../utils/account_actions.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/smart_search_toggle.dart';
 
@@ -1168,6 +1169,15 @@ class _HomeScreenState extends State<HomeScreen> {
               await SupabaseAuthService().logout();
               if (context.mounted) context.go('/login');
             },
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Account',
+            onSelected: (v) {
+              if (v == 'delete') confirmDeleteAccount(context);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'delete', child: Text('Delete account')),
+            ],
           ),
         ],
         bottom: PreferredSize(

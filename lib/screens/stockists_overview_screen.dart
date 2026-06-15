@@ -21,6 +21,7 @@ import '../widgets/filter_section.dart';
 import '../widgets/notification_bell.dart';
 import '../utils/stockist_tiers.dart';
 import '../utils/guest_gate.dart';
+import '../utils/account_actions.dart';
 import '../models/claimed_catalog.dart';
 
 const _qualities = ['Premium', 'Standard'];
@@ -1367,6 +1368,18 @@ class _State extends State<StockistsOverviewScreen> {
           onPressed: _load,
         ),
         const NotificationBell(),
+        // Self-service account deletion (App Store 5.1.1(v)) — only on the
+        // buyer's own home root, not when an admin has pushed this screen.
+        if (!Navigator.canPop(context))
+          PopupMenuButton<String>(
+            tooltip: 'Account',
+            onSelected: (v) {
+              if (v == 'delete') confirmDeleteAccount(context);
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'delete', child: Text('Delete account')),
+            ],
+          ),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(48),

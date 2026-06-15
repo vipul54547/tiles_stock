@@ -271,6 +271,26 @@ class SupabaseAuthService {
       await supabase.rpc('unregister_device', params: {'p_device_id': deviceId});
     } catch (_) {}
     await supabase.auth.signOut();
+    _clearSession();
+  }
+
+  /// Permanently deletes the signed-in user's OWN account and all their data
+  /// (App Store requirement 5.1.1(v)). Calls the SECURITY DEFINER
+  /// `delete_my_account` RPC, which only ever acts on the caller's auth.uid().
+  /// Throws on failure so the UI can surface it. Works for buyers, guests and
+  /// stockists; admin accounts are rejected server-side.
+  Future<void> deleteAccount() async {
+    // Best-effort: release this device slot before the user row disappears.
+    try {
+      final deviceId = await DeviceId.get();
+      await supabase.rpc('unregister_device', params: {'p_device_id': deviceId});
+    } catch (_) {}
+    await supabase.rpc('delete_my_account');
+    await supabase.auth.signOut();
+    _clearSession();
+  }
+
+  void _clearSession() {
     _role = null;
     currentStockistId   = '';
     currentStockistUUID = '';
