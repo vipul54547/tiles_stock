@@ -28,6 +28,7 @@ export default async (request, context) => {
 
   let stockist = null;
   let brand = null;
+  let banner = null;
   let designCount = 0;
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/public_catalog`, {
@@ -43,6 +44,7 @@ export default async (request, context) => {
       const data = await res.json();
       stockist = data && data.stockist ? data.stockist : null;
       brand = data && data.brand ? data.brand : null;
+      banner = data && data.banner ? data.banner : null;
       designCount = data && Array.isArray(data.designs) ? data.designs.length : 0;
     }
   } catch (_) {
@@ -56,20 +58,27 @@ export default async (request, context) => {
     });
   }
 
-  // Multi-brand: lead with the brand name/logo when present; the stockist is the
-  // company shown as "by …".
+  // overlay=true means the chosen banner is a GENERIC/anonymous image (system
+  // overlays a "Welcome to [name]" trust strip). In that case `stockist.name` /
+  // `banner.name` are already the (server-gated) masked-or-real name, and we must
+  // NOT surface the brand name or tagline — they would leak an anonymous identity.
+  // overlay=false means a finished BRANDED image, so brand identity is intended.
+  const overlay = !!(banner && banner.overlay === true);
   const brandName = brand && brand.name ? String(brand.name).trim() : '';
   const company = (stockist.name && String(stockist.name).trim()) || 'Tile Catalog';
-  const name = brandName || company;
+  const bannerName = banner && banner.name ? String(banner.name).trim() : '';
+  const name = overlay ? (bannerName || company) : (brandName || company);
   const taglineBase =
-    stockist.tagline && String(stockist.tagline).trim()
+    !overlay && stockist.tagline && String(stockist.tagline).trim()
       ? String(stockist.tagline).trim()
       : `${designCount} tile design${designCount === 1 ? '' : 's'} in stock`;
-  const byLine = brandName ? `by ${company} · ` : '';
+  const byLine = !overlay && brandName ? `by ${company} · ` : '';
   const description = `${byLine}${taglineBase} · Powered by TilesDesign`;
-  // Prefer the stockist banner, then the brand logo, then the stockist logo, then
-  // the TilesDesign mark. (Anonymous stockists return null logo/banner.)
-  const image = stockist.banner_url ||
+  // Use the admin-chosen banner (branded image, or the daily-rotated generic one)
+  // so the link-preview thumbnail matches the on-page banner. Fall back to brand
+  // logo, then stockist logo, then the TilesDesign mark.
+  const image =
+    (banner && banner.image_url && String(banner.image_url).trim()) ||
     (brand && brand.logo_url) || stockist.logo_url || fallbackImg;
 
   const html = `<!doctype html>
