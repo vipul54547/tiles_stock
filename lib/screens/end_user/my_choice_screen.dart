@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
@@ -248,6 +249,11 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         ),
         title: const Text('My Choice'),
         actions: [
+          IconButton(
+            tooltip: 'Dispatch history',
+            icon: const Icon(Icons.local_shipping_outlined),
+            onPressed: () => context.push('/my-dispatches'),
+          ),
           if (!_loading && _chosenDesigns.isNotEmpty)
             TextButton.icon(
               onPressed: _confirmClearAll,
@@ -551,6 +557,24 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                     fontSize: 10.5,
                     fontStyle: FontStyle.italic,
                     color: Colors.grey.shade600),
+              ),
+            ),
+          // Once the supplier starts shipping, let the buyer see what went out.
+          if (o.isDispatching || o.isCompleted)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () =>
+                    context.push('/my-dispatches?token=${o.token}'),
+                icon: const Icon(Icons.local_shipping_outlined, size: 15),
+                label: const Text('View dispatches',
+                    style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF1B4F72),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
             ),
         ],

@@ -51,6 +51,7 @@ import 'screens/admin/inquiry_report_screen.dart';
 import 'screens/stockists_overview_screen.dart';
 import 'screens/end_user/stockist_group_screen.dart';
 import 'screens/end_user/my_choice_screen.dart';
+import 'screens/end_user/dispatch_history_screen.dart';
 import 'screens/stockist/upload_stock_screen.dart';
 import 'screens/stockist/manage_catalogs_screen.dart';
 import 'screens/stockist/manage_brands_screen.dart';
@@ -203,6 +204,11 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/stockists-overview', builder: (_, __) => const StockistsOverviewScreen()), // legacy alias
     GoRoute(path: '/stockist-groups', builder: (_, __) => const StockistGroupScreen()),
     GoRoute(path: '/my-choices', builder: (_, __) => const MyChoiceScreen()),
+    GoRoute(
+      path: '/my-dispatches',
+      builder: (_, state) =>
+          DispatchHistoryScreen(filterToken: state.uri.queryParameters['token']),
+    ),
 
     GoRoute(
       path: '/stockist/stock/upload',

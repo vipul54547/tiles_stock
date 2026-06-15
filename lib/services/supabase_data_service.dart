@@ -10,6 +10,7 @@ import '../models/share_link.dart';
 import '../models/claimed_catalog.dart';
 import '../models/brand.dart';
 import '../models/inquiry_order.dart';
+import '../models/dispatch_record.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
 import 'supabase_auth_service.dart';
@@ -1049,6 +1050,23 @@ class SupabaseDataService {
           .toList();
     } catch (e, st) {
       debugPrint('getMyOrders failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Buyer: my dispatch history — every dispatch note a supplier shipped to me
+  /// (truck/invoice details + per-design boxes), newest first. Stockist name is
+  /// anonymity-masked by the RPC. Empty for guests.
+  Future<List<DispatchRecord>> getMyDispatches() async {
+    if (currentEndUserId.isEmpty) return [];
+    try {
+      final res = await supabase.rpc('my_dispatches');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => DispatchRecord.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyDispatches failed: $e\n$st');
       return [];
     }
   }
