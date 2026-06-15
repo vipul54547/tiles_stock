@@ -8,7 +8,19 @@ String currentStockistId   = '';  // sequential_id e.g. '001' (display use)
 String currentStockistUUID = '';  // Supabase UUID  (DB query use)
 // The logged-in stockist's own anonymity, so OUTGOING share messages use the
 // masked trade name instead of the real/default-brand name. Loaded at login.
-bool currentStockistIsAnonymous = false;
+//
+// Effective anonymity is GATED by [publicMarketLive]: anonymity only exists to
+// hide a brand from strangers in the public marketplace. While the market is
+// dormant (private-first runway), buyers reach a stockist only via a link the
+// stockist sent them — they already know who it is — so masking the name is
+// pointless and confusing. So when the market is off, nobody is anonymous,
+// regardless of the stored per-stockist flag. One switch gates both (see the
+// design note on [publicMarketLive]). The setter stores the raw DB value; the
+// getter applies the gate at read time, so it can never go stale on load order.
+bool _currentStockistIsAnonymousRaw = false;
+bool get currentStockistIsAnonymous =>
+    publicMarketLive && _currentStockistIsAnonymousRaw;
+set currentStockistIsAnonymous(bool v) => _currentStockistIsAnonymousRaw = v;
 String currentStockistDisplayName = ''; // public_display_name (masked trade name)
 
 // Logged-in end user
