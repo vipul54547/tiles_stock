@@ -441,6 +441,40 @@ class SupabaseDataService {
         .update({'is_anonymous': anonymous}).eq('id', id);
   }
 
+  // ── Catalog banners (admin-controlled) ──────────────────────────────────────
+  /// Admin: the generic/anonymous banner pool (shown on anonymous lists + as the
+  /// fallback, daily-rotated). Newest first.
+  Future<List<Map<String, dynamic>>> getGenericBanners() async {
+    try {
+      final data = await supabase
+          .from('banners')
+          .select('id, image_url, is_active, created_at')
+          .eq('kind', 'generic')
+          .order('created_at', ascending: false);
+      return data
+          .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getGenericBanners failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Admin: add a banner to the generic/anonymous pool (Cloudinary URL).
+  Future<void> addGenericBanner(String imageUrl) async {
+    await supabase
+        .from('banners')
+        .insert({'image_url': imageUrl, 'kind': 'generic'});
+  }
+
+  Future<void> setBannerActive(String id, bool active) async {
+    await supabase.from('banners').update({'is_active': active}).eq('id', id);
+  }
+
+  Future<void> deleteBanner(String id) async {
+    await supabase.from('banners').delete().eq('id', id);
+  }
+
   Future<void> setCatalogActive(String id, bool active) async {
     await supabase
         .from('stock_catalogs')
