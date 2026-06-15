@@ -233,7 +233,7 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: phoneCtrl,
                 keyboardType: TextInputType.phone,
-                decoration: deco('Phone'),
+                decoration: deco('WhatsApp number'),
               ),
             ],
           ),
@@ -269,7 +269,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (shopCtrl.text.trim().isNotEmpty)
         'Shop / Company: ${shopCtrl.text.trim()}',
       if (cityCtrl.text.trim().isNotEmpty) 'City: ${cityCtrl.text.trim()}',
-      if (phoneCtrl.text.trim().isNotEmpty) 'Phone: ${phoneCtrl.text.trim()}',
+      if (phoneCtrl.text.trim().isNotEmpty)
+        'WhatsApp: ${phoneCtrl.text.trim()}',
       '',
       'Please send me my login details. Thank you.',
     ];

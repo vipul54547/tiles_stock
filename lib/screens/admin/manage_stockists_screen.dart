@@ -1180,7 +1180,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                 child: PhoneField(
                     codeController: _code,
                     phoneController: _phone,
-                    label: 'Phone'),
+                    label: 'WhatsApp Number'),
               ),
               _field(_city, 'City'),
               _field(_state, 'State'),

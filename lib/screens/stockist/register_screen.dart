@@ -57,7 +57,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             _field(_companyCtrl, 'Company Name', Icons.business, required: true),
             _field(_contactCtrl, 'Contact Person', Icons.person_outline, required: true),
             _field(_emailCtrl, 'Email', Icons.email_outlined, required: true),
-            _field(_phoneCtrl, 'Phone Number', Icons.phone_outlined, required: true),
+            _field(_phoneCtrl, 'WhatsApp Number', Icons.phone_outlined, required: true),
             _field(_cityCtrl, 'City', Icons.location_city_outlined, required: true),
             _field(_gstCtrl, 'GST Number', Icons.receipt_outlined),
             _field(_passCtrl, 'Password', Icons.lock_outline, required: true, obscure: true),

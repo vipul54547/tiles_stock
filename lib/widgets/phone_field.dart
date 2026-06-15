@@ -14,7 +14,7 @@ class PhoneField extends StatelessWidget {
     super.key,
     required this.codeController,
     required this.phoneController,
-    this.label = 'Phone Number',
+    this.label = 'WhatsApp Number',
     this.required = false,
     this.icon,
   });
