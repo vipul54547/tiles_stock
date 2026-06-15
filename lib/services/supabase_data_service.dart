@@ -432,6 +432,15 @@ class SupabaseDataService {
         .update({'show_in_marketplace': show}).eq('id', id);
   }
 
+  /// Per-list anonymity: when this Discover list is shown publicly, wear the
+  /// stockist's masked identity instead of the real name. Only meaningful for
+  /// admin-eligible stockists' Discover lists (server enforces the full rule).
+  Future<void> setCatalogAnonymous(String id, bool anonymous) async {
+    await supabase
+        .from('stock_catalogs')
+        .update({'is_anonymous': anonymous}).eq('id', id);
+  }
+
   Future<void> setCatalogActive(String id, bool active) async {
     await supabase
         .from('stock_catalogs')

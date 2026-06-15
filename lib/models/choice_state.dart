@@ -21,6 +21,13 @@ bool _currentStockistIsAnonymousRaw = false;
 bool get currentStockistIsAnonymous =>
     publicMarketLive && _currentStockistIsAnonymousRaw;
 set currentStockistIsAnonymous(bool v) => _currentStockistIsAnonymousRaw = v;
+
+/// Whether the admin has provisioned this stockist a masked identity (the raw
+/// account flag, NOT gated by the market switch). The stockist needs this to
+/// manage per-list anonymity even while the market is dormant — so it drives
+/// whether the per-list "anonymous name" toggle is offered. Display/masking
+/// still goes through [currentStockistIsAnonymous] / the server gate.
+bool get currentStockistAnonymityEligible => _currentStockistIsAnonymousRaw;
 String currentStockistDisplayName = ''; // public_display_name (masked trade name)
 
 // Logged-in end user

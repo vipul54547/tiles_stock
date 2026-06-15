@@ -972,6 +972,59 @@ class _State extends State<ManageCatalogsScreen> {
                     ],
                   ),
                 ),
+              // Per-list anonymity. Only for admin-eligible stockists, and only
+              // on Discover lists (a private/link-only list always shows the real
+              // name — the buyer reached it directly). Lets a stockist keep one
+              // public list under their real brand while dumping another publicly
+              // under the masked identity. (project_anonymity_market_gate)
+              if (publicMarketLive &&
+                  currentStockistAnonymityEligible &&
+                  c.showInMarketplace)
+                Container(
+                  margin: const EdgeInsets.only(top: 6, right: 4),
+                  padding: const EdgeInsets.fromLTRB(8, 0, 4, 0),
+                  decoration: BoxDecoration(
+                    color: c.isAnonymous
+                        ? const Color(0xFFEDE7F6)
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                          c.isAnonymous
+                              ? Icons.theater_comedy
+                              : Icons.badge_outlined,
+                          size: 16,
+                          color: c.isAnonymous
+                              ? const Color(0xFF673AB7)
+                              : Colors.grey.shade600),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                            c.isAnonymous
+                                ? 'Anonymous — shown as "$currentStockistDisplayName"'
+                                : 'Shown under your real name',
+                            style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: c.isAnonymous
+                                    ? const Color(0xFF673AB7)
+                                    : Colors.grey.shade700)),
+                      ),
+                      Switch(
+                        value: c.isAnonymous,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                        activeThumbColor: const Color(0xFF673AB7),
+                        onChanged: _busy
+                            ? null
+                            : (v) => _run(
+                                () => _data.setCatalogAnonymous(c.id, v)),
+                      ),
+                    ],
+                  ),
+                ),
               const Divider(height: 12),
               // Permanent link row.
               Padding(
