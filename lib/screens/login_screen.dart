@@ -191,6 +191,13 @@ class _LoginScreenState extends State<LoginScreen> {
           isDense: true,
         );
 
+    void disposeAll() {
+      nameCtrl.dispose();
+      shopCtrl.dispose();
+      cityCtrl.dispose();
+      phoneCtrl.dispose();
+    }
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -248,7 +255,10 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       ),
     );
-    if (ok != true) return;
+    if (ok != true) {
+      disposeAll();
+      return;
+    }
 
     final lines = <String>[
       'Hi Tiles Stock team 👋',
@@ -263,7 +273,11 @@ class _LoginScreenState extends State<LoginScreen> {
       '',
       'Please send me my login details. Thank you.',
     ];
-    await contactSupport(ref: 'login-help', message: lines.join('\n'));
+    final message = lines.join('\n');
+    disposeAll();
+    // No `ref` → the WhatsApp text stays clean (no "(Ref: ...)" suffix);
+    // contactSupport still logs the full message server-side.
+    await contactSupport(message: message);
   }
 
 

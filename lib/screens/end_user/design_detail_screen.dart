@@ -235,11 +235,14 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                   const SizedBox(height: 16),
 
                   // ── Boxes highlight card ─────────────────────────────────
-                  _StatCard(
-                    icon: Icons.inventory_2_outlined,
-                    value: '${design.boxQuantity}',
-                    sub: 'Boxes Available',
-                    color: const Color(0xFF1B4F72),
+                  SizedBox(
+                    width: double.infinity,
+                    child: _StatCard(
+                      icon: Icons.inventory_2_outlined,
+                      value: '${design.boxQuantity}',
+                      sub: 'Boxes Available',
+                      color: const Color(0xFF1B4F72),
+                    ),
                   ),
                   const SizedBox(height: 16),
 
