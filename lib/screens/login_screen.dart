@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import '../services/supabase_auth_service.dart';
 import '../models/choice_state.dart';
 import '../utils/support.dart';
+import '../utils/login_history.dart';
 import '../widgets/powered_by_tiles_stock.dart';
 
 
@@ -27,7 +28,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _obscurePassword = true;
 
+  // Shown only until the first successful login on this install. New dealers
+  // are created by the admin and don't know their credentials yet, so they get
+  // a one-tap way to request them. Runway-only — retire once OTP self-service
+  // login is live.
+  bool _showFirstTimeHelp = false;
 
+  @override
+  void initState() {
+    super.initState();
+    LoginHistory.hasLoggedIn().then((seen) {
+      if (mounted && !seen) setState(() => _showFirstTimeHelp = true);
+    });
+  }
 
   void _login() async {
     if (_emailCtrl.text.trim().isEmpty || _passCtrl.text.isEmpty) {
@@ -65,6 +78,10 @@ class _LoginScreenState extends State<LoginScreen> {
       ));
       return;
     }
+
+    // They're in — hide the first-time "Get my login details" helper from now on.
+    await LoginHistory.markLoggedIn();
+    if (!mounted) return;
 
     if (role == UserRole.admin) {
       context.go('/admin');
@@ -156,6 +173,97 @@ class _LoginScreenState extends State<LoginScreen> {
         duration: const Duration(seconds: 6),
       ));
     }
+  }
+
+  // First-time helper: a dealer who doesn't have their login asks the team for
+  // it. Collects who they are, then opens a pre-filled WhatsApp message to the
+  // Tiles Stock team (contactSupport also logs the request server-side). Empty
+  // fields are simply left out of the message.
+  void _requestLoginDetails() async {
+    final nameCtrl = TextEditingController();
+    final shopCtrl = TextEditingController();
+    final cityCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+
+    InputDecoration deco(String label) => InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        );
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Get my login details'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Tell us who you are and the Tiles Stock team will send your '
+                'login details on WhatsApp.',
+                style: TextStyle(color: Colors.grey),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nameCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: deco('Your name'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: shopCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: deco('Shop / Company'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: cityCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: deco('City'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: deco('Phone'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.chat_outlined, size: 18),
+            label: const Text('Send on WhatsApp'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    final lines = <String>[
+      'Hi Tiles Stock team 👋',
+      "I want to log in to the Tiles Stock app but I don't have my account "
+          'details.',
+      '',
+      if (nameCtrl.text.trim().isNotEmpty) 'Name: ${nameCtrl.text.trim()}',
+      if (shopCtrl.text.trim().isNotEmpty)
+        'Shop / Company: ${shopCtrl.text.trim()}',
+      if (cityCtrl.text.trim().isNotEmpty) 'City: ${cityCtrl.text.trim()}',
+      if (phoneCtrl.text.trim().isNotEmpty) 'Phone: ${phoneCtrl.text.trim()}',
+      '',
+      'Please send me my login details. Thank you.',
+    ];
+    await contactSupport(ref: 'login-help', message: lines.join('\n'));
   }
 
 
@@ -293,6 +401,53 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
 
               ),
+
+              // First-time helper for dealers who don't yet have their login.
+              if (_showFirstTimeHelp) ...[
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 0,
+                  color: const Color(0xFFE8F0FE),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: const BorderSide(color: Color(0xFFB6CCF2)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Don't have your login yet?",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Get your account details from the Tiles Stock team '
+                          'on WhatsApp.',
+                          style:
+                              TextStyle(color: Colors.black54, fontSize: 13),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed:
+                                _loading ? null : _requestLoginDetails,
+                            icon: const Icon(Icons.badge_outlined, size: 18),
+                            label: const Text('Get my login details'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF25D366),
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 16),
 
