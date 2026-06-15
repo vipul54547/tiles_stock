@@ -31,6 +31,10 @@ class _State extends State<PublicCatalogScreen> {
   // Non-default brand identity (multi-brand): shown as the header, with the
   // company name as a "by …" subtitle. Empty for single-brand stockists.
   Map<String, dynamic> _brandInfo = {};
+  // Admin-controlled banner chosen server-side: {image_url, overlay, name}.
+  // overlay=true → generic/anonymous banner, render the "Welcome to [name]"
+  // trust strip; false → a finished branded image shown as-is.
+  Map<String, dynamic> _banner = {};
   List<Map<String, dynamic>> _all = [];
 
   // Selection: designId -> box quantity wanted.
@@ -77,6 +81,9 @@ class _State extends State<PublicCatalogScreen> {
       _stockist = Map<String, dynamic>.from(data['stockist'] ?? {});
       _brandInfo = data['brand'] != null
           ? Map<String, dynamic>.from(data['brand'])
+          : {};
+      _banner = data['banner'] != null
+          ? Map<String, dynamic>.from(data['banner'])
           : {};
       _all = ((data['designs'] as List?) ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
@@ -658,18 +665,9 @@ class _State extends State<PublicCatalogScreen> {
                     ? _brandInfo['name'].toString()
                     : (_stockist['name']?.toString() ?? 'Stock Catalogue')),
           ),
-          SliverToBoxAdapter(child: _brandHeader()),
+          SliverToBoxAdapter(child: _bannerArea()),
           SliverToBoxAdapter(child: _searchRow()),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-              child: Text(
-                '${list.length} of ${_all.length} designs'
-                '${(_stockist['city'] ?? '').toString().isNotEmpty ? ' · ${_stockist['city']}' : ''}',
-                style: const TextStyle(color: Colors.grey, fontSize: 12),
-              ),
-            ),
-          ),
+          SliverToBoxAdapter(child: _metaRow(list.length)),
           if (list.isEmpty)
             const SliverFillRemaining(
               hasScrollBody: false,
@@ -695,130 +693,130 @@ class _State extends State<PublicCatalogScreen> {
     );
   }
 
-  // Branded white-label header: logo + name + tagline, then address + a Maps
-  // "Directions" link. Anonymity is enforced server-side (the RPC nulls logo/
-  // address/map for anonymous stockists), so we just render whatever arrives.
-  Widget _brandHeader() {
-    final company = (_stockist['name'] ?? '').toString();
-    final brandName = (_brandInfo['name'] ?? '').toString();
-    final brandLogo = (_brandInfo['logo_url'] ?? '').toString();
-    final hasBrand = brandName.isNotEmpty;
-    // Multi-brand: lead with the brand (logo + name), company as a subtitle.
-    final name = hasBrand ? brandName : company;
-    final tagline = (_stockist['tagline'] ?? '').toString();
-    final logo = hasBrand && brandLogo.isNotEmpty
-        ? brandLogo
-        : (_stockist['logo_url'] ?? '').toString();
-    final banner = (_stockist['banner_url'] ?? '').toString();
-    final address = (_stockist['address'] ?? '').toString();
-    final city = (_stockist['city'] ?? '').toString();
-    final mapUrl = (_stockist['map_url'] ?? '').toString();
-    final place = [address, city].where((x) => x.trim().isNotEmpty).join(', ');
-
-    return Container(
-      width: double.infinity,
-      color: Colors.white,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Full-width 3:1 header banner (centre-cropped via Cloudinary).
-          if (banner.isNotEmpty)
-            AspectRatio(
-              aspectRatio: 3,
-              child: Image.network(
-                CloudinaryService.bannerUrl(banner, width: 1500),
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+  // ── Banner (admin-controlled) ──────────────────────────────────────────────
+  // A slim, height-capped 2.5:1 (1500×600) banner. The image is chosen
+  // server-side: a finished BRANDED image (overlay=false, shown as-is) or a
+  // daily-rotated GENERIC/anonymous image with a system "Welcome to [name]"
+  // trust strip (overlay=true). Falls back to a brand-colour gradient + strip
+  // when no pool image is configured yet. Replaces the old tall logo/name/
+  // tagline/address header that ate ~half the screen. (project_admin_banner_system)
+  Widget _bannerArea() {
+    final img = (_banner['image_url'] ?? '').toString();
+    final overlay = _banner['overlay'] == true;
+    final welcome = (_banner['name'] ?? _stockist['name'] ?? '').toString();
+    return LayoutBuilder(
+      builder: (context, c) {
+        final h = (c.maxWidth / 2.5).clamp(0.0, 200.0);
+        return SizedBox(
+          width: double.infinity,
+          height: h,
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              if (logo.isNotEmpty) ...[
-                // Distortion-free, colour-safe logo (BoxFit.contain + c_fit URL).
-                ConstrainedBox(
-                  constraints: const BoxConstraints(
-                      maxWidth: 72, maxHeight: 56, minWidth: 0),
-                  child: Image.network(
-                    CloudinaryService.logoUrl(logo, size: 160),
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                  ),
+              if (img.isNotEmpty)
+                Image.network(img,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _bannerGradient())
+              else
+                _bannerGradient(),
+              if (overlay) _trustStrip(welcome),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // Brand-colour gradient shown when no banner image is configured yet.
+  Widget _bannerGradient() => DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [_brand, Color.lerp(_brand, Colors.black, 0.35)!],
+          ),
+        ),
+      );
+
+  // System trust strip for generic/anonymous banners: centred "Welcome to
+  // [name]" + right "Powered by TilesDesign", over a dark scrim for readability.
+  Widget _trustStrip(String name) => Align(
+        alignment: Alignment.topCenter,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xB3000000), Color(0x00000000)],
+            ),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 86),
+                child: Text(
+                  name.trim().isEmpty ? 'Welcome' : 'Welcome to $name',
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
                 ),
-                const SizedBox(width: 12),
-              ],
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(name.isEmpty ? 'Stock Catalogue' : name,
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 18,
-                            color: _brand)),
-                    if (hasBrand && company.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text('by $company',
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.grey.shade700)),
-                    ],
-                    if (tagline.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(tagline,
-                          style: TextStyle(
-                              fontSize: 12.5, color: Colors.grey.shade600)),
-                    ],
-                  ],
-                ),
+              ),
+              const Align(
+                alignment: Alignment.centerRight,
+                child: Text('Powered by TilesDesign',
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600)),
               ),
             ],
           ),
-          if (place.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.location_on_outlined,
-                    size: 16, color: Colors.grey.shade500),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(place,
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                ),
-                if (mapUrl.isNotEmpty)
-                  GestureDetector(
-                    onTap: () => launchUrl(Uri.parse(mapUrl),
-                        mode: LaunchMode.externalApplication),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.directions, size: 15, color: _brand),
-                        const SizedBox(width: 2),
-                        Text('Directions',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: _brand)),
-                      ],
-                    ),
-                  ),
-              ],
+        ),
+      );
+
+  // Result count + city, with a compact "Directions" link (Maps) when set.
+  Widget _metaRow(int shown) {
+    final city = (_stockist['city'] ?? '').toString();
+    final mapUrl = (_stockist['map_url'] ?? '').toString();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '$shown of ${_all.length} designs'
+              '${city.isNotEmpty ? ' · $city' : ''}',
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
-          ],
-              ], // inner Column children
-            ),   // inner Column
-          ),     // Padding
-        ],       // outer Column children
-      ),         // outer Column
-    );           // Container
+          ),
+          if (mapUrl.isNotEmpty)
+            GestureDetector(
+              onTap: () => launchUrl(Uri.parse(mapUrl),
+                  mode: LaunchMode.externalApplication),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.directions, size: 15, color: _brand),
+                  const SizedBox(width: 2),
+                  Text('Directions',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _brand)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   // The right app-store URL for the browser visitor's platform (Android → Play,
