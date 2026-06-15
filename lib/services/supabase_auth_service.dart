@@ -123,12 +123,15 @@ class SupabaseAuthService {
     if (roleStr == 'stockist') {
       final stockist = await supabase
           .from('stockists')
-          .select('id, sequential_id, is_active')
+          .select('id, sequential_id, is_active, is_anonymous, public_display_name')
           .eq('user_id', userId)
           .single();
       await _ensureActive(stockist['is_active']);
       currentStockistId   = stockist['sequential_id'] as String;
       currentStockistUUID = stockist['id']            as String;
+      currentStockistIsAnonymous   = stockist['is_anonymous'] as bool? ?? false;
+      currentStockistDisplayName   =
+          (stockist['public_display_name'] as String?) ?? '';
       _role = UserRole.stockist;
       return _role;
     }
@@ -294,6 +297,8 @@ class SupabaseAuthService {
     _role = null;
     currentStockistId   = '';
     currentStockistUUID = '';
+    currentStockistIsAnonymous = false;
+    currentStockistDisplayName = '';
     currentEndUserId    = '';
     currentEndUserCanClaimPrivate = false;
     publicMarketLive = false;

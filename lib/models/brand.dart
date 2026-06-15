@@ -10,6 +10,10 @@ class Brand {
   final bool isActive;
   final int catalogCount;
 
+  /// True for the auto-created default brand (named after the stockist). Used to
+  /// mask that name in outgoing share messages when the stockist is anonymous.
+  final bool isDefault;
+
   const Brand({
     required this.id,
     required this.name,
@@ -17,6 +21,7 @@ class Brand {
     this.sortOrder = 0,
     this.isActive = true,
     this.catalogCount = 0,
+    this.isDefault = false,
   });
 
   factory Brand.fromJson(Map<String, dynamic> j) => Brand(
@@ -26,5 +31,6 @@ class Brand {
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         isActive: j['is_active'] as bool? ?? true,
         catalogCount: (j['catalog_count'] as num?)?.toInt() ?? 0,
+        isDefault: j['is_default'] as bool? ?? false,
       );
 }

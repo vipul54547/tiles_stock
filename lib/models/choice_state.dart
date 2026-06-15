@@ -6,6 +6,10 @@ final Map<String, int> myChoiceQuantities = {};
 // Logged-in stockist — both are set together after login
 String currentStockistId   = '';  // sequential_id e.g. '001' (display use)
 String currentStockistUUID = '';  // Supabase UUID  (DB query use)
+// The logged-in stockist's own anonymity, so OUTGOING share messages use the
+// masked trade name instead of the real/default-brand name. Loaded at login.
+bool currentStockistIsAnonymous = false;
+String currentStockistDisplayName = ''; // public_display_name (masked trade name)
 
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID

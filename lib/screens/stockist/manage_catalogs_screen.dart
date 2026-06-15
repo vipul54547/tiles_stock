@@ -355,7 +355,15 @@ class _State extends State<ManageCatalogsScreen> {
     }
     if (permanent) daysCtrl.dispose();
     if (entries.isEmpty) return;
-    final text = '${b.name}\n${entries.join('\n')}\n\nPowered by Tiles Stock';
+    // Anonymity: the default brand is named after the real company, so when the
+    // stockist is anonymous show the masked trade name instead — never leak the
+    // real name in the outgoing message. Real (non-default) brands still show.
+    final header = (currentStockistIsAnonymous &&
+            b.isDefault &&
+            currentStockistDisplayName.isNotEmpty)
+        ? currentStockistDisplayName
+        : b.name;
+    final text = '$header\n${entries.join('\n')}\n\nPowered by Tiles Stock';
     await launchUrl(Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'),
         mode: LaunchMode.externalApplication);
   }
