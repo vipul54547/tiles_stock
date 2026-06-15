@@ -122,11 +122,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<TileDesign> get _base {
     switch (_tab) {
       case 1:
-        return _privateDesigns; // Private (Closed Market)
-      case 2:
-        return [..._designs, ..._privateDesigns]; // Both (public first)
+        return _privateDesigns; // My Suppliers
       default:
-        return _designs; // Public (Open Market)
+        return _designs; // Discover
     }
   }
 
@@ -982,9 +980,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
-  // Public / Private / Both segmented tabs (Father & Child).
+  // Discover / My Suppliers segmented tabs.
   Widget _marketTabs() {
-    const labels = ['Public', 'Private', 'Both'];
+    const labels = ['Discover', 'My Suppliers'];
     const brand = Color(0xFF1B4F72);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
@@ -1004,7 +1002,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   child: Text(
                     i == 1 && _privateDesigns.isNotEmpty
-                        ? 'Private (${_privateDesigns.length})'
+                        ? 'My Suppliers (${_privateDesigns.length})'
                         : labels[i],
                     textAlign: TextAlign.center,
                     style: TextStyle(
