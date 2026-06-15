@@ -55,7 +55,10 @@ class _State extends State<ManageCatalogsScreen> {
   final Map<String, TextEditingController> _daysCtrls = {}; // per-list days box
   final Set<String> _expandedBrands = {}; // collapsible brand boxes (open set)
   final Set<String> _customOpen = {}; // per-list "make custom link" expanded
-  final Set<String> _showExpired = {}; // per-list "show expired links" revealed
+
+  // Max ACTIVE (non-expired) custom links allowed per stock list. Keeps the
+  // links panel from ballooning and nudges the stockist to reuse live links.
+  static const int _maxActiveLinks = 4;
   bool _loading = true;
   bool _busy = false;
 
@@ -380,6 +383,16 @@ class _State extends State<ManageCatalogsScreen> {
     if (days == null || days < 1) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Enter the number of days (1 or more).')));
+      return;
+    }
+    // Per-list cap of [_maxActiveLinks] active custom links (server enforces too).
+    final liveCount = (_catLinks[catalogId] ?? const <ShareLink>[])
+        .where((l) => l.revocable && !l.expired)
+        .length;
+    if (liveCount >= _maxActiveLinks) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('You already have $_maxActiveLinks active links for '
+              'this list. Reuse one, or delete one / let it expire first.')));
       return;
     }
     setState(() => _busy = true);
@@ -813,14 +826,13 @@ class _State extends State<ManageCatalogsScreen> {
     final pal = _listPalette[index % _listPalette.length];
     final dealers = _claimers[c.id]?.length ?? 0;
     final enq = _inq[c.id] ?? 0;
-    final timed = (_catLinks[c.id] ?? const <ShareLink>[])
-        .where((l) => l.revocable)
+    // Only ACTIVE (non-expired) custom links are shown — expired links are
+    // auto-hidden (they already stop working everywhere; the row stays in the DB
+    // for records). Capped at [_maxActiveLinks] so the panel can't balloon.
+    final liveLinks = (_catLinks[c.id] ?? const <ShareLink>[])
+        .where((l) => l.revocable && !l.expired)
         .toList();
-    // Expired timed links are auto-hidden from the main view (they already stop
-    // working everywhere); the row is kept in the DB for records and can be
-    // peeked via "Show expired".
-    final liveLinks = timed.where((l) => !l.expired).toList();
-    final expiredLinks = timed.where((l) => l.expired).toList();
+    final atLinkCap = liveLinks.length >= _maxActiveLinks;
     final customOpen = _customOpen.contains(c.id);
     final ctrl =
         _daysCtrls.putIfAbsent(c.id, () => TextEditingController(text: '60'));
@@ -1039,8 +1051,9 @@ class _State extends State<ManageCatalogsScreen> {
                           const Text('days', style: TextStyle(fontSize: 12)),
                           const Spacer(),
                           ElevatedButton(
-                            onPressed:
-                                _busy ? null : () => _generateDays(c.id, ctrl),
+                            onPressed: (_busy || atLinkCap)
+                                ? null
+                                : () => _generateDays(c.id, ctrl),
                             style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.orange.shade800,
                                 foregroundColor: Colors.white,
@@ -1052,23 +1065,28 @@ class _State extends State<ManageCatalogsScreen> {
                           ),
                         ],
                       ),
-                      const Padding(
-                        padding: EdgeInsets.only(top: 4),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
                         child: Text(
-                            'Tip: the days count starts now — generate the link '
-                            'just before you send it.',
+                            atLinkCap
+                                ? 'You have $_maxActiveLinks active links (the '
+                                    'max). Reuse one above, or delete one / let '
+                                    'it expire before making a new one.'
+                                : 'Tip: the days count starts now — generate the '
+                                    'link just before you send it.',
                             style: TextStyle(
                                 fontSize: 10.5,
-                                color: Colors.black54,
+                                color: atLinkCap
+                                    ? Colors.red.shade700
+                                    : Colors.black54,
                                 fontStyle: FontStyle.italic)),
                       ),
                     ],
                   ),
                 ),
-              // Live generated links (with remaining days).
+              // Live generated links (with remaining days). Expired links are
+              // auto-hidden (kept in the DB, just not shown).
               for (final l in liveLinks) _liveLinkRow(c, l),
-              // Expired links: auto-hidden, peekable for records.
-              if (expiredLinks.isNotEmpty) _expiredSection(c, expiredLinks),
             ],
           ),
         ),
@@ -1120,85 +1138,6 @@ class _State extends State<ManageCatalogsScreen> {
   }
 
   // Collapsed "Show expired (N)" peek — expired links are kept for records only.
-  Widget _expiredSection(StockCatalog c, List<ShareLink> expired) {
-    final open = _showExpired.contains(c.id);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        InkWell(
-          onTap: () => setState(() {
-            if (open) {
-              _showExpired.remove(c.id);
-            } else {
-              _showExpired.add(c.id);
-            }
-          }),
-          child: Padding(
-            padding: const EdgeInsets.only(top: 6, left: 2),
-            child: Row(
-              children: [
-                Icon(open ? Icons.expand_more : Icons.chevron_right,
-                    size: 16, color: Colors.grey.shade600),
-                Icon(Icons.history, size: 14, color: Colors.grey.shade600),
-                const SizedBox(width: 4),
-                Text('Expired links (${expired.length})',
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade600)),
-              ],
-            ),
-          ),
-        ),
-        if (open) for (final l in expired) _expiredRow(c, l),
-      ],
-    );
-  }
-
-  // A read-only expired link row (kept for records) + one-tap "Generate again".
-  Widget _expiredRow(StockCatalog c, ShareLink l) {
-    final exp = l.expiresAt;
-    final agoDays = exp == null ? 0 : DateTime.now().difference(exp).inDays;
-    final when = exp == null ? '' : _fmtDate(exp);
-    return Container(
-      margin: const EdgeInsets.only(top: 4, left: 14, right: 4),
-      padding: const EdgeInsets.fromLTRB(8, 2, 2, 2),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.link_off, size: 14, color: Colors.grey.shade500),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-                'Expired${when.isEmpty ? '' : ' $when'}'
-                '${agoDays > 0 ? ' · ${agoDays}d ago' : ''}',
-                style: TextStyle(
-                    fontSize: 11, color: Colors.grey.shade600)),
-          ),
-          _miniBtn(Icons.refresh, 'Generate again',
-              _busy ? null : () => _regenerate(c, l)),
-        ],
-      ),
-    );
-  }
-
-  // Re-issue a fresh link for the same duration as the expired one. Falls back
-  // to opening the custom generator if the duration can't be read from its label.
-  Future<void> _regenerate(StockCatalog c, ShareLink l) async {
-    final n = int.tryParse(l.label.split(' ').first);
-    if (n == null || n < 1) {
-      setState(() => _customOpen.add(c.id));
-      return;
-    }
-    setState(() => _busy = true);
-    final token = await _data.createCatalogShareLinkDays(c.id, n);
-    if (token != null) await _reloadLinks(c.id);
-    if (mounted) setState(() => _busy = false);
-  }
-
   Future<void> _deleteLink(StockCatalog c, ShareLink l) async {
     if (l.id == null) return;
     final ok = await _data.revokeShareLink(l.id!);
