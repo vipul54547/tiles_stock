@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- App uses only standard HTTPS/TLS encryption → exempt from export
+	     compliance. Setting this skips the question on every App Store upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Tiles Stock uses the camera to photograph tile designs you add to your stock catalogue.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

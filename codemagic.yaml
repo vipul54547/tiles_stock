@@ -1,0 +1,54 @@
+# Codemagic CI — builds the iOS app on a cloud Mac and uploads it to TestFlight.
+# No Mac required. See docs/IOS_RELEASE_PLAN.md (Phase 3) for the full walkthrough.
+#
+# BEFORE THE FIRST BUILD (one-time, in the Codemagic web UI):
+#   1. Codemagic → Teams → Integrations → App Store Connect → add your API key
+#      (the .p8 file + Key ID + Issuer ID from App Store Connect, Phase 2).
+#   2. Give that integration a NAME, then put the SAME name below in place of
+#      `Tiles Stock ASC` (the value after `app_store_connect:` in BOTH places).
+#   3. Make sure the app record exists in App Store Connect (Phase 1) with bundle
+#      id `in.tilesdesign.stock`.
+# Then push and start this workflow in Codemagic — it signs automatically and
+# delivers the build to TestFlight.
+
+workflows:
+  ios-testflight:
+    name: iOS TestFlight — Tiles Stock
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      # 👇 Replace with the exact name you gave the App Store Connect API key
+      #    integration in the Codemagic UI.
+      app_store_connect: Tiles Stock ASC
+    environment:
+      ios_signing:
+        distribution_type: app_store          # TestFlight + App Store distribution
+        bundle_identifier: in.tilesdesign.stock
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Install CocoaPods dependencies
+        script: find . -name "Podfile" -execdir pod install \;
+      - name: Set up provisioning profiles
+        script: xcode-project use-profiles
+      - name: Build signed IPA
+        # $BUILD_NUMBER is Codemagic's auto-incrementing counter, so every upload
+        # to TestFlight gets a unique, increasing build number (Apple requires it).
+        # Build name (1.0.0) comes from pubspec.yaml.
+        script: |
+          flutter build ipa --release \
+            --build-number=$BUILD_NUMBER \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true            # auto-deliver to TestFlight
+        # Internal testers get the build automatically once Apple finishes
+        # processing. Add external testers / groups in App Store Connect.
