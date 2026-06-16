@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../utils/banner_layout.dart';
 
 /// Admin: per-brand stock-list limit for one stockist. Each brand has its own
 /// "how many stock lists" number (default 1); raising it auto-creates the missing
@@ -525,7 +526,12 @@ class _State extends State<StockistBrandListsScreen> {
             ],
           ),
           const SizedBox(height: 6),
-          _posDropdown('Company position', companyPos, _companyPosKeys, (v) {
+          // With a logo all 9 cells are offered; with the big NAME (no logo) the
+          // middle row is hidden so a wide name never lands in the centre band.
+          _posDropdown(
+              'Company position',
+              effectiveCompanyPos(companyPos, hasLogo: logo.isNotEmpty),
+              companyPosKeys(hasLogo: logo.isNotEmpty), (v) {
             b['company_pos'] = v;
             _applyBanner(b);
           }),
@@ -538,7 +544,7 @@ class _State extends State<StockistBrandListsScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(
-                  'No logo → the big company NAME shows at the company position.',
+                  'No logo → the big company NAME shows (top or bottom row only).',
                   style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
             ),
         ] else ...[
@@ -566,11 +572,8 @@ class _State extends State<StockistBrandListsScreen> {
     );
   }
 
-  // Company dropdown = 9 grid + None; TilesDesign = 9 grid + Footer.
-  static const _companyPosKeys = <String>[
-    'none', 'top-left', 'top-center', 'top-right', 'middle-left', 'center',
-    'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'
-  ];
+  // Company dropdown keys come from banner_layout (9 grid + None with a logo,
+  // middle row dropped for the big name). TilesDesign = 9 grid + Footer.
   static const _tdPosKeys = <String>[
     'footer', 'top-left', 'top-center', 'top-right', 'middle-left', 'center',
     'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'
@@ -609,7 +612,10 @@ class _State extends State<StockistBrandListsScreen> {
     final source = (b['banner_source'] ?? 'pool').toString();
     final bg = (b['banner_bg_url'] ?? '').toString();
     final logo = (b['company_logo_url'] ?? '').toString();
-    final companyPos = (b['company_pos'] ?? 'none').toString();
+    // Mirror the renderer: a logo-less name never sits in the middle row.
+    final companyPos = effectiveCompanyPos(
+        (b['company_pos'] ?? 'none').toString(),
+        hasLogo: logo.isNotEmpty);
     final tdPos = (b['td_pos'] ?? 'footer').toString();
     final name = (b['name'] ?? '').toString();
 

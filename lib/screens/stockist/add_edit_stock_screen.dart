@@ -1,20 +1,24 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/stock_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
 import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/library_entry.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/finishes.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/unsaved_changes.dart';
 
+// Add/Edit a stock design. Per [[project_stockist_library]] decision #7 this
+// screen is QUANTITY-ONLY: a design's identity (name, size, photo) lives in the
+// stockist's Design Library and is edited ONLY there. A new design is created by
+// picking a Library master (its name/size/photo are copied in); everything else
+// here is stock attributes (boxes, quality, finish, list…).
 class AddEditStockScreen extends StatefulWidget {
   final String? designId;
   const AddEditStockScreen({super.key, this.designId});
@@ -28,7 +32,6 @@ class _State extends State<AddEditStockScreen> {
   final _stockSvc = StockService();
   bool get isEdit => widget.designId != null;
 
-  final _nameCtrl      = TextEditingController();
   final _qtyCtrl       = TextEditingController();
   final _piecesCtrl    = TextEditingController();
   final _weightCtrl    = TextEditingController();
@@ -38,7 +41,11 @@ class _State extends State<AddEditStockScreen> {
   // future PDF uploads carrying this wording auto-align to the admin finish.
   final _finishAliasCtrl = TextEditingController();
 
-  String _size      = kAllowedSizes.first;
+  // Identity (name / size / photo) — sourced from the Library, NOT edited here.
+  String _designName = '';
+  String _size       = kAllowedSizes.first;
+  String _imageUrl   = '';
+
   String _surface   = 'Matt';
   String _tileType  = kTileTypes.first;
   String _quality   = 'Premium';
@@ -49,24 +56,31 @@ class _State extends State<AddEditStockScreen> {
   List<StockCatalog> _catalogs = []; // the stockist's catalogs
   String? _catalogId; // which catalog this design belongs to
   String? _defaultBrandId; // fallback brand for legacy catalogs with no brand
+  List<LibraryEntry> _masters = []; // this stockist's library, for the add picker
+  LibraryEntry? _selectedMaster;    // add mode: the chosen master
+  final _qualities  = ['Premium', 'Standard'];
+  final _stockTypes = ['Both', 'Regular', 'One Time'];
+
+  bool _pageLoading = false;
+  bool _saving      = false;
+  bool _dirty       = false; // unsaved edits → pinned Save bar + exit guard
 
   // The brand this design belongs to (its list's brand, else default). Used to
-  // scope a newly-snapped photo's contribution to this stockist's own library.
+  // resolve a master's per-brand design name.
   String? get _designBrandId {
     for (final c in _catalogs) {
       if (c.id == _catalogId) return c.brandId ?? _defaultBrandId;
     }
     return _defaultBrandId;
   }
-  final _qualities  = ['Premium', 'Standard'];
-  final _stockTypes = ['Both', 'Regular', 'One Time'];
 
-  List<String> _existingImageUrls = []; // loaded from DB in edit mode
-  List<String> _pickedPaths       = []; // newly picked local files
-  bool _pageLoading = false;
-  bool _saving      = false;
-  bool _processingDialogShown = false;
-  bool _dirty       = false; // unsaved edits → pinned Save bar + exit guard
+  // A master's design name under the current list's brand (alias), else its
+  // master name.
+  String _nameForBrand(LibraryEntry m) {
+    final b = _designBrandId;
+    final alias = b == null ? null : m.aliases[b];
+    return (alias != null && alias.trim().isNotEmpty) ? alias.trim() : m.masterName;
+  }
 
   // Marks the form dirty on user edits. Ignored during the initial load/_fill
   // so prefilling an existing design doesn't count as a change.
@@ -86,6 +100,7 @@ class _State extends State<AddEditStockScreen> {
     await _loadSurfaces();
     await _loadSizes();
     await _loadCatalogs();
+    if (!isEdit) await _loadMasters();
     if (isEdit) await _loadExisting();
   }
 
@@ -103,6 +118,13 @@ class _State extends State<AddEditStockScreen> {
         _catalogId ??= _catalogs.isEmpty ? null : _catalogs.first.id;
       }
     });
+  }
+
+  // The Library masters available to pick from when adding a new design.
+  Future<void> _loadMasters() async {
+    final masters = await _service.getMyLibrary();
+    if (!mounted) return;
+    setState(() => _masters = masters);
   }
 
   // Use the admin's live size list so the picker matches the master.
@@ -139,7 +161,7 @@ class _State extends State<AddEditStockScreen> {
 
   @override
   void dispose() {
-    _nameCtrl.dispose();      _qtyCtrl.dispose();
+    _qtyCtrl.dispose();
     _piecesCtrl.dispose();
     _weightCtrl.dispose();    _thicknessCtrl.dispose();
     _colourCtrl.dispose();    _finishAliasCtrl.dispose();
@@ -161,7 +183,7 @@ class _State extends State<AddEditStockScreen> {
   }
 
   void _fill(TileDesign d) {
-    _nameCtrl.text      = d.name;
+    _designName         = d.name;
     _qtyCtrl.text       = d.boxQuantity.toString();
     _piecesCtrl.text    = d.piecesPerBox.toString();
     _weightCtrl.text    = d.boxWeightKg.toString();
@@ -171,7 +193,7 @@ class _State extends State<AddEditStockScreen> {
     _tileType           = kTileTypes.contains(d.tileType)   ? d.tileType   : kTileTypes.first;
     _quality            = _qualities.contains(d.quality)    ? d.quality    : _qualities.first;
     _stockType          = _stockTypes.contains(d.stockType) ? d.stockType  : _stockTypes.first;
-    _existingImageUrls  = List.from(d.faceImageUrls);
+    _imageUrl           = d.faceImageUrls.isEmpty ? '' : d.faceImageUrls.first;
     // Preselect this design's catalog (only if it's still an active catalog).
     if (d.catalogId != null && _catalogs.any((c) => c.id == d.catalogId)) {
       _catalogId = d.catalogId;
@@ -187,104 +209,62 @@ class _State extends State<AddEditStockScreen> {
     );
   }
 
-  // ── Image picker ──────────────────────────────────────────────────────────
+  // ── Library master picker (add mode) ───────────────────────────────────────
 
-  final _picker = ImagePicker();
+  void _selectMaster(LibraryEntry m) {
+    setState(() {
+      _selectedMaster = m;
+      _size = m.size;
+      _imageUrl = m.imageUrl;
+      _designName = _nameForBrand(m);
+      _dirty = true;
+    });
+  }
 
-  // Ask the stockist whether to take a photo or pick from the gallery, then
-  // run the matching picker. This is where a stockist adds a tile photo for a
-  // design that came from a PDF without one.
-  Future<void> _chooseImageSource() async {
-    final src = await showModalBottomSheet<String>(
+  Future<void> _openMasterPicker() async {
+    final picked = await showModalBottomSheet<LibraryEntry>(
       context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera, color: Color(0xFF1B4F72)),
-              title: const Text('Take photo'),
-              onTap: () => Navigator.pop(ctx, 'camera'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Color(0xFF1B4F72)),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(ctx, 'gallery'),
-            ),
-          ],
-        ),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => _MasterPickerSheet(
+        masters: _masters,
+        brandId: _designBrandId,
+        nameForBrand: _nameForBrand,
       ),
     );
-    if (src == 'camera') {
-      await _takePhoto();
-    } else if (src == 'gallery') {
-      await _pickImages();
+    if (!mounted) return;
+    if (picked == null) return;
+    if (identical(picked, _addToLibrarySentinel)) {
+      // Send them to the Library to add a master, then reload the picker list.
+      await context.push('/stockist/library');
+      await _loadMasters();
+      return;
     }
-  }
-
-  Future<void> _takePhoto() async {
-    try {
-      final x = await _picker.pickImage(
-          source: ImageSource.camera, maxWidth: 2000, imageQuality: 85);
-      if (x == null || !mounted) return;
-      setState(() {
-        _pickedPaths = [x.path];
-        _existingImageUrls = []; // replace existing with the new photo
-        _dirty = true;
-      });
-    } catch (e) {
-      if (mounted) _snack('Could not open camera: $e', Colors.red);
-    }
-  }
-
-  Future<void> _pickImages() async {
-    final res = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: true,
-    );
-    if (res != null) {
-      setState(() {
-        _pickedPaths = res.files
-            .where((f) => f.path != null)
-            .map((f) => f.path!)
-            .toList();
-        _existingImageUrls = []; // replace existing images with new pick
-        _dirty = true;
-      });
-    }
+    _selectMaster(picked);
   }
 
   // ── Save (add or update) ──────────────────────────────────────────────────
 
   Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) return;
     if (currentStockistUUID.isEmpty) {
       _snack('Session error — please login again.', Colors.red);
       return;
     }
+    if (!isEdit && _selectedMaster == null) {
+      _snack('Pick a design from your Library first.', Colors.red);
+      return;
+    }
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() => _saving = true);
 
-    // Only show the "uploading to server" dialog when there are new photos to
-    // upload — a plain field-only save doesn't hit the image server.
-    if (_pickedPaths.isNotEmpty) _showProcessing();
-
-    // Upload any newly picked images to Cloudinary
-    final newUrls = <String>[];
-    for (final path in _pickedPaths) {
-      final url = await CloudinaryService.uploadImage(path);
-      if (url != null) newUrls.add(url);
-    }
-    final finalUrls = newUrls.isNotEmpty ? newUrls : _existingImageUrls;
-
     bool ok;
     if (isEdit) {
-      // box_quantity is intentionally omitted here — in edit mode stock only
-      // changes through Recount (adjustment), dispatch, or add-stock, so saving
-      // other fields never silently rewrites the count.
+      // Identity (name / size / photo) is intentionally omitted — it's edited
+      // only in the Library. box_quantity is omitted too (changed via Recount /
+      // dispatch / add-stock). Only stock attributes are saved here.
       ok = await _service.updateDesign(widget.designId!, {
-        'name':          _nameCtrl.text.trim(),
-        'size':          _size,
         'surface_type':  _surface,
         'tile_type':     _tileType,
         'quality':       _quality,
@@ -295,14 +275,15 @@ class _State extends State<AddEditStockScreen> {
         'thickness_mm':  approxThicknessMm(_size,
                 int.tryParse(_piecesCtrl.text) ?? 0,
                 double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
-        'face_image_urls': finalUrls,
         if (_catalogId != null) 'catalog_id': _catalogId,
       });
     } else {
+      final master = _selectedMaster!;
+      final name = _nameForBrand(master); // brand may have changed since pick
       final id = await _service.addDesign(
         stockistUUID:  currentStockistUUID,
-        name:          _nameCtrl.text.trim(),
-        size:          _size,
+        name:          name,
+        size:          master.size,
         surfaceType:   _surface,
         tileType:      _tileType,
         quality:       _quality,
@@ -314,7 +295,7 @@ class _State extends State<AddEditStockScreen> {
         thicknessMm:   approxThicknessMm(_size,
                 int.tryParse(_piecesCtrl.text) ?? 0,
                 double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
-        faceImageUrls: finalUrls,
+        faceImageUrls: master.imageUrl.isNotEmpty ? [master.imageUrl] : const [],
         catalogId:     _catalogId,
       );
       ok = id != null;
@@ -327,30 +308,13 @@ class _State extends State<AddEditStockScreen> {
       await _service.upsertSurfaceAlias(currentStockistUUID, aliasRaw, _surface);
     }
 
-    // Contribute a newly-snapped photo to THIS stockist's own Design Library on
-    // a NEW design add only (decision #3 — never on an edit/replace, which may be
-    // a correction). First-writer-wins inside the RPC. Scoped to the design's
-    // brand so a later Excel/PDF import of the same name+size auto-fills it.
-    if (ok && !isEdit && newUrls.isNotEmpty && _designBrandId != null) {
-      await _service.libraryContribute(
-        brandId: _designBrandId!,
-        name: _nameCtrl.text.trim(),
-        size: _size,
-        imageUrl: newUrls.first,
-      );
-    }
-
     if (!mounted) return;
-    _hideProcessing();
     setState(() {
       _saving = false;
       if (ok) _dirty = false; // saved → let the pop through the exit guard
     });
 
-    _snack(
-        ok
-            ? 'Design saved! Your tile photo is now live.'
-            : 'Failed to save. Please try again.',
+    _snack(ok ? 'Design saved.' : 'Failed to save. Please try again.',
         ok ? Colors.green : Colors.red);
     if (ok) context.pop();
   }
@@ -363,8 +327,9 @@ class _State extends State<AddEditStockScreen> {
       builder: (_) => AlertDialog(
         title: const Text('Delete Design?'),
         content: Text(
-            'Delete "${_nameCtrl.text.trim()}"?\n\n'
-            'This will remove the design and all its stock history.'),
+            'Delete "$_designName"?\n\n'
+            'This removes the design and its stock history. Its entry in your '
+            'Design Library is kept.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -396,56 +361,6 @@ class _State extends State<AddEditStockScreen> {
     );
   }
 
-  // Blocking "uploading to server" dialog, shown while newly captured tile
-  // photos are being uploaded so the stockist knows the work is in progress
-  // (and not to close the app). Dismissed by [_hideProcessing] when done.
-  void _showProcessing() {
-    _processingDialogShown = true;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const PopScope(
-        canPop: false,
-        child: AlertDialog(
-          content: Row(
-            children: [
-              SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              ),
-              SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Uploading your tile photo…',
-                        style: TextStyle(fontWeight: FontWeight.w600)),
-                    SizedBox(height: 6),
-                    Text(
-                      'Saving the image to the server. Please keep the app '
-                      'open — this can take a little longer on a slow '
-                      'connection.',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _hideProcessing() {
-    if (_processingDialogShown) {
-      Navigator.of(context, rootNavigator: true).pop();
-      _processingDialogShown = false;
-    }
-  }
-
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -465,7 +380,7 @@ class _State extends State<AddEditStockScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.maybePop(context),
         ),
-        title: Text(isEdit ? 'Edit Design' : 'Add New Design'),
+        title: Text(isEdit ? 'Edit Stock' : 'Add New Design'),
         actions: [
           if (isEdit)
             IconButton(
@@ -475,7 +390,7 @@ class _State extends State<AddEditStockScreen> {
                   ? null
                   : () => context.push(
                         '/stockist/stock/history/${widget.designId}/'
-                        '${Uri.encodeComponent(_nameCtrl.text.trim())}',
+                        '${Uri.encodeComponent(_designName)}',
                       ),
             ),
           if (isEdit)
@@ -499,11 +414,9 @@ class _State extends State<AddEditStockScreen> {
                 padding: EdgeInsets.fromLTRB(
                     16, 16, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
                 children: [
-                  _buildImagePicker(),
-                  const SizedBox(height: 8),
-                  _field(_nameCtrl, 'Design Name', required: true),
+                  isEdit ? _buildIdentityReadonly() : _buildMasterPicker(),
+                  const SizedBox(height: 12),
                   if (_catalogs.length > 1) _buildCatalogPicker(),
-                  _buildSizePicker(),
                   _buildSurfaceSection(),
                   const SizedBox(height: 12),
                   _buildDropdown('Tile Type', kTileTypes, _tileType,
@@ -533,84 +446,146 @@ class _State extends State<AddEditStockScreen> {
     );
   }
 
-  // ── Image picker widget ───────────────────────────────────────────────────
-
-  Widget _buildImagePicker() {
-    final hasImages = _existingImageUrls.isNotEmpty || _pickedPaths.isNotEmpty;
-    final ratio = aspectRatioFromSize(_size); // width / height (0.5 = 1:2)
-    final portrait = ratio < 0.95;
-    return GestureDetector(
-      onTap: _chooseImageSource,
-      child: LayoutBuilder(
-        builder: (ctx, c) {
-          final w = c.maxWidth - 16; // minus padding
-          // Portrait tiles are rotated to landscape so the wide preview area is
-          // used instead of leaving large empty side margins.
-          var imgH = portrait ? w * ratio : w / ratio;
-          imgH = imgH.clamp(140.0, 260.0);
-          final imgW = portrait ? w : imgH * ratio;
-          return Container(
-            width: double.infinity,
-            height: hasImages ? imgH + 16 : 160,
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              border: Border.all(
-                  color: hasImages ? const Color(0xFF1B4F72) : Colors.grey),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: hasImages
-                ? Stack(
-                    children: [
-                      Center(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: SizedBox(
-                            width: imgW,
-                            height: imgH,
-                            child: _previewImage(portrait),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: TextButton.icon(
-                          onPressed: _chooseImageSource,
-                          icon: const Icon(Icons.edit, size: 14),
-                          label: const Text('Change'),
-                          style: TextButton.styleFrom(
-                            backgroundColor: Colors.black.withValues(alpha: 0.5),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                          ),
-                        ),
-                      ),
-                    ],
-                  )
-                : const Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.add_photo_alternate_outlined,
-                          size: 48, color: Colors.grey),
-                      SizedBox(height: 8),
-                      Text('Tap to add a photo — camera or gallery',
-                          style: TextStyle(color: Colors.grey)),
-                    ],
-                  ),
-          );
-        },
+  // ── Identity: read-only (edit mode) ────────────────────────────────────────
+  // Name / size / photo live in the Library; show them, link out to edit there.
+  Widget _buildIdentityReadonly() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _identityThumb(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_designName.isEmpty ? '(unnamed)' : _designName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15)),
+                    const SizedBox(height: 2),
+                    Text(_size.replaceAll(' mm', ''),
+                        style: TextStyle(
+                            fontSize: 12.5, color: Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.lock_outline, size: 13, color: Colors.grey.shade500),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                    'Name, size & photo are set in your Design Library.',
+                    style: TextStyle(
+                        fontSize: 11, color: Colors.grey.shade600)),
+              ),
+              TextButton(
+                onPressed: () => context.push('/stockist/library'),
+                child: const Text('Edit in Library'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
-  // First image, rotated 90° for portrait tiles so it shows horizontally.
-  Widget _previewImage(bool portrait) {
-    final image = _pickedPaths.isNotEmpty
-        ? Image.file(File(_pickedPaths.first), fit: BoxFit.cover)
-        : Image.network(_existingImageUrls.first, fit: BoxFit.cover);
-    return portrait ? RotatedBox(quarterTurns: 1, child: image) : image;
+  // ── Master picker (add mode) ───────────────────────────────────────────────
+  Widget _buildMasterPicker() {
+    if (_selectedMaster == null) {
+      return InkWell(
+        onTap: _openMasterPicker,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF1B4F72), width: 1.5),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.collections_bookmark_outlined,
+                  color: Color(0xFF1B4F72)),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Choose design from your Library',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1B4F72))),
+                    SizedBox(height: 2),
+                    Text('Its name, size and photo come from the Library',
+                        style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Color(0xFF1B4F72)),
+            ],
+          ),
+        ),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B4F72).withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF1B4F72).withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          _identityThumb(),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_designName.isEmpty ? '(unnamed)' : _designName,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15)),
+                const SizedBox(height: 2),
+                Text(_size.replaceAll(' mm', ''),
+                    style:
+                        TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+              ],
+            ),
+          ),
+          TextButton(onPressed: _openMasterPicker, child: const Text('Change')),
+        ],
+      ),
+    );
   }
+
+  Widget _identityThumb() => ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 56,
+          height: 56,
+          child: _imageUrl.isEmpty
+              ? Container(
+                  color: Colors.grey.shade100,
+                  child: Icon(Icons.image_outlined, color: Colors.grey.shade400))
+              : CachedNetworkImage(
+                  imageUrl: CloudinaryService.thumbUrl(_imageUrl, width: 160),
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(color: Colors.grey.shade200),
+                  errorWidget: (_, __, ___) =>
+                      Container(color: Colors.grey.shade200)),
+        ),
+      );
 
   // ── Catalog picker (Father & Child) ───────────────────────────────────────
 
@@ -639,98 +614,13 @@ class _State extends State<AddEditStockScreen> {
                   .toList(),
               onChanged: (v) => setState(() {
                 _catalogId = v ?? _catalogId;
+                // The list's brand may change the design's name (alias).
+                if (_selectedMaster != null) {
+                  _designName = _nameForBrand(_selectedMaster!);
+                }
                 _dirty = true;
               }),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── Size picker ───────────────────────────────────────────────────────────
-
-  Widget _buildSizePicker() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Tile Size',
-              style: TextStyle(fontSize: 13, color: Colors.grey)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _sizes.map((s) {
-              final selected = _size == s;
-              final r = aspectRatioFromSize(s);
-              final label = s.replaceAll(' mm', '');
-              final rLabel = ratioLabel(s);
-              final iconW = r >= 0.95 ? 16.0 : (r > 0.63 ? 12.0 : 10.0);
-              final iconH = r >= 0.95 ? 16.0 : (r > 0.63 ? 18.0 : 20.0);
-              return GestureDetector(
-                onTap: () => setState(() { _size = s; _dirty = true; }),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? const Color(0xFF1B4F72)
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: selected
-                          ? const Color(0xFF1B4F72)
-                          : Colors.grey.shade300,
-                      width: selected ? 2 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: iconW,
-                        height: iconH,
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? Colors.white.withValues(alpha: 0.25)
-                              : const Color(0xFF1B4F72).withValues(alpha: 0.08),
-                          border: Border.all(
-                            color: selected
-                                ? Colors.white
-                                : const Color(0xFF1B4F72),
-                            width: 1.5,
-                          ),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(label,
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: selected
-                                      ? Colors.white
-                                      : Colors.grey.shade800)),
-                          Text(rLabel,
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  color: selected
-                                      ? Colors.white70
-                                      : Colors.grey.shade500)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
           ),
         ],
       ),
@@ -1084,5 +974,129 @@ class _State extends State<AddEditStockScreen> {
       setState(() => _qtyCtrl.text = '$n');
       _snack('Stock recounted to $n boxes.', Colors.green);
     }
+  }
+}
+
+// Sentinel returned by the picker sheet to mean "go add a new master".
+const LibraryEntry _addToLibrarySentinel =
+    LibraryEntry(id: '__add__', size: '', masterName: '');
+
+// Bottom sheet to pick a Library master (with search) when adding stock.
+class _MasterPickerSheet extends StatefulWidget {
+  final List<LibraryEntry> masters;
+  final String? brandId;
+  final String Function(LibraryEntry) nameForBrand;
+  const _MasterPickerSheet(
+      {required this.masters, required this.brandId, required this.nameForBrand});
+  @override
+  State<_MasterPickerSheet> createState() => _MasterPickerSheetState();
+}
+
+class _MasterPickerSheetState extends State<_MasterPickerSheet> {
+  String _q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _q.trim().toLowerCase();
+    final list = widget.masters.where((m) {
+      if (q.isEmpty) return true;
+      final hay = '${m.masterName} ${m.aliases.values.join(' ')} ${m.size}'
+          .toLowerCase();
+      return hay.contains(q);
+    }).toList();
+    return Padding(
+      padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        expand: false,
+        builder: (_, scroll) => Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+              child: TextField(
+                autofocus: false,
+                onChanged: (v) => setState(() => _q = v),
+                decoration: InputDecoration(
+                  hintText: 'Search your library…',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add, color: Color(0xFF1B4F72)),
+              title: const Text('Add a new design to your Library',
+                  style: TextStyle(
+                      color: Color(0xFF1B4F72), fontWeight: FontWeight.w600)),
+              onTap: () => Navigator.pop(context, _addToLibrarySentinel),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: widget.masters.isEmpty
+                  ? const Center(
+                      child: Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text(
+                          'Your Design Library is empty.\nAdd a design there '
+                          'first, then add its stock here.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey)),
+                    ))
+                  : ListView.separated(
+                      controller: scroll,
+                      itemCount: list.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final m = list[i];
+                        final name = widget.nameForBrand(m);
+                        return ListTile(
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: m.imageUrl.isEmpty
+                                  ? Container(
+                                      color: Colors.grey.shade100,
+                                      child: Icon(Icons.image_outlined,
+                                          size: 18,
+                                          color: Colors.grey.shade400))
+                                  : CachedNetworkImage(
+                                      imageUrl: CloudinaryService.thumbUrl(
+                                          m.imageUrl,
+                                          width: 120),
+                                      fit: BoxFit.cover,
+                                      placeholder: (_, __) => Container(
+                                          color: Colors.grey.shade200),
+                                      errorWidget: (_, __, ___) => Container(
+                                          color: Colors.grey.shade200)),
+                            ),
+                          ),
+                          title: Text(name,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600)),
+                          subtitle: Text(m.size.replaceAll(' mm', ''),
+                              style: const TextStyle(fontSize: 12)),
+                          onTap: () => Navigator.pop(context, m),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

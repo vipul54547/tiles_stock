@@ -10,6 +10,7 @@ import '../services/cloudinary_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
+import '../utils/banner_layout.dart' show effectiveCompanyPos;
 
 /// Public, login-free catalog opened via a stockist's private share link
 /// (`/s/<token>`). Shows that stockist's in-stock designs with search, filters,
@@ -738,7 +739,10 @@ class _State extends State<PublicCatalogScreen> {
     final source = (_banner['source'] ?? 'pool').toString();
     final bg = (_banner['bg_url'] ?? _banner['image_url'] ?? '').toString();
     final companyLogo = (_banner['company_logo_url'] ?? '').toString();
-    final companyPos = (_banner['company_pos'] ?? 'none').toString();
+    // Big NAME (no logo) never uses the middle row — coerce legacy values down.
+    final companyPos = effectiveCompanyPos(
+        (_banner['company_pos'] ?? 'none').toString(),
+        hasLogo: companyLogo.isNotEmpty);
     final tdPos = (_banner['td_pos'] ?? 'footer').toString();
     final name = (_banner['name'] ?? _stockist['name'] ?? '').toString();
     final topRow = companyPos == 'top-left' ||
