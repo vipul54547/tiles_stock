@@ -46,7 +46,6 @@ class _State extends State<ManageCatalogsScreen> {
   final _data = SupabaseDataService();
   List<StockCatalog> _items = [];
   List<Brand> _brands = [];
-  int _listLimit = 3; // admin-set stock lists allowed per brand
   Map<String, int> _inq = {}; // catalogId → link-enquiry count
   Map<String, List<CatalogClaimer>> _claimers = {}; // catalogId → dealers joined
   Map<String, List<ShareLink>> _catLinks = {}; // catalogId → its share links
@@ -79,7 +78,6 @@ class _State extends State<ManageCatalogsScreen> {
     setState(() => _loading = true);
     final items = await _data.getCatalogs(currentStockistUUID);
     final brands = await _data.getMyBrands();
-    final limit = await _data.myStockListLimit();
     final inq = await _data.getCatalogInquiryCounts(currentStockistUUID);
     final claimerList = await _data.getMyCatalogClaimers();
     final allDesigns = await _data.getDesignsByStockist(currentStockistUUID);
@@ -101,7 +99,6 @@ class _State extends State<ManageCatalogsScreen> {
     setState(() {
       _items = items;
       _brands = brands;
-      _listLimit = limit;
       _inq = inq;
       _claimers = claimers;
       _catLinks = catLinks;
@@ -150,33 +147,6 @@ class _State extends State<ManageCatalogsScreen> {
   }
 
   // ── Stock list create / rename / delete ──────────────────────────────────
-  Future<void> _newListDialog(Brand brand) async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('New stock list — ${brand.name}'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-              hintText: 'e.g. Clearance, Festival',
-              border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Create')),
-        ],
-      ),
-    );
-    if (ok != true || ctrl.text.trim().isEmpty) return;
-    await _run(() => _data.createStockList(brand.id, ctrl.text.trim()));
-  }
-
   Future<void> _renameDialog(StockCatalog c) async {
     final ctrl = TextEditingController(text: c.name);
     final ok = await showDialog<bool>(
@@ -199,28 +169,6 @@ class _State extends State<ManageCatalogsScreen> {
       ),
     );
     if (ok == true) await _run(() => _data.renameCatalog(c.id, ctrl.text));
-  }
-
-  Future<void> _deleteList(StockCatalog c) async {
-    final yes = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete stock list?'),
-        content: Text('Delete "${c.name}"? Its share links stop working. '
-            'Designs in it are NOT deleted but will need reassigning to '
-            'another list.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child:
-                  const Text('Delete', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-    if (yes == true) await _run(() => _data.deleteCatalog(c.id));
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -682,7 +630,6 @@ class _State extends State<ManageCatalogsScreen> {
   Widget _brandBox(Brand b) {
     final lists = _listsFor(b.id);
     final open = _expandedBrands.contains(b.id);
-    final atCap = lists.length >= _listLimit;
     final activeLinks = lists.fold<int>(
         0,
         (n, c) =>
@@ -759,36 +706,18 @@ class _State extends State<ManageCatalogsScreen> {
             ),
           ),
           if (open) ...[
-            // Lists count + add-list control.
+            // List count only — lists are admin-controlled (auto-created from the
+            // admin's per-brand limit); the stockist just renames them.
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 0, 8, 4),
-              child: Row(
-                children: [
-                  Text('${lists.length}/$_listLimit lists',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade700)),
-                  const Spacer(),
-                  TextButton.icon(
-                    onPressed: (_busy || atCap) ? null : () => _newListDialog(b),
-                    icon: Icon(Icons.add,
-                        size: 18,
-                        color: atCap ? Colors.grey.shade400 : _navy),
-                    label: Text(atCap ? 'List limit reached' : 'Add list',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: atCap ? Colors.grey.shade500 : _navy)),
-                    style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        minimumSize: const Size(0, 32),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                  ),
-                ],
-              ),
+              child: Text(
+                  '${lists.length} stock list${lists.length == 1 ? '' : 's'}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
             ),
             if (lists.isEmpty)
               const Padding(
                 padding: EdgeInsets.fromLTRB(14, 0, 14, 12),
-                child: Text('No lists yet — tap "Add list".',
+                child: Text('No stock lists yet — the admin enables these.',
                     style: TextStyle(fontSize: 12, color: Colors.grey)),
               )
             else
@@ -867,8 +796,6 @@ class _State extends State<ManageCatalogsScreen> {
                       () => _previewDesigns(c)),
                   _rowIcon(Icons.edit_outlined, 'Rename', _navy,
                       _busy ? null : () => _renameDialog(c)),
-                  _rowIcon(Icons.delete_outline, 'Delete', Colors.red,
-                      _busy ? null : () => _deleteList(c)),
                   _rowIcon(
                       c.isActive
                           ? Icons.visibility_outlined
