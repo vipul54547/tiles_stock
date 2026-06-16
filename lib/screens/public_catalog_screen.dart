@@ -656,8 +656,11 @@ class _State extends State<PublicCatalogScreen> {
       backgroundColor: const Color(0xFFF5F5F5),
       body: CustomScrollView(
         slivers: [
+          // Name bar scrolls away (not pinned) — the brand identity lives on the
+          // banner; the buyer gets the full screen for designs while browsing.
           SliverAppBar(
-            pinned: true,
+            pinned: false,
+            floating: false,
             backgroundColor: _brand,
             foregroundColor: Colors.white,
             title: Text(
@@ -666,7 +669,11 @@ class _State extends State<PublicCatalogScreen> {
                     : (_stockist['name']?.toString() ?? 'Stock Catalogue')),
           ),
           SliverToBoxAdapter(child: _bannerArea()),
-          SliverToBoxAdapter(child: _searchRow()),
+          // Search + filter row stays PINNED so it's always reachable while scrolling.
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _PinnedHeader(height: 60, child: _searchRow()),
+          ),
           SliverToBoxAdapter(child: _metaRow(list.length)),
           if (list.isEmpty)
             const SliverFillRemaining(
@@ -700,10 +707,48 @@ class _State extends State<PublicCatalogScreen> {
   // trust strip (overlay=true). Falls back to a brand-colour gradient + strip
   // when no pool image is configured yet. Replaces the old tall logo/name/
   // tagline/address header that ate ~half the screen. (project_admin_banner_system)
+  // Maps a placement key to an Alignment for overlay positioning.
+  static Alignment _alignFor(String pos) {
+    switch (pos) {
+      case 'top-left':
+        return Alignment.topLeft;
+      case 'top-center':
+        return Alignment.topCenter;
+      case 'top-right':
+        return Alignment.topRight;
+      case 'middle-left':
+        return Alignment.centerLeft;
+      case 'center':
+        return Alignment.center;
+      case 'middle-right':
+        return Alignment.centerRight;
+      case 'bottom-left':
+        return Alignment.bottomLeft;
+      case 'bottom-center':
+      case 'footer':
+        return Alignment.bottomCenter;
+      case 'bottom-right':
+        return Alignment.bottomRight;
+      default:
+        return Alignment.center;
+    }
+  }
+
   Widget _bannerArea() {
-    final img = (_banner['image_url'] ?? '').toString();
-    final overlay = _banner['overlay'] == true;
-    final welcome = (_banner['name'] ?? _stockist['name'] ?? '').toString();
+    final source = (_banner['source'] ?? 'pool').toString();
+    final bg = (_banner['bg_url'] ?? _banner['image_url'] ?? '').toString();
+    final companyLogo = (_banner['company_logo_url'] ?? '').toString();
+    final companyPos = (_banner['company_pos'] ?? 'none').toString();
+    final tdPos = (_banner['td_pos'] ?? 'footer').toString();
+    final name = (_banner['name'] ?? _stockist['name'] ?? '').toString();
+    final topRow = companyPos == 'top-left' ||
+        companyPos == 'top-center' ||
+        companyPos == 'top-right';
+    // Welcome text: pool always; library only when the company is NOT on the top
+    // row (top logo hides Welcome); upload never (the design is self-contained).
+    final showWelcome = source == 'pool' || (source == 'library' && !topRow);
+    final showCompany = source == 'library' && companyPos != 'none';
+
     return LayoutBuilder(
       builder: (context, c) {
         final h = (c.maxWidth / 2.5).clamp(0.0, 200.0);
@@ -713,19 +758,69 @@ class _State extends State<PublicCatalogScreen> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (img.isNotEmpty)
-                Image.network(img,
+              // Background
+              if (bg.isNotEmpty)
+                Image.network(bg,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => _bannerGradient())
               else
                 _bannerGradient(),
-              if (overlay) _trustStrip(welcome),
+              // Company logo or big name (library path)
+              if (showCompany)
+                Align(
+                  alignment: _alignFor(companyPos),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: _scrim(
+                      companyLogo.isNotEmpty
+                          ? Image.network(companyLogo,
+                              height: h * 0.40, fit: BoxFit.contain)
+                          : Text(
+                              name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: (h * 0.20).clamp(16.0, 34.0),
+                                  fontWeight: FontWeight.bold,
+                                  shadows: const [
+                                    Shadow(blurRadius: 4, color: Colors.black87)
+                                  ]),
+                            ),
+                    ),
+                  ),
+                ),
+              // TilesDesign logo (library/upload). Pool shows it in the trust strip.
+              if (source != 'pool')
+                Align(
+                  alignment: _alignFor(tdPos),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: _scrim(Image.asset(
+                        tdPos == 'footer'
+                            ? 'assets/brand/tilesdesign_wide.png'
+                            : 'assets/brand/tilesdesign_square.png',
+                        height: tdPos == 'footer' ? h * 0.16 : h * 0.22)),
+                  ),
+                ),
+              // Welcome / Powered-by trust strip
+              if (showWelcome) _trustStrip(name, poweredBy: source == 'pool'),
             ],
           ),
         );
       },
     );
   }
+
+  // A subtle translucent backing so an overlay stays legible on any art.
+  Widget _scrim(Widget child) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.28),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: child,
+      );
 
   // Brand-colour gradient shown when no banner image is configured yet.
   Widget _bannerGradient() => DecoratedBox(
@@ -740,7 +835,7 @@ class _State extends State<PublicCatalogScreen> {
 
   // System trust strip for generic/anonymous banners: centred "Welcome to
   // [name]" + right "Powered by TilesDesign", over a dark scrim for readability.
-  Widget _trustStrip(String name) => Align(
+  Widget _trustStrip(String name, {bool poweredBy = true}) => Align(
         alignment: Alignment.topCenter,
         child: Container(
           width: double.infinity,
@@ -769,14 +864,15 @@ class _State extends State<PublicCatalogScreen> {
                       shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
                 ),
               ),
-              const Align(
-                alignment: Alignment.centerRight,
-                child: Text('Powered by TilesDesign',
-                    style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w600)),
-              ),
+              if (poweredBy)
+                const Align(
+                  alignment: Alignment.centerRight,
+                  child: Text('Powered by TilesDesign',
+                      style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600)),
+                ),
             ],
           ),
         ),
@@ -1205,4 +1301,26 @@ class _Unavailable extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// Pins a fixed-height widget (the search + filter row) to the top while the
+/// banner and name bar scroll away beneath it.
+class _PinnedHeader extends SliverPersistentHeaderDelegate {
+  final double height;
+  final Widget child;
+  _PinnedHeader({required this.height, required this.child});
+
+  @override
+  double get minExtent => height;
+  @override
+  double get maxExtent => height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return Material(color: const Color(0xFFF5F5F5), child: child);
+  }
+
+  @override
+  bool shouldRebuild(_PinnedHeader old) =>
+      old.height != height || old.child != child;
 }
