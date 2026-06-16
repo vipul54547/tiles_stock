@@ -709,22 +709,17 @@ class SupabaseDataService {
     return res as String?;
   }
 
-  /// Admin: set a stockist's white-label branding for the public catalog page
-  /// (logo, tagline, brand colour hex, Google-Maps link). Blank values clear the
-  /// field. Anonymity hiding is enforced server-side in the public_catalog RPC.
+  /// Admin: set a stockist's catalogue accent colour + Google-Maps link for the
+  /// public catalog page. Logo/banner/tagline editing was retired — the
+  /// share-link banner is admin-controlled via the Catalog Banners screen
+  /// (project_admin_banner_system). Blank values clear the field.
   Future<void> setStockistBranding(
     String sequentialId, {
-    String logoUrl = '',
-    String bannerUrl = '',
-    String tagline = '',
     String brandColor = '',
     String mapUrl = '',
   }) async {
     await supabase.rpc('admin_set_branding', params: {
       'p_seq': sequentialId,
-      'p_logo_url': logoUrl,
-      'p_banner_url': bannerUrl,
-      'p_tagline': tagline,
       'p_brand_color': brandColor,
       'p_map_url': mapUrl,
     });

@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import '../../models/stockist.dart';
 import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
-import '../../services/cloudinary_service.dart';
 import '../../widgets/phone_field.dart';
 import '../../utils/stockist_tiers.dart';
 import 'excel_import_screen.dart';
@@ -470,13 +468,9 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _stockListLimit =
       TextEditingController(text: '3'); // stock lists per brand
 
-  // Branded catalog page (white-label share-link page).
-  final _picker = ImagePicker();
-  String _logoUrl = ''; // Cloudinary URL of the uploaded logo ('' = none)
-  bool _uploadingLogo = false;
-  String _bannerUrl = ''; // Cloudinary URL of the 3:1 header banner ('' = none)
-  bool _uploadingBanner = false;
-  final _tagline = TextEditingController();
+  // Catalogue accent + location shown on the share-link page. Logo/banner/
+  // tagline editing was retired — the share-link banner is now fully admin-
+  // controlled via the Catalog Banners screen (project_admin_banner_system).
   String _brandColor = ''; // hex like #1B4F72 ('' = default theme colour)
   final _mapUrl = TextEditingController();
 
@@ -513,9 +507,6 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _deviceLimit.text = '${s.deviceLimit}';
       _brandLimit.text = '${s.brandLimit}';
       _stockListLimit.text = '${s.stockListLimit}';
-      _logoUrl = s.logoUrl;
-      _bannerUrl = s.bannerUrl;
-      _tagline.text = s.tagline;
       _brandColor = s.brandColor;
       _mapUrl.text = s.mapUrl;
       _loadDeviceCount();
@@ -532,7 +523,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
       _priority, _gst, _tradeName, _deviceLimit, _brandLimit, _stockListLimit,
-      _tagline, _mapUrl
+      _mapUrl
     ]) {
       c.dispose();
     }
@@ -780,179 +771,21 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     );
   }
 
-  Future<void> _pickLogo() async {
-    try {
-      final x = await _picker.pickImage(
-          source: ImageSource.gallery, maxWidth: 1200, imageQuality: 100);
-      if (x == null || !mounted) return;
-      setState(() => _uploadingLogo = true);
-      final url = await CloudinaryService.uploadImage(x.path);
-      if (!mounted) return;
-      setState(() {
-        _uploadingLogo = false;
-        if (url != null) {
-          _logoUrl = url;
-        } else {
-          _error = 'Logo upload failed. Please try again.';
-        }
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _uploadingLogo = false;
-        _error = 'Logo upload failed: $e';
-      });
-    }
-  }
-
-  Future<void> _pickBanner() async {
-    try {
-      final x = await _picker.pickImage(
-          source: ImageSource.gallery, maxWidth: 2000, imageQuality: 90);
-      if (x == null || !mounted) return;
-      setState(() => _uploadingBanner = true);
-      final url = await CloudinaryService.uploadImage(x.path);
-      if (!mounted) return;
-      setState(() {
-        _uploadingBanner = false;
-        if (url != null) {
-          _bannerUrl = url;
-        } else {
-          _error = 'Banner upload failed. Please try again.';
-        }
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _uploadingBanner = false;
-        _error = 'Banner upload failed: $e';
-      });
-    }
-  }
-
   Widget _brandingSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(height: 24),
-        const Text('Stock Catalogue Branding',
+        const Text('Catalogue Accent & Location',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
         const SizedBox(height: 2),
         Text(
-            'Logo, tagline, colour & map shown on the share-link stock catalogue page. '
-            'Hidden automatically while the stockist is anonymous (except '
-            'tagline & colour).',
+            'Accent colour & map link for the share-link stock catalogue page. '
+            'The banner (logo/branding) is managed centrally on the Catalog '
+            'Banners screen.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-        const SizedBox(height: 10),
-        // Logo: preview (fit, no distortion) + upload / change / remove.
-        Row(
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: _uploadingLogo
-                  ? const Center(
-                      child: SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2)))
-                  : _logoUrl.isEmpty
-                      ? Icon(Icons.image_outlined,
-                          color: Colors.grey.shade400, size: 26)
-                      : Image.network(
-                          CloudinaryService.logoUrl(_logoUrl, size: 128),
-                          fit: BoxFit.contain),
-            ),
-            const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _uploadingLogo ? null : _pickLogo,
-                  icon: const Icon(Icons.upload, size: 16),
-                  label: Text(_logoUrl.isEmpty ? 'Upload logo' : 'Change logo'),
-                ),
-                if (_logoUrl.isNotEmpty)
-                  TextButton.icon(
-                    onPressed: _uploadingLogo
-                        ? null
-                        : () => setState(() => _logoUrl = ''),
-                    icon: const Icon(Icons.delete_outline, size: 16),
-                    label: const Text('Remove'),
-                    style:
-                        TextButton.styleFrom(foregroundColor: Colors.redAccent),
-                  ),
-              ],
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        // Banner: full-width 3:1 header image (centre-cropped on display).
-        Row(
-          children: [
-            const Text('Header banner',
-                style: TextStyle(fontSize: 12, color: Colors.grey)),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text('3:1 · e.g. 1500×500 px',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
-            ),
-            if (_bannerUrl.isNotEmpty)
-              GestureDetector(
-                onTap: _uploadingBanner
-                    ? null
-                    : () => setState(() => _bannerUrl = ''),
-                child: const Text('Remove',
-                    style: TextStyle(fontSize: 12, color: Colors.redAccent)),
-              ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        GestureDetector(
-          onTap: _uploadingBanner ? null : _pickBanner,
-          child: AspectRatio(
-            aspectRatio: 3, // 3:1 — exactly how the public page renders it
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: _uploadingBanner
-                  ? const Center(
-                      child: SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2)))
-                  : _bannerUrl.isEmpty
-                      ? Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.add_photo_alternate_outlined,
-                                color: Colors.grey.shade400, size: 26),
-                            const SizedBox(height: 4),
-                            Text('Tap to upload banner',
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey.shade500)),
-                          ],
-                        )
-                      : Image.network(
-                          CloudinaryService.bannerUrl(_bannerUrl, width: 900),
-                          fit: BoxFit.cover),
-            ),
-          ),
-        ),
         const SizedBox(height: 12),
-        _field(_tagline, 'Tagline (e.g. "Premium tiles since 2008")'),
         // Brand colour swatches.
-        const SizedBox(height: 2),
         const Text('Brand colour',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
         const SizedBox(height: 6),
@@ -1052,9 +885,6 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             int.tryParse(_stockListLimit.text.trim()) ?? 3);
         await _dataSvc.setStockistBranding(
           widget.existing!.id,
-          logoUrl: _logoUrl.trim(),
-          bannerUrl: _bannerUrl.trim(),
-          tagline: _tagline.text.trim(),
           brandColor: _brandColor.trim(),
           mapUrl: _mapUrl.text.trim(),
         );
