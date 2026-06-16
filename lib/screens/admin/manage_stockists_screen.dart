@@ -465,8 +465,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   String _publicCode = ''; // current masked code (read-only, server-minted)
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
-  final _brandLimit = TextEditingController(text: '1'); // brands they may create
-  // Stock-list limit is now per-brand (set on StockistBrandListsScreen), not here.
+  // Brands & per-brand stock-list limits are managed on StockistBrandListsScreen
+  // (added directly with +), not via a numeric field here.
 
   // Catalogue accent + location shown on the share-link page. Logo/banner/
   // tagline editing was retired — the share-link banner is now fully admin-
@@ -505,7 +505,6 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _tradeName.text = s.publicDisplayName;
       _publicCode = s.publicCode;
       _deviceLimit.text = '${s.deviceLimit}';
-      _brandLimit.text = '${s.brandLimit}';
       _brandColor = s.brandColor;
       _mapUrl.text = s.mapUrl;
       _loadDeviceCount();
@@ -521,7 +520,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   void dispose() {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
-      _priority, _gst, _tradeName, _deviceLimit, _brandLimit,
+      _priority, _gst, _tradeName, _deviceLimit,
       _mapUrl
     ]) {
       c.dispose();
@@ -645,40 +644,13 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Divider(height: 24),
-        const Text('Brand Limit',
+        const Text('Brands, Lists & Banners',
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
         const SizedBox(height: 2),
         Text(
-            'How many brands this stockist may create (for manufacturers selling '
-            'the same stock under different brand names). 1 = single brand. '
-            'Currently ${widget.existing!.brandCount} created.',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: 90,
-          child: TextFormField(
-            controller: _brandLimit,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-                labelText: 'Brands',
-                isDense: true,
-                border: OutlineInputBorder()),
-            validator: (v) {
-              final t = (v ?? '').trim();
-              if (t.isEmpty) return null;
-              final n = int.tryParse(t);
-              if (n == null || n < 1) return 'Min 1';
-              return null;
-            },
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text('Stock Lists per Brand',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-        const SizedBox(height: 2),
-        Text(
-            'Each brand has its own number of stock lists (default 1). Set them '
-            'per brand. New brands appear here after you save the Brands count.',
+            'Add/rename brands, set each brand\'s stock-list count, banner and '
+            'visibility — all in one place. ${widget.existing!.brandCount} brand'
+            '${widget.existing!.brandCount == 1 ? '' : 's'} now.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         const SizedBox(height: 8),
         Container(
@@ -691,7 +663,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             leading: const Icon(Icons.tune, color: Color(0xFF1B4F72)),
             title: const Text('Manage brands & lists',
                 style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-            subtitle: const Text('Set how many stock lists each brand has',
+            subtitle: const Text('Add brands, rename, banner, lists, visibility',
                 style: TextStyle(fontSize: 12)),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
@@ -879,8 +851,6 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             widget.existing!.id, _anonymous, _tradeName.text.trim());
         await _dataSvc.setDeviceLimit('stockist', widget.existing!.id,
             int.tryParse(_deviceLimit.text.trim()) ?? 1);
-        await _dataSvc.setBrandLimit(
-            widget.existing!.id, int.tryParse(_brandLimit.text.trim()) ?? 1);
         await _dataSvc.setStockistBranding(
           widget.existing!.id,
           brandColor: _brandColor.trim(),

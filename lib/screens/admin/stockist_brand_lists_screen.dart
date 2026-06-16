@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/supabase_data_service.dart';
+import '../../services/cloudinary_service.dart';
 
 /// Admin: per-brand stock-list limit for one stockist. Each brand has its own
 /// "how many stock lists" number (default 1); raising it auto-creates the missing
@@ -16,6 +19,7 @@ class StockistBrandListsScreen extends StatefulWidget {
 
 class _State extends State<StockistBrandListsScreen> {
   final _data = SupabaseDataService();
+  final _picker = ImagePicker();
   List<Map<String, dynamic>> _brands = [];
   // brand id -> the limit currently shown in the stepper (edited value).
   final Map<String, int> _limit = {};
@@ -23,6 +27,21 @@ class _State extends State<StockistBrandListsScreen> {
   bool _saving = false;
 
   static const Color _navy = Color(0xFF1B4F72);
+
+  // Placement keys for the position dropdowns.
+  static const _gridPositions = <String, String>{
+    'none': 'None',
+    'top-left': 'Top-Left',
+    'top-center': 'Top-Center',
+    'top-right': 'Top-Right',
+    'middle-left': 'Middle-Left',
+    'center': 'Center',
+    'middle-right': 'Middle-Right',
+    'bottom-left': 'Bottom-Left',
+    'bottom-center': 'Bottom-Center',
+    'bottom-right': 'Bottom-Right',
+    'footer': 'Footer',
+  };
 
   @override
   void initState() {
@@ -78,11 +97,92 @@ class _State extends State<StockistBrandListsScreen> {
     }
   }
 
+  // + Add brand — dialog pre-filled with the next default name "Brand N".
+  Future<void> _addBrand() async {
+    final ctrl = TextEditingController(text: 'Brand ${_brands.length + 1}');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add brand'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+              labelText: 'Brand name', border: OutlineInputBorder()),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      await _data.addBrandForStockist(widget.seq, name.trim());
+      await _load();
+    } catch (e) {
+      _snack('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _rename(Map<String, dynamic> b) async {
+    final ctrl = TextEditingController(text: (b['name'] ?? '').toString());
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename brand'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+              labelText: 'Brand name', border: OutlineInputBorder()),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (name == null || name.trim().isEmpty || name.trim() == b['name']) return;
+    setState(() => _saving = true);
+    try {
+      await _data.renameBrand((b['id'] ?? '').toString(), name.trim());
+      if (!mounted) return;
+      setState(() => b['name'] = name.trim());
+    } catch (e) {
+      _snack('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(title: Text('${widget.stockistName} — Brands & Lists')),
+      appBar: AppBar(
+        title: Text('${widget.stockistName} — Brands & Lists'),
+        actions: [
+          IconButton(
+            tooltip: 'Add brand',
+            icon: const Icon(Icons.add),
+            onPressed: _saving ? null : _addBrand,
+          ),
+        ],
+      ),
       bottomNavigationBar: _brands.isEmpty
           ? null
           : SafeArea(
@@ -139,8 +239,8 @@ class _State extends State<StockistBrandListsScreen> {
                       fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
               const SizedBox(height: 4),
               Text(
-                  'Set the Brands count on the stockist and save first — the '
-                  'brands appear here afterwards.',
+                  'Tap + (top right) to add a brand. The first one is the '
+                  'company default.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
             ],
@@ -190,8 +290,16 @@ class _State extends State<StockistBrandListsScreen> {
                     ),
                     child: const Text('default',
                         style: TextStyle(fontSize: 11, color: Colors.black54)),
-                  )
-                else
+                  ),
+                IconButton(
+                  tooltip: 'Rename brand',
+                  icon: const Icon(Icons.edit_outlined, size: 19, color: _navy),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(4),
+                  onPressed: _saving ? null : () => _rename(b),
+                ),
+                if (!isDefault)
                   IconButton(
                     tooltip: 'Delete brand',
                     icon: const Icon(Icons.delete_outline,
@@ -203,6 +311,8 @@ class _State extends State<StockistBrandListsScreen> {
                   ),
               ],
             ),
+            const SizedBox(height: 10),
+            _bannerSection(b),
             const SizedBox(height: 10),
             _statusControl(b),
             const SizedBox(height: 10),
@@ -229,6 +339,342 @@ class _State extends State<StockistBrandListsScreen> {
               Text(names.join(' · '),
                   style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Banner (two-path overlay) ──────────────────────────────────────────────
+  Alignment _alignFor(String pos) {
+    switch (pos) {
+      case 'top-left':
+        return Alignment.topLeft;
+      case 'top-center':
+        return Alignment.topCenter;
+      case 'top-right':
+        return Alignment.topRight;
+      case 'middle-left':
+        return Alignment.centerLeft;
+      case 'center':
+        return Alignment.center;
+      case 'middle-right':
+        return Alignment.centerRight;
+      case 'bottom-left':
+        return Alignment.bottomLeft;
+      case 'bottom-center':
+      case 'footer':
+        return Alignment.bottomCenter;
+      case 'bottom-right':
+        return Alignment.bottomRight;
+      default:
+        return Alignment.center;
+    }
+  }
+
+  Future<void> _applyBanner(Map<String, dynamic> b) async {
+    setState(() {});
+    try {
+      await _data.setBrandBannerConfig(
+        (b['id'] ?? '').toString(),
+        source: (b['banner_source'] ?? 'pool').toString(),
+        bgUrl: (b['banner_bg_url'] ?? '').toString(),
+        companyLogoUrl: (b['company_logo_url'] ?? '').toString(),
+        companyPos: (b['company_pos'] ?? 'none').toString(),
+        tdPos: (b['td_pos'] ?? 'footer').toString(),
+      );
+    } catch (e) {
+      _snack('$e', error: true);
+    }
+  }
+
+  Future<String?> _uploadImage({double maxWidth = 1600}) async {
+    final x = await _picker.pickImage(
+        source: ImageSource.gallery, maxWidth: maxWidth, imageQuality: 88);
+    if (x == null) return null;
+    setState(() => _saving = true);
+    final url = await CloudinaryService.uploadImage(x.path);
+    if (mounted) setState(() => _saving = false);
+    if (url == null) _snack('Upload failed. Try again.', error: true);
+    return url;
+  }
+
+  // Pick a logo-free background from the shared pool (Path A library source).
+  Future<void> _pickLibraryBg(Map<String, dynamic> b) async {
+    final pool = await _data.getGenericBanners();
+    final active = pool.where((p) => p['is_active'] == true).toList();
+    if (!mounted) return;
+    if (active.isEmpty) {
+      _snack('No background banners in the pool yet (add them in Catalog Banners).',
+          error: true);
+      return;
+    }
+    final url = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.all(12),
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Text('Pick a background',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            ...active.map((p) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(ctx, (p['image_url'] ?? '').toString()),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: AspectRatio(
+                        aspectRatio: 2.5,
+                        child: Image.network((p['image_url'] ?? '').toString(),
+                            fit: BoxFit.cover),
+                      ),
+                    ),
+                  ),
+                )),
+          ],
+        ),
+      ),
+    );
+    if (url == null) return;
+    b['banner_bg_url'] = url;
+    await _applyBanner(b);
+  }
+
+  Widget _bannerSection(Map<String, dynamic> b) {
+    final source = (b['banner_source'] ?? 'pool').toString();
+    final bg = (b['banner_bg_url'] ?? '').toString();
+    final logo = (b['company_logo_url'] ?? '').toString();
+    final companyPos = (b['company_pos'] ?? 'none').toString();
+    final tdPos = (b['td_pos'] ?? 'footer').toString();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Banner',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        // Source: pool / library / upload
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 11.5)),
+            ),
+            segments: const [
+              ButtonSegment(value: 'pool', label: Text('Pool')),
+              ButtonSegment(value: 'library', label: Text('Library')),
+              ButtonSegment(value: 'upload', label: Text('Upload')),
+            ],
+            selected: {['pool', 'library', 'upload'].contains(source) ? source : 'pool'},
+            onSelectionChanged: _saving
+                ? null
+                : (sel) {
+                    b['banner_source'] = sel.first;
+                    _applyBanner(b);
+                  },
+          ),
+        ),
+        const SizedBox(height: 8),
+        // Live preview
+        _bannerPreview(b),
+        const SizedBox(height: 8),
+        if (source == 'pool')
+          Text('Uses the shared daily-rotating pool (Catalog Banners).',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600))
+        else if (source == 'library') ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _saving ? null : () => _pickLibraryBg(b),
+                icon: const Icon(Icons.photo_library_outlined, size: 16),
+                label: Text(bg.isEmpty ? 'Pick background' : 'Change background'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _saving
+                    ? null
+                    : () async {
+                        final url = await _uploadImage(maxWidth: 600);
+                        if (url != null) {
+                          b['company_logo_url'] = url;
+                          await _applyBanner(b);
+                        }
+                      },
+                icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
+                label: Text(logo.isEmpty ? 'Upload logo' : 'Change logo'),
+              ),
+              if (logo.isNotEmpty)
+                TextButton(
+                  onPressed: _saving
+                      ? null
+                      : () {
+                          b['company_logo_url'] = '';
+                          _applyBanner(b);
+                        },
+                  child: const Text('Remove logo',
+                      style: TextStyle(color: Colors.red)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          _posDropdown('Company position', companyPos, _companyPosKeys, (v) {
+            b['company_pos'] = v;
+            _applyBanner(b);
+          }),
+          const SizedBox(height: 6),
+          _posDropdown('TilesDesign position', tdPos, _tdPosKeys, (v) {
+            b['td_pos'] = v;
+            _applyBanner(b);
+          }),
+          if (logo.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                  'No logo → the big company NAME shows at the company position.',
+                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
+            ),
+        ] else ...[
+          // upload (full finished design)
+          OutlinedButton.icon(
+            onPressed: _saving
+                ? null
+                : () async {
+                    final url = await _uploadImage(maxWidth: 2000);
+                    if (url != null) {
+                      b['banner_bg_url'] = url;
+                      await _applyBanner(b);
+                    }
+                  },
+            icon: const Icon(Icons.upload, size: 16),
+            label: Text(bg.isEmpty ? 'Upload full banner' : 'Replace banner'),
+          ),
+          const SizedBox(height: 6),
+          _posDropdown('TilesDesign position', tdPos, _tdPosKeys, (v) {
+            b['td_pos'] = v;
+            _applyBanner(b);
+          }),
+        ],
+      ],
+    );
+  }
+
+  // Company dropdown = 9 grid + None; TilesDesign = 9 grid + Footer.
+  static const _companyPosKeys = <String>[
+    'none', 'top-left', 'top-center', 'top-right', 'middle-left', 'center',
+    'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'
+  ];
+  static const _tdPosKeys = <String>[
+    'footer', 'top-left', 'top-center', 'top-right', 'middle-left', 'center',
+    'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'
+  ];
+
+  Widget _posDropdown(String label, String value, List<String> keys,
+      ValueChanged<String> onChanged) {
+    final v = keys.contains(value) ? value : keys.first;
+    return Row(
+      children: [
+        SizedBox(
+            width: 140,
+            child: Text(label, style: const TextStyle(fontSize: 12.5))),
+        Expanded(
+          child: DropdownButton<String>(
+            value: v,
+            isExpanded: true,
+            isDense: true,
+            underline: const SizedBox.shrink(),
+            items: keys
+                .map((k) => DropdownMenuItem(
+                    value: k,
+                    child: Text(_gridPositions[k] ?? k,
+                        style: const TextStyle(fontSize: 13))))
+                .toList(),
+            onChanged: _saving ? null : (val) => onChanged(val ?? keys.first),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // A small 2.5:1 preview: background + the company logo/name + a TilesDesign chip
+  // at their chosen positions (approximate — the real /s/ render comes in Phase 4).
+  Widget _bannerPreview(Map<String, dynamic> b) {
+    final source = (b['banner_source'] ?? 'pool').toString();
+    final bg = (b['banner_bg_url'] ?? '').toString();
+    final logo = (b['company_logo_url'] ?? '').toString();
+    final companyPos = (b['company_pos'] ?? 'none').toString();
+    final tdPos = (b['td_pos'] ?? 'footer').toString();
+    final name = (b['name'] ?? '').toString();
+
+    Widget bgWidget;
+    if (source == 'pool') {
+      bgWidget = Container(
+        color: _navy.withValues(alpha: 0.12),
+        alignment: Alignment.center,
+        child: const Text('Shared pool (rotates daily)',
+            style: TextStyle(fontSize: 11, color: _navy)),
+      );
+    } else if (bg.isNotEmpty) {
+      bgWidget = CachedNetworkImage(imageUrl: bg, fit: BoxFit.cover);
+    } else {
+      bgWidget = Container(
+        color: Colors.grey.shade200,
+        alignment: Alignment.center,
+        child: Text(source == 'upload' ? 'Upload a banner' : 'Pick a background',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: AspectRatio(
+        aspectRatio: 2.5,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            bgWidget,
+            // company overlay (library path only; none = hidden)
+            if (source == 'library' && companyPos != 'none')
+              Align(
+                alignment: _alignFor(companyPos),
+                child: Container(
+                  margin: const EdgeInsets.all(6),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.45),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: logo.isNotEmpty
+                      ? Image.network(logo, height: 28)
+                      : Text(name,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold)),
+                ),
+              ),
+            // TilesDesign mark
+            Align(
+              alignment: _alignFor(tdPos),
+              child: Container(
+                margin: const EdgeInsets.all(4),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text('TilesDesign',
+                    style: TextStyle(
+                        fontSize: 9, fontWeight: FontWeight.w600, color: _navy)),
+              ),
+            ),
           ],
         ),
       ),

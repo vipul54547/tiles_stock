@@ -514,6 +514,43 @@ class SupabaseDataService {
     }
   }
 
+  /// Admin: add ONE brand to a stockist directly (the "+ Add brand" button).
+  /// Blank name → server defaults to "Brand N". Returns the new brand id.
+  Future<String> addBrandForStockist(String sequentialId, String name) async {
+    try {
+      final res = await supabase.rpc('admin_add_brand',
+          params: {'p_seq': sequentialId, 'p_name': name});
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Admin: set a brand's banner overlay config. [source] = pool | library |
+  /// upload; [bgUrl] = library background or full uploaded banner; [companyLogoUrl]
+  /// = uploaded brand logo (library path); [companyPos]/[tdPos] = placement keys.
+  Future<void> setBrandBannerConfig(
+    String brandId, {
+    required String source,
+    String bgUrl = '',
+    String companyLogoUrl = '',
+    String companyPos = 'none',
+    String tdPos = 'footer',
+  }) async {
+    try {
+      await supabase.rpc('admin_set_brand_banner_config', params: {
+        'p_brand_id': brandId,
+        'p_source': source,
+        'p_bg_url': bgUrl,
+        'p_company_logo_url': companyLogoUrl,
+        'p_company_pos': companyPos,
+        'p_td_pos': tdPos,
+      });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Stockist creates a stock list under a brand (server enforces the admin-set
   /// stock_list_limit per brand). Returns the new list id. Throws the server
   /// message on failure.
