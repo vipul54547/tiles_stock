@@ -4,6 +4,7 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
+import '../../models/library_entry.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
@@ -50,6 +51,9 @@ class _State extends State<StockistDashboardScreen> {
   // Brands (multi-brand). Switcher shown only when the stockist has >1 brand.
   List<Brand> _brands = [];
   String _brandFilter = 'all'; // 'all' | <brandId>
+  // This stockist's Design Library — to tell whether a brand is set up yet
+  // (its designs/names exist) before letting them upload stock into it.
+  List<LibraryEntry> _library = [];
   // Buyer My-Choice interest in this stockist's designs: designId → (buyers, boxes).
   Map<String, ({int buyers, int boxes})> _inquiries = {};
   // Boxes the stockist added that are held for admin approval (big-stock rule).
@@ -138,6 +142,7 @@ class _State extends State<StockistDashboardScreen> {
     final pending = await _service.myPendingStockBoxes();
     final catalogs = await _service.getCatalogs(_myStockistId);
     final brands = await _service.getMyBrands();
+    final library = await _service.getMyLibrary();
     if (!mounted) return;
     setState(() {
       _designs = data;
@@ -145,6 +150,7 @@ class _State extends State<StockistDashboardScreen> {
       _pendingBoxes = pending;
       _catalogs = catalogs;
       _brands = brands;
+      _library = library;
       // Drop a stale brand filter if that brand no longer exists.
       if (_brandFilter != 'all' && !_brands.any((b) => b.id == _brandFilter)) {
         _brandFilter = 'all';
@@ -799,108 +805,239 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // A catalogue's brand name (multi-brand). Empty when unknown/legacy.
-  String _brandNameOf(StockCatalog c) {
-    final m = _brands.where((b) => b.id == c.brandId).toList();
-    return m.isEmpty ? '' : m.first.name;
+  // Is this brand set up in the Design Library yet? (Has at least one master
+  // carrying this brand's name; the default brand's masters always count.)
+  bool _brandHasLibrary(Brand b) =>
+      _library.any((e) => e.aliases.containsKey(b.id)) ||
+      (b.isDefault && _library.isNotEmpty);
+
+  // Does this brand already have stock (designs in any of its lists)?
+  bool _brandHasStock(Brand b) {
+    final listIds = _listsForBrand(b).map((c) => c.id).toSet();
+    return _designs.any((d) => listIds.contains(d.catalogId));
   }
 
-  // The Upload button asks WHICH stock list to upload into and then which source
-  // (PDF or Excel). The list choices RESPECT the dashboard's brand filter so a
-  // brand's stock can never land in another brand's list; when no brand is
-  // filtered, the lists are grouped under their brand so the target is explicit.
+  // A brand-new brand: no Library designs AND no stock yet. Per the flow, the
+  // stockist must set up its designs (Mapping) before uploading stock into it.
+  bool _brandNeedsSetup(Brand b) => !_brandHasLibrary(b) && !_brandHasStock(b);
+
+  // A brand's active stock lists (legacy null-brand lists count as the default
+  // brand's). Every brand owns at least its 1 default list.
+  List<StockCatalog> _listsForBrand(Brand b) =>
+      _catalogs
+          .where((c) =>
+              c.isActive &&
+              (c.brandId == b.id || (c.brandId == null && b.isDefault)))
+          .toList()
+        ..sort((x, y) => x.sortOrder.compareTo(y.sortOrder));
+
+  // Upload is BRAND-FIRST: a stock list always belongs to one brand, so you pick
+  // the BRAND, its stock list is taken automatically (only asked when the brand
+  // has more than one), then the source. The chosen list — and therefore its
+  // brand — is passed to the importer. PDF is offered only for the main brand
+  // (others import via Excel, decision #5).
   void _showUploadSourceSheet() {
-    // Only the active lists in the current brand view (all brands when 'all').
-    final lists = _filterLists;
-    // Group by brand so the picker shows which brand each list belongs to.
-    final groups = <String, List<StockCatalog>>{};
-    for (final c in lists) {
-      final bn = _brandNameOf(c);
-      groups.putIfAbsent(bn.isEmpty ? 'Other' : bn, () => []).add(c);
+    final brands = _brands.where((b) => _listsForBrand(b).isNotEmpty).toList();
+    if (brands.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No stock lists to upload into yet.')));
+      return;
     }
-    var catId = lists.isEmpty ? null : lists.first.id;
-    final showLabels = groups.length > 1;
+    Brand? brandOf(String? id) {
+      for (final b in brands) {
+        if (b.id == id) return b;
+      }
+      return null;
+    }
+
+    // Default to the brand currently being viewed on the dashboard, else first.
+    var brandId =
+        brands.any((b) => b.id == _brandFilter) ? _brandFilter : brands.first.id;
+    String? catId;
+
     showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (lists.length > 1) ...[
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
-                  child: Text('Upload to which stock list?',
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 14)),
-                ),
-                for (final entry in groups.entries) ...[
-                  if (showLabels)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
-                      child: Row(
-                        children: [
-                          Icon(Icons.sell_outlined,
-                              size: 13, color: Colors.grey.shade600),
-                          const SizedBox(width: 4),
-                          Text(entry.key,
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey.shade700)),
-                        ],
-                      ),
-                    ),
+        builder: (ctx, setS) {
+          final brand = brandOf(brandId) ?? brands.first;
+          final lists = _listsForBrand(brand);
+          // Keep the chosen list valid for the selected brand.
+          if (catId == null || !lists.any((c) => c.id == catId)) {
+            catId = lists.isEmpty ? null : lists.first.id;
+          }
+          final isMainBrand = brand.isDefault;
+          final needsSetup = _brandNeedsSetup(brand);
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 1) Brand — only when the stockist runs more than one.
+                if (brands.length > 1) ...[
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
+                    child: Text('Upload to which brand?',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 14)),
+                  ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Wrap(
                       spacing: 8,
                       children: [
-                        for (final c in entry.value)
+                        for (final b in brands)
+                          ChoiceChip(
+                            avatar: Icon(Icons.sell_outlined,
+                                size: 15,
+                                color: brandId == b.id
+                                    ? const Color(0xFF1B4F72)
+                                    : Colors.grey.shade500),
+                            label: Text(b.name),
+                            selected: brandId == b.id,
+                            selectedColor:
+                                const Color(0xFF1B4F72).withValues(alpha: 0.15),
+                            onSelected: (_) => setS(() {
+                              brandId = b.id;
+                              catId = null; // re-default to the brand's list
+                            }),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                // 2) Stock list — picked only when the brand has more than one;
+                //    otherwise its single default list is shown for confirmation.
+                if (lists.length > 1) ...[
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 8, 16, 6),
+                    child: Text('Which stock list?',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 14)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final c in lists)
                           ChoiceChip(
                             label: Text(c.name),
                             selected: catId == c.id,
-                            selectedColor: const Color(0xFF1B4F72)
-                                .withValues(alpha: 0.15),
+                            selectedColor:
+                                const Color(0xFF1B4F72).withValues(alpha: 0.15),
                             onSelected: (_) => setS(() => catId = c.id),
                           ),
                       ],
                     ),
                   ),
-                ],
+                ] else if (lists.length == 1)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                    child: Text('Stock list: ${lists.first.name}',
+                        style: TextStyle(
+                            fontSize: 12.5, color: Colors.grey.shade600)),
+                  ),
                 const Divider(height: 20),
+                // 3) Source — gated by whether the brand is set up yet.
+                if (needsSetup) ...[
+                  // Brand-new brand: its designs aren't in the Library, so stock
+                  // has nothing to attach to. Start by mapping the designs in.
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF8E1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFFFE082)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline,
+                            size: 16, color: Colors.orange.shade800),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'This brand has no designs yet. Set up its designs '
+                            'in your Library first, then upload stock.',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.orange.shade900),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.account_tree_outlined,
+                        color: Color(0xFF1B4F72)),
+                    title: const Text('Set up designs — Mapping (Excel)'),
+                    subtitle: const Text(
+                        "Add this brand's designs & names to your Library"),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await context.push('/stockist/library/import-mapping');
+                      _load();
+                    },
+                  ),
+                  // The main brand can also seed its Library straight from a PDF
+                  // (it carries photos + names).
+                  if (isMainBrand)
+                    ListTile(
+                      leading: const Icon(Icons.picture_as_pdf,
+                          color: Color(0xFF1B4F72)),
+                      title: const Text('Set up from a PDF'),
+                      subtitle:
+                          const Text('PDF adds your main brand designs + photos'),
+                      onTap: catId == null
+                          ? null
+                          : () async {
+                              Navigator.pop(ctx);
+                              await context.push('/stockist/stock/upload',
+                                  extra: catId);
+                              _load();
+                            },
+                    ),
+                ] else ...[
+                  // Brand is set up — normal stock upload. PDF is main-brand only.
+                  if (isMainBrand)
+                    ListTile(
+                      leading: const Icon(Icons.picture_as_pdf,
+                          color: Color(0xFF1B4F72)),
+                      title: const Text('Upload PDF stock report'),
+                      subtitle: const Text('Parses designs + tile photos'),
+                      onTap: catId == null
+                          ? null
+                          : () async {
+                              Navigator.pop(ctx);
+                              await context.push('/stockist/stock/upload',
+                                  extra: catId);
+                              _load();
+                            },
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.table_view_rounded,
+                        color: Color(0xFF2E7D32)),
+                    title: const Text('Import Excel stock list'),
+                    subtitle: Text(isMainBrand
+                        ? 'Design, size, quality, boxes — photos reused'
+                        : 'Other brands upload by Excel'),
+                    onTap: catId == null
+                        ? null
+                        : () async {
+                            Navigator.pop(ctx);
+                            await context.push('/stockist/stock/import-excel',
+                                extra: catId);
+                            _load();
+                          },
+                  ),
+                ],
+                const SizedBox(height: 8),
               ],
-              ListTile(
-                leading:
-                    const Icon(Icons.picture_as_pdf, color: Color(0xFF1B4F72)),
-                title: const Text('Upload PDF stock report'),
-                subtitle: const Text('Parses designs + tile photos'),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await context.push('/stockist/stock/upload', extra: catId);
-                  _load();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.table_view_rounded,
-                    color: Color(0xFF2E7D32)),
-                title: const Text('Import Excel stock list'),
-                subtitle:
-                    const Text('Design, size, quality, boxes — photos reused'),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  await context.push('/stockist/stock/import-excel',
-                      extra: catId);
-                  _load();
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
