@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/brand.dart';
@@ -148,7 +149,21 @@ class _State extends State<MyDesignLibraryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
-      appBar: AppBar(title: const Text('My Design Library')),
+      appBar: AppBar(
+        title: const Text('My Design Library'),
+        actions: [
+          if (_brands.length > 1)
+            IconButton(
+              icon: const Icon(Icons.account_tree_outlined),
+              tooltip: 'Import name mapping (Excel)',
+              onPressed: () async {
+                final done = await context
+                    .push<bool>('/stockist/library/import-mapping');
+                if (done == true) _load();
+              },
+            ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openEditor(),
         backgroundColor: _navy,

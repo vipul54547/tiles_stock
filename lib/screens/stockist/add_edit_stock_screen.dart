@@ -48,6 +48,16 @@ class _State extends State<AddEditStockScreen> {
   List<String> _sizes    = kAllowedSizes; // replaced by admin master list on load
   List<StockCatalog> _catalogs = []; // the stockist's catalogs
   String? _catalogId; // which catalog this design belongs to
+  String? _defaultBrandId; // fallback brand for legacy catalogs with no brand
+
+  // The brand this design belongs to (its list's brand, else default). Used to
+  // scope a newly-snapped photo's contribution to this stockist's own library.
+  String? get _designBrandId {
+    for (final c in _catalogs) {
+      if (c.id == _catalogId) return c.brandId ?? _defaultBrandId;
+    }
+    return _defaultBrandId;
+  }
   final _qualities  = ['Premium', 'Standard'];
   final _stockTypes = ['Both', 'Regular', 'One Time'];
 
@@ -83,8 +93,11 @@ class _State extends State<AddEditStockScreen> {
   Future<void> _loadCatalogs() async {
     if (currentStockistUUID.isEmpty) return;
     final cats = await _service.getCatalogs(currentStockistUUID);
+    final brands = await _service.getMyBrands();
     if (!mounted) return;
+    final def = brands.where((b) => b.isDefault).toList();
     setState(() {
+      _defaultBrandId = def.isEmpty ? null : def.first.id;
       _catalogs = cats.where((c) => c.isActive).toList();
       if (!isEdit) {
         _catalogId ??= _catalogs.isEmpty ? null : _catalogs.first.id;
@@ -314,17 +327,16 @@ class _State extends State<AddEditStockScreen> {
       await _service.upsertSurfaceAlias(currentStockistUUID, aliasRaw, _surface);
     }
 
-    // Contribute a newly added photo to the shared design-image library (first
-    // writer wins), so the next stockist's Excel/PDF import of the same design
-    // (name + size) auto-fills this picture. This is what makes a manually
-    // snapped photo fill everyone's blank rows.
-    if (ok && newUrls.isNotEmpty) {
-      await _service.contributeDesignImage(
+    // Contribute a newly-snapped photo to THIS stockist's own Design Library on
+    // a NEW design add only (decision #3 — never on an edit/replace, which may be
+    // a correction). First-writer-wins inside the RPC. Scoped to the design's
+    // brand so a later Excel/PDF import of the same name+size auto-fills it.
+    if (ok && !isEdit && newUrls.isNotEmpty && _designBrandId != null) {
+      await _service.libraryContribute(
+        brandId: _designBrandId!,
         name: _nameCtrl.text.trim(),
         size: _size,
         imageUrl: newUrls.first,
-        source: 'camera',
-        stockistUUID: currentStockistUUID,
       );
     }
 

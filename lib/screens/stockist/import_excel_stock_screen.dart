@@ -8,6 +8,8 @@ import '../../services/stock_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/tile_size.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/brand.dart';
+import '../../models/library_entry.dart';
 import '../../utils/finishes.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -84,9 +86,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   final _stockSvc = StockService();
 
   List<_XlsRow> _rows = [];
-  // Shared-library photos matched for the preview (name+size → url). Excel has no
-  // images, so this is the only photo shown per row before import.
+  // This stockist's OWN Design Library photos matched for the preview
+  // (name+size → url), scoped to the target list's brand. Excel carries no
+  // images, so this is the only photo per row; never borrows across stockists.
   Map<String, String> _libImages = {};
+  List<LibraryEntry> _library = []; // this stockist's own master designs
+  String? _defaultBrandId;
   bool _parsed = false;
   bool _importing = false;
   bool _loading = false;
@@ -140,12 +145,47 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final catalogs = currentStockistUUID.isEmpty
           ? <StockCatalog>[]
           : await _dataSvc.getCatalogs(currentStockistUUID);
+      final brands = currentStockistUUID.isEmpty
+          ? <Brand>[]
+          : await _dataSvc.getMyBrands();
+      _library = currentStockistUUID.isEmpty
+          ? <LibraryEntry>[]
+          : await _dataSvc.getMyLibrary();
+      final def = brands.where((b) => b.isDefault).toList();
+      _defaultBrandId = def.isEmpty ? null : def.first.id;
       if (names.isNotEmpty) _finishes = names;
       if (sizeNames.isNotEmpty) _sizes = sizeNames;
       _tileSizes = tileSizes;
       _catalogs = catalogs.where((c) => c.isActive).toList();
       _catalogId ??= _defaultCatalogId();
     } catch (_) {/* keep fallbacks */}
+  }
+
+  // Brand the import writes to: the chosen list's brand, else the default brand.
+  String? get _uploadBrandId {
+    for (final c in _catalogs) {
+      if (c.id == _catalogId) return c.brandId ?? _defaultBrandId;
+    }
+    return _defaultBrandId;
+  }
+
+  // (name+size → own image url) map from this stockist's library for the target
+  // list's brand, across all sizes present. Keyed by [designImageKey]; includes
+  // the master name and the brand alias so a row matches whichever name was used.
+  // Never borrows another stockist's photo.
+  Map<String, String> _ownLibImages() {
+    final brand = _uploadBrandId;
+    final out = <String, String>{};
+    for (final e in _library) {
+      if (e.imageUrl.isEmpty) continue;
+      final names = <String>{e.masterName};
+      final alias = brand == null ? null : e.aliases[brand];
+      if (alias != null && alias.isNotEmpty) names.add(alias);
+      for (final n in names) {
+        out[designImageKey(n, e.size)] = e.imageUrl;
+      }
+    }
+    return out;
   }
 
   // Default import target: first active public catalog, else the first.
@@ -265,13 +305,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
     _computeActions(parsed);
 
-    // Auto-match shared-library photos by name+size so the preview shows a
-    // picture for each row (Excel carries none). Text-only query; thumbnails
-    // load lazily for visible rows.
-    final lib = await _dataSvc.lookupDesignImages(
-        [for (final r in parsed) if (r.valid) (r.name, r.size)]);
-
-    setState(() { _rows = parsed; _parsed = true; _done = 0; _libImages = lib; });
+    // Auto-match this stockist's OWN library photos by name+size so the preview
+    // shows a picture for each row (Excel carries none). Local lookup; thumbnails
+    // load lazily for visible rows. Never borrows another stockist's photo.
+    setState(() {
+      _rows = parsed; _parsed = true; _done = 0; _libImages = _ownLibImages();
+    });
   }
 
   // Validate required fields/values; align each finish to an admin finish.
@@ -441,10 +480,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     int updated = 0, created = 0, finishFixed = 0, imagesFromLibrary = 0;
     final learned = <String, String>{};
 
-    // Excel carries no photos — pull them from the shared design-image library
-    // (populated by earlier PDF/camera imports) by (name + size).
-    final libImages = await _dataSvc
-        .lookupDesignImages([for (final r in toDo) (r.name, r.size)]);
+    // Excel carries no photos — fill them from THIS stockist's own Design Library
+    // (by the target brand's design name / master name + size). Never borrows.
+    final libImages = _ownLibImages();
 
     for (final r in toDo) {
       final libUrl = libImages[designImageKey(r.name, r.size)];
@@ -702,7 +740,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                         .toList(),
                     onChanged: _importing
                         ? null
-                        : (v) => setState(() => _catalogId = v ?? _catalogId),
+                        : (v) => setState(() {
+                              _catalogId = v ?? _catalogId;
+                              // Switching list may switch brand → refresh which
+                              // own-library photos apply.
+                              _libImages = _ownLibImages();
+                            }),
                   ),
                 ),
               ],

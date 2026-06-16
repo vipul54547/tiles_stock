@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/pdf_import_service.dart';
@@ -8,6 +9,8 @@ import '../../services/cloudinary_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/tile_size.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/brand.dart';
+import '../../models/library_entry.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -67,9 +70,9 @@ class _State extends State<UploadStockScreen> {
 
   PdfImportResult?   _parsed;
   List<_Resolved>    _rows      = [];
-  // Shared-library photos matched for the preview (name+size → url). Shown as the
-  // thumbnail for rows the PDF carried no image for, so the stockist sees the
-  // auto-matched picture before importing.
+  // This stockist's OWN Design Library photos matched for the preview
+  // (name+size → url, scoped to the upload brand). Shown as the thumbnail for
+  // rows the PDF carried no image for; never borrows another stockist's photo.
   Map<String, String> _libImages = {};
   bool  _loading   = false;
   bool  _importing = false;
@@ -94,10 +97,26 @@ class _State extends State<UploadStockScreen> {
   List<String>        _finishes = kFinishes;     // fallback until loaded
   List<String>        _sizes    = kAllowedSizes;  // admin master, loaded once
   List<TileSize>      _tileSizes = [];           // full size rows (with aliases)
-  List<StockCatalog>  _catalogs  = [];           // stockist's stock catalogs
+  List<StockCatalog>  _catalogs  = [];           // default-brand stock lists only
   String?             _catalogId;                // chosen upload target catalog
   Map<String, String> _aliases  = {};            // normalisedRaw → finish name
+  // Multi-brand: PDF upload is the DEFAULT brand's only ([[project_stockist_library]]
+  // decision #5 — other brands import via Excel). The library + contributions are
+  // scoped to this brand.
+  String?             _defaultBrandId;
+  List<LibraryEntry>  _library  = [];            // this stockist's own master designs
+  // True when the screen was opened from a non-default brand's list — PDF isn't
+  // allowed there, so we show a "use Excel" block instead of the picker.
+  bool _brandBlocked = false;
   bool _configLoaded = false;
+
+  // Brand the current upload writes to: the chosen list's brand, else default.
+  String? get _uploadBrandId {
+    for (final c in _catalogs) {
+      if (c.id == _catalogId) return c.brandId ?? _defaultBrandId;
+    }
+    return _defaultBrandId;
+  }
 
   @override
   void initState() {
@@ -120,14 +139,34 @@ class _State extends State<UploadStockScreen> {
       final aliases = currentStockistUUID.isEmpty
           ? <String, String>{}
           : await _dataSvc.getSurfaceAliases(currentStockistUUID);
+      final brands = currentStockistUUID.isEmpty
+          ? <Brand>[]
+          : await _dataSvc.getMyBrands();
+      final library = currentStockistUUID.isEmpty
+          ? <LibraryEntry>[]
+          : await _dataSvc.getMyLibrary();
       if (!mounted) return;
+      final defaultBrand = brands.where((b) => b.isDefault).toList();
+      final defaultBrandId = defaultBrand.isEmpty ? null : defaultBrand.first.id;
+      final active = catalogs.where((c) => c.isActive).toList();
+      // PDF upload is the default brand's only. Restrict the target lists, and
+      // flag a block when the screen was opened from another brand's list.
+      bool isDefaultCat(StockCatalog c) =>
+          c.brandId == null || c.brandId == defaultBrandId;
+      final entry = active.where((c) => c.id == widget.initialCatalogId).toList();
       setState(() {
         if (names.isNotEmpty) _finishes = names;
         if (sizeNames.isNotEmpty) _sizes = sizeNames;
         _tileSizes = tileSizes;
-        _catalogs = catalogs.where((c) => c.isActive).toList();
-        // Default to the first public catalog (the usual marketplace stock).
-        _catalogId ??= _defaultCatalogId();
+        _defaultBrandId = defaultBrandId;
+        _library = library;
+        _catalogs = active.where(isDefaultCat).toList();
+        _brandBlocked =
+            entry.isNotEmpty && !isDefaultCat(entry.first);
+        // Keep the chosen list only if it's a default-brand one; else default.
+        if (_catalogId == null || !_catalogs.any((c) => c.id == _catalogId)) {
+          _catalogId = _defaultCatalogId();
+        }
         _aliases = aliases;
         _configLoaded = true;
       });
@@ -151,6 +190,30 @@ class _State extends State<UploadStockScreen> {
       row.surface = _finishes.contains('None') ? 'None' : row.surface;
     }
     return rawKey;
+  }
+
+  // A normalised size key so a library master at the same size matches even if
+  // the stored format differs slightly (mirrors the Excel importer).
+  String _sizeKey(String s) => s.toLowerCase().replaceAll(RegExp(r'[^0-9x]'), '');
+
+  // Builds a (name+size → own image url) map from this stockist's library for the
+  // current upload brand + size. Keyed by [designImageKey] so the existing row
+  // lookups work unchanged. Includes both the master name and the brand alias so
+  // a row matches whichever name the PDF used.
+  Map<String, String> _ownLibImages() {
+    final brand = _uploadBrandId;
+    final out = <String, String>{};
+    for (final e in _library) {
+      if (e.imageUrl.isEmpty) continue;
+      if (_sizeKey(e.size) != _sizeKey(_size)) continue;
+      final names = <String>{e.masterName};
+      final alias = brand == null ? null : e.aliases[brand];
+      if (alias != null && alias.isNotEmpty) names.add(alias);
+      for (final n in names) {
+        out[designImageKey(n, _size)] = e.imageUrl;
+      }
+    }
+    return out;
   }
 
   // The stockist's own finish wording from the PDF (full raw text preferred),
@@ -204,11 +267,10 @@ class _State extends State<UploadStockScreen> {
       return _Resolved(row, match, rawKey: rawKey);
     }).toList();
 
-    // Look up shared-library photos so the preview can show an auto-matched
-    // picture for rows the PDF had no image for. Text-only query (URLs); the
-    // thumbnails themselves load lazily, only for visible rows.
-    final lib = await _dataSvc
-        .lookupDesignImages([for (final r in rows) (r.row.name, _size)]);
+    // Match each row against THIS stockist's own library (by the upload brand's
+    // design name / master name + size) so the preview shows their own photo for
+    // rows the PDF had no image for. Never borrows another stockist's photo.
+    final lib = _ownLibImages();
 
     setState(() { _loading = false; _loadingStep = ''; _libImages = lib; });
     if (!mounted) return;
@@ -701,11 +763,11 @@ class _State extends State<UploadStockScreen> {
     int imagesFromLibrary = 0;
     String? lastImageError;
 
-    // Shared design-image library: photos contributed by earlier imports (from
-    // any stockist), keyed by (name + size). Used to fill rows whose PDF had no
-    // photo, and freshly-uploaded photos are contributed back below.
-    final libImages = await _dataSvc.lookupDesignImages(
-        [for (final r in _rows) (r.row.name, _size)]);
+    // This stockist's OWN library photos (brand + size scoped), to fill rows
+    // whose PDF carried no photo. Never borrows across stockists. Freshly
+    // uploaded PDF photos are contributed back to the library on new-design adds.
+    final libImages = _libImages;
+    final brandId = _uploadBrandId;
     final contributions = <({String name, String size, String url})>[];
 
     // Upload a tile photo extracted from the PDF. Tracks success/failure
@@ -726,17 +788,11 @@ class _State extends State<UploadStockScreen> {
       return null;
     }
 
-    // Resolve a row's photo: upload the one extracted from the PDF (and queue it
-    // to enrich the shared library), or fall back to a library image when the
-    // PDF carried none for this design.
+    // Resolve a row's photo: upload the one extracted from the PDF, or fall back
+    // to this stockist's own library image when the PDF carried none. (Fresh PDF
+    // photos are contributed to the library only on a new-design add, below.)
     Future<String?> resolvePhoto(PdfDesignRow row) async {
-      if (row.imageBytes != null) {
-        final url = await uploadPhoto(row);
-        if (url != null) {
-          contributions.add((name: row.name, size: _size, url: url));
-        }
-        return url;
-      }
+      if (row.imageBytes != null) return await uploadPhoto(row);
       final libUrl = libImages[designImageKey(row.name, _size)];
       if (libUrl != null) imagesFromLibrary++;
       return libUrl;
@@ -789,6 +845,12 @@ class _State extends State<UploadStockScreen> {
           catalogId:     _catalogId,
         );
         if (newId != null) {
+          // Contribute a freshly-uploaded PDF photo to THIS stockist's own
+          // library on the blank/new add (decision #3 — new adds only, never on
+          // a change). First-writer-wins inside the RPC.
+          if (r.row.imageBytes != null && url != null) {
+            contributions.add((name: r.row.name, size: _size, url: url));
+          }
           final ok = await _stockSvc.addStock(
             designId:     newId,
             stockistUUID: currentStockistUUID,
@@ -802,10 +864,14 @@ class _State extends State<UploadStockScreen> {
       }
     }
 
-    // Enrich the shared library with every photo this import uploaded, so the
-    // next stockist's Excel/PDF (even one with no images) can reuse them.
-    await _dataSvc.contributeDesignImages(contributions,
-        source: 'pdf', stockistUUID: currentStockistUUID);
+    // Grow this stockist's OWN Design Library with the photos this import
+    // uploaded (brand + size scoped), so their next Excel/PDF auto-fills them.
+    if (brandId != null) {
+      for (final c in contributions) {
+        await _dataSvc.libraryContribute(
+            brandId: brandId, name: c.name, size: c.size, imageUrl: c.url);
+      }
+    }
 
     // Learn finish alignments: remember each raw PDF surface word → the finish
     // it ended up as, so the next PDF from this stockist auto-aligns. Deduped
@@ -865,7 +931,9 @@ class _State extends State<UploadStockScreen> {
         ),
         title: const Text('Upload Stock PDF'),
       ),
-      body: (_loading || _importing)
+      body: _brandBlocked
+          ? _buildBrandBlocked()
+          : (_loading || _importing)
           ? _buildLoading()
           : _parsed == null
               ? _buildPicker()
@@ -899,6 +967,46 @@ class _State extends State<UploadStockScreen> {
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
             ),
           ],
+        ),
+      );
+
+  // ── Brand-blocked notice ──────────────────────────────────────────────────
+  // PDF upload is the default brand's only ([[project_stockist_library]] #5).
+  // When opened from another brand's list, send the stockist to Excel instead.
+  Widget _buildBrandBlocked() => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.picture_as_pdf_outlined,
+                  size: 56, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              const Text('PDF upload is for your main brand only',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              Text(
+                'Other brands add stock by Excel — their photos come from your '
+                'Design Library. Import an Excel list for this brand instead.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  context.push('/stockist/stock/import-excel',
+                      extra: widget.initialCatalogId);
+                },
+                icon: const Icon(Icons.table_view_rounded),
+                label: const Text('Import Excel instead'),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white),
+              ),
+            ],
+          ),
         ),
       );
 

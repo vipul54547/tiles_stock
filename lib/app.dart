@@ -56,6 +56,7 @@ import 'screens/end_user/dispatch_history_screen.dart';
 import 'screens/stockist/upload_stock_screen.dart';
 import 'screens/stockist/manage_catalogs_screen.dart';
 import 'screens/stockist/my_design_library_screen.dart';
+import 'screens/stockist/import_mapping_excel_screen.dart';
 import 'screens/stockist/import_excel_stock_screen.dart';
 import 'screens/stockist/add_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
@@ -224,6 +225,10 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/stockist/library',
       builder: (_, __) => const MyDesignLibraryScreen(),
+    ),
+    GoRoute(
+      path: '/stockist/library/import-mapping',
+      builder: (_, __) => const ImportMappingExcelScreen(),
     ),
     GoRoute(
       path: '/stockist/stock/import-excel',

@@ -437,6 +437,54 @@ class SupabaseDataService {
     }
   }
 
+  /// Contributes a freshly-uploaded photo to THIS stockist's own library on a
+  /// blank/new design add (PDF row or camera). First-writer-wins — an existing
+  /// master image is never overwritten. Resolves/creates the master by the
+  /// brand's design name + size and ensures the brand alias. Never borrows or
+  /// touches another stockist's library. No-op on empty key/url.
+  Future<void> libraryContribute({
+    required String brandId,
+    required String name,
+    required String size,
+    required String imageUrl,
+  }) async {
+    if (brandId.isEmpty || name.trim().isEmpty || size.trim().isEmpty) return;
+    try {
+      await supabase.rpc('library_contribute', params: {
+        'p_brand_id': brandId,
+        'p_name': name,
+        'p_size': size,
+        'p_image_url': imageUrl,
+      });
+    } catch (e) {
+      debugPrint('libraryContribute failed ("$name"): $e');
+    }
+  }
+
+  /// Mapping-Excel bulk hook: resolves/creates a master by (master name + size)
+  /// and MERGES the given per-brand aliases (brandId -> design name) in without
+  /// deleting existing ones. Returns the master id. Throws the server message.
+  Future<String> libraryMapUpsert({
+    required String size,
+    required String masterName,
+    Map<String, String> aliases = const {},
+  }) async {
+    final aliasJson = aliases.entries
+        .where((e) => e.value.trim().isNotEmpty)
+        .map((e) => {'brand_id': e.key, 'name': e.value.trim()})
+        .toList();
+    try {
+      final res = await supabase.rpc('library_map_upsert', params: {
+        'p_size': size,
+        'p_master_name': masterName,
+        'p_aliases': aliasJson,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Sets a brand's logo (Cloudinary URL); pass '' to clear.
   Future<void> setBrandLogo(String id, String logoUrl) async {
     try {
