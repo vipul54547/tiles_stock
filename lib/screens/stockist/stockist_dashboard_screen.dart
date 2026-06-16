@@ -799,20 +799,27 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Default upload target: the first active stock list.
-  String? _defaultUploadCatalogId() {
-    for (final c in _catalogs) {
-      if (c.isActive) return c.id;
-    }
-    return _catalogs.isEmpty ? null : _catalogs.first.id;
+  // A catalogue's brand name (multi-brand). Empty when unknown/legacy.
+  String _brandNameOf(StockCatalog c) {
+    final m = _brands.where((b) => b.id == c.brandId).toList();
+    return m.isEmpty ? '' : m.first.name;
   }
 
-  // The Upload button asks WHICH stock list to upload into (only when the
-  // stockist has more than one list) and then which source (PDF or Excel).
-  // The chosen list is passed to the import screen.
+  // The Upload button asks WHICH stock list to upload into and then which source
+  // (PDF or Excel). The list choices RESPECT the dashboard's brand filter so a
+  // brand's stock can never land in another brand's list; when no brand is
+  // filtered, the lists are grouped under their brand so the target is explicit.
   void _showUploadSourceSheet() {
-    var catId = _defaultUploadCatalogId();
-    final activeCatalogs = _catalogs.where((c) => c.isActive).toList();
+    // Only the active lists in the current brand view (all brands when 'all').
+    final lists = _filterLists;
+    // Group by brand so the picker shows which brand each list belongs to.
+    final groups = <String, List<StockCatalog>>{};
+    for (final c in lists) {
+      final bn = _brandNameOf(c);
+      groups.putIfAbsent(bn.isEmpty ? 'Other' : bn, () => []).add(c);
+    }
+    var catId = lists.isEmpty ? null : lists.first.id;
+    final showLabels = groups.length > 1;
     showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -823,29 +830,47 @@ class _State extends State<StockistDashboardScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (activeCatalogs.length > 1) ...[
+              if (lists.length > 1) ...[
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
                   child: Text('Upload to which stock list?',
                       style: TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 14)),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Wrap(
-                    spacing: 8,
-                    children: [
-                      for (final c in activeCatalogs)
-                        ChoiceChip(
-                          label: Text(c.name),
-                          selected: catId == c.id,
-                          selectedColor: const Color(0xFF1B4F72)
-                              .withValues(alpha: 0.15),
-                          onSelected: (_) => setS(() => catId = c.id),
-                        ),
-                    ],
+                for (final entry in groups.entries) ...[
+                  if (showLabels)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+                      child: Row(
+                        children: [
+                          Icon(Icons.sell_outlined,
+                              size: 13, color: Colors.grey.shade600),
+                          const SizedBox(width: 4),
+                          Text(entry.key,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade700)),
+                        ],
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+                    child: Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final c in entry.value)
+                          ChoiceChip(
+                            label: Text(c.name),
+                            selected: catId == c.id,
+                            selectedColor: const Color(0xFF1B4F72)
+                                .withValues(alpha: 0.15),
+                            onSelected: (_) => setS(() => catId = c.id),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
                 const Divider(height: 20),
               ],
               ListTile(
@@ -896,7 +921,10 @@ class _State extends State<StockistDashboardScreen> {
               _showUploadSourceSheet),
           const SizedBox(width: 6),
           _actionBtn('Add', Icons.add, const Color(0xFF2E7D32), () async {
-            await context.push('/stockist/stock/add');
+            // Default the new design to a list in the brand being viewed.
+            final lists = _filterLists;
+            await context.push('/stockist/stock/add',
+                extra: lists.isEmpty ? null : lists.first.id);
             _load();
           }),
           const SizedBox(width: 6),

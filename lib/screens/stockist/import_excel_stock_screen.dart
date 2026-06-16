@@ -107,6 +107,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   String? _catalogId; // chosen target catalog
   Map<String, String> _aliases = {};
   List<TileDesign> _existing = [];
+  List<Brand> _brands = []; // for labelling each list with its brand
+
+  // A catalogue's brand name (multi-brand), so the target picker is unambiguous.
+  String _brandNameOf(StockCatalog c) {
+    final m = _brands.where((b) => b.id == c.brandId).toList();
+    return m.isEmpty ? '' : m.first.name;
+  }
 
   @override
   void initState() {
@@ -148,6 +155,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final brands = currentStockistUUID.isEmpty
           ? <Brand>[]
           : await _dataSvc.getMyBrands();
+      _brands = brands;
       _library = currentStockistUUID.isEmpty
           ? <LibraryEntry>[]
           : await _dataSvc.getMyLibrary();
@@ -735,7 +743,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                         .map((c) => DropdownMenuItem(
                             value: c.id,
                             child: Text(
-                                '${c.name}${c.isPrivate ? '  (private)' : ''}',
+                                '${_brands.length > 1 && _brandNameOf(c).isNotEmpty ? '${_brandNameOf(c)} · ' : ''}${c.name}${c.isPrivate ? '  (private)' : ''}',
                                 style: const TextStyle(fontSize: 13))))
                         .toList(),
                     onChanged: _importing

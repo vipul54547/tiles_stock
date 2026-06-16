@@ -180,7 +180,8 @@ final GoRouter _router = GoRouter(
 
         path: '/stockist/stock/add',
 
-        builder: (_, __) => const AddEditStockScreen()),
+        builder: (_, state) =>
+            AddEditStockScreen(initialCatalogId: state.extra as String?)),
 
     GoRoute(
 

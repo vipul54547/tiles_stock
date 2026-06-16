@@ -7,6 +7,7 @@ import '../../services/cloudinary_service.dart';
 import '../../models/choice_state.dart';
 import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/brand.dart';
 import '../../models/library_entry.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -21,7 +22,11 @@ import '../../widgets/unsaved_changes.dart';
 // here is stock attributes (boxes, quality, finish, list…).
 class AddEditStockScreen extends StatefulWidget {
   final String? designId;
-  const AddEditStockScreen({super.key, this.designId});
+  /// In add mode, the stock list to default to (its brand). Lets the dashboard
+  /// open Add already pointed at the brand the stockist was viewing, so a new
+  /// design never silently lands in another brand's list.
+  final String? initialCatalogId;
+  const AddEditStockScreen({super.key, this.designId, this.initialCatalogId});
   @override
   State<AddEditStockScreen> createState() => _State();
 }
@@ -56,6 +61,13 @@ class _State extends State<AddEditStockScreen> {
   List<StockCatalog> _catalogs = []; // the stockist's catalogs
   String? _catalogId; // which catalog this design belongs to
   String? _defaultBrandId; // fallback brand for legacy catalogs with no brand
+  List<Brand> _brands = []; // for labelling each list with its brand
+
+  // A catalogue's brand name (multi-brand), so the list picker is unambiguous.
+  String _brandNameOf(StockCatalog c) {
+    final m = _brands.where((b) => b.id == c.brandId).toList();
+    return m.isEmpty ? '' : m.first.name;
+  }
   List<LibraryEntry> _masters = []; // this stockist's library, for the add picker
   LibraryEntry? _selectedMaster;    // add mode: the chosen master
   final _qualities  = ['Premium', 'Standard'];
@@ -112,9 +124,15 @@ class _State extends State<AddEditStockScreen> {
     if (!mounted) return;
     final def = brands.where((b) => b.isDefault).toList();
     setState(() {
+      _brands = brands;
       _defaultBrandId = def.isEmpty ? null : def.first.id;
       _catalogs = cats.where((c) => c.isActive).toList();
       if (!isEdit) {
+        // Prefer the list the dashboard passed (the brand being viewed).
+        final initial = widget.initialCatalogId;
+        if (initial != null && _catalogs.any((c) => c.id == initial)) {
+          _catalogId ??= initial;
+        }
         _catalogId ??= _catalogs.isEmpty ? null : _catalogs.first.id;
       }
     });
@@ -610,7 +628,11 @@ class _State extends State<AddEditStockScreen> {
               underline: const SizedBox.shrink(),
               items: _catalogs
                   .map((c) => DropdownMenuItem(
-                      value: c.id, child: Text(c.name)))
+                      value: c.id,
+                      child: Text(_brands.length > 1 &&
+                              _brandNameOf(c).isNotEmpty
+                          ? '${_brandNameOf(c)} · ${c.name}'
+                          : c.name)))
                   .toList(),
               onChanged: (v) => setState(() {
                 _catalogId = v ?? _catalogId;
