@@ -463,9 +463,34 @@ class SupabaseDataService {
   }
 
   /// Admin: set how many stock lists per brand a stockist may create.
+  /// (Stockist-wide; superseded by the per-brand limit below — kept for safety.)
   Future<void> setStockListLimit(String sequentialId, int limit) async {
     await supabase.rpc('admin_set_stock_list_limit',
         params: {'p_seq': sequentialId, 'p_limit': limit});
+  }
+
+  /// Admin: a stockist's brands with each brand's per-brand stock-list limit and
+  /// its current list names. Rows: {id, name, is_default, stock_list_limit,
+  /// list_count, list_names}.
+  Future<List<Map<String, dynamic>>> adminStockistBrands(
+      String sequentialId) async {
+    try {
+      final res = await supabase
+          .rpc('admin_stockist_brands', params: {'p_seq': sequentialId});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('adminStockistBrands failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Admin: set one brand's stock-list limit; the brand auto-fills its lists up
+  /// to the new number (never deletes).
+  Future<void> setBrandStockListLimit(String brandId, int limit) async {
+    await supabase.rpc('admin_set_brand_stock_list_limit',
+        params: {'p_brand_id': brandId, 'p_limit': limit});
   }
 
   /// Stockist creates a stock list under a brand (server enforces the admin-set
@@ -1021,6 +1046,10 @@ class SupabaseDataService {
         publicDisplayName: s['public_display_name'] ?? '',
         publicCode: s['public_code'] ?? '',
         deviceLimit: s['device_limit'] ?? 1,
+        deviceCount: s['device_count'] ?? 0,
+        brandLimit: s['brand_limit'] ?? 1,
+        brandCount: s['brand_count'] ?? 0,
+        stockListLimit: s['stock_list_limit'] ?? 3,
         logoUrl:    s['logo_url'] ?? '',
         bannerUrl:  s['banner_url'] ?? '',
         tagline:    s['tagline'] ?? '',

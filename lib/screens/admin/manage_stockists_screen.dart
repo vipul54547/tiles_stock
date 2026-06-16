@@ -5,6 +5,7 @@ import '../../services/supabase_data_service.dart';
 import '../../widgets/phone_field.dart';
 import '../../utils/stockist_tiers.dart';
 import 'excel_import_screen.dart';
+import 'stockist_brand_lists_screen.dart';
 
 // Admin screen to view existing stockists and add a single new one. The
 // sequential ID (A01, A02, … B01) is generated automatically by the backend —
@@ -465,8 +466,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   final _brandLimit = TextEditingController(text: '1'); // brands they may create
-  final _stockListLimit =
-      TextEditingController(text: '3'); // stock lists per brand
+  // Stock-list limit is now per-brand (set on StockistBrandListsScreen), not here.
 
   // Catalogue accent + location shown on the share-link page. Logo/banner/
   // tagline editing was retired — the share-link banner is now fully admin-
@@ -506,7 +506,6 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _publicCode = s.publicCode;
       _deviceLimit.text = '${s.deviceLimit}';
       _brandLimit.text = '${s.brandLimit}';
-      _stockListLimit.text = '${s.stockListLimit}';
       _brandColor = s.brandColor;
       _mapUrl.text = s.mapUrl;
       _loadDeviceCount();
@@ -522,7 +521,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   void dispose() {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
-      _priority, _gst, _tradeName, _deviceLimit, _brandLimit, _stockListLimit,
+      _priority, _gst, _tradeName, _deviceLimit, _brandLimit,
       _mapUrl
     ]) {
       c.dispose();
@@ -678,26 +677,27 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
         const SizedBox(height: 2),
         Text(
-            'How many stock lists this stockist may create inside each brand '
-            '(e.g. Premium / Standard / OneTime). Default 3.',
+            'Each brand has its own number of stock lists (default 1). Set them '
+            'per brand. New brands appear here after you save the Brands count.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         const SizedBox(height: 8),
-        SizedBox(
-          width: 90,
-          child: TextFormField(
-            controller: _stockListLimit,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-                labelText: 'Lists',
-                isDense: true,
-                border: OutlineInputBorder()),
-            validator: (v) {
-              final t = (v ?? '').trim();
-              if (t.isEmpty) return null;
-              final n = int.tryParse(t);
-              if (n == null || n < 1) return 'Min 1';
-              return null;
-            },
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.tune, color: Color(0xFF1B4F72)),
+            title: const Text('Manage brands & lists',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+            subtitle: const Text('Set how many stock lists each brand has',
+                style: TextStyle(fontSize: 12)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => StockistBrandListsScreen(
+                    seq: widget.existing!.id,
+                    stockistName: widget.existing!.name))),
           ),
         ),
         const SizedBox(height: 16),
@@ -881,8 +881,6 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             int.tryParse(_deviceLimit.text.trim()) ?? 1);
         await _dataSvc.setBrandLimit(
             widget.existing!.id, int.tryParse(_brandLimit.text.trim()) ?? 1);
-        await _dataSvc.setStockListLimit(widget.existing!.id,
-            int.tryParse(_stockListLimit.text.trim()) ?? 3);
         await _dataSvc.setStockistBranding(
           widget.existing!.id,
           brandColor: _brandColor.trim(),
