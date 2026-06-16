@@ -493,6 +493,27 @@ class SupabaseDataService {
         params: {'p_brand_id': brandId, 'p_limit': limit});
   }
 
+  /// Admin: set a brand's moderation status — 'live' (all see), 'correction'
+  /// (stockist sees to fix, buyers don't) or 'off' (hidden; non-default only).
+  Future<void> setBrandStatus(String brandId, String status) async {
+    try {
+      await supabase.rpc('admin_set_brand_status',
+          params: {'p_brand_id': brandId, 'p_status': status});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Admin: permanently delete a (non-default) brand + its stock lists; frees a
+  /// brand slot.
+  Future<void> deleteBrand(String brandId) async {
+    try {
+      await supabase.rpc('admin_delete_brand', params: {'p_brand_id': brandId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Stockist creates a stock list under a brand (server enforces the admin-set
   /// stock_list_limit per brand). Returns the new list id. Throws the server
   /// message on failure.

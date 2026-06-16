@@ -190,10 +190,22 @@ class _State extends State<StockistBrandListsScreen> {
                     ),
                     child: const Text('default',
                         style: TextStyle(fontSize: 11, color: Colors.black54)),
+                  )
+                else
+                  IconButton(
+                    tooltip: 'Delete brand',
+                    icon: const Icon(Icons.delete_outline,
+                        size: 20, color: Colors.red),
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                    onPressed: _saving ? null : () => _deleteBrand(b),
                   ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
+            _statusControl(b),
+            const SizedBox(height: 10),
             Row(
               children: [
                 const Text('Stock lists',
@@ -221,6 +233,115 @@ class _State extends State<StockistBrandListsScreen> {
         ),
       ),
     );
+  }
+
+  // Live / Correction / Off — the moderation control. Default brand omits "Off".
+  Widget _statusControl(Map<String, dynamic> b) {
+    final isDefault = b['is_default'] == true;
+    var status = (b['status'] ?? 'live').toString();
+    if (!['live', 'correction', 'off'].contains(status)) status = 'live';
+    if (isDefault && status == 'off') status = 'live';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 12)),
+            ),
+            segments: [
+              const ButtonSegment(
+                  value: 'live',
+                  label: Text('Live'),
+                  icon: Icon(Icons.public, size: 15)),
+              const ButtonSegment(
+                  value: 'correction',
+                  label: Text('Correction'),
+                  icon: Icon(Icons.build_outlined, size: 15)),
+              if (!isDefault)
+                const ButtonSegment(
+                    value: 'off',
+                    label: Text('Off'),
+                    icon: Icon(Icons.visibility_off_outlined, size: 15)),
+            ],
+            selected: {status},
+            onSelectionChanged:
+                _saving ? null : (sel) => _setStatus(b, sel.first),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+            'Live: stockist + buyers · Correction: only the stockist (to fix '
+            'images), hidden from buyers'
+            '${isDefault ? '' : ' · Off: hidden from everyone'}',
+            style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
+      ],
+    );
+  }
+
+  Future<void> _setStatus(Map<String, dynamic> b, String status) async {
+    if (status == (b['status'] ?? 'live').toString()) return;
+    if (status == 'off') {
+      final ok = await _confirm('Turn off brand?',
+          'Buyers and the stockist will no longer see "${b['name']}". '
+          'You can turn it back on later.');
+      if (!ok) return;
+    }
+    setState(() => _saving = true);
+    try {
+      await _data.setBrandStatus((b['id'] ?? '').toString(), status);
+      if (!mounted) return;
+      setState(() => b['status'] = status); // local update, keep stepper edits
+    } catch (e) {
+      _snack('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _deleteBrand(Map<String, dynamic> b) async {
+    final ok = await _confirm('Delete brand?',
+        'Permanently delete "${b['name']}" and its stock lists. This frees a '
+        'brand slot and cannot be undone.');
+    if (!ok) return;
+    setState(() => _saving = true);
+    try {
+      await _data.deleteBrand((b['id'] ?? '').toString());
+      await _load();
+    } catch (e) {
+      _snack('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<bool> _confirm(String title, String body) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Confirm')),
+        ],
+      ),
+    );
+    return ok ?? false;
+  }
+
+  void _snack(String msg, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: error ? Colors.red : null));
   }
 
   Widget _stepBtn(IconData icon, bool enabled, VoidCallback onTap) {

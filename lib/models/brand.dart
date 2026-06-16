@@ -14,6 +14,10 @@ class Brand {
   /// mask that name in outgoing share messages when the stockist is anonymous.
   final bool isDefault;
 
+  /// Moderation status: 'live' (all see), 'correction' (stockist sees to fix,
+  /// buyers don't) or 'off' (hidden — never returned to the stockist).
+  final String status;
+
   const Brand({
     required this.id,
     required this.name,
@@ -22,7 +26,11 @@ class Brand {
     this.isActive = true,
     this.catalogCount = 0,
     this.isDefault = false,
+    this.status = 'live',
   });
+
+  /// Admin flagged this brand: buyers can't see it until corrected.
+  bool get inCorrection => status == 'correction';
 
   factory Brand.fromJson(Map<String, dynamic> j) => Brand(
         id: (j['id'] ?? '').toString(),
@@ -32,5 +40,6 @@ class Brand {
         isActive: j['is_active'] as bool? ?? true,
         catalogCount: (j['catalog_count'] as num?)?.toInt() ?? 0,
         isDefault: j['is_default'] as bool? ?? false,
+        status: (j['status'] ?? 'live').toString(),
       );
 }

@@ -672,6 +672,24 @@ class _State extends State<ManageCatalogsScreen> {
                                 fontWeight: FontWeight.bold,
                                 fontSize: 16,
                                 color: _navy)),
+                        if (b.inCorrection)
+                          Container(
+                            margin: const EdgeInsets.only(top: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF3E0),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFFFB74D)),
+                            ),
+                            child: const Text(
+                                '⚠ In correction — hidden from buyers. Fix the '
+                                'design images.',
+                                style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: Color(0xFFE65100),
+                                    fontWeight: FontWeight.w600)),
+                          ),
                         if (!open)
                           Text(
                               '${lists.length} list${lists.length == 1 ? '' : 's'}'
