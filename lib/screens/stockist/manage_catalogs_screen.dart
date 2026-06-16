@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/app_config.dart';
@@ -119,16 +118,18 @@ class _State extends State<ManageCatalogsScreen> {
   List<StockCatalog> _listsFor(String brandId) =>
       _items.where((c) => c.brandId == brandId).toList();
 
-  // ── Brand create ────────────────────────────────────────────────────────
-  Future<void> _createBrandDialog() async {
-    final ctrl = TextEditingController();
+  // ── Brand rename ──────────────────────────────────────────────────────────
+  // Brands are created by the admin; the stockist can only rename them here.
+  Future<void> _renameBrandDialog(Brand b) async {
+    final ctrl = TextEditingController(text: b.name);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Create your brand'),
+        title: const Text('Rename brand'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
+          textCapitalization: TextCapitalization.words,
           decoration: const InputDecoration(
               hintText: 'Brand name (e.g. Bianco Tera)',
               border: OutlineInputBorder()),
@@ -139,16 +140,13 @@ class _State extends State<ManageCatalogsScreen> {
               child: const Text('Cancel')),
           ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Create')),
+              child: const Text('Save')),
         ],
       ),
     );
-    if (ok != true || ctrl.text.trim().isEmpty) return;
-    // Server enforces the admin-set brand_limit and throws if exceeded.
-    await _run(() async {
-      final id = await _data.createBrand(ctrl.text.trim());
-      _expandedBrands.add(id); // open the new brand
-    });
+    final name = ctrl.text.trim();
+    if (ok != true || name.isEmpty || name == b.name) return;
+    await _run(() => _data.renameBrand(b.id, name));
   }
 
   // ── Stock list create / rename / delete ──────────────────────────────────
@@ -650,7 +648,7 @@ class _State extends State<ManageCatalogsScreen> {
                   const Padding(
                     padding: EdgeInsets.all(24),
                     child: Center(
-                        child: Text('Create your first brand to begin.',
+                        child: Text('No brand yet — contact the admin to enable one.',
                             style: TextStyle(color: Colors.grey))),
                   ),
               ],
@@ -658,27 +656,23 @@ class _State extends State<ManageCatalogsScreen> {
     );
   }
 
-  // The standalone "Create Your Brand" action card — visually separate from the
-  // brand boxes (neutral / dashed) so it reads as an action, not a brand.
+  // Brands are created by the admin (who sets how many you may have); a new brand
+  // appears here automatically. So this is just a note, not an action.
   Widget _createBrandCard() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.grey.shade100,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade400, width: 1.2),
+        border: Border.all(color: Colors.grey.shade300),
       ),
-      child: ListTile(
-        leading: const Icon(Icons.add_business_outlined, color: _navy),
-        title: const Text('Create Your Brand',
-            style: TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: const Text('Add a new brand to organise stock lists under it',
+      child: const ListTile(
+        leading: Icon(Icons.info_outline, color: _navy),
+        title: Text('You want to create a new brand? Contact admin.',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        subtitle: Text(
+            'When the admin allows another brand, it appears here automatically — '
+            'just rename it with the pencil.',
             style: TextStyle(fontSize: 12)),
-        trailing: IconButton(
-          tooltip: 'Create brand',
-          icon: const Icon(Icons.add_circle, color: _navy, size: 30),
-          onPressed: _busy ? null : _createBrandDialog,
-        ),
-        onTap: _busy ? null : _createBrandDialog,
       ),
     );
   }
@@ -709,12 +703,10 @@ class _State extends State<ManageCatalogsScreen> {
           // Collapsible header.
           InkWell(
             borderRadius: BorderRadius.circular(14),
+            // Accordion: only one brand open at a time — opening one closes the rest.
             onTap: () => setState(() {
-              if (open) {
-                _expandedBrands.remove(b.id);
-              } else {
-                _expandedBrands.add(b.id);
-              }
+              _expandedBrands.clear();
+              if (!open) _expandedBrands.add(b.id);
             }),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
@@ -755,17 +747,12 @@ class _State extends State<ManageCatalogsScreen> {
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap),
                     ),
                   IconButton(
-                    tooltip: 'Brand settings (logo, rename, delete)',
-                    icon: const Icon(Icons.tune, size: 18, color: _navy),
+                    tooltip: 'Rename brand',
+                    icon: const Icon(Icons.edit_outlined, size: 18, color: _navy),
                     visualDensity: VisualDensity.compact,
                     constraints: const BoxConstraints(),
                     padding: const EdgeInsets.all(6),
-                    onPressed: _busy
-                        ? null
-                        : () async {
-                            await context.push('/stockist/brands');
-                            if (mounted) _load();
-                          },
+                    onPressed: _busy ? null : () => _renameBrandDialog(b),
                   ),
                 ],
               ),

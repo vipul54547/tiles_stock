@@ -11,6 +11,7 @@ import '../models/claimed_catalog.dart';
 import '../models/brand.dart';
 import '../models/inquiry_order.dart';
 import '../models/dispatch_record.dart';
+import '../models/library_entry.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
 import 'supabase_auth_service.dart';
@@ -362,6 +363,77 @@ class SupabaseDataService {
       await supabase.rpc('rename_brand', params: {'p_id': id, 'p_name': name});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  // ── stockist Design Library ─────────────────────────────────────────────────
+  // Per-stockist master designs (image + per-brand design-name aliases). The
+  // single source of truth for a design's identity/photo; never borrows across
+  // stockists. (project_stockist_library)
+
+  /// This stockist's full design library (masters + their per-brand aliases).
+  Future<List<LibraryEntry>> getMyLibrary() async {
+    try {
+      final res = await supabase.rpc('my_library');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((e) => LibraryEntry.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getMyLibrary failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Creates ([id] null) or updates a master design + replaces its per-brand
+  /// aliases. [aliases] = brandId -> design name (blank names are dropped).
+  /// Returns the master id. Throws the server message on failure.
+  Future<String> upsertLibraryMaster({
+    String? id,
+    required String size,
+    required String masterName,
+    String imageUrl = '',
+    Map<String, String> aliases = const {},
+  }) async {
+    final aliasJson = aliases.entries
+        .where((e) => e.value.trim().isNotEmpty)
+        .map((e) => {'brand_id': e.key, 'name': e.value.trim()})
+        .toList();
+    try {
+      final res = await supabase.rpc('library_upsert_master', params: {
+        'p_id': id,
+        'p_size': size,
+        'p_master_name': masterName,
+        'p_image_url': imageUrl,
+        'p_aliases': aliasJson,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  Future<void> deleteLibraryMaster(String id) async {
+    try {
+      await supabase.rpc('library_delete_master', params: {'p_id': id});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Auto-fill lookup: this stockist's own master image for (brand, design name,
+  /// size), or null when the design isn't in their library. Used by stock uploads
+  /// so an image is only ever shown when the stockist owns it.
+  Future<String?> libraryImageFor(
+      String brandId, String name, String size) async {
+    try {
+      final res = await supabase.rpc('library_image_for',
+          params: {'p_brand_id': brandId, 'p_name': name, 'p_size': size});
+      final url = (res ?? '').toString();
+      return url.isEmpty ? null : url;
+    } catch (e) {
+      debugPrint('libraryImageFor failed: $e');
+      return null;
     }
   }
 

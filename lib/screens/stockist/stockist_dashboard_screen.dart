@@ -293,6 +293,14 @@ class _State extends State<StockistDashboardScreen> {
                 // links live there). Replaces the old separate catalogs + share
                 // icons (stockists understand "share" best).
                 IconButton(
+                  icon: const Icon(Icons.collections_outlined),
+                  tooltip: 'My Design Library',
+                  onPressed: () async {
+                    await context.push('/stockist/library');
+                    _load();
+                  },
+                ),
+                IconButton(
                   icon: const Icon(Icons.share_outlined),
                   tooltip: 'Share my stock catalogue',
                   onPressed: () async {
