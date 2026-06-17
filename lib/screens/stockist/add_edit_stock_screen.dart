@@ -54,7 +54,7 @@ class _State extends State<AddEditStockScreen> {
   String _surface   = 'Matt';
   String _tileType  = kTileTypes.first;
   String _quality   = 'Premium';
-  String _stockType = 'Regular';
+  String _stockType = 'Uncertain';
 
   List<String> _surfaces = kFinishes;   // replaced by admin master list on load
   List<String> _sizes    = kAllowedSizes; // replaced by admin master list on load
@@ -71,7 +71,11 @@ class _State extends State<AddEditStockScreen> {
   List<LibraryEntry> _masters = []; // this stockist's library, for the add picker
   LibraryEntry? _selectedMaster;    // add mode: the chosen master
   final _qualities  = ['Premium', 'Standard'];
-  final _stockTypes = ['Both', 'Regular', 'One Time'];
+  // Quality gates stock type: Standard/seconds can never be 'Continuous' (not
+  // reliably reproduced); Premium can. Default is always 'Uncertain'.
+  List<String> get _stockTypes => _quality == 'Premium'
+      ? const ['Continuous', 'One Time', 'Uncertain']
+      : const ['One Time', 'Uncertain'];
 
   bool _pageLoading = false;
   bool _saving      = false;
@@ -210,7 +214,7 @@ class _State extends State<AddEditStockScreen> {
     _surface            = _surfaces.contains(d.surfaceType) ? d.surfaceType : _surfaces.first;
     _tileType           = kTileTypes.contains(d.tileType)   ? d.tileType   : kTileTypes.first;
     _quality            = _qualities.contains(d.quality)    ? d.quality    : _qualities.first;
-    _stockType          = _stockTypes.contains(d.stockType) ? d.stockType  : _stockTypes.first;
+    _stockType          = _stockTypes.contains(d.stockType) ? d.stockType  : 'Uncertain';
     _imageUrl           = d.faceImageUrls.isEmpty ? '' : d.faceImageUrls.first;
     // Preselect this design's catalog (only if it's still an active catalog).
     if (d.catalogId != null && _catalogs.any((c) => c.id == d.catalogId)) {
@@ -674,7 +678,12 @@ class _State extends State<AddEditStockScreen> {
             }
             return Expanded(
               child: GestureDetector(
-                onTap: () => setState(() { _quality = q; _dirty = true; }),
+                onTap: () => setState(() {
+                  _quality = q;
+                  // Quality gates stock type — drop an now-invalid choice.
+                  if (!_stockTypes.contains(_stockType)) _stockType = 'Uncertain';
+                  _dirty = true;
+                }),
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 4),
                   padding: const EdgeInsets.symmetric(vertical: 9),
@@ -710,17 +719,19 @@ class _State extends State<AddEditStockScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Stock Type',
+        const Text('Design Stock Type',
             style: TextStyle(color: Colors.grey, fontSize: 13)),
         const SizedBox(height: 6),
         Row(
           children: _stockTypes.map((type) {
             final sel = _stockType == type;
-            final icon = type == 'Regular'
+            final icon = type == 'Continuous'
                 ? Icons.autorenew
-                : type == 'Both'
-                    ? Icons.layers_outlined
-                    : Icons.looks_one_outlined;
+                : type == 'One Time'
+                    ? Icons.looks_one_outlined
+                    : type == 'Uncertain'
+                        ? Icons.help_outline
+                        : Icons.block_outlined;
             return Expanded(
               child: GestureDetector(
                 onTap: () => setState(() { _stockType = type; _dirty = true; }),

@@ -31,7 +31,6 @@ const _groupColors = [Color(0xFFEF6C00), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
 const _qualityMeta = {
   'Premium': (icon: Icons.star_rounded,      bg: Color(0xFFFFF8E1), fg: Color(0xFFF9A825)),
   'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
-  'Both':     (icon: Icons.layers_outlined,   bg: Color(0xFFE8F5E9), fg: Color(0xFF2E7D32)),
 };
 
 class _StockistData {
@@ -112,7 +111,7 @@ class _State extends State<StockistsOverviewScreen> {
   // Design filter (Qty, Stock Type — in addition to shared Size/Finish/Quality)
   final Set<String> _selectedTypes = {};
   final Set<String> _selectedThickness = {};
-  String _designStockType = 'Both';
+  Set<String> _selectedStockTypes = {};
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
 
@@ -121,7 +120,7 @@ class _State extends State<StockistsOverviewScreen> {
         _selectedSurfaces.length +
         _selectedTypes.length +
         _selectedThickness.length;
-    if (_designStockType != 'Both') c++;
+    if (_selectedStockTypes.isNotEmpty) c++;
     if (_minQtyCtrl.text.isNotEmpty) c++;
     if (_maxQtyCtrl.text.isNotEmpty) c++;
     return c;
@@ -149,8 +148,8 @@ class _State extends State<StockistsOverviewScreen> {
         !_selectedThickness.contains(thicknessBandOf(t))) {
       return false;
     }
-    if (_designStockType != 'Both' &&
-        !(t.stockType == _designStockType || t.stockType == 'Both')) {
+    if (_selectedStockTypes.isNotEmpty &&
+        !_selectedStockTypes.contains(t.stockType)) {
       return false;
     }
     final mn = int.tryParse(_minQtyCtrl.text);
@@ -580,9 +579,9 @@ class _State extends State<StockistsOverviewScreen> {
           .where((d) => _selectedThickness.contains(thicknessBandOf(d)))
           .toList();
     }
-    if (_designStockType != 'Both') {
+    if (_selectedStockTypes.isNotEmpty) {
       result = result
-          .where((d) => d.stockType == _designStockType || d.stockType == 'Both')
+          .where((d) => _selectedStockTypes.contains(d.stockType))
           .toList();
     }
     final minQty = int.tryParse(_minQtyCtrl.text);
@@ -607,10 +606,7 @@ class _State extends State<StockistsOverviewScreen> {
     addSet(_selectedTypes);
     addSet(_selectedThickness);
     addSet(_selectedQualities);
-    if (_designStockType != 'Both') {
-      out.add(ActiveFilter(
-          _designStockType, () => setState(() => _designStockType = 'Both')));
-    }
+    addSet(_selectedStockTypes);
     final mn = _minQtyCtrl.text.trim();
     final mx = _maxQtyCtrl.text.trim();
     if (mn.isNotEmpty || mx.isNotEmpty) {
@@ -630,12 +626,12 @@ class _State extends State<StockistsOverviewScreen> {
         _selectedTypes.clear();
         _selectedThickness.clear();
         _selectedQualities.clear();
-        _designStockType = 'Both';
+        _selectedStockTypes.clear();
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
       });
 
-  static const _filterStockTypes = ['One Time', 'Regular', 'Both'];
+  static const _filterStockTypes = ['One Time', 'Continuous', 'Uncertain'];
 
   void _showDesignFilterSheet() {
     _dismissKeyboard();
@@ -645,7 +641,7 @@ class _State extends State<StockistsOverviewScreen> {
     var localTypes      = Set<String>.from(_selectedTypes);
     var localThickness  = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_allDesigns);
-    var localStockType  = _designStockType;
+    final localStockTypes = {..._selectedStockTypes};
 
     showModalBottomSheet<bool>(
       context: context,
@@ -718,8 +714,8 @@ class _State extends State<StockistsOverviewScreen> {
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
             }
-            if (localStockType != 'Both') {
-              r = r.where((d) => d.stockType == localStockType || d.stockType == 'Both').toList();
+            if (localStockTypes.isNotEmpty) {
+              r = r.where((d) => localStockTypes.contains(d.stockType)).toList();
             }
             final mn = int.tryParse(_minQtyCtrl.text);
             final mx = int.tryParse(_maxQtyCtrl.text);
@@ -783,7 +779,7 @@ class _State extends State<StockistsOverviewScreen> {
                           localSurfaces.clear();
                           localTypes.clear();
                           localThickness.clear();
-                          localStockType = 'Both';
+                          localStockTypes.clear();
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
                         }),
@@ -836,11 +832,13 @@ class _State extends State<StockistsOverviewScreen> {
                         ),
                       FilterSection(
                         title: 'Stock Type',
-                        summary: localStockType,
+                        summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
                         child: Wrap(spacing: 8, runSpacing: 8,
                           children: _filterStockTypes.map((t) => filterChip(
-                            t, localStockType == t,
-                            () => setSheet(() => localStockType = t),
+                            t, localStockTypes.contains(t),
+                            () => setSheet(() => localStockTypes.contains(t)
+                                ? localStockTypes.remove(t)
+                                : localStockTypes.add(t)),
                           )).toList()),
                       ),
                     ],
@@ -884,7 +882,7 @@ class _State extends State<StockistsOverviewScreen> {
         _selectedSurfaces   ..clear()..addAll(localSurfaces);
         _selectedTypes      ..clear()..addAll(localTypes);
         _selectedThickness  ..clear()..addAll(localThickness);
-        _designStockType    = localStockType;
+        _selectedStockTypes = {...localStockTypes};
       });
     });
   }
@@ -2316,7 +2314,7 @@ class _State extends State<StockistsOverviewScreen> {
                 _selectedTypes.clear();
                 _selectedThickness.clear();
                 _selectedQualities.clear();
-                _designStockType = 'Both';
+                _selectedStockTypes.clear();
                 _minQtyCtrl.clear();
                 _maxQtyCtrl.clear();
               }),

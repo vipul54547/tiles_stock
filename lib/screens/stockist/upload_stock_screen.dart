@@ -20,9 +20,13 @@ import '../../utils/dispose_after_frame.dart';
 // Quality grades a stockist can assign to an uploaded batch.
 const List<String> kQualities = ['Standard', 'Premium', 'Economy'];
 
-// Stock types a stockist can assign to an uploaded batch. 'Both' = the designs
-// are sold as regular AND one-time stock (shows under either buyer filter).
-const List<String> kUploadStockTypes = ['Both', 'Regular', 'One Time'];
+// Design Stock Type = a design's FUTURE-availability outlook (can this same design
+// be re-ordered again later?). Quality gates the options: Standard/seconds can never
+// be 'Continuous' (not reliably reproduced). Default is always 'Uncertain'.
+const List<String> _premiumStockTypes    = ['Continuous', 'One Time', 'Uncertain'];
+const List<String> _nonPremiumStockTypes = ['One Time', 'Uncertain'];
+List<String> stockTypesForQuality(String quality) =>
+    quality == 'Premium' ? _premiumStockTypes : _nonPremiumStockTypes;
 
 // ── Resolved row ─────────────────────────────────────────────────────────────
 // Produced after matching PDF rows to existing designs.
@@ -89,7 +93,7 @@ class _State extends State<UploadStockScreen> {
   String _tileType     = kTileTypes.first;
   double _boxWeightKg  = 0;
   int    _piecesPerBox = 0;
-  String _stockType    = 'Both'; // One Time / Regular / Both (whole batch)
+  String _stockType    = 'Uncertain'; // gated by quality (whole batch); default Uncertain
 
   // Admin's live master finish list + this stockist's learned aliases. Loaded
   // once so every parsed row can be aligned to an official finish (and the
@@ -584,7 +588,14 @@ class _State extends State<UploadStockScreen> {
                         .map((q) =>
                             DropdownMenuItem(value: q, child: Text(q)))
                         .toList(),
-                    onChanged: (v) => setLocal(() => _quality = v ?? _quality),
+                    onChanged: (v) => setLocal(() {
+                      _quality = v ?? _quality;
+                      // Quality gates stock type: keep _stockType valid for the
+                      // new quality, else fall back to the default.
+                      if (!stockTypesForQuality(_quality).contains(_stockType)) {
+                        _stockType = 'Uncertain';
+                      }
+                    }),
                   ),
                   const SizedBox(height: 12),
                   // Tile type (body)
@@ -600,13 +611,13 @@ class _State extends State<UploadStockScreen> {
                     onChanged: (v) => setLocal(() => _tileType = v ?? _tileType),
                   ),
                   const SizedBox(height: 12),
-                  // Stock type
-                  const Text('Stock type',
+                  // Design Stock Type
+                  const Text('Design Stock Type',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
                     isExpanded: true,
                     value: _stockType,
-                    items: kUploadStockTypes
+                    items: stockTypesForQuality(_quality)
                         .map((t) =>
                             DropdownMenuItem(value: t, child: Text(t)))
                         .toList(),

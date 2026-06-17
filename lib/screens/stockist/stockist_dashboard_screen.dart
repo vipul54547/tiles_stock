@@ -25,7 +25,6 @@ const _qualities = ['Premium', 'Standard'];
 const _qualityMeta = {
   'Premium': (icon: Icons.star_rounded,      bg: Color(0xFFFFF8E1), fg: Color(0xFFF9A825)),
   'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
-  'Both':     (icon: Icons.layers_outlined,   bg: Color(0xFFE8F5E9), fg: Color(0xFF2E7D32)),
 };
 
 const _sortOptions = [
@@ -38,8 +37,9 @@ const _sortOptions = [
 
 const int _lowStockThreshold = 10;
 
-// Stock-type options for the filter (matches the buyer "All Designs" filter).
-const _filterStockTypes = ['One Time', 'Regular', 'Both'];
+// Design-Stock-Type options for the filter (multi-select; nothing selected =
+// show all; 'None' isn't a stored value any more). Matches the buyer filter.
+const _filterStockTypes = ['One Time', 'Continuous', 'Uncertain'];
 
 class _State extends State<StockistDashboardScreen> {
   final SupabaseDataService _service = SupabaseDataService();
@@ -72,7 +72,7 @@ class _State extends State<StockistDashboardScreen> {
   final Set<String> _selectedColours = {};
   final Set<String> _selectedTypes = {};
   final Set<String> _selectedThickness = {};
-  String _stockType = 'Both';
+  Set<String> _selectedStockTypes = {};
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
   String _sortBy = 'default';
@@ -86,7 +86,7 @@ class _State extends State<StockistDashboardScreen> {
       _selectedColours.length +
       _selectedTypes.length +
       _selectedThickness.length +
-      (_stockType != 'Both' ? 1 : 0) +
+      (_selectedStockTypes.isNotEmpty ? 1 : 0) +
       (_minQtyCtrl.text.isNotEmpty ? 1 : 0) +
       (_maxQtyCtrl.text.isNotEmpty ? 1 : 0);
 
@@ -223,9 +223,9 @@ class _State extends State<StockistDashboardScreen> {
           .where((d) => _selectedThickness.contains(thicknessBandOf(d)))
           .toList();
     }
-    if (_stockType != 'Both') {
+    if (_selectedStockTypes.isNotEmpty) {
       result = result
-          .where((d) => d.stockType == _stockType || d.stockType == 'Both')
+          .where((d) => _selectedStockTypes.contains(d.stockType))
           .toList();
     }
     final minQty = int.tryParse(_minQtyCtrl.text);
@@ -1232,7 +1232,7 @@ class _State extends State<StockistDashboardScreen> {
     var localColours   = Set<String>.from(_selectedColours);
     var localTypes     = Set<String>.from(_selectedTypes);
     var localThickness = Set<String>.from(_selectedThickness);
-    var localStockType = _stockType;
+    final localStockTypes = {..._selectedStockTypes};
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
 
     showModalBottomSheet<bool>(
@@ -1297,8 +1297,8 @@ class _State extends State<StockistDashboardScreen> {
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
             }
-            if (localStockType != 'Both') {
-              r = r.where((d) => d.stockType == localStockType || d.stockType == 'Both').toList();
+            if (localStockTypes.isNotEmpty) {
+              r = r.where((d) => localStockTypes.contains(d.stockType)).toList();
             }
             final mn = int.tryParse(_minQtyCtrl.text);
             final mx = int.tryParse(_maxQtyCtrl.text);
@@ -1367,7 +1367,7 @@ class _State extends State<StockistDashboardScreen> {
                           localColours.clear();
                           localTypes.clear();
                           localThickness.clear();
-                          localStockType = 'Both';
+                          localStockTypes.clear();
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
                         }),
@@ -1428,13 +1428,15 @@ class _State extends State<StockistDashboardScreen> {
                         ),
                       FilterSection(
                         title: 'Stock Type',
-                        summary: localStockType,
+                        summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
                         child: Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: _filterStockTypes
-                              .map((t) => chip(t, localStockType == t,
-                                  () => setSheet(() => localStockType = t)))
+                              .map((t) => chip(t, localStockTypes.contains(t),
+                                  () => setSheet(() => localStockTypes.contains(t)
+                                      ? localStockTypes.remove(t)
+                                      : localStockTypes.add(t))))
                               .toList(),
                         ),
                       ),
@@ -1483,7 +1485,7 @@ class _State extends State<StockistDashboardScreen> {
         _selectedThickness
           ..clear()
           ..addAll(localThickness);
-        _stockType = localStockType;
+        _selectedStockTypes = {...localStockTypes};
       });
     });
   }

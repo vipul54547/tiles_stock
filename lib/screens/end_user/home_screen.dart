@@ -19,12 +19,11 @@ import '../../widgets/smart_search_toggle.dart';
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
 const _filterQualities  = ['Premium', 'Standard'];
-const _filterStockTypes = ['One Time', 'Regular', 'Both'];
+const _filterStockTypes = ['One Time', 'Continuous', 'Uncertain'];
 
 const _qualityMeta = {
   'Premium': (icon: Icons.star_rounded,      bg: Color(0xFFFFF8E1), fg: Color(0xFFF9A825)),
   'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
-  'Both':     (icon: Icons.layers_outlined,   bg: Color(0xFFE8F5E9), fg: Color(0xFF2E7D32)),
 };
 
 // Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
@@ -54,7 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _selectedTypes = {};
   Set<String> _selectedThickness = {};
   Set<String> _selectedQualities = {};
-  String _stockType = 'Both';
+  Set<String> _selectedStockTypes = {};
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
   int _activeGroupIndex = -1;
@@ -155,9 +154,9 @@ class _HomeScreenState extends State<HomeScreen> {
           .where((d) => _selectedThickness.contains(thicknessBandOf(d)))
           .toList();
     }
-    if (_stockType != 'Both') {
+    if (_selectedStockTypes.isNotEmpty) {
       result = result
-          .where((d) => d.stockType == _stockType || d.stockType == 'Both')
+          .where((d) => _selectedStockTypes.contains(d.stockType))
           .toList();
     }
     final minQty = int.tryParse(_minQtyCtrl.text);
@@ -183,10 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
     addSet(_selectedTypes);
     addSet(_selectedThickness);
     addSet(_selectedQualities);
-    if (_stockType != 'Both') {
-      out.add(ActiveFilter(
-          _stockType, () => setState(() => _stockType = 'Both')));
-    }
+    addSet(_selectedStockTypes);
     final mn = _minQtyCtrl.text.trim();
     final mx = _maxQtyCtrl.text.trim();
     if (mn.isNotEmpty || mx.isNotEmpty) {
@@ -206,7 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedTypes.clear();
         _selectedThickness.clear();
         _selectedQualities.clear();
-        _stockType = 'Both';
+        _selectedStockTypes.clear();
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
       });
@@ -218,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_selectedTypes.isNotEmpty) c++;
     if (_selectedThickness.isNotEmpty) c++;
     if (_selectedQualities.isNotEmpty) c++;
-    if (_stockType != 'Both') c++;
+    if (_selectedStockTypes.isNotEmpty) c++;
     if (_minQtyCtrl.text.isNotEmpty) c++;
     if (_maxQtyCtrl.text.isNotEmpty) c++;
     return c;
@@ -231,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
     var localTypes     = Set<String>.from(_selectedTypes);
     var localThickness = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_base);
-    var localStockType = _stockType;
+    final localStockTypes = {..._selectedStockTypes};
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     showModalBottomSheet<bool>(
       context: context,
@@ -302,8 +298,8 @@ class _HomeScreenState extends State<HomeScreen> {
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
             }
-            if (localStockType != 'Both') {
-              r = r.where((d) => d.stockType == localStockType || d.stockType == 'Both').toList();
+            if (localStockTypes.isNotEmpty) {
+              r = r.where((d) => localStockTypes.contains(d.stockType)).toList();
             }
             final mn = int.tryParse(_minQtyCtrl.text);
             final mx = int.tryParse(_maxQtyCtrl.text);
@@ -379,7 +375,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           localSurfaces.clear();
                           localTypes.clear();
                           localThickness.clear();
-                          localStockType = 'Both';
+                          localStockTypes.clear();
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
                         }),
@@ -434,13 +430,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       FilterSection(
                         title: 'Stock Type',
-                        summary: localStockType,
+                        summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
                         child: Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: _filterStockTypes
-                              .map((t) => filterChip(t, localStockType == t,
-                                  () => setSheet(() => localStockType = t)))
+                              .map((t) => filterChip(t, localStockTypes.contains(t),
+                                  () => setSheet(() => localStockTypes.contains(t)
+                                      ? localStockTypes.remove(t)
+                                      : localStockTypes.add(t))))
                               .toList(),
                         ),
                       ),
@@ -486,7 +484,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedSurfaces  = Set<String>.from(localSurfaces);
         _selectedTypes     = Set<String>.from(localTypes);
         _selectedThickness = Set<String>.from(localThickness);
-        _stockType         = localStockType;
+        _selectedStockTypes = {...localStockTypes};
       });
     });
   }
@@ -1330,7 +1328,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             _selectedTypes.clear();
                             _selectedThickness.clear();
                             _selectedQualities = {};
-                            _stockType = 'Both';
+                            _selectedStockTypes.clear();
                             _minQtyCtrl.clear();
                             _maxQtyCtrl.clear();
                           }),

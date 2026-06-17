@@ -72,7 +72,7 @@ class SupabaseDataService {
         catalogId:    d['catalog_id'] as String?,
         updatedAt:  DateTime.parse(d['updated_at']),
         quality:    d['quality']    ?? 'Standard',
-        stockType:  d['stock_type'] ?? 'Regular',
+        stockType:  d['stock_type'] ?? 'None',
         createdAt:  d['created_at'] != null
             ? DateTime.tryParse(d['created_at'].toString())
             : null,
@@ -167,7 +167,7 @@ class SupabaseDataService {
       if (colours      != null && colours.isNotEmpty)      query = query.inFilter('colour',        colours);
       if (qualities    != null && qualities.isNotEmpty)    query = query.inFilter('quality',       qualities);
       if (tileTypes    != null && tileTypes.isNotEmpty)    query = query.inFilter('tile_type',     tileTypes);
-      if (stockType    != null && stockType != 'Both')     query = query.eq('stock_type',          stockType);
+      if (stockType    != null && stockType != 'All')      query = query.eq('stock_type',          stockType);
       if (minQty       != null)                            query = query.gte('box_quantity',        minQty);
       if (maxQty       != null)                            query = query.lte('box_quantity',        maxQty);
 

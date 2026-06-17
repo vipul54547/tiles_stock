@@ -46,7 +46,7 @@ class MockDataService implements DataService {
 
   static const _colours   = ['White', 'Beige', 'Grey', 'Black', 'Cream'];
   static const _qualities = ['Premium', 'Standard'];
-  static const _stocks    = ['One Time', 'Regular'];
+  static const _stocks    = ['Continuous', 'One Time', 'Uncertain'];
 
   // ── fallback mock data (used when no asset images found) ──────────────────
   static const _stockistProfiles = [

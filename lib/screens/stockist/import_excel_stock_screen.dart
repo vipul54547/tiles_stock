@@ -503,7 +503,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           surfaceType: r.surface,
           quality: r.quality,
           colour: r.colour,
-          stockType: 'Regular',
+          stockType: 'None',
           boxQuantity: 0,
           piecesPerBox: r.pieces ?? 0,
           boxWeightKg: r.weight ?? 0,

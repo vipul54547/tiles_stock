@@ -33,7 +33,7 @@ const _qualityMeta = {
 };
 
 const _filterSizes      = ['600x600 mm', '800x800 mm', '300x600 mm', '1200x600 mm'];
-const _filterStockTypes = ['One Time', 'Regular', 'Both'];
+const _filterStockTypes = ['One Time', 'Continuous', 'Uncertain'];
 
 class _State extends State<StockistPortfolioScreen> {
   final SupabaseDataService _service = SupabaseDataService();
@@ -49,7 +49,7 @@ class _State extends State<StockistPortfolioScreen> {
   Set<String> _selectedSurfaces = {};
   Set<String> _selectedTypes    = {};
   Set<String> _selectedThickness = {};
-  String      _stockType        = 'Both';
+  Set<String> _selectedStockTypes = {};
   final _minQtyCtrl  = TextEditingController();
   final _maxQtyCtrl  = TextEditingController();
   final _searchCtrl  = TextEditingController();
@@ -63,7 +63,7 @@ class _State extends State<StockistPortfolioScreen> {
     if (_selectedSurfaces.isNotEmpty) n++;
     if (_selectedTypes.isNotEmpty)    n++;
     if (_selectedThickness.isNotEmpty) n++;
-    if (_stockType != 'Both')         n++;
+    if (_selectedStockTypes.isNotEmpty) n++;
     if (_minQtyCtrl.text.trim().isNotEmpty || _maxQtyCtrl.text.trim().isNotEmpty) n++;
     return n;
   }
@@ -90,9 +90,9 @@ class _State extends State<StockistPortfolioScreen> {
           .where((d) => _selectedThickness.contains(thicknessBandOf(d)))
           .toList();
     }
-    if (_stockType != 'Both') {
+    if (_selectedStockTypes.isNotEmpty) {
       result = result
-          .where((d) => d.stockType == _stockType || d.stockType == 'Both')
+          .where((d) => _selectedStockTypes.contains(d.stockType))
           .toList();
     }
     final minQty = int.tryParse(_minQtyCtrl.text.trim());
@@ -115,10 +115,7 @@ class _State extends State<StockistPortfolioScreen> {
     addSet(_selectedTypes);
     addSet(_selectedThickness);
     addSet(_selectedQualities);
-    if (_stockType != 'Both') {
-      out.add(ActiveFilter(
-          _stockType, () => setState(() => _stockType = 'Both')));
-    }
+    addSet(_selectedStockTypes);
     final mn = _minQtyCtrl.text.trim();
     final mx = _maxQtyCtrl.text.trim();
     if (mn.isNotEmpty || mx.isNotEmpty) {
@@ -138,7 +135,7 @@ class _State extends State<StockistPortfolioScreen> {
         _selectedTypes.clear();
         _selectedThickness.clear();
         _selectedQualities.clear();
-        _stockType = 'Both';
+        _selectedStockTypes.clear();
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
       });
@@ -377,7 +374,7 @@ class _State extends State<StockistPortfolioScreen> {
         _selectedSurfaces.clear();
         _selectedTypes.clear();
         _selectedThickness.clear();
-        _stockType = 'Both';
+        _selectedStockTypes.clear();
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
       }),
@@ -888,7 +885,7 @@ class _State extends State<StockistPortfolioScreen> {
     var localTypes     = Set<String>.from(_selectedTypes);
     var localThickness = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_designs);
-    var localStockType = _stockType;
+    final localStockTypes = {..._selectedStockTypes};
     final sheetHeight  = MediaQuery.sizeOf(context).height * 0.72;
     final bottomPad    = MediaQuery.paddingOf(context).bottom;
 
@@ -950,11 +947,13 @@ class _State extends State<StockistPortfolioScreen> {
               spacing: 6,
               runSpacing: 6,
               children: _filterStockTypes.map((type) {
-                final active = localStockType == type;
+                final active = localStockTypes.contains(type);
                 return GestureDetector(
                   onTap: () {
                     FocusManager.instance.primaryFocus?.unfocus();
-                    setSheet(() => localStockType = type);
+                    setSheet(() => localStockTypes.contains(type)
+                        ? localStockTypes.remove(type)
+                        : localStockTypes.add(type));
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(
@@ -1000,8 +999,8 @@ class _State extends State<StockistPortfolioScreen> {
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
             }
-            if (localStockType != 'Both') {
-              r = r.where((d) => d.stockType == localStockType || d.stockType == 'Both').toList();
+            if (localStockTypes.isNotEmpty) {
+              r = r.where((d) => localStockTypes.contains(d.stockType)).toList();
             }
             final mn = int.tryParse(_minQtyCtrl.text.trim());
             final mx = int.tryParse(_maxQtyCtrl.text.trim());
@@ -1051,7 +1050,7 @@ class _State extends State<StockistPortfolioScreen> {
               _selectedSurfaces  = Set<String>.from(localSurfaces);
               _selectedTypes     = Set<String>.from(localTypes);
               _selectedThickness = Set<String>.from(localThickness);
-              _stockType         = localStockType;
+              _selectedStockTypes = {...localStockTypes};
             });
             Navigator.of(ctx).pop();
           }
@@ -1089,7 +1088,7 @@ class _State extends State<StockistPortfolioScreen> {
                           localSurfaces.clear();
                           localTypes.clear();
                           localThickness.clear();
-                          localStockType = 'Both';
+                          localStockTypes.clear();
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
                         }),
@@ -1143,7 +1142,7 @@ class _State extends State<StockistPortfolioScreen> {
                         ),
                       FilterSection(
                         title: 'Stock Type',
-                        summary: localStockType,
+                        summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
                         child: stockTypeRow(),
                       ),
                     ],
@@ -1185,7 +1184,7 @@ class _State extends State<StockistPortfolioScreen> {
         _selectedSurfaces  = Set<String>.from(localSurfaces);
         _selectedTypes     = Set<String>.from(localTypes);
         _selectedThickness = Set<String>.from(localThickness);
-        _stockType         = localStockType;
+        _selectedStockTypes = {...localStockTypes};
       });
     });
   }

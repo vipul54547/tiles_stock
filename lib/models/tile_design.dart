@@ -74,7 +74,7 @@ class TileDesign {
         catalogId: json['catalog_id'] as String?,
         updatedAt: DateTime.parse(json['updated_at']),
         quality: json['quality'] ?? 'Standard',
-        stockType: json['stock_type'] ?? 'Regular',
+        stockType: json['stock_type'] ?? 'None',
         createdAt: json['created_at'] != null
             ? DateTime.tryParse(json['created_at'].toString())
             : null,
