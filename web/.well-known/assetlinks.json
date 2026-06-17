@@ -3,9 +3,9 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.example.tiles_stock",
+      "package_name": "in.tilesdesign.stock",
       "sha256_cert_fingerprints": [
-        "82:DA:6D:C5:EA:75:B0:A9:CC:83:25:F1:97:E4:42:A4:8B:1E:D1:4B:8D:AC:11:99:14:84:9C:00:19:C8:B8:0C"
+        "AB:13:84:06:87:57:5A:F0:34:7A:D4:95:6C:04:27:58:12:2A:98:D1:C1:74:E6:95:AD:97:44:47:6F:DC:42:D2"
       ]
     }
   }

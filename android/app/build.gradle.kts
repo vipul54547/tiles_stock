@@ -20,8 +20,9 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.tiles_stock"
+        // Must match the package registered & verified in Play Console
+        // (Android developer verification): in.tilesdesign.stock.
+        applicationId = "in.tilesdesign.stock"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
