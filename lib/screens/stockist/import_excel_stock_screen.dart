@@ -38,7 +38,7 @@ class ImportExcelStockScreen extends StatefulWidget {
 const Map<String, List<String>> _headerSynonyms = {
   'name':     ['name', 'design', 'design name', 'designname', 'product', 'item', 'article'],
   'size':     ['size', 'tile size', 'dimension', 'dimensions'],
-  'quality':  ['quality', 'grade', 'grd'],
+  'quality':  ['quality', 'qality', 'qualty', 'grade', 'grd'],
   'qty':      ['qty', 'quantity', 'box', 'boxes', 'box qty', 'box quantity', 'stock', 'stock qty', 'no of box', 'nos', 'pcs box'],
   'surface':  ['surface', 'finish', 'surface type', 'finish type', 'surface finish'],
   'tiletype': ['tile type', 'type', 'body', 'body type', 'tiletype'],
@@ -46,6 +46,14 @@ const Map<String, List<String>> _headerSynonyms = {
   'pieces':   ['pieces', 'pieces/box', 'pcs', 'pcs/box', 'pieces per box', 'piece', 'pc'],
   'colour':   ['colour', 'color', 'shade'],
 };
+
+// Combined sheet: a master-design column links the per-brand name columns. The
+// brand columns themselves are matched by the brand's own name (not a synonym).
+// Kept master-specific so it never clobbers the generic 'name' column above.
+const List<String> _masterHeaders = [
+  'master', 'master name', 'master design', 'master design name',
+  'master_design', 'masterdesign',
+];
 
 // One parsed spreadsheet row + its resolution against existing stock.
 class _XlsRow {
@@ -61,9 +69,15 @@ class _XlsRow {
   String surface = 'None'; // resolved admin finish (after Map Finishes)
   String rawKey = '';     // normalised raw surface for alias learning
   TileDesign? match;      // matched existing design (name+size+quality)
-  String action = 'skip'; // 'update' | 'new' | 'conflict' | 'skip'
+  String action = 'skip'; // 'update' | 'new' | 'conflict' | 'map' | 'skip'
   bool conflictAsNew = false; // conflict: true=add as new design, false=correct finish
   bool include = true;    // unchecked = excluded from import
+  // Combined sheet (brand-name columns): the per-brand names on this row and the
+  // master name, written into the Library during the same import. mapOnly = the
+  // chosen brand has no name here (tile not sold under it) → map, but no stock.
+  Map<String, String> brandNames = {}; // brandId -> design name on this row
+  String masterName = '';
+  bool mapOnly = false;
 
   _XlsRow({
     required this.rowNum,
@@ -95,6 +109,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   bool _parsed = false;
   bool _importing = false;
   bool _loading = false;
+  bool _combined = false; // sheet had brand-name columns → also map the Library
   String _filename = '';
   String _blockError = ''; // header / file-level problem
   int _done = 0;
@@ -113,6 +128,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   String _brandNameOf(StockCatalog c) {
     final m = _brands.where((b) => b.id == c.brandId).toList();
     return m.isEmpty ? '' : m.first.name;
+  }
+
+  // A brand's name by id, for the per-row mapping chips ('?' when unknown).
+  String _brandLabel(String id) {
+    final m = _brands.where((b) => b.id == id).toList();
+    return m.isEmpty ? '?' : m.first.name;
   }
 
   @override
@@ -209,12 +230,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
   String _sizeKey(String s) => s.toLowerCase().replaceAll(RegExp(r'[^0-9x]'), '');
 
-  // 'PRE'/'premium' → Premium, 'std'/'economy' → Standard, else '' (unknown).
+  // Tolerant of stockists' spelling: anything starting 'pr' (premium / primium /
+  // pramium / premeum / pre / prm) → Premium; 'st' / 'ec' or containing 'second'
+  // → Standard; else '' (unknown → row error).
   String _normQuality(String raw) {
     final q = raw.trim().toLowerCase();
     if (q.isEmpty) return '';
-    if (q.startsWith('prem') || q == 'pre' || q == 'prm') return 'Premium';
-    if (q.startsWith('stand') || q == 'std' || q == 'eco' || q == 'economy') {
+    if (q.startsWith('pr')) return 'Premium';
+    if (q.startsWith('st') || q.startsWith('ec') || q.contains('second')) {
       return 'Standard';
     }
     return ''; // unrecognised
@@ -250,25 +273,49 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       return;
     }
 
-    // Detect each logical column by header synonym.
+    // Detect each fixed logical column by header synonym.
     final header =
         sheet.rows.first.map((c) => _normHeader(c?.value?.toString() ?? '')).toList();
     final colOf = <String, int>{};
     _headerSynonyms.forEach((field, syns) {
       colOf[field] = header.indexWhere((h) => syns.contains(h));
     });
+    final masterCol = header.indexWhere((h) => _masterHeaders.contains(h));
 
-    // Required columns must be present. Tile Type is compulsory — it identifies
-    // the body type and drives the thickness calc, so it can't be left to a
-    // silent default (see [[project_stock_upload_validation]]).
-    final missing = ['name', 'size', 'quality', 'qty', 'tiletype']
+    // Combined sheet: any remaining header matching one of this stockist's brand
+    // names becomes that brand's design-name column. The CHOSEN upload brand's
+    // column supplies the stock design name; ALL brand columns are written into
+    // the Library (name mapping) during the same import.
+    final usedCols = {
+      ...colOf.values.where((i) => i >= 0),
+      if (masterCol >= 0) masterCol,
+    };
+    final brandCols = <int, String>{}; // colIndex -> brandId
+    for (var i = 0; i < header.length; i++) {
+      if (usedCols.contains(i) || header[i].isEmpty) continue;
+      final b = _brands.where((br) => _normHeader(br.name) == header[i]).toList();
+      if (b.isNotEmpty) brandCols[i] = b.first.id;
+    }
+    final hasBrandCols = brandCols.isNotEmpty;
+    final chosenBrandId = _uploadBrandId;
+    int? chosenBrandCol;
+    brandCols.forEach((i, bid) { if (bid == chosenBrandId) chosenBrandCol = i; });
+
+    // A design-name source must exist: the chosen brand's column, a master
+    // column, or a generic name column. 'name' isn't required on a combined
+    // sheet where a brand/master column already supplies it.
+    final nameCol = colOf['name'] ?? -1;
+    final hasNameSource =
+        chosenBrandCol != null || masterCol >= 0 || nameCol >= 0;
+
+    final missing = ['size', 'quality', 'qty', 'tiletype']
         .where((f) => (colOf[f] ?? -1) < 0)
         .toList();
+    if (!hasNameSource) missing.insert(0, 'name');
     if (missing.isNotEmpty) {
       final names = {
-        'name': 'Design Name', 'size': 'Size',
-        'quality': 'Quality', 'qty': 'Box Quantity',
-        'tiletype': 'Tile Type',
+        'name': 'Design Name (or a brand / master column)', 'size': 'Size',
+        'quality': 'Quality', 'qty': 'Box Quantity', 'tiletype': 'Tile Type',
       };
       setState(() => _blockError =
           'Missing required column(s): ${missing.map((m) => names[m]).join(', ')}.'
@@ -281,6 +328,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (i < 0 || i >= row.length) return '';
       return row[i]?.value?.toString().trim() ?? '';
     }
+    String cellAt(List<Data?> row, int i) {
+      if (i < 0 || i >= row.length) return '';
+      return row[i]?.value?.toString().trim() ?? '';
+    }
 
     final parsed = <_XlsRow>[];
     for (var r = 1; r < sheet.rows.length; r++) {
@@ -288,9 +339,32 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final blank = row.every((c) =>
           c == null || c.value == null || c.value.toString().trim().isEmpty);
       if (blank) continue;
-      parsed.add(_XlsRow(
+
+      // Per-brand names on this row (blank cells dropped).
+      final brandNames = <String, String>{};
+      brandCols.forEach((i, bid) {
+        final v = cellAt(row, i);
+        if (v.isNotEmpty) brandNames[bid] = v;
+      });
+      final masterVal = masterCol >= 0 ? cellAt(row, masterCol) : '';
+      final chosenName =
+          chosenBrandCol != null ? cellAt(row, chosenBrandCol!) : '';
+      final nameVal = cell(row, 'name');
+      // Stock design name = chosen brand's name, else master, else generic name.
+      final stockName = chosenName.isNotEmpty
+          ? chosenName
+          : (masterVal.isNotEmpty ? masterVal : nameVal);
+      // Library master name = master col, else chosen brand's name, else the
+      // first brand name present, else the generic name.
+      final masterName = masterVal.isNotEmpty
+          ? masterVal
+          : (chosenName.isNotEmpty
+              ? chosenName
+              : (brandNames.isNotEmpty ? brandNames.values.first : nameVal));
+
+      final xls = _XlsRow(
         rowNum: r + 1,
-        name: cell(row, 'name'),
+        name: stockName,
         sizeRaw: cell(row, 'size'),
         qualityRaw: cell(row, 'quality'),
         surfaceRaw: cell(row, 'surface'),
@@ -299,13 +373,20 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         qty: _toInt(cell(row, 'qty')) ?? -1,
         pieces: _toInt(cell(row, 'pieces')),
         weight: _toDouble(cell(row, 'weight')),
-      ));
+      );
+      xls.brandNames = brandNames;
+      xls.masterName = masterName;
+      // No name under the chosen brand but other brands named → map only (can't
+      // make stock for a brand this tile isn't sold under).
+      xls.mapOnly = hasBrandCols && chosenName.isEmpty && brandNames.isNotEmpty;
+      parsed.add(xls);
     }
 
     if (parsed.isEmpty) {
       setState(() => _blockError = 'No data rows found (only a header?).');
       return;
     }
+    _combined = hasBrandCols;
 
     _validateAndResolve(parsed);
 
@@ -324,9 +405,24 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     });
   }
 
+  // Canonical admin size for a raw size cell, or '' when not in the size list.
+  String _resolveSize(String raw) =>
+      resolveCanonicalSize(raw, _tileSizes) ??
+      _sizes.firstWhere((s) => _sizeKey(s) == _sizeKey(raw), orElse: () => '');
+
   // Validate required fields/values; align each finish to an admin finish.
   void _validateAndResolve(List<_XlsRow> rows) {
     for (final r in rows) {
+      // Map-only rows (combined sheet, chosen brand blank) just need size +
+      // master + brand names for the Library mapping — skip the stock fields.
+      if (r.mapOnly) {
+        if (r.sizeRaw.isEmpty) { r.error = 'Missing size'; continue; }
+        final mz = _resolveSize(r.sizeRaw);
+        if (mz.isEmpty) { r.error = "Size '${r.sizeRaw}' is not in your size list"; continue; }
+        r.size = mz;
+        if (r.masterName.trim().isEmpty) { r.error = 'Missing design name'; continue; }
+        continue;
+      }
       if (r.name.isEmpty) { r.error = 'Missing design name'; continue; }
       if (r.sizeRaw.isEmpty) { r.error = 'Missing size'; continue; }
       // Map any inch/feet trade name (12x18, 2x4 …) to its canonical mm size via
@@ -370,6 +466,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   void _computeActions(List<_XlsRow> rows) {
     for (final r in rows) {
       if (!r.valid) { r.action = 'skip'; continue; }
+      if (r.mapOnly) { r.action = 'map'; continue; }
       final needle = r.name.trim().toLowerCase();
       final matches = _existing.where((d) =>
           d.name.trim().toLowerCase() == needle &&
@@ -496,7 +593,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     if (toDo.isEmpty) { _snack('Nothing to import.'); return; }
 
     setState(() { _importing = true; _done = 0; });
-    int updated = 0, created = 0, finishFixed = 0, imagesFromLibrary = 0;
+    int updated = 0, created = 0, finishFixed = 0, imagesFromLibrary = 0, mapped = 0;
     final learned = <String, String>{};
 
     // Excel carries no photos — fill them from THIS stockist's own Design Library
@@ -504,6 +601,19 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final libImages = _ownLibImages();
 
     for (final r in toDo) {
+      // Combined sheet: write the master + all brand names into the Library so a
+      // new brand's name mapping happens inline (existing aliases are merged,
+      // never deleted). Best-effort — stock still proceeds if mapping fails.
+      if (_combined && r.masterName.trim().isNotEmpty && r.brandNames.isNotEmpty) {
+        try {
+          await _dataSvc.libraryMapUpsert(
+              size: r.size, masterName: r.masterName, aliases: r.brandNames);
+          mapped++;
+        } catch (_) {/* best-effort */}
+      }
+      // Map-only row (the chosen brand doesn't sell this tile) → no stock.
+      if (r.mapOnly) { setState(() => _done++); continue; }
+
       final libUrl = libImages[designImageKey(r.name, r.size)];
       final addAsNew = r.action == 'new' || (r.action == 'conflict' && r.conflictAsNew);
       if (addAsNew) {
@@ -566,18 +676,20 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final fixNote = finishFixed > 0 ? ' · $finishFixed finish corrected' : '';
     final libNote =
         imagesFromLibrary > 0 ? ' · $imagesFromLibrary photos from library' : '';
+    final mapNote = mapped > 0 ? ' · $mapped mapped to library' : '';
     StockCatalog? cat;
     for (final c in _catalogs) {
       if (c.id == _catalogId) { cat = c; break; }
     }
     final catNote = cat == null ? '' : ' → "${cat.name}"';
-    _snack('Done — $updated updated, $created new$fixNote$libNote$catNote.',
+    _snack('Done — $updated updated, $created new$mapNote$fixNote$libNote$catNote.',
         Colors.green);
-    if (updated + created > 0) Navigator.of(context).pop();
+    if (updated + created + mapped > 0) Navigator.of(context).pop();
   }
 
   void _reset() => setState(() {
-        _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = ''; _libImages = {};
+        _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = '';
+        _libImages = {}; _combined = false;
       });
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -676,7 +788,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
   Widget _colTable() {
     const cols = [
-      ('Design Name', 'required', true),
+      ('Design Name', 'required — or a brand / master column', true),
       ('Size', 'required — must match your sizes', true),
       ('Quality', 'required — Premium / Standard', true),
       ('Box Quantity', 'required — the boxes to add', true),
@@ -685,6 +797,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       ('Box Weight', 'optional — for thickness', false),
       ('Pieces/Box', 'optional — for sq.ft', false),
       ('Colour', 'optional', false),
+      ('Master design name', 'optional — links your brands in the Library', false),
+      ('<Brand name> columns', 'optional — one per brand; the design name under '
+          'each. The chosen brand\'s name becomes the stock; all are mapped.', false),
     ];
     return Container(
       decoration: BoxDecoration(
@@ -733,6 +848,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final updates = _rows.where((r) => r.valid && r.action == 'update').length;
     final news = _rows.where((r) => r.valid && r.action == 'new').length;
     final conflicts = _rows.where((r) => r.valid && r.action == 'conflict').length;
+    final maps = _rows.where((r) => r.valid && r.action == 'map').length;
     final skipped = _rows.where((r) => !r.valid).length;
     final willImport = _rows.where((r) => r.valid && r.include).length;
     final allDone = !_importing && _done > 0 && _done >= willImport;
@@ -781,6 +897,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               if (conflicts > 0) ...[
                 const SizedBox(width: 10),
                 _chip('$conflicts', 'Conflict', Colors.orange.shade800),
+              ],
+              if (maps > 0) ...[
+                const SizedBox(width: 10),
+                _chip('$maps', 'Map only', const Color(0xFF6A1B9A)),
               ],
               if (skipped > 0) ...[
                 const SizedBox(width: 10),
@@ -866,6 +986,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     } else if (r.action == 'new') {
       border = Colors.green.shade200; bg = const Color(0xFFE8F5E9);
       tag = 'NEW'; tagColor = const Color(0xFF2E7D32);
+    } else if (r.action == 'map') {
+      border = const Color(0xFFE1BEE7); bg = const Color(0xFFF3E5F5);
+      tag = 'MAP'; tagColor = const Color(0xFF6A1B9A);
     } else {
       border = Colors.blue.shade100; bg = const Color(0xFFE3F2FD);
       tag = 'UPDATE'; tagColor = const Color(0xFF1B4F72);
@@ -918,14 +1041,38 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           ),
           const SizedBox(height: 2),
           Text(
-            [
-              if (r.size.isNotEmpty) r.size else r.sizeRaw,
-              if (r.quality.isNotEmpty) r.quality else r.qualityRaw,
-              if (r.qty >= 0) '${r.qty} boxes',
-              if (r.surfaceRaw.trim().isNotEmpty) r.surface,
-            ].join('  ·  '),
+            r.mapOnly
+                ? '${r.size.isNotEmpty ? r.size : r.sizeRaw}  ·  map only (not sold under this brand)'
+                : [
+                    if (r.size.isNotEmpty) r.size else r.sizeRaw,
+                    if (r.quality.isNotEmpty) r.quality else r.qualityRaw,
+                    if (r.qty >= 0) '${r.qty} boxes',
+                    if (r.surfaceRaw.trim().isNotEmpty) r.surface,
+                  ].join('  ·  '),
             style: const TextStyle(fontSize: 12, color: Colors.black54),
           ),
+          // Combined sheet: show the per-brand names this row maps into the
+          // Library, so the stockist can verify the cross-brand link.
+          if (r.valid && r.brandNames.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: r.brandNames.entries
+                  .map((a) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6A1B9A).withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('${_brandLabel(a.key)}: ${a.value}',
+                            style: const TextStyle(
+                                fontSize: 10.5, color: Color(0xFF6A1B9A))),
+                      ))
+                  .toList(),
+            ),
+          ],
           if (!r.valid) ...[
             const SizedBox(height: 4),
             Text(r.error!,
