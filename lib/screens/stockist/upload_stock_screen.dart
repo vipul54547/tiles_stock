@@ -18,7 +18,7 @@ import '../../utils/finishes.dart';
 import '../../utils/dispose_after_frame.dart';
 
 // Quality grades a stockist can assign to an uploaded batch.
-const List<String> kQualities = ['Standard', 'Premium', 'Economy'];
+const List<String> kQualities = ['Standard', 'Premium'];
 
 // Design Stock Type = a design's FUTURE-availability outlook (can this same design
 // be re-ordered again later?). Quality gates the options: Standard/seconds can never
@@ -248,10 +248,34 @@ class _State extends State<UploadStockScreen> {
     setState(() { _loading = false; _loadingStep = ''; });
     if (!mounted) return;
 
-    // Confirm size / quality / expected design count before importing. The
-    // filename only pre-fills these; a wrong filename is caught here rather
-    // than silently importing every design with the wrong size/quality.
-    final ok = await _confirmDetails(parsed);
+    // Reject rule: a design row with no name has no identity (name is the match
+    // key), so it can't be imported. Drop those rows; reject the WHOLE PDF only
+    // when nothing named remains.
+    final beforeCount = parsed.designs.length;
+    parsed.designs.removeWhere((d) => d.name.trim().isEmpty);
+    final skippedNameless = beforeCount - parsed.designs.length;
+    if (parsed.designs.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('No designs found'),
+          content: const Text(
+              'This PDF has no design names to import. A design needs a name — '
+              'it identifies the tile. Please check the file and try again.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+      setState(() { _filename = ''; });
+      return;
+    }
+
+    // Confirm size / quality / tile type / expected count before importing. The
+    // filename only pre-fills size (when recognised); a wrong filename is caught
+    // here rather than silently importing every design with the wrong details.
+    final ok = await _confirmDetails(parsed, skippedNameless: skippedNameless);
     if (!ok) { setState(() { _filename = ''; }); return; }
 
     // Make sure the admin finish list + aliases are loaded before aligning.
@@ -507,16 +531,20 @@ class _State extends State<UploadStockScreen> {
     return _catalogs.isEmpty ? null : _catalogs.first.id;
   }
 
-  // Ask the stockist to confirm size + quality (defaulted from the filename)
-  // and enter how many designs they expect. Returns false if cancelled.
-  Future<bool> _confirmDetails(PdfImportResult parsed) async {
-    // Pre-fill size from the filename/data. First map any inch/feet trade name
-    // (e.g. "12x18", "2x4") to its canonical mm size via the admin alias list,
-    // then fall back to a plain mm normalisation.
+  // Confirm size + quality + tile type before importing. The hard-required
+  // fields (size, quality, tile type) are shown EMPTY so a forgotten field is
+  // never silently saved as a real value. Returns false if cancelled.
+  Future<bool> _confirmDetails(PdfImportResult parsed,
+      {int skippedNameless = 0}) async {
+    // Pre-fill size ONLY when the filename's size is recognised; otherwise leave
+    // it empty and force a conscious pick (no silent fallback-to-first).
     final resolved = resolveCanonicalSize(parsed.size, _tileSizes);
     final parsedSize = resolved ?? normaliseSize(parsed.size);
-    _size = _sizes.contains(parsedSize) ? parsedSize : _sizes.first;
-    _quality = kQualities.contains(parsed.quality) ? parsed.quality : 'Standard';
+    String? size = _sizes.contains(parsedSize) ? parsedSize : null;
+    String? quality;   // empty + required (Economy removed → Standard/Premium)
+    String? tileType;  // empty + required (drives the thickness calc)
+    String? stockType; // disabled until quality chosen, then soft Uncertain
+    bool showErrors = false; // reveal red "Required" after a failed Continue
     final countCtrl =
         TextEditingController(text: parsed.designs.length.toString());
     final weightCtrl =
@@ -532,6 +560,14 @@ class _State extends State<UploadStockScreen> {
           final parsedCount = parsed.designs.length;
           final entered = int.tryParse(countCtrl.text.trim());
           final countMismatch = entered != null && entered != parsedCount;
+          // Red "Required" helper under a hard field still empty after a try.
+          Widget reqError(bool show) => show
+              ? Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('Required — please select',
+                      style:
+                          TextStyle(fontSize: 11, color: Colors.red.shade700)))
+              : const SizedBox.shrink();
           return AlertDialog(
             title: const Text('Confirm Upload Details'),
             content: SingleChildScrollView(
@@ -541,6 +577,13 @@ class _State extends State<UploadStockScreen> {
                 children: [
                   Text('File: $_filename',
                       style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  if (skippedNameless > 0) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                        '$skippedNameless row(s) had no design name and were skipped.',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.orange.shade800)),
+                  ],
                   const SizedBox(height: 14),
                   // Which stock list this upload goes into — only when the
                   // stockist has more than one list.
@@ -560,68 +603,84 @@ class _State extends State<UploadStockScreen> {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  // Size
+                  // Size — HARD required (empty unless the filename was recognised)
                   const Text('Tile size',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
                     isExpanded: true,
-                    value: _size,
+                    value: size,
+                    hint: const Text('Select size (required)'),
                     items: _sizes
-                        .map((s) => DropdownMenuItem(
-                            value: s, child: Text(s.replaceAll(' mm', ' mm'))))
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                         .toList(),
-                    onChanged: (v) => setLocal(() => _size = v ?? _size),
+                    onChanged: (v) => setLocal(() => size = v),
                   ),
-                  if (!_sizes.contains(parsedSize))
+                  if (size == null && parsed.size.isNotEmpty)
                     Text('⚠ Filename size "${parsed.size}" not recognised — '
                         'please pick the correct size.',
                         style: TextStyle(
                             fontSize: 11, color: Colors.orange.shade800)),
+                  reqError(showErrors && size == null),
                   const SizedBox(height: 12),
-                  // Quality
+                  // Quality — HARD required, empty (Economy removed)
                   const Text('Quality',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
                     isExpanded: true,
-                    value: _quality,
+                    value: quality,
+                    hint: const Text('Select quality (required)'),
                     items: kQualities
                         .map((q) =>
                             DropdownMenuItem(value: q, child: Text(q)))
                         .toList(),
                     onChanged: (v) => setLocal(() {
-                      _quality = v ?? _quality;
-                      // Quality gates stock type: keep _stockType valid for the
-                      // new quality, else fall back to the default.
-                      if (!stockTypesForQuality(_quality).contains(_stockType)) {
-                        _stockType = 'Uncertain';
+                      quality = v;
+                      // Quality gates + UNLOCKS stock type; keep it valid and
+                      // soft-default to Uncertain.
+                      if (quality != null &&
+                          (stockType == null ||
+                              !stockTypesForQuality(quality!)
+                                  .contains(stockType))) {
+                        stockType = 'Uncertain';
                       }
                     }),
                   ),
+                  reqError(showErrors && quality == null),
                   const SizedBox(height: 12),
-                  // Tile type (body)
+                  // Tile type (body) — HARD required, empty
                   const Text('Tile type',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
                     isExpanded: true,
-                    value: _tileType,
+                    value: tileType,
+                    hint: const Text('Select tile type (required)'),
                     items: kTileTypes
                         .map((t) =>
                             DropdownMenuItem(value: t, child: Text(t)))
                         .toList(),
-                    onChanged: (v) => setLocal(() => _tileType = v ?? _tileType),
+                    onChanged: (v) => setLocal(() => tileType = v),
                   ),
+                  reqError(showErrors && tileType == null),
                   const SizedBox(height: 12),
-                  // Design Stock Type
+                  // Design Stock Type — soft default Uncertain, DISABLED until a
+                  // quality is chosen (its options are quality-gated).
                   const Text('Design Stock Type',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
                     isExpanded: true,
-                    value: _stockType,
-                    items: stockTypesForQuality(_quality)
-                        .map((t) =>
-                            DropdownMenuItem(value: t, child: Text(t)))
-                        .toList(),
-                    onChanged: (v) => setLocal(() => _stockType = v ?? _stockType),
+                    value: stockType,
+                    hint: Text(quality == null
+                        ? 'Select quality first'
+                        : 'Select stock type'),
+                    items: quality == null
+                        ? const <DropdownMenuItem<String>>[]
+                        : stockTypesForQuality(quality!)
+                            .map((t) =>
+                                DropdownMenuItem(value: t, child: Text(t)))
+                            .toList(),
+                    onChanged: quality == null
+                        ? null
+                        : (v) => setLocal(() => stockType = v ?? stockType),
                   ),
                   const SizedBox(height: 12),
                   // Box weight + pieces/box (numbers)
@@ -668,8 +727,13 @@ class _State extends State<UploadStockScreen> {
                   Builder(builder: (_) {
                     final pcs = int.tryParse(piecesCtrl.text.trim()) ?? 0;
                     final wt = double.tryParse(weightCtrl.text.trim()) ?? 0;
-                    final sqft = sqftPerBox(_size, pcs);
-                    final tRange = thicknessRangeLabel(_size, pcs, wt, _tileType);
+                    // Needs size + tile type; both may still be empty
+                    // (hard-required), so show nothing until they're set.
+                    if (size == null || tileType == null) {
+                      return const SizedBox(height: 6);
+                    }
+                    final sqft = sqftPerBox(size!, pcs);
+                    final tRange = thicknessRangeLabel(size!, pcs, wt, tileType!);
                     if (sqft == null && tRange == null) {
                       return const SizedBox(height: 6);
                     }
@@ -730,6 +794,15 @@ class _State extends State<UploadStockScreen> {
               ),
               ElevatedButton(
                 onPressed: () {
+                  // Hard-required fields must be chosen — reveal errors + block.
+                  if (size == null || quality == null || tileType == null) {
+                    setLocal(() => showErrors = true);
+                    return;
+                  }
+                  _size = size!;
+                  _quality = quality!;
+                  _tileType = tileType!;
+                  _stockType = stockType ?? 'Uncertain';
                   _expectedCount = int.tryParse(countCtrl.text.trim());
                   _boxWeightKg = double.tryParse(weightCtrl.text.trim()) ?? 0;
                   _piecesPerBox = int.tryParse(piecesCtrl.text.trim()) ?? 0;

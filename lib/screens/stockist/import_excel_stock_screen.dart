@@ -258,14 +258,17 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       colOf[field] = header.indexWhere((h) => syns.contains(h));
     });
 
-    // Required columns must be present.
-    final missing = ['name', 'size', 'quality', 'qty']
+    // Required columns must be present. Tile Type is compulsory — it identifies
+    // the body type and drives the thickness calc, so it can't be left to a
+    // silent default (see [[project_stock_upload_validation]]).
+    final missing = ['name', 'size', 'quality', 'qty', 'tiletype']
         .where((f) => (colOf[f] ?? -1) < 0)
         .toList();
     if (missing.isNotEmpty) {
       final names = {
         'name': 'Design Name', 'size': 'Size',
         'quality': 'Quality', 'qty': 'Box Quantity',
+        'tiletype': 'Tile Type',
       };
       setState(() => _blockError =
           'Missing required column(s): ${missing.map((m) => names[m]).join(', ')}.'
@@ -339,6 +342,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (q.isEmpty) { r.error = "Unknown quality '${r.qualityRaw}'"; continue; }
       r.quality = q;
       if (r.qty < 0) { r.error = 'Missing / invalid box quantity'; continue; }
+      // Tile type is compulsory and must match a known body type (no silent
+      // default). Matched case-insensitively against the canonical list.
+      if (r.tileType.trim().isEmpty) { r.error = 'Missing tile type'; continue; }
+      final tt = kTileTypes.firstWhere(
+          (t) => t.toLowerCase() == r.tileType.trim().toLowerCase(),
+          orElse: () => '');
+      if (tt.isEmpty) { r.error = "Unknown tile type '${r.tileType}'"; continue; }
+      r.tileType = tt;
 
       // Align finish via learned alias (only matters when a finish is given).
       if (r.surfaceRaw.trim().isNotEmpty) {
@@ -669,8 +680,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       ('Size', 'required — must match your sizes', true),
       ('Quality', 'required — Premium / Standard', true),
       ('Box Quantity', 'required — the boxes to add', true),
+      ('Tile Type', 'required — the tile body type', true),
       ('Surface / Finish', 'optional — mapped after upload', false),
-      ('Tile Type', 'optional', false),
       ('Box Weight', 'optional — for thickness', false),
       ('Pieces/Box', 'optional — for sq.ft', false),
       ('Colour', 'optional', false),
