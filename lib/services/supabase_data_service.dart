@@ -996,6 +996,18 @@ class SupabaseDataService {
     });
   }
 
+  /// Set (replace) a FREE-TEXT attribute's values on a design (e.g. Range). Each
+  /// text is found-or-created as a stockist-scoped value, then linked. The server
+  /// enforces the attribute is free-text + the design is the caller's.
+  Future<void> dnaSetDesignText(
+      String libraryId, String attributeId, List<String> texts) async {
+    await supabase.rpc('dna_set_design_text', params: {
+      'p_library_id': libraryId,
+      'p_attribute_id': attributeId,
+      'p_texts': texts,
+    });
+  }
+
   /// A design's current DNA: { attributeId: [ {id,name}, … ] }.
   Future<Map<String, List<DnaValue>>> dnaForDesign(String libraryId) async {
     try {

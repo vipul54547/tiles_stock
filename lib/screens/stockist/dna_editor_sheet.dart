@@ -33,7 +33,9 @@ class _DnaEditorState extends State<_DnaEditor> {
   final _data = SupabaseDataService();
 
   List<DnaAttribute> _attrs = [];
-  final Map<String, Set<String>> _selected = {}; // attrId → valueIds
+  final Map<String, Set<String>> _selected = {}; // attrId → valueIds (canonical)
+  final Map<String, List<String>> _freeTexts = {}; // attrId → free-text values
+  final Map<String, TextEditingController> _ftCtrls = {}; // free-text inputs
   Map<String, List<String>> _myWords = {}; // valueId → stockist's words
   bool _loading = true;
   bool _saving = false;
@@ -44,19 +46,36 @@ class _DnaEditorState extends State<_DnaEditor> {
     _load();
   }
 
+  @override
+  void dispose() {
+    for (final c in _ftCtrls.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
   Future<void> _load() async {
     final attrs = await _data.dnaCatalog();
     final cur = await _data.dnaForDesign(widget.libraryId);
     final words = await _data.dnaMyWords();
     if (!mounted) return;
     setState(() {
-      // Free-text attributes (e.g. Range) have no canonical values to pick.
-      _attrs = attrs.where((a) => !a.isFreeText).toList();
+      // Free-text attributes (e.g. Range) are edited as typed chips; the rest
+      // pick canonical values (dropdown / check-chips).
+      _attrs = attrs.toList();
       _myWords = words;
       _selected
         ..clear()
-        ..addEntries(_attrs.map((a) =>
-            MapEntry(a.id, (cur[a.id] ?? const []).map((v) => v.id).toSet())));
+        ..addEntries(_attrs
+            .where((a) => !a.isFreeText)
+            .map((a) =>
+                MapEntry(a.id, (cur[a.id] ?? const []).map((v) => v.id).toSet())));
+      _freeTexts
+        ..clear()
+        ..addEntries(_attrs
+            .where((a) => a.isFreeText)
+            .map((a) =>
+                MapEntry(a.id, (cur[a.id] ?? const []).map((v) => v.name).toList())));
       _loading = false;
     });
   }
@@ -102,6 +121,44 @@ class _DnaEditorState extends State<_DnaEditor> {
       sel.contains(valueId) ? sel.remove(valueId) : sel.add(valueId);
     });
     _save(a);
+  }
+
+  // Free-text (e.g. Range): save the whole text list for the attribute.
+  Future<void> _saveFreeText(DnaAttribute a) async {
+    setState(() => _saving = true);
+    try {
+      await _data.dnaSetDesignText(
+          widget.libraryId, a.id, _freeTexts[a.id] ?? const []);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not save: $e'),
+            backgroundColor: Colors.red.shade700));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _addFreeText(DnaAttribute a) {
+    final ctrl = _ftCtrls[a.id];
+    final t = ctrl?.text.trim() ?? '';
+    if (t.isEmpty) return;
+    final list = _freeTexts.putIfAbsent(a.id, () => []);
+    if (list.any((x) => x.toLowerCase() == t.toLowerCase())) {
+      ctrl?.clear();
+      return;
+    }
+    setState(() {
+      list.add(t);
+      ctrl?.clear();
+    });
+    _saveFreeText(a);
+  }
+
+  void _removeFreeText(DnaAttribute a, String t) {
+    setState(() => _freeTexts[a.id]?.remove(t));
+    _saveFreeText(a);
   }
 
   @override
@@ -189,9 +246,65 @@ class _DnaEditorState extends State<_DnaEditor> {
             ],
           ),
           const SizedBox(height: 6),
-          a.isMulti ? _multiChips(a) : _singleDropdown(a),
+          a.isFreeText
+              ? _freeTextEditor(a)
+              : (a.isMulti ? _multiChips(a) : _singleDropdown(a)),
         ],
       ),
+    );
+  }
+
+  // Free-text (e.g. Range): typed values shown as removable chips + an add field.
+  Widget _freeTextEditor(DnaAttribute a) {
+    final texts = _freeTexts[a.id] ?? const <String>[];
+    final ctrl = _ftCtrls.putIfAbsent(a.id, () => TextEditingController());
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (texts.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: texts
+                  .map((t) => InputChip(
+                        label: Text(t, style: const TextStyle(fontSize: 12.5)),
+                        onDeleted: () => _removeFreeText(a, t),
+                        backgroundColor: _navy.withValues(alpha: 0.08),
+                        side: BorderSide(color: Colors.grey.shade300),
+                      ))
+                  .toList(),
+            ),
+          ),
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: ctrl,
+                textCapitalization: TextCapitalization.words,
+                onSubmitted: (_) => _addFreeText(a),
+                decoration: InputDecoration(
+                  hintText: 'Add ${a.name.toLowerCase()}…',
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border:
+                      OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey.shade300)),
+                ),
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add_circle, color: _navy),
+              tooltip: 'Add',
+              onPressed: () => _addFreeText(a),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
