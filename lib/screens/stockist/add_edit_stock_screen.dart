@@ -388,7 +388,9 @@ class _State extends State<AddEditStockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      bottomNavigationBar: _pageLoading
+      // Add mode: no Save bar until a design is picked from the Library —
+      // there's nothing to save before that.
+      bottomNavigationBar: (_pageLoading || (!isEdit && _selectedMaster == null))
           ? null
           : SaveBar(
               label: isEdit ? 'Update Design' : 'Add Design',
@@ -437,30 +439,52 @@ class _State extends State<AddEditStockScreen> {
                     16, 16, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
                 children: [
                   isEdit ? _buildIdentityReadonly() : _buildMasterPicker(),
-                  const SizedBox(height: 12),
-                  if (_catalogs.length > 1) _buildCatalogPicker(),
-                  _buildSurfaceSection(),
-                  const SizedBox(height: 12),
-                  _buildDropdown('Tile Type', kTileTypes, _tileType,
-                      (v) => setState(() { _tileType = v!; _dirty = true; })),
-                  const SizedBox(height: 12),
-                  _buildQualityPicker(),
-                  const SizedBox(height: 12),
-                  _buildStockTypePicker(),
-                  const SizedBox(height: 12),
-                  _field(_colourCtrl, 'Colour (optional)'),
-                  Row(children: [
-                    Expanded(child: _field(_piecesCtrl, 'Pieces/Box',
-                        numeric: true, required: true)),
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildQtyField()),
-                  ]),
-                  Row(children: [
-                    Expanded(child: _field(_weightCtrl, 'Box Weight (kg)',
-                        numeric: true, required: true)),
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildThicknessField()),
-                  ]),
+                  // Add mode: ask for stock details ONLY after a design is picked
+                  // from the Library → "pick design → quantity", not a blank form.
+                  // (Brand-1: new designs are created in the Library, never here.)
+                  if (isEdit || _selectedMaster != null) ...[
+                    const SizedBox(height: 12),
+                    if (_catalogs.length > 1) _buildCatalogPicker(),
+                    _buildSurfaceSection(),
+                    const SizedBox(height: 12),
+                    _buildDropdown('Tile Type', kTileTypes, _tileType,
+                        (v) => setState(() { _tileType = v!; _dirty = true; })),
+                    const SizedBox(height: 12),
+                    _buildQualityPicker(),
+                    const SizedBox(height: 12),
+                    _buildStockTypePicker(),
+                    const SizedBox(height: 12),
+                    _field(_colourCtrl, 'Colour (optional)'),
+                    Row(children: [
+                      Expanded(child: _field(_piecesCtrl, 'Pieces/Box',
+                          numeric: true, required: true)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildQtyField()),
+                    ]),
+                    Row(children: [
+                      Expanded(child: _field(_weightCtrl, 'Box Weight (kg)',
+                          numeric: true, required: true)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildThicknessField()),
+                    ]),
+                  ] else
+                    Padding(
+                      padding: const EdgeInsets.only(top: 24),
+                      child: Row(
+                        children: [
+                          Icon(Icons.arrow_upward,
+                              size: 16, color: Colors.grey.shade500),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                                'Pick a design from your Library above, then enter '
+                                'its quantity. New designs are added in the Library.',
+                                style: TextStyle(
+                                    fontSize: 12.5, color: Colors.grey.shade600)),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),

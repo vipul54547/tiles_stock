@@ -35,12 +35,25 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     final results = await Future.wait([
       _service.getAllDesigns(),
       _service.getMarketStockists(),
+      _service.getMyPrivateDesigns(),
     ]);
     await loadMyChoices(); // restore saved selections
     final orders = await _service.getMyOrders();
     if (!mounted) return;
+    // Choices can be saved from PRIVATE (My-Suppliers) stock too, so the design
+    // pool must include private (claimed) designs — getAllDesigns() is the public
+    // market only (empty when the public market is off), which otherwise hides
+    // those choices entirely.
+    final seen = <String>{};
+    final combined = <TileDesign>[];
+    for (final d in [
+      ...(results[0] as List<TileDesign>),
+      ...(results[2] as List<TileDesign>),
+    ]) {
+      if (seen.add(d.id)) combined.add(d);
+    }
     setState(() {
-      _allDesigns = results[0] as List<TileDesign>;
+      _allDesigns = combined;
       _allStockists = results[1] as List<Stockist>;
       _orders = orders;
       _loading = false;

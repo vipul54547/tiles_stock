@@ -311,16 +311,8 @@ class _State extends State<StockistsOverviewScreen> {
       final i = order.indexOf(v);
       return i < 0 ? 1 << 20 : i;
     }
-    final sizes = designs.map((d) => d.size).toSet().toList()
-      ..sort((a, b) {
-        final r = rankIn(sizeOrder, a).compareTo(rankIn(sizeOrder, b));
-        return r != 0 ? r : a.compareTo(b);
-      });
-    final surfaces = designs.map((d) => d.surfaceType).toSet().toList()
-      ..sort((a, b) {
-        final r = rankIn(finishOrder, a).compareTo(rankIn(finishOrder, b));
-        return r != 0 ? r : a.compareTo(b);
-      });
+    // (Size/Finish filter options are derived further below from BOTH the public
+    // market designs AND the buyer's private claimed designs — see filterPool.)
 
     final data = stockists.asMap().entries.map((e) {
       final s = e.value;
@@ -380,6 +372,21 @@ class _State extends State<StockistsOverviewScreen> {
       privateDesigns =
           rankDesigns(priv, seed: DateTime.now().microsecondsSinceEpoch);
     }
+
+    // Filter options reflect BOTH the public market AND the buyer's private
+    // (claimed) designs, so Size/Finish chips aren't empty in My-Suppliers mode
+    // or when the public market is off.
+    final filterPool = [...designs, ...privateDesigns];
+    final sizes = filterPool.map((d) => d.size).toSet().toList()
+      ..sort((a, b) {
+        final r = rankIn(sizeOrder, a).compareTo(rankIn(sizeOrder, b));
+        return r != 0 ? r : a.compareTo(b);
+      });
+    final surfaces = filterPool.map((d) => d.surfaceType).toSet().toList()
+      ..sort((a, b) {
+        final r = rankIn(finishOrder, a).compareTo(rankIn(finishOrder, b));
+        return r != 0 ? r : a.compareTo(b);
+      });
 
     setState(() {
       _allData = data;
@@ -2592,7 +2599,9 @@ class _StockistCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 ...List.generate(stockistGroups.length, (i) {
                   final inGroup = stockistGroups[i].stockistIds.contains(s.id);
-                  final color = _groupColors[i];
+                  // Cycle the palette (modulo) — a 4th+ group must not RangeError
+                  // and blank the whole card. Matches the chip/badge colour logic.
+                  final color = _groupColors[i % _groupColors.length];
                   return Padding(
                     padding: const EdgeInsets.only(left: 4),
                     child: GestureDetector(

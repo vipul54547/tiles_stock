@@ -72,7 +72,7 @@ class SupabaseDataService {
         catalogId:    d['catalog_id'] as String?,
         updatedAt:  DateTime.parse(d['updated_at']),
         quality:    d['quality']    ?? 'Standard',
-        stockType:  d['stock_type'] ?? 'None',
+        stockType:  d['stock_type'] ?? 'Uncertain',
         createdAt:  d['created_at'] != null
             ? DateTime.tryParse(d['created_at'].toString())
             : null,
@@ -838,6 +838,20 @@ class SupabaseDataService {
     }
   }
 
+  /// Resolves a stockist key (a real sequential_id OR an anonymous public_code)
+  /// to the stockist's stable uuid. Used to match saved keys (which may be a code
+  /// or a real id depending on the market mode at save time) against the current
+  /// display. Returns null if the key resolves to no stockist (e.g. deleted).
+  Future<String?> resolveStockistKey(String key) async {
+    try {
+      final res = await supabase.rpc('resolve_stockist_key', params: {'p_key': key});
+      final s = res?.toString() ?? '';
+      return s.isEmpty ? null : s;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Admin: update a stockist's editable fields (keyed by sequential id).
   Future<void> updateStockist({
     required String sequentialId,
@@ -1134,6 +1148,7 @@ class SupabaseDataService {
 
   Stockist _toStockist(Map<String, dynamic> s) => Stockist(
         id:        s['sequential_id'],
+        uuid:      s['uuid'] ?? '',
         name:      s['name'],
         email:     s['email'] ?? '', // present only via admin_list_stockists
         phone:     s['phone'],

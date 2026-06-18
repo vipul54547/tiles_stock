@@ -18,7 +18,8 @@ final List<StockistGroup> stockistGroups = [];
 /// Loads the signed-in end user's saved groups into [stockistGroups]. Call from
 /// any buyer screen before using the group filter. No-op for guests.
 Future<void> loadStockistGroupsFromDb() async {
-  final rows = await SupabaseDataService().getMyGroups();
+  final service = SupabaseDataService();
+  final rows = await service.getMyGroups();
   stockistGroups
     ..clear()
     ..addAll(rows.map((r) {
@@ -27,6 +28,52 @@ Future<void> loadStockistGroupsFromDb() async {
       g.stockistIds.addAll(List<String>.from(r['stockist_ids'] ?? const []));
       return g;
     }));
+  await _normalizeGroupKeysToCurrentDisplay(service);
+}
+
+// Saved group members may be stored as a real sequential_id OR an anonymous
+// public_code — whichever the buyer saw when adding the stockist (it depends on
+// the public-market mode at that time, and admin anonymity toggles migrate them).
+// Rewrite each stored key to the stockist's CURRENT display key (resolved via the
+// stable uuid) so checkbox + group-filter matching works in BOTH modes. Keys that
+// resolve to no accessible stockist (e.g. a deleted one) are dropped. In-memory
+// only — persisted only if the group is later edited. No-op for guests.
+Future<void> _normalizeGroupKeysToCurrentDisplay(
+    SupabaseDataService service) async {
+  if (stockistGroups.isEmpty) return;
+  final displayed = await service.getMarketStockists();
+  if (displayed.isEmpty) return;
+  final keyToUuid = {for (final s in displayed) s.id: s.uuid};
+  final uuidToKey = {for (final s in displayed) s.uuid: s.id};
+  // Keys that aren't already a current display key need a server resolve to map
+  // a stored code<->real-id across the two market modes.
+  final unknown = <String>{};
+  for (final g in stockistGroups) {
+    for (final k in g.stockistIds) {
+      if (!keyToUuid.containsKey(k)) unknown.add(k);
+    }
+  }
+  final resolvedUuid = <String, String>{};
+  for (final k in unknown) {
+    final uuid = await service.resolveStockistKey(k);
+    if (uuid != null && uuid.isNotEmpty) resolvedUuid[k] = uuid;
+  }
+  for (final g in stockistGroups) {
+    final normalized = <String>{};
+    for (final k in g.stockistIds) {
+      if (keyToUuid.containsKey(k)) {
+        normalized.add(k); // already the current display key
+      } else {
+        final uuid = resolvedUuid[k];
+        final cur = uuid == null ? null : uuidToKey[uuid];
+        if (cur != null) normalized.add(cur); // remap to the current display key
+        // else: deleted / inaccessible stockist -> drop
+      }
+    }
+    g.stockistIds
+      ..clear()
+      ..addAll(normalized);
+  }
 }
 
 /// Confirms — then, on Yes, performs AND persists — adding/removing a stockist

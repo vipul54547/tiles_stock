@@ -28,9 +28,20 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
 
   Future<void> _load() async {
     final data = await _service.getAllDesigns();
-    final idx = data.indexWhere((d) => d.id == widget.designId);
+    // Include the buyer's private (claimed) designs: getAllDesigns() returns only
+    // the PUBLIC market (empty when the public market is off), so a private-only
+    // tile would otherwise be missing → empty list → RangeError → blank screen.
+    final priv =
+        isGuest ? <TileDesign>[] : await _service.getMyPrivateDesigns();
+    final seen = <String>{};
+    final combined = <TileDesign>[];
+    for (final d in [...data, ...priv]) {
+      if (seen.add(d.id)) combined.add(d);
+    }
+    if (!mounted) return;
+    final idx = combined.indexWhere((d) => d.id == widget.designId);
     setState(() {
-      _designs = data;
+      _designs = combined;
       _currentIndex = idx >= 0 ? idx : 0;
       _loading = false;
     });
@@ -56,6 +67,19 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
           title: const Text('Tile Details'),
         ),
         body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_designs.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          title: const Text('Tile Details'),
+        ),
+        body: const Center(child: Text('Design not found or no longer in stock.')),
       );
     }
 

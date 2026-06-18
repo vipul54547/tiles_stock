@@ -171,10 +171,21 @@ class _State extends State<StockistPortfolioScreen> {
     final results = await Future.wait([
       _service.getDesignsByStockistSeqId(widget.stockistId),
       _service.getMarketStockists(),
+      _service.getMyPrivateDesigns(),
     ]);
     if (!mounted) return;
-    final designs   = results[0] as List<TileDesign>;
+    final publicDesigns = results[0] as List<TileDesign>;
     final stockists = results[1] as List<Stockist>;
+    // getDesignsByStockistSeqId reads the public market view (empty when the public
+    // market is off), so a private (claimed) supplier would show a blank portfolio.
+    // Merge in this stockist's private designs so the portfolio is never empty.
+    final privForStockist = (results[2] as List<TileDesign>)
+        .where((d) => d.stockistId == widget.stockistId);
+    final seen = <String>{};
+    final designs = <TileDesign>[];
+    for (final d in [...publicDesigns, ...privForStockist]) {
+      if (seen.add(d.id)) designs.add(d);
+    }
     Stockist? stockist;
     try {
       stockist = stockists.firstWhere((s) => s.id == widget.stockistId);

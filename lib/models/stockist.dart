@@ -1,6 +1,14 @@
 class Stockist {
 
+  /// Display key shown to the user: the real sequential_id, OR the masked public
+  /// code when the stockist is anonymous in the public market. NOT stable across
+  /// anonymity/market changes — use [uuid] for identity matching (e.g. groups).
   final String id;
+
+  /// Stable internal stockists.id (uuid). Present from the buyer_stockists view;
+  /// empty elsewhere. Use this to match a stockist regardless of how [id] is
+  /// currently masked.
+  final String uuid;
 
   final String name;
 
@@ -87,6 +95,8 @@ class Stockist {
 
     required this.id,
 
+    this.uuid = '',
+
     required this.name,
 
     required this.email,
@@ -150,6 +160,8 @@ class Stockist {
   factory Stockist.fromJson(Map<String, dynamic> json) => Stockist(
 
     id: json['id'],
+
+    uuid: json['uuid'] ?? '',
 
     name: json['name'],
 

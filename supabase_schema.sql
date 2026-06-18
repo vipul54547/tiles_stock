@@ -56,7 +56,7 @@ create table if not exists designs (
   finish_label   text,                       -- raw PDF finish when not a standard one (e.g. "Punch Ghr")
   quality        text not null default 'Standard',
   colour         text not null default '',
-  stock_type     text not null default 'Regular',
+  stock_type     text not null default 'Uncertain',
   box_quantity   int  not null default 0,
   pieces_per_box int  not null default 0,
   box_weight_kg  numeric(8,2)  not null default 0,
