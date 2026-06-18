@@ -11,7 +11,9 @@ import '../../widgets/tile_card.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/powered_by_tiles_stock.dart';
 import '../../widgets/notification_bell.dart';
+import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
+import '../../models/dna.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/account_actions.dart';
 
@@ -56,6 +58,9 @@ class _State extends State<StockistDashboardScreen> {
   List<LibraryEntry> _library = [];
   // Buyer My-Choice interest in this stockist's designs: designId → (buyers, boxes).
   Map<String, ({int buyers, int boxes})> _inquiries = {};
+  // Design DNA completeness per design: designId → fraction (0..1) of the
+  // fillable DNA attributes that are tagged. Drives the corner indicator.
+  Map<String, double> _dnaFill = {};
   // Boxes the stockist added that are held for admin approval (big-stock rule).
   int _pendingBoxes = 0;
   bool _loading = true;
@@ -143,7 +148,14 @@ class _State extends State<StockistDashboardScreen> {
     final catalogs = await _service.getCatalogs(_myStockistId);
     final brands = await _service.getMyBrands();
     final library = await _service.getMyLibrary();
+    // Design DNA completeness: how many of the fillable DNA attributes each
+    // design is tagged with (drives the corner indicator). Bridged design→master
+    // server-side by designsDnaValues.
+    final dnaAttrs = await _service.dnaCatalog();
+    final dnaVals =
+        await _service.designsDnaValues(data.map((d) => d.id).toList());
     if (!mounted) return;
+    final dnaFill = _computeDnaFill(data, dnaAttrs, dnaVals);
     setState(() {
       _designs = data;
       _inquiries = inquiries;
@@ -151,6 +163,7 @@ class _State extends State<StockistDashboardScreen> {
       _catalogs = catalogs;
       _brands = brands;
       _library = library;
+      _dnaFill = dnaFill;
       // Drop a stale brand filter if that brand no longer exists.
       if (_brandFilter != 'all' && !_brands.any((b) => b.id == _brandFilter)) {
         _brandFilter = 'all';
@@ -239,7 +252,8 @@ class _State extends State<StockistDashboardScreen> {
 
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result = result.where((d) => d.name.toLowerCase().contains(q)).toList();
+      result =
+          result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
     }
 
     switch (_sortBy) {
@@ -704,9 +718,68 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
+  // Per-design DNA completeness = filled fillable-attributes / total fillable
+  // attributes. "Fillable" excludes attributes that have no real value yet
+  // (only "None") so e.g. an unconfigured attribute can't drag everyone down.
+  Map<String, double> _computeDnaFill(List<TileDesign> designs,
+      List<DnaAttribute> attrs, Map<String, Set<String>> values) {
+    final fillable = attrs
+        .where((a) =>
+            a.isFreeText ||
+            a.values.any((v) => v.name.toLowerCase() != 'none'))
+        .toList();
+    final total = fillable.length;
+    if (total == 0) return {};
+    final fillableIds = fillable.map((a) => a.id).toSet();
+    final valToAttr = <String, String>{
+      for (final a in attrs)
+        for (final v in a.values) v.id: a.id,
+    };
+    final out = <String, double>{};
+    for (final d in designs) {
+      final vals = values[d.id] ?? const <String>{};
+      final tagged = <String>{};
+      for (final vid in vals) {
+        final aid = valToAttr[vid];
+        if (aid != null && fillableIds.contains(aid)) tagged.add(aid);
+      }
+      out[d.id] = tagged.length / total;
+    }
+    return out;
+  }
+
+  // Corner DNA indicator: green when fully tagged, red→amber gradient by how
+  // much is filled (any gap stays warm, never green). Tooltip shows the percent.
+  Widget _dnaDot(double fill) {
+    final pct = (fill * 100).round();
+    final Color c = fill >= 1.0
+        ? const Color(0xFF2E7D32)
+        : Color.lerp(const Color(0xFFD32F2F), const Color(0xFFF9A825), fill)!;
+    return Tooltip(
+      message: 'Design DNA $pct% tagged',
+      child: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: c,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 2,
+                offset: const Offset(0, 1)),
+          ],
+        ),
+        child: const Icon(Icons.science, size: 12, color: Colors.white),
+      ),
+    );
+  }
+
   Widget _designTile(TileDesign d) {
     final outOfStock = d.boxQuantity == 0;
     final lowStock = !outOfStock && d.boxQuantity < _lowStockThreshold;
+    final dnaFill = _dnaFill[d.id];
     final isSelected = _selectedIds.contains(d.id);
     return GestureDetector(
       onLongPress: () => setState(() {
@@ -726,6 +799,7 @@ class _State extends State<StockistDashboardScreen> {
         children: [
           TileCard(
             design: d,
+            showQuality: false, // stockist has a quality filter; chip is redundant
             onTap: _selectMode
                 ? () {}
                 : () => context.push('/stockist/stock/edit/${d.id}'),
@@ -750,24 +824,35 @@ class _State extends State<StockistDashboardScreen> {
                         fontWeight: FontWeight.bold)),
               ),
             ),
-          if (outOfStock || lowStock)
+          // Top-left: DNA-completeness dot (always, when DNA is configured) +
+          // the out/low-stock badge beside it when relevant.
+          if (dnaFill != null || outOfStock || lowStock)
             Positioned(
               top: 6,
               left: 6,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: outOfStock ? Colors.red : Colors.orange.shade700,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  outOfStock ? 'Out of Stock' : 'Low Stock',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold),
-                ),
+              child: Row(
+                children: [
+                  if (dnaFill != null) _dnaDot(dnaFill),
+                  if (outOfStock || lowStock) ...[
+                    if (dnaFill != null) const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color:
+                            outOfStock ? Colors.red : Colors.orange.shade700,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        outOfStock ? 'Out of Stock' : 'Low Stock',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           if (_selectMode)
@@ -1226,6 +1311,9 @@ class _State extends State<StockistDashboardScreen> {
             ),
           ),
           const SizedBox(width: 8),
+          // Smart search: synonym/multi-language expansion (white = bianco…).
+          SmartSearchToggle(onChanged: () => setState(() {})),
+          const SizedBox(width: 8),
           // Filter (All-Design style) with a count badge.
           Stack(
             clipBehavior: Clip.none,
@@ -1377,7 +1465,7 @@ class _State extends State<StockistDashboardScreen> {
             }
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
-              r = r.where((d) => d.name.toLowerCase().contains(q)).toList();
+              r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
             if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();

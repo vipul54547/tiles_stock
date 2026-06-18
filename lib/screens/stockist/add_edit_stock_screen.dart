@@ -454,7 +454,10 @@ class _State extends State<AddEditStockScreen> {
                     const SizedBox(height: 12),
                     _buildStockTypePicker(),
                     const SizedBox(height: 12),
-                    _field(_colourCtrl, 'Colour (optional)'),
+                    // Colour now lives in Design DNA (multi-select in the "+"
+                    // mapper), so it's no longer entered here. The controller is
+                    // kept wired to save so an existing design's colour is
+                    // preserved untouched.
                     Row(children: [
                       Expanded(child: _field(_piecesCtrl, 'Pieces/Box',
                           numeric: true, required: true)),

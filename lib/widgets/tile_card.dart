@@ -13,6 +13,9 @@ class TileCard extends StatelessWidget {
   final VoidCallback? onStockistTap;
   final bool isChosen;
   final VoidCallback? onChoiceTap;
+  /// Quality badge on the card. Stockists hide it (they have a quality filter,
+  /// and it crowds the box count); buyers keep it.
+  final bool showQuality;
 
   const TileCard({
     super.key,
@@ -21,6 +24,7 @@ class TileCard extends StatelessWidget {
     this.onStockistTap,
     this.isChosen = false,
     this.onChoiceTap,
+    this.showQuality = true,
   });
 
   @override
@@ -124,8 +128,10 @@ class TileCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      _QualityBadge(quality: design.quality),
+                      if (showQuality) ...[
+                        const SizedBox(width: 4),
+                        _QualityBadge(quality: design.quality),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 5),
