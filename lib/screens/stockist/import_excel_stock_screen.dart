@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:uuid/uuid.dart';
 import 'package:excel/excel.dart' hide Border, BorderStyle;
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
-import '../../services/stock_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/tile_size.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
+import '../../models/dna.dart';
 import '../../utils/finishes.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -78,6 +79,9 @@ class _XlsRow {
   Map<String, String> brandNames = {}; // brandId -> design name on this row
   String masterName = '';
   bool mapOnly = false;
+  // Auto-detected Design DNA on this row: attributeId -> raw value words (a
+  // column whose header matched a DNA attribute name). Resolved on import.
+  Map<String, List<String>> dna = {};
 
   _XlsRow({
     required this.rowNum,
@@ -97,7 +101,7 @@ class _XlsRow {
 
 class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   final _dataSvc = SupabaseDataService();
-  final _stockSvc = StockService();
+  String _batchId = ''; // idempotency key per parsed file (reused on retry)
 
   List<_XlsRow> _rows = [];
   // This stockist's OWN Design Library photos matched for the preview
@@ -123,6 +127,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   Map<String, String> _aliases = {};
   List<TileDesign> _existing = [];
   List<Brand> _brands = []; // for labelling each list with its brand
+  List<DnaAttribute> _dnaAttrs = []; // DNA catalog (for auto-detecting columns)
+  List<String> _dnaDetected = []; // names of DNA columns found in this sheet
 
   // A catalogue's brand name (multi-brand), so the target picker is unambiguous.
   String _brandNameOf(StockCatalog c) {
@@ -180,6 +186,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       _library = currentStockistUUID.isEmpty
           ? <LibraryEntry>[]
           : await _dataSvc.getMyLibrary();
+      _dnaAttrs = currentStockistUUID.isEmpty
+          ? <DnaAttribute>[]
+          : await _dataSvc.dnaCatalog();
       final def = brands.where((b) => b.isDefault).toList();
       _defaultBrandId = def.isEmpty ? null : def.first.id;
       if (names.isNotEmpty) _finishes = names;
@@ -301,6 +310,24 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     int? chosenBrandCol;
     brandCols.forEach((i, bid) { if (bid == chosenBrandId) chosenBrandCol = i; });
 
+    // Auto-detect Design DNA columns: any still-unused header that matches a DNA
+    // attribute's name (free-text attributes like Range are skipped — they have
+    // no canonical values to resolve to). The cell value is the raw DNA word(s),
+    // resolved on import via dna_resolve (canonical name OR a learned alias).
+    final dnaUsed = {...usedCols, ...brandCols.keys};
+    final dnaCols = <int, DnaAttribute>{}; // colIndex -> attribute
+    for (final attr in _dnaAttrs) {
+      if (attr.isFreeText) continue;
+      final h = _normHeader(attr.name);
+      if (h.isEmpty) continue;
+      final i = header.indexWhere((x) => x == h);
+      if (i >= 0 && !dnaUsed.contains(i)) {
+        dnaCols[i] = attr;
+        dnaUsed.add(i);
+      }
+    }
+    _dnaDetected = dnaCols.values.map((a) => a.name).toList();
+
     // A design-name source must exist: the chosen brand's column, a master
     // column, or a generic name column. 'name' isn't required on a combined
     // sheet where a brand/master column already supplies it.
@@ -376,6 +403,18 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       );
       xls.brandNames = brandNames;
       xls.masterName = masterName;
+      // Auto-detected DNA: split each cell on comma/slash so multi-value
+      // attributes (e.g. Colour) carry several words; blanks dropped.
+      dnaCols.forEach((i, attr) {
+        final raw = cellAt(row, i);
+        if (raw.isEmpty) return;
+        final words = raw
+            .split(RegExp(r'[,/]'))
+            .map((w) => w.trim())
+            .where((w) => w.isNotEmpty)
+            .toList();
+        if (words.isNotEmpty) xls.dna[attr.id] = words;
+      });
       // No name under the chosen brand but other brands named → map only (can't
       // make stock for a brand this tile isn't sold under).
       xls.mapOnly = hasBrandCols && chosenName.isEmpty && brandNames.isNotEmpty;
@@ -592,104 +631,146 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final toDo = _rows.where((r) => r.valid && r.include).toList();
     if (toDo.isEmpty) { _snack('Nothing to import.'); return; }
 
+    final willImport = toDo.length;
     setState(() { _importing = true; _done = 0; });
-    int updated = 0, created = 0, finishFixed = 0, imagesFromLibrary = 0, mapped = 0;
-    final learned = <String, String>{};
 
     // Excel carries no photos — fill them from THIS stockist's own Design Library
     // (by the target brand's design name / master name + size). Never borrows.
     final libImages = _ownLibImages();
+    final brandId = _uploadBrandId;
+
+    // Build ONE atomic batch payload (no per-row loop of writes). Combined-sheet
+    // rows write the master + all brand aliases into the Library inline; plain
+    // rows opt out of the Library (skip_master) and just create/update the
+    // design — preserving the old behaviour exactly. Map-only rows carry qty 0
+    // (library mapping, no stock). force_new replays the stockist's "add as new"
+    // choice on a finish conflict; update_surface replays a finish correction.
+    int mapped = 0, news = 0, fixes = 0, imagesFromLibrary = 0;
+    final rows = <Map<String, dynamic>>[];
+    final learned = <String, String>{};
 
     for (final r in toDo) {
-      // Combined sheet: write the master + all brand names into the Library so a
-      // new brand's name mapping happens inline (existing aliases are merged,
-      // never deleted). Best-effort — stock still proceeds if mapping fails.
-      if (_combined && r.masterName.trim().isNotEmpty && r.brandNames.isNotEmpty) {
-        try {
-          await _dataSvc.libraryMapUpsert(
-              size: r.size, masterName: r.masterName, aliases: r.brandNames);
-          mapped++;
-        } catch (_) {/* best-effort */}
+      final isCombined =
+          _combined && r.masterName.trim().isNotEmpty && r.brandNames.isNotEmpty;
+      final aliasJson = r.brandNames.entries
+          .where((e) => e.value.trim().isNotEmpty)
+          .map((e) => {'brand_id': e.key, 'name': e.value.trim()})
+          .toList();
+
+      // Map-only row (chosen brand doesn't sell this tile) → Library only.
+      if (r.mapOnly) {
+        rows.add(<String, dynamic>{
+          'name': r.masterName.trim(),
+          'master_name': r.masterName.trim(),
+          'size': r.size,
+          'aliases': aliasJson,
+          'qty': 0,
+          if (r.dna.isNotEmpty) 'dna': r.dna,
+        });
+        mapped++;
+        continue;
       }
-      // Map-only row (the chosen brand doesn't sell this tile) → no stock.
-      if (r.mapOnly) { setState(() => _done++); continue; }
 
       final libUrl = libImages[designImageKey(r.name, r.size)];
-      final addAsNew = r.action == 'new' || (r.action == 'conflict' && r.conflictAsNew);
-      if (addAsNew) {
-        final newId = await _dataSvc.addDesign(
-          stockistUUID: currentStockistUUID,
-          name: r.name,
-          size: r.size,
-          surfaceType: r.surface,
-          quality: r.quality,
-          colour: r.colour,
-          stockType: 'Uncertain',
-          boxQuantity: 0,
-          piecesPerBox: r.pieces ?? 0,
-          boxWeightKg: r.weight ?? 0,
-          thicknessMm: approxThicknessMm(
-                  r.size, r.pieces ?? 0, r.weight ?? 0,
-                  kTileTypes.contains(r.tileType) ? r.tileType : kTileTypes.first) ??
-              0,
-          tileType: kTileTypes.contains(r.tileType) ? r.tileType : '',
-          faceImageUrls: libUrl != null ? [libUrl] : const [],
-          finishLabel: r.surfaceRaw.trim().isEmpty ? null : r.surfaceRaw.trim(),
-          catalogId: _catalogId,
-        );
-        if (newId != null) {
-          if (libUrl != null) imagesFromLibrary++;
-          final ok = await _stockSvc.addStock(
-            designId: newId, stockistUUID: currentStockistUUID,
-            quantity: r.qty, pdfFilename: _filename, size: r.size, quality: r.quality);
-          if (ok) created++;
-        }
-      } else {
-        // Update existing: correct the finish if the stockist chose to, then
-        // add the new stock quantity (image + history preserved).
-        if (r.action == 'conflict' && !r.conflictAsNew &&
-            r.surface != r.match!.surfaceType) {
-          await _dataSvc.updateDesign(r.match!.id, {'surface_type': r.surface});
-          finishFixed++;
-        }
-        // Backfill a photo from the library if this design still has none.
-        if (libUrl != null && r.match!.faceImageUrls.isEmpty) {
-          await _dataSvc.updateDesign(r.match!.id, {'face_image_urls': [libUrl]});
-          imagesFromLibrary++;
-        }
-        final ok = await _stockSvc.addStock(
-          designId: r.match!.id, stockistUUID: currentStockistUUID,
-          quantity: r.qty, pdfFilename: _filename, size: r.size, quality: r.quality);
-        if (ok) updated++;
+      final addAsNew =
+          r.action == 'new' || (r.action == 'conflict' && r.conflictAsNew);
+      final correctFinish = r.action == 'conflict' &&
+          !r.conflictAsNew &&
+          r.match != null &&
+          r.surface != r.match!.surfaceType;
+
+      final row = <String, dynamic>{
+        'name': r.name,
+        'size': r.size,
+        'quality': r.quality,
+        'surface': r.surface,
+        'colour': r.colour,
+        'qty': r.qty,
+        'stock_type': 'Uncertain',
+        'tile_type': kTileTypes.contains(r.tileType) ? r.tileType : '',
+        'pieces_per_box': r.pieces ?? 0,
+        'box_weight_kg': r.weight ?? 0,
+        'thickness_mm': approxThicknessMm(
+                r.size, r.pieces ?? 0, r.weight ?? 0,
+                kTileTypes.contains(r.tileType)
+                    ? r.tileType
+                    : kTileTypes.first) ??
+            0,
+        'force_new': addAsNew,
+        'update_surface': correctFinish,
+        if (libUrl != null) 'image_url': libUrl,
+        if (r.surfaceRaw.trim().isNotEmpty) 'finish_label': r.surfaceRaw.trim(),
+        if (r.match != null && !addAsNew) 'design_id': r.match!.id,
+      };
+      final hasDna = r.dna.isNotEmpty;
+      if (isCombined) {
+        row['master_name'] = r.masterName.trim();
+        row['aliases'] = aliasJson;
+        mapped++;
+      } else if (!hasDna) {
+        row['skip_master'] = true; // plain row, no DNA: leave the Library untouched
       }
+      // A plain row WITH DNA keeps skip_master off so a master exists to tag it.
+      if (hasDna) row['dna'] = r.dna;
+      rows.add(row);
+
+      if (libUrl != null) imagesFromLibrary++;
+      if (addAsNew) news++;
+      if (correctFinish) fixes++;
       // Remember the finish wording → chosen finish for next time.
       if (r.rawKey.isNotEmpty && r.surface != 'None') learned[r.rawKey] = r.surface;
-      setState(() => _done++);
     }
 
+    // ONE atomic, idempotent call — never half-saves, and a reused batch id can't
+    // double-add on retry (the DB rolls the whole thing back on any failure).
+    if (_batchId.isEmpty) _batchId = const Uuid().v4();
+    Map<String, dynamic> res;
+    try {
+      res = await _dataSvc.importStockBatch(
+        batchId: _batchId,
+        catalogId: _catalogId,
+        brandId: brandId,
+        pdfFilename: _filename,
+        rows: rows,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _importing = false);
+      _snack('Nothing was saved — $e. Please try again.', Colors.red);
+      return;
+    }
+
+    // Learn finish alignments AFTER the import (idempotent upserts, safe outside
+    // the transaction — they don't add stock so they can't double-apply).
     for (final e in learned.entries) {
       await _dataSvc.upsertSurfaceAlias(currentStockistUUID, e.key, e.value);
     }
 
     if (!mounted) return;
-    setState(() => _importing = false);
-    final fixNote = finishFixed > 0 ? ' · $finishFixed finish corrected' : '';
-    final libNote =
-        imagesFromLibrary > 0 ? ' · $imagesFromLibrary photos from library' : '';
+    setState(() { _importing = false; _done = willImport; });
+    final created = (res['created'] as num?)?.toInt() ?? news;
+    final updated = (res['updated'] as num?)?.toInt() ?? 0;
+    final dnaTagged = (res['dna_tagged'] as num?)?.toInt() ?? 0;
+    final fixNote = fixes > 0 ? ' · $fixes finish corrected' : '';
+    final libNote = imagesFromLibrary > 0
+        ? ' · $imagesFromLibrary photos from library'
+        : '';
     final mapNote = mapped > 0 ? ' · $mapped mapped to library' : '';
+    final dnaNote = dnaTagged > 0 ? ' · $dnaTagged DNA tagged' : '';
     StockCatalog? cat;
     for (final c in _catalogs) {
       if (c.id == _catalogId) { cat = c; break; }
     }
     final catNote = cat == null ? '' : ' → "${cat.name}"';
-    _snack('Done — $updated updated, $created new$mapNote$fixNote$libNote$catNote.',
+    _snack(
+        'Done — $updated updated, $created new$mapNote$dnaNote$fixNote$libNote$catNote.',
         Colors.green);
     if (updated + created + mapped > 0) Navigator.of(context).pop();
   }
 
   void _reset() => setState(() {
         _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = '';
-        _libImages = {}; _combined = false;
+        _libImages = {}; _combined = false; _batchId = ''; _dnaDetected = [];
       });
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -925,6 +1006,27 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             ],
           ),
         ),
+        if (_dnaDetected.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: const Color(0xFF6A1B9A).withValues(alpha: 0.06),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_awesome,
+                    size: 15, color: Color(0xFF6A1B9A)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Design DNA columns detected: ${_dnaDetected.join(', ')} '
+                    '— values will be tagged automatically.',
+                    style: const TextStyle(
+                        fontSize: 11, color: Color(0xFF6A1B9A)),
+                  ),
+                ),
+              ],
+            ),
+          ),
         Expanded(
           child: ListView.builder(
             padding: EdgeInsets.fromLTRB(

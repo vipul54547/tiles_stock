@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:uuid/uuid.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/pdf_import_service.dart';
-import '../../services/stock_service.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/tile_design.dart';
@@ -38,6 +38,8 @@ class _Resolved {
   // Mutable: a single-surface PDF carries no finish word, so the stockist may
   // type their own in the Map-Finishes step, which becomes the key to learn.
 
+  String? uploadedUrl; // cached Cloudinary URL so a retry never re-uploads.
+
   _Resolved(this.row, this.match, {this.rawKey = ''});
 
   bool get isUpdate => match != null;
@@ -69,8 +71,8 @@ class UploadStockScreen extends StatefulWidget {
 
 class _State extends State<UploadStockScreen> {
   final _pdfService  = PdfImportService();
-  final _stockSvc    = StockService();
   final _dataSvc     = SupabaseDataService();
+  String _batchId    = ''; // idempotency key per parsed PDF (reused on retry)
 
   PdfImportResult?   _parsed;
   List<_Resolved>    _rows      = [];
@@ -312,6 +314,7 @@ class _State extends State<UploadStockScreen> {
     setState(() {
       _parsed = parsed;
       _rows   = rows;
+      _batchId = const Uuid().v4(); // one idempotency key per parsed PDF
     });
   }
 
@@ -852,109 +855,79 @@ class _State extends State<UploadStockScreen> {
     // uploaded PDF photos are contributed back to the library on new-design adds.
     final libImages = _libImages;
     final brandId = _uploadBrandId;
-    final contributions = <({String name, String size, String url})>[];
 
-    // Upload a tile photo extracted from the PDF. Tracks success/failure
-    // counts and remembers the last error so we can surface it to the user.
-    Future<String?> uploadPhoto(PdfDesignRow row) async {
-      if (row.imageBytes == null) return null;
-      setState(() => _loadingStep = 'Uploading image for ${row.name}…');
-      final res = await CloudinaryService.uploadImageBytes(
-        row.imageBytes!,
-        filename: '${row.name.replaceAll(' ', '_')}.jpg',
-      );
-      if (res.ok) {
-        imagesUploaded++;
-        return res.url;
+    // ── Phase A: resolve images (non-transactional). Upload each PDF photo to
+    // Cloudinary once (cached on the row so a retry never re-uploads), or fall
+    // back to this stockist's own library photo. We only fetch a photo when the
+    // row actually needs one — a new design, or an existing one with no image yet.
+    Future<String?> resolveImage(_Resolved r) async {
+      final needs = !r.isUpdate || r.match!.faceImageUrls.isEmpty;
+      if (!needs) return null;
+      if (r.uploadedUrl != null) return r.uploadedUrl;
+      if (r.row.imageBytes != null) {
+        setState(() => _loadingStep = 'Uploading image for ${r.row.name}…');
+        final res = await CloudinaryService.uploadImageBytes(
+          r.row.imageBytes!,
+          filename: '${r.row.name.replaceAll(' ', '_')}.jpg',
+        );
+        if (res.ok) { imagesUploaded++; r.uploadedUrl = res.url; return res.url; }
+        imagesFailed++; lastImageError = res.error; return null;
       }
-      imagesFailed++;
-      lastImageError = res.error;
-      return null;
-    }
-
-    // Resolve a row's photo: upload the one extracted from the PDF, or fall back
-    // to this stockist's own library image when the PDF carried none. (Fresh PDF
-    // photos are contributed to the library only on a new-design add, below.)
-    Future<String?> resolvePhoto(PdfDesignRow row) async {
-      if (row.imageBytes != null) return await uploadPhoto(row);
-      final libUrl = libImages[designImageKey(row.name, _size)];
+      final libUrl = libImages[designImageKey(r.row.name, _size)];
       if (libUrl != null) imagesFromLibrary++;
       return libUrl;
     }
 
+    final thick =
+        approxThicknessMm(_size, _piecesPerBox, _boxWeightKg, _tileType) ?? 0;
+
+    // ── Phase B: build ONE atomic batch payload. The DB find-or-creates each
+    // design, adds stock and grows the Library (master + brand alias + photo,
+    // first-writer-wins) in a single transaction — never a half-import, and a
+    // reused batch id can't double-add on retry. design_id honours THIS screen's
+    // (fuzzy) match so a previewed "update" stays an update.
+    final rows = <Map<String, dynamic>>[];
     for (final r in _rows) {
-      if (r.isUpdate) {
-        // Existing design — add the new stock quantity…
-        final ok = await _stockSvc.addStock(
-          designId:     r.match!.id,
-          stockistUUID: currentStockistUUID,
-          quantity:     r.row.quantity,
-          pdfFilename:  _filename,
-          size:         _size,
-          quality:      _quality,
-        );
-        if (ok) updated++;
-
-        // …and backfill a photo if the design has none yet — from the PDF or,
-        // failing that, the shared library.
-        if (r.match!.faceImageUrls.isEmpty) {
-          final url = await resolvePhoto(r.row);
-          if (url != null) {
-            await _dataSvc.updateDesign(r.match!.id, {
-              'face_image_urls': [url],
-            });
-          }
-        }
-      } else {
-        // New design — resolve image (PDF photo or library), then create.
-        final url = await resolvePhoto(r.row);
-        final imageUrls = url != null ? [url] : <String>[];
-
-        final newId = await _dataSvc.addDesign(
-          stockistUUID:  currentStockistUUID,
-          name:          r.row.name,
-          size:          _size,
-          surfaceType:   r.row.surface,
-          quality:       _quality,
-          colour:        '',
-          stockType:     _stockType,
-          boxQuantity:   0,
-          piecesPerBox:  _piecesPerBox,
-          boxWeightKg:   _boxWeightKg,
-          thicknessMm:
-              approxThicknessMm(_size, _piecesPerBox, _boxWeightKg, _tileType) ?? 0,
-          tileType:      _tileType,
-          faceImageUrls: imageUrls,
-          finishLabel:   r.row.finishLabel,
-          catalogId:     _catalogId,
-        );
-        if (newId != null) {
-          // Contribute a freshly-uploaded PDF photo to THIS stockist's own
-          // library on the blank/new add (decision #3 — new adds only, never on
-          // a change). First-writer-wins inside the RPC.
-          if (r.row.imageBytes != null && url != null) {
-            contributions.add((name: r.row.name, size: _size, url: url));
-          }
-          final ok = await _stockSvc.addStock(
-            designId:     newId,
-            stockistUUID: currentStockistUUID,
-            quantity:     r.row.quantity,
-            pdfFilename:  _filename,
-            size:         _size,
-            quality:      _quality,
-          );
-          if (ok) created++;
-        }
-      }
+      final url = await resolveImage(r);
+      rows.add(<String, dynamic>{
+        'name': r.row.name,
+        'size': _size,
+        'quality': _quality,
+        'surface': r.row.surface,
+        'qty': r.row.quantity,
+        'stock_type': _stockType,
+        'tile_type': _tileType,
+        'pieces_per_box': _piecesPerBox,
+        'box_weight_kg': _boxWeightKg,
+        'thickness_mm': thick,
+        if (url != null) 'image_url': url,
+        if (r.row.finishLabel != null && r.row.finishLabel!.trim().isNotEmpty)
+          'finish_label': r.row.finishLabel!.trim(),
+        if (r.isUpdate) 'design_id': r.match!.id,
+      });
     }
 
-    // Grow this stockist's OWN Design Library with the photos this import
-    // uploaded (brand + size scoped), so their next Excel/PDF auto-fills them.
-    if (brandId != null) {
-      for (final c in contributions) {
-        await _dataSvc.libraryContribute(
-            brandId: brandId, name: c.name, size: c.size, imageUrl: c.url);
-      }
+    setState(() => _loadingStep = 'Saving to your catalogue…');
+    if (_batchId.isEmpty) _batchId = const Uuid().v4();
+    try {
+      final res = await _dataSvc.importStockBatch(
+        batchId: _batchId,
+        catalogId: _catalogId,
+        brandId: brandId,
+        pdfFilename: _filename,
+        rows: rows,
+      );
+      created = (res['created'] as num?)?.toInt() ?? 0;
+      updated = (res['updated'] as num?)?.toInt() ?? 0;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _importing = false; _loadingStep = ''; });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Nothing was saved — $e. Please try again.'),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 6),
+      ));
+      return;
     }
 
     // Learn finish alignments: remember each raw PDF surface word → the finish
@@ -1156,7 +1129,7 @@ class _State extends State<UploadStockScreen> {
             ),
             TextButton(
               onPressed: () =>
-                  setState(() { _parsed = null; _rows = []; _filename = ''; _libImages = {}; }),
+                  setState(() { _parsed = null; _rows = []; _filename = ''; _libImages = {}; _batchId = ''; }),
               child: const Text('Change'),
             ),
           ],

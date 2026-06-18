@@ -155,6 +155,127 @@ class _State extends State<MyDesignLibraryScreen> {
         SnackBar(content: Text(msg), backgroundColor: error ? Colors.red : null));
   }
 
+  // Other masters of the SAME size — the only merge candidates (the server also
+  // enforces same-size). Used to show/hide the per-tile merge action.
+  List<LibraryEntry> _sameSizeSiblings(LibraryEntry keep) =>
+      _entries.where((o) => o.id != keep.id && o.size == keep.size).toList();
+
+  // Merge: pick a same-size duplicate to FOLD INTO [keep]. The dropped master's
+  // brand names, DNA and (if [keep] has none) photo move onto [keep]; the drop is
+  // deleted. Stock rows have no FK to masters, so counts are untouched.
+  Future<void> _openMergeSheet(LibraryEntry keep) async {
+    final candidates = _sameSizeSiblings(keep);
+    if (candidates.isEmpty) {
+      _snack('No other ${keep.size.replaceAll(' mm', '')} designs to merge.');
+      return;
+    }
+    final chosen = await showModalBottomSheet<LibraryEntry>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Fold a duplicate into "${keep.masterName}"',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
+                  const SizedBox(height: 2),
+                  Text(
+                      'Pick the same tile listed twice. Its brand names, DNA and '
+                      'photo move here; the duplicate is removed. Stock is '
+                      'unchanged.',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                ],
+              ),
+            ),
+            const Divider(height: 12),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                itemCount: candidates.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 4),
+                itemBuilder: (_, i) {
+                  final c = candidates[i];
+                  return ListTile(
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: c.imageUrl.isEmpty
+                            ? Container(
+                                color: Colors.grey.shade100,
+                                child: Icon(Icons.image_outlined,
+                                    size: 20, color: Colors.grey.shade400))
+                            : CachedNetworkImage(
+                                imageUrl: CloudinaryService.thumbUrl(c.imageUrl,
+                                    width: 120),
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) =>
+                                    Container(color: Colors.grey.shade200),
+                                errorWidget: (_, __, ___) =>
+                                    Container(color: Colors.grey.shade200)),
+                      ),
+                    ),
+                    title: Text(c.masterName,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600)),
+                    subtitle: c.aliases.isEmpty
+                        ? null
+                        : Text(
+                            c.aliases.entries
+                                .map((a) => '${_brandName(a.key)}: ${a.value}')
+                                .join('  ·  '),
+                            style: const TextStyle(fontSize: 11),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis),
+                    trailing: const Icon(Icons.call_merge, color: _navy),
+                    onTap: () => Navigator.pop(ctx, c),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null || !mounted) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Merge these designs?'),
+        content: Text('"${chosen.masterName}" will be removed and folded into '
+            '"${keep.masterName}". Its brand names, DNA and photo move across. '
+            'This cannot be undone, but stock counts are unaffected.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _navy),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Merge')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _data.mergeLibraryMasters(keepId: keep.id, dropId: chosen.id);
+      await _load();
+      _snack('Merged into "${keep.masterName}".');
+    } catch (err) {
+      _snack('$err', error: true);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -484,6 +605,13 @@ class _State extends State<MyDesignLibraryScreen> {
                   tooltip: 'Edit',
                   onPressed: () => _openEditor(e),
                 ),
+                if (_sameSizeSiblings(e).isNotEmpty)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.call_merge, size: 20, color: _navy),
+                    tooltip: 'Merge a duplicate into this',
+                    onPressed: () => _openMergeSheet(e),
+                  ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.delete_outline,

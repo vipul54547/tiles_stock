@@ -425,6 +425,20 @@ class SupabaseDataService {
     }
   }
 
+  /// Merge two same-size library masters: [dropId]'s brand aliases, DNA and (if
+  /// the kept one has none) image move onto [keepId], then [dropId] is deleted.
+  /// Lossless — stock rows have no FK to masters so they're untouched. Throws the
+  /// server message (e.g. size mismatch / not yours). See library_merge_masters.
+  Future<void> mergeLibraryMasters(
+      {required String keepId, required String dropId}) async {
+    try {
+      await supabase.rpc('library_merge_masters',
+          params: {'p_keep_id': keepId, 'p_drop_id': dropId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Auto-fill lookup: this stockist's own master image for (brand, design name,
   /// size), or null when the design isn't in their library. Used by stock uploads
   /// so an image is only ever shown when the stockist owns it.
