@@ -3,6 +3,7 @@ import '../models/tile_design.dart';
 import '../models/stockist.dart';
 import '../models/end_user.dart';
 import '../models/surface_type.dart';
+import '../models/dna.dart';
 import '../models/app_notification.dart';
 import '../models/tile_size.dart';
 import '../models/stock_catalog.dart';
@@ -894,6 +895,123 @@ class SupabaseDataService {
         params: {'p_seq': sequentialId, 'p_is_listed': listed});
   }
 
+  /// Admin: set a stockist's business / actor type ('M' Manufacturer/Author,
+  /// 'T' Trader, 'W' Wholesaler). Decides the upload behaviour (author vs
+  /// importer). Separate from the tier in [updateStockist]'s stockistType.
+  Future<void> setStockistBusinessType(String sequentialId, String type) async {
+    await supabase.rpc('admin_set_business_type',
+        params: {'p_seq': sequentialId, 'p_type': type});
+  }
+
+  // ── Design DNA (dynamic searchable attributes) ──────────────────────────────
+
+  /// The whole DNA catalog: attributes (active) each with their active values.
+  Future<List<DnaAttribute>> dnaCatalog() async {
+    try {
+      final res = await supabase.rpc('dna_catalog');
+      final list = (res as List?) ?? const [];
+      return list
+          .map((a) => DnaAttribute.fromJson(Map<String, dynamic>.from(a as Map)))
+          .toList();
+    } catch (e) {
+      debugPrint('dnaCatalog failed: $e');
+      return [];
+    }
+  }
+
+  Future<void> adminDnaAddAttribute(String name,
+      {bool isMulti = false, bool isFreeText = false}) async {
+    await supabase.rpc('admin_dna_add_attribute', params: {
+      'p_name': name,
+      'p_is_multi': isMulti,
+      'p_is_free_text': isFreeText,
+    });
+  }
+
+  Future<void> adminDnaUpdateAttribute(String id,
+      {String? name, bool? isActive}) async {
+    await supabase.rpc('admin_dna_update_attribute',
+        params: {'p_id': id, 'p_name': name, 'p_is_active': isActive});
+  }
+
+  Future<void> adminDnaDeleteAttribute(String id) async {
+    await supabase.rpc('admin_dna_delete_attribute', params: {'p_id': id});
+  }
+
+  Future<void> adminDnaAddValue(String attributeId, String name) async {
+    await supabase.rpc('admin_dna_add_value',
+        params: {'p_attribute_id': attributeId, 'p_name': name});
+  }
+
+  Future<void> adminDnaUpdateValue(String id,
+      {String? name, bool? isActive}) async {
+    await supabase.rpc('admin_dna_update_value',
+        params: {'p_id': id, 'p_name': name, 'p_is_active': isActive});
+  }
+
+  Future<void> adminDnaDeleteValue(String id) async {
+    await supabase.rpc('admin_dna_delete_value', params: {'p_id': id});
+  }
+
+  /// Set (replace) a design's values for one attribute (single or multi).
+  Future<void> dnaSetDesign(
+      String libraryId, String attributeId, List<String> valueIds) async {
+    await supabase.rpc('dna_set_design', params: {
+      'p_library_id': libraryId,
+      'p_attribute_id': attributeId,
+      'p_value_ids': valueIds,
+    });
+  }
+
+  /// A design's current DNA: { attributeId: [ {id,name}, … ] }.
+  Future<Map<String, List<DnaValue>>> dnaForDesign(String libraryId) async {
+    try {
+      final res = await supabase
+          .rpc('dna_for_design', params: {'p_library_id': libraryId});
+      final map = res is Map ? Map<String, dynamic>.from(res) : {};
+      return map.map((k, v) => MapEntry(
+          k,
+          ((v as List?) ?? const [])
+              .map((e) => DnaValue.fromJson(Map<String, dynamic>.from(e as Map)))
+              .toList()));
+    } catch (e) {
+      debugPrint('dnaForDesign failed: $e');
+      return {};
+    }
+  }
+
+  /// Atomic, all-or-nothing bulk import. Sends the whole batch + a client
+  /// [batchId] (idempotency key) to one DB transaction: it builds library
+  /// masters/images, creates/finds designs and adds stock together. If the call
+  /// is interrupted (network/power loss) the DB rolls the whole thing back —
+  /// never a half-import. Re-sending the SAME [batchId] returns the prior result
+  /// instead of double-adding. Each row: {name,size,quality,surface,qty,
+  /// image_url,stock_type,tile_type,pieces_per_box,box_weight_kg,thickness_mm}.
+  /// Returns the summary (masters/created/updated/stock_rows/skipped/
+  /// already_applied). Throws the server message on failure.
+  Future<Map<String, dynamic>> importStockBatch({
+    required String batchId,
+    required String? catalogId,
+    required String? brandId,
+    required String pdfFilename,
+    required List<Map<String, dynamic>> rows,
+  }) async {
+    try {
+      final res = await supabase.rpc('import_stock_batch', params: {
+        'p_batch_id': batchId,
+        'p_catalog_id': catalogId,
+        'p_brand_id': brandId,
+        'p_pdf_filename': pdfFilename,
+        'p_rows': rows,
+      });
+      return res is Map
+          ? Map<String, dynamic>.from(res)
+          : <String, dynamic>{};
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Super-admin "go live" switch — reads the single app_settings flag that
   /// gates the public market + anonymity across the whole app. Safe for anyone.
   Future<bool> getPublicMarketEnabled() async {
@@ -1162,6 +1280,9 @@ class SupabaseDataService {
         priority:  (s['priority'] as num?)?.toDouble() ?? 0,
         gstNumber: s['gst_number'] ?? '',
         stockistType: s['stockist_type'] ?? '',
+        businessType: (s['business_type'] as String?)?.trim().isNotEmpty == true
+            ? s['business_type'] as String
+            : 'M',
         isActive:  s['is_active'] ?? true,
         isListed:  s['is_listed'] ?? true,
         shareToken: s['share_token'] ?? '',

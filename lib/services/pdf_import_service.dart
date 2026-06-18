@@ -41,6 +41,11 @@ class PdfDesignRow {
   /// the import UI can record the stockist's own wording for a single-surface
   /// PDF (one that carried no finish text of its own).
   String? surfaceRaw;
+  /// Per-row quality read from the PDF (canonical 'Premium'/'Standard'/'Economy'),
+  /// when the layout carries a grade per design (PRM / STOCK cards). Null when the
+  /// PDF has no per-row grade — callers fall back to the document quality.
+  String? qualityRaw;
+
   /// Raw JPEG bytes for this design's photo. From the PDF when one was matched,
   /// or set later when the stockist picks/takes a photo in the import preview.
   /// Null when the PDF had no photo for this design and none was added yet.
@@ -59,6 +64,7 @@ class PdfDesignRow {
     required this.surface,
     this.finishLabel,
     this.surfaceRaw,
+    this.qualityRaw,
     this.imageBytes,
     this.isNew = true,
     this.currentQuantity = 0,
@@ -2405,6 +2411,7 @@ class PdfImportService {
         surface:     m['surface']     as String,
         finishLabel: m['finishLabel'] as String?,
         surfaceRaw:  m['surfaceRaw']  as String?,
+        qualityRaw:  m['qualityData'] as String?,
         imageBytes:  i < imageList.length ? imageList[i] as Uint8List? : null,
       );
     });

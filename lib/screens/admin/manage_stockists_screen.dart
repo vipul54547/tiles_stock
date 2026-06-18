@@ -4,6 +4,7 @@ import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 import '../../widgets/phone_field.dart';
 import '../../utils/stockist_tiers.dart';
+import '../../utils/business_types.dart';
 import 'excel_import_screen.dart';
 import 'stockist_brand_lists_screen.dart';
 
@@ -265,6 +266,25 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
                                   color: Color(0xFF8A6D00))),
                         ),
                       ],
+                      // Importers (T/W) are flagged; Manufacturer is the default
+                      // and left unbadged to avoid clutter.
+                      if (s.isImporter) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1B4F72)
+                                .withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(businessTypeLabel(s.businessType),
+                              style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1B4F72))),
+                        ),
+                      ],
                       if (s.isAnonymous) ...[
                         const SizedBox(width: 6),
                         Container(
@@ -458,6 +478,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   final _priority = TextEditingController(text: '0.00');
   final _gst      = TextEditingController();
   String _tier = ''; // '' = no tier; else Platinum/Gold/Silver
+  String _businessType = 'M'; // M = Manufacturer/Author, T/W = importer
   bool _listed = true; // shown in the public market (false = link-only)
   bool _canPrivate = false; // may create private (Most Exclusive) catalogs
   bool _anonymous = false; // public anonymity (trade name + masked code)
@@ -499,6 +520,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _gst.text      = s.gstNumber;
       _priority.text = s.priority.toStringAsFixed(2);
       _tier = kStockistTiers.contains(s.stockistType) ? s.stockistType : '';
+      _businessType =
+          kBusinessTypes.contains(s.businessType) ? s.businessType : 'M';
       _listed = s.isListed;
       _canPrivate = s.canCreatePrivateCatalog;
       _anonymous = s.isAnonymous;
@@ -844,6 +867,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           gstNumber: _gst.text.trim(),
           stockistType: _tier,
         );
+        await _dataSvc.setStockistBusinessType(
+            widget.existing!.id, _businessType);
         await _dataSvc.setStockistListed(widget.existing!.id, _listed);
         await _dataSvc.setStockistPrivateCatalog(
             widget.existing!.id, _canPrivate);
@@ -871,6 +896,11 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           gstNumber: _gst.text.trim(),
           stockistType: _tier,
         );
+        // New stockists default to 'M' in the DB; only call the setter when the
+        // admin picked an importer type at creation.
+        if (seqId.isNotEmpty && _businessType != 'M') {
+          await _dataSvc.setStockistBusinessType(seqId, _businessType);
+        }
         msg = 'Stockist created${seqId.isNotEmpty ? ' · ID $seqId' : ''}.';
       }
       if (!mounted) return;
@@ -998,6 +1028,27 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                   ],
                   onChanged: (v) => setState(() => _tier = v ?? ''),
                 ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: DropdownButtonFormField<String>(
+                  initialValue: _businessType,
+                  decoration: const InputDecoration(
+                      labelText: 'Business type',
+                      border: OutlineInputBorder()),
+                  items: kBusinessTypes
+                      .map((t) => DropdownMenuItem(
+                          value: t, child: Text(businessTypeLabel(t))))
+                      .toList(),
+                  onChanged: (v) =>
+                      setState(() => _businessType = v ?? 'M'),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12, left: 2),
+                child: Text(businessTypeHint(_businessType),
+                    style:
+                        TextStyle(fontSize: 11, color: Colors.grey.shade600)),
               ),
               if (_isEdit && publicMarketLive)
                 Padding(

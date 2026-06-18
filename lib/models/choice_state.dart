@@ -1,5 +1,7 @@
 // Global session-level state
 
+import '../utils/business_types.dart';
+
 // My Choice: designId → quantity (boxes) the buyer wants
 final Map<String, int> myChoiceQuantities = {};
 
@@ -29,6 +31,16 @@ set currentStockistIsAnonymous(bool v) => _currentStockistIsAnonymousRaw = v;
 /// still goes through [currentStockistIsAnonymous] / the server gate.
 bool get currentStockistAnonymityEligible => _currentStockistIsAnonymousRaw;
 String currentStockistDisplayName = ''; // public_display_name (masked trade name)
+
+/// The logged-in stockist's business / actor type: 'M' (Manufacturer/Author),
+/// 'T' (Trader) or 'W' (Wholesaler). Loaded at login. Drives which upload path
+/// the stockist gets — authors get the structured PDF flow, importers (T/W) get
+/// the external-supplier mapping importer. See lib/utils/business_types.dart.
+String currentStockistBusinessType = 'M';
+
+/// True when the logged-in stockist is a Trader/Wholesaler (importer).
+bool get currentStockistIsImporter =>
+    isImporterType(currentStockistBusinessType);
 
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID

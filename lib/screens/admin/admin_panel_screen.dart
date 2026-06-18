@@ -59,6 +59,13 @@ class AdminPanelScreen extends StatelessWidget {
             onTap: () => context.push('/admin/surfaces'),
           ),
           _adminCard(
+            Icons.science_outlined,
+            'Manage Design DNA',
+            'Searchable attributes (Punch, Glaze, Colour…) + their values',
+            const Color(0xFFB9770E),
+            onTap: () => context.push('/admin/design-dna'),
+          ),
+          _adminCard(
             Icons.straighten_rounded,
             'Manage Sizes',
             'Master list of tile sizes (add / reorder / hide)',

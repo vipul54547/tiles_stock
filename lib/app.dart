@@ -40,6 +40,7 @@ import 'screens/stockist/add_edit_stock_screen.dart';
 
 import 'screens/admin/admin_panel_screen.dart';
 import 'screens/admin/manage_surfaces_screen.dart';
+import 'screens/admin/manage_design_dna_screen.dart';
 import 'screens/admin/manage_sizes_screen.dart';
 import 'screens/admin/manage_banners_screen.dart';
 import 'screens/admin/manage_stockists_screen.dart';
@@ -54,6 +55,7 @@ import 'screens/end_user/stockist_group_screen.dart';
 import 'screens/end_user/my_choice_screen.dart';
 import 'screens/end_user/dispatch_history_screen.dart';
 import 'screens/stockist/upload_stock_screen.dart';
+import 'screens/stockist/import_supplier_pdf_screen.dart';
 import 'screens/stockist/manage_catalogs_screen.dart';
 import 'screens/stockist/my_design_library_screen.dart';
 import 'screens/stockist/import_mapping_excel_screen.dart';
@@ -196,6 +198,7 @@ final GoRouter _router = GoRouter(
 
     GoRoute(path: '/admin', builder: (_, __) => const AdminPanelScreen()),
     GoRoute(path: '/admin/surfaces', builder: (_, __) => const ManageSurfacesScreen()),
+    GoRoute(path: '/admin/design-dna', builder: (_, __) => const ManageDesignDnaScreen()),
     GoRoute(path: '/admin/sizes', builder: (_, __) => const ManageSizesScreen()),
     GoRoute(path: '/admin/banners', builder: (_, __) => const ManageBannersScreen()),
     GoRoute(path: '/admin/stockists', builder: (_, __) => const ManageStockistsScreen()),
@@ -218,6 +221,11 @@ final GoRouter _router = GoRouter(
       path: '/stockist/stock/upload',
       builder: (_, state) =>
           UploadStockScreen(initialCatalogId: state.extra as String?),
+    ),
+    GoRoute(
+      path: '/stockist/stock/import-supplier-pdf',
+      builder: (_, state) =>
+          ImportSupplierPdfScreen(initialCatalogId: state.extra as String?),
     ),
     GoRoute(
       path: '/stockist/catalogs',

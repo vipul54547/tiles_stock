@@ -339,18 +339,7 @@ class _State extends State<StockistDashboardScreen> {
       // Add Design row) — no floating buttons.
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildStatsBar(),  // pinned, slim
-                if (_pendingBoxes > 0) _buildPendingBanner(),
-                // Pinned Public/Private/Both inventory filter (Stock tab only,
-                // and only when the stockist has a private catalog).
-                if (_brands.length > 1) _buildBrandFilterRow(),
-                if (_filterLists.length > 1) _buildCatalogFilterRow(),
-                _buildChipRow(),   // pinned: Stock + Inquiry buttons + quality chips
-                Expanded(child: _buildMyStockScroll()),
-              ],
-            ),
+          : _buildMyStockScroll(),
       // Slim platform co-brand footer (hidden during multi-select). Uses
       // Align(heightFactor: 1) — NOT Center — so the bar sizes to the chip's
       // height; a Center here would expand to fill the screen and hide the body.
@@ -480,30 +469,25 @@ class _State extends State<StockistDashboardScreen> {
 
   // ── Stats bar ─────────────────────────────────────────────────────────────
 
-  Widget _buildStatsBar() {
-    // Counts reflect in-stock designs only (out-of-stock are hidden here).
-    // Inquiry count already lives on the Inquiry tab badge, so the stats bar
-    // shows total boxes in stock instead (a number not surfaced elsewhere).
-    final inStock = _inStockDesigns;
-    final totalBoxes = inStock.fold(0, (s, d) => s + d.boxQuantity);
-    return Container(
-      color: const Color(0xFF1B4F72).withValues(alpha: 0.05),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+  // Slim, no-logo count line — pinned between the search bar and the grid.
+  // Reflects the CURRENT filter/search (no filter = full in-stock totals):
+  // design count on the left, total boxes on the right.
+  Widget _buildCountLine() {
+    final designs = _filteredAndSorted;
+    final boxes = designs.fold<int>(0, (s, d) => s + d.boxQuantity);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          _statItem('${inStock.length}', 'Designs',
-              Icons.grid_view_rounded, const Color(0xFF1B4F72)),
-          _divider(),
-          _statItem('$totalBoxes', 'Boxes',
-              Icons.inventory_2_rounded, const Color(0xFF2E7D32)),
+          Text('${designs.length} designs',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+          Text('$boxes boxes',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
         ],
       ),
     );
   }
-
-  Widget _divider() =>
-      Container(width: 1, height: 22, color: Colors.grey.shade300);
 
   // Banner shown when some of the stockist's added stock is held for admin
   // approval (big-stock rule: more than 35,000 boxes added in a day). The rest
@@ -531,22 +515,6 @@ class _State extends State<StockistDashboardScreen> {
       );
 
   // Slim single-line stat: icon · value · label.
-  Widget _statItem(
-      String value, String label, IconData icon, Color color) =>
-      Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 4),
-          Text(value,
-              style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.bold, color: color)),
-          const SizedBox(width: 3),
-          Text(label,
-              style: const TextStyle(fontSize: 10, color: Colors.grey)),
-        ],
-      );
-
   // ── Tab row ───────────────────────────────────────────────────────────────
 
   // Row 2 (pinned): My Stock / Buyer Interest tabs + quality chips in one
@@ -677,17 +645,40 @@ class _State extends State<StockistDashboardScreen> {
 
   // ── My Stock tab ──────────────────────────────────────────────────────────
 
-  // My Stock: collapsing header (action buttons + search/filter) over the grid.
+  // My Stock: rows 1 & 2 scroll AWAY; the search bar + slim count line stay
+  // PINNED at the top; the grid scrolls under them.
   Widget _buildMyStockScroll() {
     final designs = _filteredAndSorted;
     return CustomScrollView(
       slivers: [
+        // Scroll-away block: pending banner, brand/list filters, the Stock/
+        // Inquiry + quality chips, and the action buttons.
         SliverToBoxAdapter(
           child: Column(
             children: [
+              if (_pendingBoxes > 0) _buildPendingBanner(),
+              if (_brands.length > 1) _buildBrandFilterRow(),
+              if (_filterLists.length > 1) _buildCatalogFilterRow(),
+              _buildChipRow(),
               _buildActionButtonRow(),
-              _buildSearchFilterRow(),
             ],
+          ),
+        ),
+        // Pinned: search/filter + the filter-aware count line.
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _PinnedHeaderDelegate(
+            height: 86,
+            child: Material(
+              color: const Color(0xFFF7F9FA),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildSearchFilterRow(),
+                  _buildCountLine(),
+                ],
+              ),
+            ),
           ),
         ),
         if (designs.isEmpty)
@@ -831,6 +822,25 @@ class _State extends State<StockistDashboardScreen> {
           .toList()
         ..sort((x, y) => x.sortOrder.compareTo(y.sortOrder));
 
+  // One "Adding to" line: a fixed-width label + the value, so Brand / List align.
+  Widget _destLine(String label, String value) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 46,
+            child: Text(label,
+                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+          ),
+          Expanded(
+            child: Text(value,
+                style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1B4F72))),
+          ),
+        ],
+      );
+
   // Upload is BRAND-FIRST: a stock list always belongs to one brand, so you pick
   // the BRAND, its stock list is taken automatically (only asked when the brand
   // has more than one), then the source. The chosen list — and therefore its
@@ -850,10 +860,29 @@ class _State extends State<StockistDashboardScreen> {
       return null;
     }
 
-    // Default to the brand currently being viewed on the dashboard, else first.
-    var brandId =
-        brands.any((b) => b.id == _brandFilter) ? _brandFilter : brands.first.id;
+    // Progressive disclosure: pick BRAND first (only when the stockist runs more
+    // than one), then only THAT brand's stock list — so a list belonging to
+    // another brand is never on screen to mis-tap. Single brand / single list
+    // auto-resolve. Seed from the brand currently being viewed, if any.
+    String? selBrandId =
+        brands.any((b) => b.id == _brandFilter) ? _brandFilter : null;
     String? catId;
+
+    // Quiet, non-blocking upsell: once a stockist SEES Brand/List as named
+    // things, they realise they can ask for more — admin grants (and can charge).
+    Future<void> contactAdmin() => showDialog<void>(
+          context: context,
+          builder: (c) => AlertDialog(
+            title: const Text('Add a brand or stock list'),
+            content: const Text(
+                'More brands and stock lists are set up by your admin. Please '
+                'contact your admin to add another one.'),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(c), child: const Text('OK')),
+            ],
+          ),
+        );
 
     showModalBottomSheet<void>(
       context: context,
@@ -861,88 +890,130 @@ class _State extends State<StockistDashboardScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
-          final brand = brandOf(brandId) ?? brands.first;
-          final lists = _listsForBrand(brand);
-          // Keep the chosen list valid for the selected brand.
-          if (catId == null || !lists.any((c) => c.id == catId)) {
-            catId = lists.isEmpty ? null : lists.first.id;
-          }
-          final isMainBrand = brand.isDefault;
-          final needsSetup = _brandNeedsSetup(brand);
+          // Resolve the current step. 1 brand auto-selects; >1 forces a pick.
+          final brand =
+              brandOf(selBrandId) ?? (brands.length == 1 ? brands.first : null);
+          final lists =
+              brand == null ? <StockCatalog>[] : _listsForBrand(brand);
+          // Keep a valid prior list pick; auto when the brand has exactly one.
+          final effCatId = brand == null
+              ? null
+              : (catId != null && lists.any((c) => c.id == catId))
+                  ? catId
+                  : (lists.length == 1 ? lists.first.id : null);
+          final mustPickBrand = brand == null;
+          final mustPickList = brand != null && effCatId == null;
+          final ready = effCatId != null;
+          final isMainBrand = brand?.isDefault ?? false;
+          final needsSetup = brand != null && _brandNeedsSetup(brand);
+          // Trader / Wholesaler: ingests an arbitrary EXTERNAL supplier PDF via
+          // the mapping-assisted importer (which self-builds the Library), not
+          // the structured manufacturer PDF flow. See project_actor_types.
+          final isImporter = currentStockistIsImporter;
           return SafeArea(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 1) Brand — only when the stockist runs more than one.
-                if (brands.length > 1) ...[
+                // STEP 1 — choose brand (only when >1 brand and none chosen yet).
+                if (mustPickBrand) ...[
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
                     child: Text('Upload to which brand?',
                         style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 14)),
+                            fontWeight: FontWeight.bold, fontSize: 15)),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final b in brands)
-                          ChoiceChip(
-                            avatar: Icon(Icons.sell_outlined,
-                                size: 15,
-                                color: brandId == b.id
-                                    ? const Color(0xFF1B4F72)
-                                    : Colors.grey.shade500),
-                            label: Text(b.name),
-                            selected: brandId == b.id,
-                            selectedColor:
-                                const Color(0xFF1B4F72).withValues(alpha: 0.15),
-                            onSelected: (_) => setS(() {
-                              brandId = b.id;
-                              catId = null; // re-default to the brand's list
-                            }),
-                          ),
-                      ],
+                  for (final b in brands)
+                    ListTile(
+                      leading: const Icon(Icons.sell_outlined,
+                          color: Color(0xFF1B4F72)),
+                      title: Text(b.name),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => setS(() {
+                        selBrandId = b.id;
+                        catId = null;
+                      }),
                     ),
-                  ),
-                  const SizedBox(height: 4),
                 ],
-                // 2) Stock list — picked only when the brand has more than one;
-                //    otherwise its single default list is shown for confirmation.
-                if (lists.length > 1) ...[
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 8, 16, 6),
-                    child: Text('Which stock list?',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 14)),
+                // STEP 2 — choose this brand's stock list (only when >1, none yet).
+                if (mustPickList) ...[
+                  ListTile(
+                    contentPadding: const EdgeInsets.only(left: 8, right: 16),
+                    leading: brands.length > 1
+                        ? IconButton(
+                            icon: const Icon(Icons.arrow_back),
+                            tooltip: 'Back to brands',
+                            onPressed: () => setS(() {
+                              selBrandId = null;
+                              catId = null;
+                            }),
+                          )
+                        : const Icon(Icons.inventory_2_outlined,
+                            color: Color(0xFF1B4F72)),
+                    title: Text('${brand.name} · choose stock list',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 15)),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Wrap(
-                      spacing: 8,
+                  for (final c in lists)
+                    ListTile(
+                      leading: const Icon(Icons.inventory_2_outlined,
+                          color: Color(0xFF1B4F72)),
+                      title: Text(c.name),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => setS(() => catId = c.id),
+                    ),
+                ],
+                // STEP 3 — destination resolved: show WHERE it lands, then source.
+                if (ready) ...[
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3F2FD),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (final c in lists)
-                          ChoiceChip(
-                            label: Text(c.name),
-                            selected: catId == c.id,
-                            selectedColor:
-                                const Color(0xFF1B4F72).withValues(alpha: 0.15),
-                            onSelected: (_) => setS(() => catId = c.id),
+                        Text('Adding to',
+                            style: TextStyle(
+                                fontSize: 11.5, color: Colors.grey.shade700)),
+                        const SizedBox(height: 5),
+                        _destLine('Brand', brand!.name),
+                        const SizedBox(height: 2),
+                        _destLine('List',
+                            lists.firstWhere((c) => c.id == effCatId).name),
+                        if (brands.length > 1 || lists.length > 1) ...[
+                          const SizedBox(height: 8),
+                          InkWell(
+                            onTap: () => setS(() {
+                              if (brands.length > 1) selBrandId = null;
+                              catId = null;
+                            }),
+                            child: const Text('Change',
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: Color(0xFF1B4F72),
+                                    fontWeight: FontWeight.w600)),
                           ),
+                        ],
                       ],
                     ),
                   ),
-                ] else if (lists.length == 1)
+                  // Quiet, once-only upsell nudge — informs, never blocks.
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-                    child: Text('Stock list: ${lists.first.name}',
-                        style: TextStyle(
-                            fontSize: 12.5, color: Colors.grey.shade600)),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
+                    child: InkWell(
+                      onTap: contactAdmin,
+                      child: Text(
+                          'Need another brand or stock list? Contact admin ›',
+                          style: TextStyle(
+                              fontSize: 11.5, color: Colors.grey.shade600)),
+                    ),
                   ),
-                const Divider(height: 20),
-                // 3) Source — gated by whether the brand is set up yet.
-                if (needsSetup) ...[
+                  const Divider(height: 16),
+                  // Source — gated by whether the brand is set up yet.
+                  if (needsSetup) ...[
                   // Brand-new brand: its designs aren't in the Library, so stock
                   // has nothing to attach to. Start by mapping the designs in.
                   Container(
@@ -960,8 +1031,13 @@ class _State extends State<StockistDashboardScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'This brand has no designs yet. Set up its designs '
-                            'in your Library first, then upload stock.',
+                            isImporter
+                                ? 'This brand has no designs yet. Import your '
+                                    'supplier’s PDF — it builds your Library and '
+                                    'adds stock in one go.'
+                                : 'This brand has no designs yet. Set up its '
+                                    'designs in your Library first, then upload '
+                                    'stock.',
                             style: TextStyle(
                                 fontSize: 12, color: Colors.orange.shade900),
                           ),
@@ -969,52 +1045,66 @@ class _State extends State<StockistDashboardScreen> {
                       ],
                     ),
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.account_tree_outlined,
-                        color: Color(0xFF1B4F72)),
-                    title: const Text('Set up designs — Mapping (Excel)'),
-                    subtitle: const Text(
-                        "Add this brand's designs & names to your Library"),
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      await context.push('/stockist/library/import-mapping');
-                      _load();
-                    },
-                  ),
-                  // The main brand can also seed its Library straight from a PDF
-                  // (it carries photos + names).
+                  // Manufacturers map cross-brand design names in via Excel;
+                  // importers don't (their design name IS the master), so they
+                  // skip this and import the supplier PDF directly.
+                  if (!isImporter)
+                    ListTile(
+                      leading: const Icon(Icons.account_tree_outlined,
+                          color: Color(0xFF1B4F72)),
+                      title: const Text('Set up designs — Mapping (Excel)'),
+                      subtitle: const Text(
+                          "Add this brand's designs & names to your Library"),
+                      onTap: () async {
+                        Navigator.pop(ctx);
+                        await context.push('/stockist/library/import-mapping');
+                        _load();
+                      },
+                    ),
+                  // PDF is main-brand only. Importers get the mapping-assisted
+                  // supplier importer; manufacturers get the structured flow.
                   if (isMainBrand)
                     ListTile(
                       leading: const Icon(Icons.picture_as_pdf,
                           color: Color(0xFF1B4F72)),
-                      title: const Text('Set up from a PDF'),
-                      subtitle:
-                          const Text('PDF adds your main brand designs + photos'),
-                      onTap: catId == null
-                          ? null
-                          : () async {
-                              Navigator.pop(ctx);
-                              await context.push('/stockist/stock/upload',
-                                  extra: catId);
-                              _load();
-                            },
+                      title: Text(isImporter
+                          ? 'Import supplier PDF'
+                          : 'Set up from a PDF'),
+                      subtitle: Text(isImporter
+                          ? 'Builds your Library + adds stock'
+                          : 'PDF adds your main brand designs + photos'),
+                      onTap: () async {
+                        Navigator.pop(ctx);
+                        await context.push(
+                            isImporter
+                                ? '/stockist/stock/import-supplier-pdf'
+                                : '/stockist/stock/upload',
+                            extra: effCatId);
+                        _load();
+                      },
                     ),
                 ] else ...[
                   // Brand is set up — normal stock upload. PDF is main-brand only.
+                  // Importers get the mapping-assisted supplier importer.
                   if (isMainBrand)
                     ListTile(
                       leading: const Icon(Icons.picture_as_pdf,
                           color: Color(0xFF1B4F72)),
-                      title: const Text('Upload PDF stock report'),
-                      subtitle: const Text('Parses designs + tile photos'),
-                      onTap: catId == null
-                          ? null
-                          : () async {
-                              Navigator.pop(ctx);
-                              await context.push('/stockist/stock/upload',
-                                  extra: catId);
-                              _load();
-                            },
+                      title: Text(isImporter
+                          ? 'Import supplier PDF'
+                          : 'Upload PDF stock report'),
+                      subtitle: Text(isImporter
+                          ? 'Builds your Library + adds stock'
+                          : 'Parses designs + tile photos'),
+                      onTap: () async {
+                        Navigator.pop(ctx);
+                        await context.push(
+                            isImporter
+                                ? '/stockist/stock/import-supplier-pdf'
+                                : '/stockist/stock/upload',
+                            extra: effCatId);
+                        _load();
+                      },
                     ),
                   ListTile(
                     leading: const Icon(Icons.table_view_rounded,
@@ -1023,16 +1113,15 @@ class _State extends State<StockistDashboardScreen> {
                     subtitle: Text(isMainBrand
                         ? 'Design, size, quality, boxes — photos reused'
                         : 'Other brands upload by Excel'),
-                    onTap: catId == null
-                        ? null
-                        : () async {
-                            Navigator.pop(ctx);
-                            await context.push('/stockist/stock/import-excel',
-                                extra: catId);
-                            _load();
-                          },
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await context.push('/stockist/stock/import-excel',
+                          extra: effCatId);
+                      _load();
+                    },
                   ),
                 ],
+                ], // end if (ready)
                 const SizedBox(height: 8),
               ],
             ),
@@ -1539,4 +1628,26 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
+}
+
+// Fixed-height pinned sliver header (search bar + count line) that stays at the
+// top while rows 1 & 2 scroll away beneath the app bar.
+class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final Widget child;
+  final double height;
+  _PinnedHeaderDelegate({required this.child, required this.height});
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) =>
+      SizedBox.expand(child: child);
+
+  @override
+  double get maxExtent => height;
+
+  @override
+  double get minExtent => height;
+
+  @override
+  bool shouldRebuild(covariant _PinnedHeaderDelegate old) =>
+      old.height != height || old.child != child;
 }

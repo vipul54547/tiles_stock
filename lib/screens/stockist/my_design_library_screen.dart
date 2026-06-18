@@ -6,6 +6,7 @@ import '../../models/brand.dart';
 import '../../models/library_entry.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import 'dna_editor_sheet.dart';
 
 /// Stockist's own Design Library: master (physical) designs with their image +
 /// the name each tile carries under every brand the stockist runs. This is the
@@ -432,6 +433,14 @@ class _State extends State<MyDesignLibraryScreen> {
             ),
             Column(
               children: [
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.science_outlined,
+                      size: 20, color: Color(0xFFB9770E)),
+                  tooltip: 'Design DNA (for search)',
+                  onPressed: () => showDnaEditor(context,
+                      libraryId: e.id, designName: e.masterName),
+                ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.edit_outlined, size: 20),

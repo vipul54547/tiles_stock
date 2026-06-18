@@ -1,3 +1,5 @@
+import '../utils/business_types.dart';
+
 class Stockist {
 
   /// Display key shown to the user: the real sequential_id, OR the masked public
@@ -35,6 +37,12 @@ class Stockist {
   /// Optional tier label (e.g. Gold / Platinum / Silver). Free text, for
   /// future use.
   final String stockistType;
+
+  /// Business / actor type: 'M' (Manufacturer/Author), 'T' (Trader) or 'W'
+  /// (Wholesaler). A DIFFERENT dimension from [stockistType] (the tier).
+  /// Decides the upload behaviour — authors vs importers. Defaults to 'M'.
+  /// See lib/utils/business_types.dart.
+  final String businessType;
 
   final bool isActive;
 
@@ -117,6 +125,8 @@ class Stockist {
 
     this.stockistType = '',
 
+    this.businessType = 'M',
+
     this.isActive = true,
 
     this.isListed = true,
@@ -183,6 +193,10 @@ class Stockist {
 
     stockistType: json['stockist_type'] ?? '',
 
+    businessType: ((json['business_type'] as String?)?.trim().isNotEmpty ?? false)
+        ? json['business_type']
+        : 'M',
+
     isActive: json['is_active'] ?? true,
 
     isListed: json['is_listed'] ?? true,
@@ -220,5 +234,11 @@ class Stockist {
     createdAt: DateTime.parse(json['created_at']),
 
   );
+
+  /// Trader or Wholesaler — gets the stripped-down external-file import path.
+  bool get isImporter => isImporterType(businessType);
+
+  /// Manufacturer — the design author with the full toolkit.
+  bool get isManufacturer => isAuthorType(businessType);
 
 }
