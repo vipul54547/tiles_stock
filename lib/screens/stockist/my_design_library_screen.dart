@@ -153,6 +153,11 @@ class _State extends State<MyDesignLibraryScreen> {
       appBar: AppBar(
         title: const Text('My Design Library'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.spellcheck),
+            tooltip: 'My Words (DNA terms)',
+            onPressed: () => context.push('/stockist/dna-words'),
+          ),
           if (_brands.length > 1)
             IconButton(
               icon: const Icon(Icons.account_tree_outlined),

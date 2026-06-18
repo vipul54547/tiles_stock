@@ -953,6 +953,25 @@ class SupabaseDataService {
     await supabase.rpc('admin_dna_delete_value', params: {'p_id': id});
   }
 
+  /// The calling stockist's own words per canonical value: { valueId: [words] }.
+  Future<Map<String, List<String>>> dnaMyWords() async {
+    try {
+      final res = await supabase.rpc('dna_my_words');
+      final map = res is Map ? Map<String, dynamic>.from(res) : {};
+      return map.map((k, v) => MapEntry(
+          k, ((v as List?) ?? const []).map((e) => e.toString()).toList()));
+    } catch (e) {
+      debugPrint('dnaMyWords failed: $e');
+      return {};
+    }
+  }
+
+  /// Replace the stockist's words for one canonical value.
+  Future<void> dnaSetValueWords(String valueId, List<String> words) async {
+    await supabase.rpc('dna_set_value_words',
+        params: {'p_value_id': valueId, 'p_words': words});
+  }
+
   /// Set (replace) a design's values for one attribute (single or multi).
   Future<void> dnaSetDesign(
       String libraryId, String attributeId, List<String> valueIds) async {

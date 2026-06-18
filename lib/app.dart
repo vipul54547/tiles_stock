@@ -41,6 +41,7 @@ import 'screens/stockist/add_edit_stock_screen.dart';
 import 'screens/admin/admin_panel_screen.dart';
 import 'screens/admin/manage_surfaces_screen.dart';
 import 'screens/admin/manage_design_dna_screen.dart';
+import 'screens/stockist/my_dna_words_screen.dart';
 import 'screens/admin/manage_sizes_screen.dart';
 import 'screens/admin/manage_banners_screen.dart';
 import 'screens/admin/manage_stockists_screen.dart';
@@ -199,6 +200,7 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/admin', builder: (_, __) => const AdminPanelScreen()),
     GoRoute(path: '/admin/surfaces', builder: (_, __) => const ManageSurfacesScreen()),
     GoRoute(path: '/admin/design-dna', builder: (_, __) => const ManageDesignDnaScreen()),
+    GoRoute(path: '/stockist/dna-words', builder: (_, __) => const MyDnaWordsScreen()),
     GoRoute(path: '/admin/sizes', builder: (_, __) => const ManageSizesScreen()),
     GoRoute(path: '/admin/banners', builder: (_, __) => const ManageBannersScreen()),
     GoRoute(path: '/admin/stockists', builder: (_, __) => const ManageStockistsScreen()),
