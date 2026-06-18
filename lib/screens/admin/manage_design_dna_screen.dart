@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import '../../models/dna.dart';
 import '../../services/supabase_data_service.dart';
 
@@ -219,6 +220,33 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
     }
     return Column(
       children: [
+        // Top row — the other master-data lists live here too.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => context.push('/admin/surfaces'),
+                  icon: const Icon(Icons.texture_rounded, size: 18),
+                  label: const Text('Finishes'),
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF00897B)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => context.push('/admin/sizes'),
+                  icon: const Icon(Icons.straighten_rounded, size: 18),
+                  label: const Text('Sizes'),
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF5E35B1)),
+                ),
+              ),
+            ],
+          ),
+        ),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),

@@ -51,26 +51,14 @@ class AdminPanelScreen extends StatelessWidget {
             const Color(0xFF1B4F72),
             onTap: () => context.push('/home'),
           ),
-          _adminCard(
-            Icons.texture_rounded,
-            'Manage Finishes',
-            'Master list of tile surfaces stockists align to',
-            const Color(0xFF00897B),
-            onTap: () => context.push('/admin/surfaces'),
-          ),
+          // Finishes + Sizes now live inside the Design DNA screen (top row) —
+          // all the searchable master data in one place.
           _adminCard(
             Icons.science_outlined,
             'Manage Design DNA',
-            'Searchable attributes (Punch, Glaze, Colour…) + their values',
+            'Searchable attributes (Punch, Glaze, Colour…) + Finishes & Sizes',
             const Color(0xFFB9770E),
             onTap: () => context.push('/admin/design-dna'),
-          ),
-          _adminCard(
-            Icons.straighten_rounded,
-            'Manage Sizes',
-            'Master list of tile sizes (add / reorder / hide)',
-            const Color(0xFF5E35B1),
-            onTap: () => context.push('/admin/sizes'),
           ),
           _adminCard(Icons.storefront_outlined, 'Manage Stockists',
               'Create, view & assign sequential IDs', Colors.blue,
