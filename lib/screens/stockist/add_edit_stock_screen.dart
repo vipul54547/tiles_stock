@@ -43,8 +43,13 @@ class _State extends State<AddEditStockScreen> {
   final _thicknessCtrl = TextEditingController();
   final _colourCtrl    = TextEditingController();
   // Stockist's own wording for the chosen finish — learned as a surface_alias so
-  // future PDF uploads carrying this wording auto-align to the admin finish.
+  // future PDF uploads carrying this wording auto-align to the admin finish, and
+  // shown on the design as its finish_label. Picked from a dropdown of the
+  // stockist's existing words for this finish, or typed via "Add new".
   final _finishAliasCtrl = TextEditingController();
+  Map<String, String> _surfaceAliases = {}; // raw word -> admin finish
+  String _finishWord = ''; // the currently chosen word for this design's finish
+  bool _addingFinishWord = false; // "Add new" reveals the text field
 
   // Identity (name / size / photo) — sourced from the Library, NOT edited here.
   String _designName = '';
@@ -116,8 +121,28 @@ class _State extends State<AddEditStockScreen> {
     await _loadSurfaces();
     await _loadSizes();
     await _loadCatalogs();
+    await _loadSurfaceAliases();
     if (!isEdit) await _loadMasters();
     if (isEdit) await _loadExisting();
+  }
+
+  // This stockist's own finish words (raw -> admin finish), to offer as a
+  // dropdown for "your name for this finish".
+  Future<void> _loadSurfaceAliases() async {
+    if (currentStockistUUID.isEmpty) return;
+    final aliases = await _service.getSurfaceAliases(currentStockistUUID);
+    if (mounted) setState(() => _surfaceAliases = aliases);
+  }
+
+  // The stockist's existing words mapped to the currently chosen finish.
+  List<String> get _wordsForSurface {
+    final out = _surfaceAliases.entries
+        .where((e) => e.value == _surface)
+        .map((e) => e.key)
+        .toList()
+      ..sort();
+    if (_finishWord.isNotEmpty && !out.contains(_finishWord)) out.add(_finishWord);
+    return out;
   }
 
   // The stockist's stock lists; default a NEW design to the first list.
@@ -212,6 +237,8 @@ class _State extends State<AddEditStockScreen> {
     _thicknessCtrl.text = d.thicknessMm.toString();
     _colourCtrl.text    = d.colour;
     _surface            = _surfaces.contains(d.surfaceType) ? d.surfaceType : _surfaces.first;
+    _finishWord         = d.finishLabel?.trim() ?? '';
+    _finishAliasCtrl.text = _finishWord;
     _tileType           = kTileTypes.contains(d.tileType)   ? d.tileType   : kTileTypes.first;
     _quality            = _qualities.contains(d.quality)    ? d.quality    : _qualities.first;
     _stockType          = _stockTypes.contains(d.stockType) ? d.stockType  : 'Uncertain';
@@ -281,6 +308,7 @@ class _State extends State<AddEditStockScreen> {
 
     setState(() => _saving = true);
 
+    final finishWord = _finishWord.trim();
     bool ok;
     if (isEdit) {
       // Identity (name / size / photo) is intentionally omitted — it's edited
@@ -288,6 +316,7 @@ class _State extends State<AddEditStockScreen> {
       // dispatch / add-stock). Only stock attributes are saved here.
       ok = await _service.updateDesign(widget.designId!, {
         'surface_type':  _surface,
+        'finish_label':  finishWord,
         'tile_type':     _tileType,
         'quality':       _quality,
         'colour':        _colourCtrl.text.trim(),
@@ -307,6 +336,7 @@ class _State extends State<AddEditStockScreen> {
         name:          name,
         size:          master.size,
         surfaceType:   _surface,
+        finishLabel:   finishWord.isEmpty ? null : finishWord,
         tileType:      _tileType,
         quality:       _quality,
         colour:        _colourCtrl.text.trim(),
@@ -325,9 +355,8 @@ class _State extends State<AddEditStockScreen> {
 
     // Learn the stockist's own finish wording -> chosen admin finish, so future
     // PDF uploads carrying this wording auto-align (mirrors the upload screen).
-    final aliasRaw = _finishAliasCtrl.text.trim();
-    if (ok && aliasRaw.isNotEmpty && _surface != 'None') {
-      await _service.upsertSurfaceAlias(currentStockistUUID, aliasRaw, _surface);
+    if (ok && finishWord.isNotEmpty && _surface != 'None') {
+      await _service.upsertSurfaceAlias(currentStockistUUID, finishWord, _surface);
     }
 
     if (!mounted) return;
@@ -807,24 +836,74 @@ class _State extends State<AddEditStockScreen> {
   // on save it's learned as a surface_alias so future PDF uploads with that
   // wording auto-align to the chosen finish (same mechanism as Upload Stock).
   Widget _buildSurfaceSection() {
+    final words = _wordsForSurface;
+    // The dropdown shows the stockist's existing words for this finish; a final
+    // "+ Add new word" entry reveals a text field. "— None —" clears it.
+    final currentValue =
+        !_addingFinishWord && words.contains(_finishWord) ? _finishWord : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildDropdown('Surface Type', _surfaces, _surface,
-            (v) => setState(() { _surface = v!; _dirty = true; })),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: TextFormField(
-            controller: _finishAliasCtrl,
-            decoration: InputDecoration(
-              labelText: 'Your name for this finish (optional)',
-              helperText: 'Maps your wording to "$_surface" so future PDF '
-                  'uploads using it auto-align.',
-              helperMaxLines: 2,
-              border: const OutlineInputBorder(),
+        _buildDropdown('Surface Type', _surfaces, _surface, (v) => setState(() {
+              _surface = v!;
+              _dirty = true;
+              // A word belongs to one finish — drop it if it doesn't map here.
+              if (!_wordsForSurface.contains(_finishWord)) {
+                _finishWord = '';
+                _finishAliasCtrl.clear();
+              }
+              _addingFinishWord = false;
+            })),
+        DropdownButtonFormField<String?>(
+          initialValue: _addingFinishWord ? '__add__' : currentValue,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'Your name for this finish (optional)',
+            helperText: 'Shown on the design + auto-aligns future PDF uploads.',
+            helperMaxLines: 2,
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('— None —',
+                    style: TextStyle(color: Colors.black45))),
+            ...words.map((w) =>
+                DropdownMenuItem<String?>(value: w, child: Text(w))),
+            const DropdownMenuItem<String?>(
+                value: '__add__',
+                child: Text('＋ Add new word…',
+                    style: TextStyle(color: Color(0xFF1B4F72)))),
+          ],
+          onChanged: (v) => setState(() {
+            _dirty = true;
+            if (v == '__add__') {
+              _addingFinishWord = true;
+              _finishAliasCtrl.clear();
+              _finishWord = '';
+            } else {
+              _addingFinishWord = false;
+              _finishWord = v ?? '';
+              _finishAliasCtrl.text = _finishWord;
+            }
+          }),
+        ),
+        if (_addingFinishWord)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: TextFormField(
+              controller: _finishAliasCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              onChanged: (v) => _finishWord = v.trim(),
+              decoration: const InputDecoration(
+                labelText: 'New finish word',
+                hintText: 'e.g. Carving, Lustra, Punch Ghr',
+                border: OutlineInputBorder(),
+              ),
             ),
           ),
-        ),
+        const SizedBox(height: 16),
       ],
     );
   }
