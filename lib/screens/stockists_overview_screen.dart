@@ -23,6 +23,7 @@ import '../utils/stockist_tiers.dart';
 import '../utils/guest_gate.dart';
 import '../utils/account_actions.dart';
 import '../models/claimed_catalog.dart';
+import '../models/dna.dart';
 
 const _qualities = ['Premium', 'Standard'];
 // Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
@@ -115,11 +116,54 @@ class _State extends State<StockistsOverviewScreen> {
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
 
+  // Design DNA search/filter: the buyer picks canonical value ids; the design's
+  // matched library determines which values it carries. Cross-stockist, so the
+  // chips show the admin's canonical names (the unifying key). See
+  // project_design_dna_engine.
+  List<DnaAttribute> _dnaAttrs = []; // catalog (non-free-text), for facet chips
+  Map<String, Set<String>> _dnaValues = {}; // designId → canonical value ids
+  final Set<String> _selectedDna = {}; // selected canonical value ids
+
+  // value ids actually present in the current pool (so empty facets are hidden).
+  Set<String> get _dnaValuesInUse =>
+      _dnaValues.values.expand((s) => s).toSet();
+
+  // DNA attributes that have at least one value present in the pool.
+  List<DnaAttribute> get _dnaFacetAttrs {
+    final inUse = _dnaValuesInUse;
+    return _dnaAttrs
+        .where((a) => a.values.any((v) => inUse.contains(v.id)))
+        .toList();
+  }
+
+  String _dnaValueName(String valueId) {
+    for (final a in _dnaAttrs) {
+      for (final v in a.values) {
+        if (v.id == valueId) return v.name;
+      }
+    }
+    return '?';
+  }
+
+  // Faceted DNA match: within an attribute the picks are OR'd, across attributes
+  // they're AND'd. Empty selection matches everything.
+  bool _matchesDna(TileDesign t, Set<String> selected) {
+    if (selected.isEmpty) return true;
+    final vals = _dnaValues[t.id] ?? const <String>{};
+    for (final attr in _dnaAttrs) {
+      final picked =
+          attr.values.map((v) => v.id).where(selected.contains).toSet();
+      if (picked.isNotEmpty && picked.intersection(vals).isEmpty) return false;
+    }
+    return true;
+  }
+
   int get _designFilterCount {
     int c = _selectedSizes.length +
         _selectedSurfaces.length +
         _selectedTypes.length +
-        _selectedThickness.length;
+        _selectedThickness.length +
+        _selectedDna.length;
     if (_selectedStockTypes.isNotEmpty) c++;
     if (_minQtyCtrl.text.isNotEmpty) c++;
     if (_maxQtyCtrl.text.isNotEmpty) c++;
@@ -156,6 +200,7 @@ class _State extends State<StockistsOverviewScreen> {
     final mx = int.tryParse(_maxQtyCtrl.text);
     if (mn != null && t.boxQuantity < mn) return false;
     if (mx != null && t.boxQuantity > mx) return false;
+    if (!_matchesDna(t, _selectedDna)) return false;
     return true;
   }
 
@@ -388,6 +433,17 @@ class _State extends State<StockistsOverviewScreen> {
         return r != 0 ? r : a.compareTo(b);
       });
 
+    // Design DNA: the canonical attribute/value catalog (for the facet chips) +
+    // each design's canonical value ids (the search bridge), across the whole
+    // visible pool (public + private).
+    final dnaAttrs = await _service.dnaCatalog();
+    final dnaIds = <String>{
+      ...designs.map((d) => d.id),
+      ...privateDesigns.map((d) => d.id),
+    }.toList();
+    final dnaValues = await _service.designsDnaValues(dnaIds);
+    if (!mounted) return;
+
     setState(() {
       _allData = data;
       // Blended catalog ranking (fresh per-session seed) for the All-Design grid.
@@ -398,6 +454,8 @@ class _State extends State<StockistsOverviewScreen> {
       _claimedCatalogs = claimedCatalogs;
       _allSizes = sizes;
       _allSurfaces = surfaces;
+      _dnaAttrs = dnaAttrs.where((a) => !a.isFreeText).toList();
+      _dnaValues = dnaValues;
       _loading = false;
     });
     // Confirm a deep-link auto-add (Scenario 1) if one just happened.
@@ -595,6 +653,9 @@ class _State extends State<StockistsOverviewScreen> {
     final maxQty = int.tryParse(_maxQtyCtrl.text);
     if (minQty != null) result = result.where((d) => d.boxQuantity >= minQty).toList();
     if (maxQty != null) result = result.where((d) => d.boxQuantity <= maxQty).toList();
+    if (_selectedDna.isNotEmpty) {
+      result = result.where((d) => _matchesDna(d, _selectedDna)).toList();
+    }
     // Preserve the blended ranking order from _load (no quantity re-sort).
     return result;
   }
@@ -614,6 +675,10 @@ class _State extends State<StockistsOverviewScreen> {
     addSet(_selectedThickness);
     addSet(_selectedQualities);
     addSet(_selectedStockTypes);
+    for (final id in _selectedDna.toList()) {
+      out.add(ActiveFilter(
+          _dnaValueName(id), () => setState(() => _selectedDna.remove(id))));
+    }
     final mn = _minQtyCtrl.text.trim();
     final mx = _maxQtyCtrl.text.trim();
     if (mn.isNotEmpty || mx.isNotEmpty) {
@@ -634,6 +699,7 @@ class _State extends State<StockistsOverviewScreen> {
         _selectedThickness.clear();
         _selectedQualities.clear();
         _selectedStockTypes.clear();
+        _selectedDna.clear();
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
       });
@@ -649,6 +715,9 @@ class _State extends State<StockistsOverviewScreen> {
     var localThickness  = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_allDesigns);
     final localStockTypes = {..._selectedStockTypes};
+    final localDna = {..._selectedDna};
+    final dnaFacets = _dnaFacetAttrs;
+    final dnaInUse = _dnaValuesInUse;
 
     showModalBottomSheet<bool>(
       context: context,
@@ -728,6 +797,9 @@ class _State extends State<StockistsOverviewScreen> {
             final mx = int.tryParse(_maxQtyCtrl.text);
             if (mn != null) r = r.where((d) => d.boxQuantity >= mn).toList();
             if (mx != null) r = r.where((d) => d.boxQuantity <= mx).toList();
+            if (localDna.isNotEmpty) {
+              r = r.where((d) => _matchesDna(d, localDna)).toList();
+            }
             return r.length;
           }
 
@@ -787,6 +859,7 @@ class _State extends State<StockistsOverviewScreen> {
                           localTypes.clear();
                           localThickness.clear();
                           localStockTypes.clear();
+                          localDna.clear();
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
                         }),
@@ -848,6 +921,34 @@ class _State extends State<StockistsOverviewScreen> {
                                 : localStockTypes.add(t)),
                           )).toList()),
                       ),
+                      // ── Design DNA facets (only attributes with tagged values
+                      // present in the current pool are shown) ─────────────────
+                      ...dnaFacets.map((attr) {
+                        final vals = attr.values
+                            .where((v) => dnaInUse.contains(v.id))
+                            .toList();
+                        final picked = vals
+                            .where((v) => localDna.contains(v.id))
+                            .map((v) => v.name)
+                            .toList();
+                        return FilterSection(
+                          title: attr.name,
+                          summary: picked.isEmpty ? 'All' : picked.join(', '),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: vals
+                                .map((v) => filterChip(
+                                      v.name,
+                                      localDna.contains(v.id),
+                                      () => setSheet(() => localDna.contains(v.id)
+                                          ? localDna.remove(v.id)
+                                          : localDna.add(v.id)),
+                                    ))
+                                .toList(),
+                          ),
+                        );
+                      }),
                     ],
                   ),
                 ),
@@ -890,6 +991,7 @@ class _State extends State<StockistsOverviewScreen> {
         _selectedTypes      ..clear()..addAll(localTypes);
         _selectedThickness  ..clear()..addAll(localThickness);
         _selectedStockTypes = {...localStockTypes};
+        _selectedDna        ..clear()..addAll(localDna);
       });
     });
   }

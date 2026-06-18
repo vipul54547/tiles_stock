@@ -322,6 +322,13 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                       ],
                     );
                   }),
+
+                  // ── Design DNA (searchable tags, in the stockist's words) ──
+                  _DnaSection(
+                      key: ValueKey(design.id),
+                      designId: design.id,
+                      service: _service),
+
                   const SizedBox(height: 24),
 
                   // Guests can't reach the stockist (ID, contact, portfolio).
@@ -402,6 +409,100 @@ class _FullImageView extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ── Design DNA section ──────────────────────────────────────────────────────
+// Loads the design's DNA tags (shown in the design's own stockist's words) and
+// renders them grouped by attribute. Renders nothing when the design is untagged.
+class _DnaSection extends StatelessWidget {
+  final String designId;
+  final SupabaseDataService service;
+  const _DnaSection(
+      {super.key, required this.designId, required this.service});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<({String attribute, String label})>>(
+      future: service.designDnaTags(designId),
+      builder: (_, snap) {
+        final tags = snap.data ?? const [];
+        if (tags.isEmpty) return const SizedBox.shrink();
+        // Group labels by attribute, preserving server order.
+        final byAttr = <String, List<String>>{};
+        for (final t in tags) {
+          (byAttr[t.attribute] ??= []).add(t.label);
+        }
+        return Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(4, 0, 0, 8),
+                child: Text('DESIGN DNA',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                        color: Color(0xFF8A5A09))),
+              ),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFB9770E).withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                      color: const Color(0xFFB9770E).withValues(alpha: 0.18)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: byAttr.entries.map((e) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(e.key.toUpperCase(),
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade600)),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: e.value
+                                .map((label) => Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 9, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                            color: const Color(0xFFB9770E)
+                                                .withValues(alpha: 0.3)),
+                                      ),
+                                      child: Text(label,
+                                          style: const TextStyle(
+                                              fontSize: 12.5,
+                                              color: Color(0xFF8A5A09),
+                                              fontWeight: FontWeight.w600)),
+                                    ))
+                                .toList(),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

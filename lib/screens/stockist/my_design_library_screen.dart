@@ -25,6 +25,7 @@ class _State extends State<MyDesignLibraryScreen> {
   List<Brand> _brands = [];
   List<LibraryEntry> _entries = [];
   List<String> _sizes = [];
+  Map<String, List<String>> _dnaTags = {}; // libraryId → DNA labels (their words)
   bool _loading = true;
 
   // Search + filters
@@ -78,6 +79,7 @@ class _State extends State<MyDesignLibraryScreen> {
       _data.getMyBrands(),
       _data.getMyLibrary(),
       _data.getActiveSizeNames(),
+      _data.dnaMyLibraryTags(),
     ]);
     if (!mounted) return;
     final brands = results[0] as List<Brand>;
@@ -90,8 +92,15 @@ class _State extends State<MyDesignLibraryScreen> {
       _brands = brands;
       _entries = results[1] as List<LibraryEntry>;
       _sizes = results[2] as List<String>;
+      _dnaTags = results[3] as Map<String, List<String>>;
       _loading = false;
     });
+  }
+
+  // Refresh just the DNA tags (after the per-design mapper sheet closes).
+  Future<void> _reloadDnaTags() async {
+    final tags = await _data.dnaMyLibraryTags();
+    if (mounted) setState(() => _dnaTags = tags);
   }
 
   String _brandName(String brandId) =>
@@ -433,6 +442,26 @@ class _State extends State<MyDesignLibraryScreen> {
                       }).toList(),
                     ),
                   ],
+                  if ((_dnaTags[e.id] ?? const []).isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 5,
+                      runSpacing: 4,
+                      children: _dnaTags[e.id]!.map((t) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFB9770E).withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(t,
+                              style: const TextStyle(
+                                  fontSize: 11, color: Color(0xFF8A5A09))),
+                        );
+                      }).toList(),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -443,8 +472,11 @@ class _State extends State<MyDesignLibraryScreen> {
                   icon: const Icon(Icons.science_outlined,
                       size: 20, color: Color(0xFFB9770E)),
                   tooltip: 'Design DNA (for search)',
-                  onPressed: () => showDnaEditor(context,
-                      libraryId: e.id, designName: e.masterName),
+                  onPressed: () async {
+                    await showDnaEditor(context,
+                        libraryId: e.id, designName: e.masterName);
+                    await _reloadDnaTags();
+                  },
                 ),
                 IconButton(
                   visualDensity: VisualDensity.compact,

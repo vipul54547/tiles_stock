@@ -999,6 +999,58 @@ class SupabaseDataService {
     }
   }
 
+  /// Bulk DNA tags for the stockist's whole library, in THEIR own words:
+  /// { libraryId: ["Glossy", "Marble", …] }. One call for the library list.
+  Future<Map<String, List<String>>> dnaMyLibraryTags() async {
+    try {
+      final res = await supabase.rpc('dna_my_library_tags');
+      final map = res is Map ? Map<String, dynamic>.from(res) : {};
+      return map.map((k, v) => MapEntry(
+          k, ((v as List?) ?? const []).map((e) => e.toString()).toList()));
+    } catch (e) {
+      debugPrint('dnaMyLibraryTags failed: $e');
+      return {};
+    }
+  }
+
+  /// A single (buyer-visible) design's DNA tags for display, in the design's
+  /// OWN stockist's word: [ {attribute, label}, … ] grouped/ordered server-side.
+  Future<List<({String attribute, String label})>> designDnaTags(
+      String designId) async {
+    try {
+      final res = await supabase
+          .rpc('design_dna_tags', params: {'p_design_id': designId});
+      final list = (res as List?) ?? const [];
+      return list.map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        return (
+          attribute: (m['attribute'] ?? '').toString(),
+          label: (m['label'] ?? '').toString(),
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('designDnaTags failed: $e');
+      return [];
+    }
+  }
+
+  /// Canonical DNA value_ids per design, for buyer faceted search/filter:
+  /// { designId: {valueId, …} }.
+  Future<Map<String, Set<String>>> designsDnaValues(
+      List<String> designIds) async {
+    if (designIds.isEmpty) return {};
+    try {
+      final res = await supabase
+          .rpc('designs_dna_values', params: {'p_design_ids': designIds});
+      final map = res is Map ? Map<String, dynamic>.from(res) : {};
+      return map.map((k, v) => MapEntry(
+          k, ((v as List?) ?? const []).map((e) => e.toString()).toSet()));
+    } catch (e) {
+      debugPrint('designsDnaValues failed: $e');
+      return {};
+    }
+  }
+
   /// Atomic, all-or-nothing bulk import. Sends the whole batch + a client
   /// [batchId] (idempotency key) to one DB transaction: it builds library
   /// masters/images, creates/finds designs and adds stock together. If the call
