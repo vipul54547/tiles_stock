@@ -164,15 +164,18 @@ class TileCard extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              // Seller name (real, or masked trade name when the
-                              // stockist is anonymous); falls back to the ID/code.
+                              // Brand the design is sold under (shorter, and the
+                              // thing buyers shop by). Falls back to the seller's
+                              // name — real or masked trade name — then the ID.
                               ConstrainedBox(
                                 constraints:
                                     const BoxConstraints(maxWidth: 96),
                                 child: Text(
-                                    design.stockistName.isNotEmpty
-                                        ? design.stockistName
-                                        : 'ID: ${design.stockistId}',
+                                    design.brandName.isNotEmpty
+                                        ? design.brandName
+                                        : design.stockistName.isNotEmpty
+                                            ? design.stockistName
+                                            : 'ID: ${design.stockistId}',
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(

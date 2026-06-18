@@ -23,6 +23,11 @@ class TileDesign {
   /// The stock catalog this design belongs to (Father & Child). Null for legacy
   /// rows; the stockist's default public catalog otherwise.
   final String? catalogId;
+  /// The brand this design is sold under (parent of the catalog). Shown on the
+  /// card in place of the seller's company name. Empty for legacy/brandless
+  /// rows, and masked (empty) for anonymous public listings — callers fall back
+  /// to [stockistName].
+  final String brandName;
   final DateTime updatedAt;
   final String quality;
   final String stockType;
@@ -49,6 +54,7 @@ class TileDesign {
     required this.stockistId,
     this.stockistName = '',
     this.catalogId,
+    this.brandName = '',
     required this.updatedAt,
     required this.quality,
     required this.stockType,
@@ -72,6 +78,7 @@ class TileDesign {
         stockistId: json['stockist_id'],
         stockistName: json['stockist_display_name'] ?? '',
         catalogId: json['catalog_id'] as String?,
+        brandName: json['brand_name'] ?? '',
         updatedAt: DateTime.parse(json['updated_at']),
         quality: json['quality'] ?? 'Standard',
         stockType: json['stock_type'] ?? 'Uncertain',

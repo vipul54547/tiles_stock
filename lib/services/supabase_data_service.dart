@@ -70,6 +70,9 @@ class SupabaseDataService {
         stockistName: d['stockist_display_name'] ??
             (d['stockists'] != null ? (d['stockists']['name'] ?? '') : ''),
         catalogId:    d['catalog_id'] as String?,
+        // Brand the design is sold under (market_designs/my_private_designs);
+        // masked to null for anonymous public listings. Empty for legacy rows.
+        brandName:    d['brand_name'] ?? '',
         updatedAt:  DateTime.parse(d['updated_at']),
         quality:    d['quality']    ?? 'Standard',
         stockType:  d['stock_type'] ?? 'Uncertain',

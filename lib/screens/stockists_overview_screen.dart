@@ -1464,7 +1464,6 @@ class _State extends State<StockistsOverviewScreen> {
             _buildAddSupplierBar(),
           // Progressive one-time suggestion to group suppliers (after ~7).
           if (_showGroupTip) _buildGroupTip(),
-          _buildQualityRow(),
           _buildGroupRow(
               _viewDesigns ? filteredDesigns.length : filteredStockists.length),
           if (_viewDesigns)
@@ -1542,6 +1541,28 @@ class _State extends State<StockistsOverviewScreen> {
                       ),
           ),
           if (!_viewDesigns) _buildLegend(),
+          // Pinned filter bar: Premium/Standard + Search + Filter live at the
+          // bottom now, always reachable as the grid scrolls above. SafeArea
+          // adds the system-nav inset only when there's no mode nav below.
+          SafeArea(
+            top: false,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(
+                    top: BorderSide(color: Colors.grey.shade200, width: 1)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 6,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildQualityRow(),
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: _buildModeNav(),
@@ -1714,9 +1735,9 @@ class _State extends State<StockistsOverviewScreen> {
               const SizedBox(width: 6),
               for (int i = 0; i < stockistGroups.length; i++) ...[
                 _groupChip(
-                  stockistGroups[i].stockistIds.isEmpty
-                      ? stockistGroups[i].name
-                      : '${stockistGroups[i].name} (${stockistGroups[i].stockistIds.length})',
+                  // Group name only — the supplier count moves next to the
+                  // "Showing N designs" line when this group is selected.
+                  stockistGroups[i].name,
                   _activeGroupIndex == i,
                   stockistGroups[i].stockistIds.isEmpty
                       ? null
@@ -1765,11 +1786,46 @@ class _State extends State<StockistsOverviewScreen> {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
-          child: Text(
-            _viewDesigns
-                ? 'Showing $count design${count == 1 ? '' : 's'}'
-                : 'Showing $count stockist${count == 1 ? '' : 's'}',
-            style: const TextStyle(color: Colors.grey, fontSize: 12),
+          child: Row(
+            children: [
+              Text(
+                _viewDesigns
+                    ? 'Showing $count design${count == 1 ? '' : 's'}'
+                    : 'Showing $count stockist${count == 1 ? '' : 's'}',
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+              // When a group is selected, its supplier count shows here instead
+              // of on the chip, with the group's colour dot for the legend.
+              if (_activeGroupIndex >= 0 &&
+                  _activeGroupIndex < stockistGroups.length) ...[
+                const SizedBox(width: 8),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color:
+                        _groupColors[_activeGroupIndex % _groupColors.length],
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    '${stockistGroups[_activeGroupIndex].name} · '
+                    '${stockistGroups[_activeGroupIndex].stockistIds.length} '
+                    'supplier${stockistGroups[_activeGroupIndex].stockistIds.length == 1 ? '' : 's'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _groupColors[
+                          _activeGroupIndex % _groupColors.length],
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ],
@@ -2210,49 +2266,49 @@ class _State extends State<StockistsOverviewScreen> {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Row(
         children: [
+          // Shorter, content-width quality buttons (no longer half-width each)
+          // so Search + Filter get proper room on the right.
           ..._qualities.map((q) {
             final m = _qualityMeta[q]!;
             final selected = _selectedQualities.contains(q);
-            return Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  _dismissKeyboard();
-                  setState(() {
-                    if (selected) { _selectedQualities.remove(q); } else { _selectedQualities.add(q); }
-                  });
-                },
-                child: Container(
-                  margin: const EdgeInsets.only(right: 6),
-                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: selected ? m.fg : m.bg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: m.fg, width: selected ? 2 : 1),
-                    boxShadow: selected
-                        ? [BoxShadow(
-                            color: m.fg.withValues(alpha: 0.22),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2))]
-                        : [],
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(m.icon, size: 12, color: selected ? Colors.white : m.fg),
-                      const SizedBox(width: 3),
-                      Text(q,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: selected ? Colors.white : m.fg,
-                          )),
-                    ],
-                  ),
+            return GestureDetector(
+              onTap: () {
+                _dismissKeyboard();
+                setState(() {
+                  if (selected) { _selectedQualities.remove(q); } else { _selectedQualities.add(q); }
+                });
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: selected ? m.fg : m.bg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: m.fg, width: selected ? 2 : 1),
+                  boxShadow: selected
+                      ? [BoxShadow(
+                          color: m.fg.withValues(alpha: 0.22),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2))]
+                      : [],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(m.icon, size: 12, color: selected ? Colors.white : m.fg),
+                    const SizedBox(width: 3),
+                    Text(q,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: selected ? Colors.white : m.fg,
+                        )),
+                  ],
                 ),
               ),
             );
           }),
+          const Spacer(),
           GestureDetector(
             onTap: () => setState(() => _searchActive = true),
             child: Container(
@@ -2528,21 +2584,36 @@ class _StockistCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                // Stock summary: boxes on top, designs beneath (stacked, not one
+                // line) so it stays narrow and doesn't crowd the company name.
+                // The remove (⋮) action moved to the card's bottom corner.
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: const Color(0xFF1B4F72).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Text(
-                          '$displayDesigns design${displayDesigns == 1 ? '' : 's'} · $displayBoxes boxes',
-                          style: const TextStyle(
-                              color: Color(0xFF1B4F72),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13)),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text('$displayBoxes boxes',
+                              style: const TextStyle(
+                                  color: Color(0xFF1B4F72),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  height: 1.1)),
+                          Text(
+                              '$displayDesigns design${displayDesigns == 1 ? '' : 's'}',
+                              style: const TextStyle(
+                                  color: Color(0xFF1B4F72),
+                                  fontSize: 11,
+                                  height: 1.1)),
+                        ],
+                      ),
                     ),
                     if (qualityLabel != null)
                       Padding(
@@ -2555,30 +2626,6 @@ class _StockistCard extends StatelessWidget {
                       ),
                   ],
                 ),
-                // My Suppliers cards get a direct Remove (⋮ → Remove supplier).
-                if (onRemove != null)
-                  PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert, size: 20),
-                    padding: EdgeInsets.zero,
-                    tooltip: 'Supplier options',
-                    onSelected: (v) {
-                      if (v == 'remove') onRemove!();
-                    },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'remove',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete_outline,
-                                size: 18, color: Colors.red),
-                            SizedBox(width: 8),
-                            Text('Remove supplier',
-                                style: TextStyle(color: Colors.red)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
               ],
             ),
             const SizedBox(height: 8),
@@ -2638,6 +2685,37 @@ class _StockistCard extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               child: _buildTable(boxTable, countTable, dispSizes, dispSurfaces),
             ),
+            // Remove supplier (⋮ → horizontal) tucked in the bottom corner —
+            // out of the way so it isn't tapped by mistake, and off the company
+            // name's space up top. My Suppliers cards only.
+            if (onRemove != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: PopupMenuButton<String>(
+                  icon: Icon(Icons.more_horiz,
+                      size: 20, color: Colors.grey.shade500),
+                  padding: EdgeInsets.zero,
+                  splashRadius: 18,
+                  tooltip: 'Supplier options',
+                  onSelected: (v) {
+                    if (v == 'remove') onRemove!();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'remove',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline,
+                              size: 18, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('Remove supplier',
+                              style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
