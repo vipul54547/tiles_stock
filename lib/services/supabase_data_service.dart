@@ -580,6 +580,72 @@ class SupabaseDataService {
     }
   }
 
+  /// Stockist: hide/show their own NON-DEFAULT brand from buyers (they keep
+  /// seeing + managing it). Showing also cancels any pending deletion.
+  Future<void> setBrandHidden(String brandId, bool hidden) async {
+    try {
+      await supabase.rpc('stockist_set_brand_hidden',
+          params: {'p_brand_id': brandId, 'p_hidden': hidden});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist: start the 24h deletion countdown on a hidden, non-default brand.
+  /// Returns when it was scheduled (deletion runs 24h later; cancellable).
+  Future<DateTime> scheduleBrandDelete(String brandId) async {
+    try {
+      final res = await supabase.rpc('stockist_schedule_brand_delete',
+          params: {'p_brand_id': brandId});
+      return DateTime.parse(res.toString()).toLocal();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist: cancel a pending brand deletion (the "last chance" stop).
+  Future<void> cancelBrandDelete(String brandId) async {
+    try {
+      await supabase.rpc('stockist_cancel_brand_delete',
+          params: {'p_brand_id': brandId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist: hide/show one of their own stock lists from buyers (they keep
+  /// managing it). Showing cancels any pending deletion.
+  Future<void> setListHidden(String catalogId, bool hidden) async {
+    try {
+      await supabase.rpc('stockist_set_list_hidden',
+          params: {'p_catalog_id': catalogId, 'p_hidden': hidden});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist: start the 24h deletion countdown on a hidden stock list. After it
+  /// fires the list (and its stock) is wiped and an empty replacement is seeded.
+  Future<DateTime> scheduleListDelete(String catalogId) async {
+    try {
+      final res = await supabase.rpc('stockist_schedule_list_delete',
+          params: {'p_catalog_id': catalogId});
+      return DateTime.parse(res.toString()).toLocal();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist: cancel a pending stock-list deletion (the "last chance" stop).
+  Future<void> cancelListDelete(String catalogId) async {
+    try {
+      await supabase.rpc('stockist_cancel_list_delete',
+          params: {'p_catalog_id': catalogId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Admin: add ONE brand to a stockist directly (the "+ Add brand" button).
   /// Blank name → server defaults to "Brand N". Returns the new brand id.
   Future<String> addBrandForStockist(String sequentialId, String name) async {

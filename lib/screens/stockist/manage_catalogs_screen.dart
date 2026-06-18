@@ -690,6 +690,12 @@ class _State extends State<ManageCatalogsScreen> {
                                     color: Color(0xFFE65100),
                                     fontWeight: FontWeight.w600)),
                           ),
+                        if (b.pendingDelete)
+                          _miniBadge('⏳ Deletes in ${_deleteCountdown(b.deleteScheduledAt!)}',
+                              const Color(0xFFFFEBEE), Colors.red)
+                        else if (b.hiddenByStockist)
+                          _miniBadge('🚫 Hidden from buyers',
+                              const Color(0xFFEEEEEE), Colors.black54),
                         if (!open)
                           Text(
                               '${lists.length} list${lists.length == 1 ? '' : 's'}'
@@ -748,11 +754,236 @@ class _State extends State<ManageCatalogsScreen> {
                   ],
                 ),
               ),
+            // Stockist-side brand visibility + deletion (non-default only).
+            if (!b.isDefault) _brandAdminControls(b),
           ],
         ],
       ),
     );
   }
+
+  // A tiny coloured status pill used in the brand header.
+  Widget _miniBadge(String text, Color bg, Color fg) => Container(
+        margin: const EdgeInsets.only(top: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: 10.5, color: fg, fontWeight: FontWeight.w600)),
+      );
+
+  // Hide/show toggle, the Delete button (only once hidden), and the 24h deletion
+  // countdown with a "Keep brand" stop. Default brand never reaches here.
+  Widget _brandAdminControls(Brand b) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(height: 14),
+          Row(
+            children: [
+              Icon(
+                  b.hiddenByStockist
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 18,
+                  color: _navy),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    b.hiddenByStockist
+                        ? 'Hidden from buyers'
+                        : 'Visible to buyers',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+              Switch(
+                value: !b.hiddenByStockist,
+                onChanged: _busy ? null : (_) => _toggleBrandHidden(b),
+              ),
+            ],
+          ),
+          if (b.hiddenByStockist && !b.pendingDelete)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _busy ? null : () => _confirmScheduleDelete(b),
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: const Text('Delete brand'),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+              ),
+            ),
+          if (b.pendingDelete)
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEBEE),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.timer_outlined,
+                          size: 16, color: Colors.red),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                            'Scheduled for deletion · ${_deleteCountdown(b.deleteScheduledAt!)}',
+                            style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.red)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                      'Last chance — stop now to keep this brand and all its '
+                      'lists. After the timer it cannot be recovered.',
+                      style: TextStyle(fontSize: 11, color: Colors.black54)),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      onPressed:
+                          _busy ? null : () => _cancelScheduledDelete(b),
+                      icon: const Icon(Icons.undo, size: 16),
+                      label: const Text('Keep brand'),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: _navy,
+                          visualDensity: VisualDensity.compact),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // Brand hide/show + scheduled-delete handlers.
+  Future<void> _toggleBrandHidden(Brand b) =>
+      _run(() => _data.setBrandHidden(b.id, !b.hiddenByStockist));
+
+  Future<void> _confirmScheduleDelete(Brand b) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this brand?'),
+        content: Text(
+            'Deleting "${b.name}" removes the brand, its stock lists and all '
+            'their share links. This CANNOT be undone.\n\n'
+            'For safety it happens after a 24-hour wait — you can stop it any '
+            'time within that window.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Start 24h deletion')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _run(() async {
+      await _data.scheduleBrandDelete(b.id);
+    });
+  }
+
+  Future<void> _cancelScheduledDelete(Brand b) =>
+      _run(() => _data.cancelBrandDelete(b.id));
+
+  // Time left before a scheduled brand/list deletion fires (24h after it was set).
+  String _deleteCountdown(DateTime scheduledAt) {
+    final left =
+        scheduledAt.add(const Duration(hours: 24)).difference(DateTime.now());
+    if (left.isNegative) return 'deleting now…';
+    final h = left.inHours;
+    final m = left.inMinutes % 60;
+    return h > 0 ? '${h}h ${m}m left' : '${m}m left';
+  }
+
+  // ── Stock-list hide / scheduled-delete (same provision as brands) ──────────
+  Future<void> _toggleListHidden(StockCatalog c) =>
+      _run(() => _data.setListHidden(c.id, !c.hiddenByStockist));
+
+  Future<void> _confirmScheduleListDelete(StockCatalog c) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this stock list?'),
+        content: Text(
+            'Deleting "${c.name}" removes the list, its designs/stock and its '
+            'share links. This CANNOT be undone.\n\n'
+            'For safety it happens after a 24-hour wait — you can stop it any '
+            'time within that window. A fresh empty list takes its place.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Start 24h deletion')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _run(() async {
+      await _data.scheduleListDelete(c.id);
+    });
+  }
+
+  Future<void> _cancelListDelete(StockCatalog c) =>
+      _run(() => _data.cancelListDelete(c.id));
+
+  // The red "scheduled for deletion · Nh left + Keep list" banner inside a list.
+  Widget _listDeleteCountdown(StockCatalog c) => Container(
+        margin: const EdgeInsets.fromLTRB(0, 6, 6, 2),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFEBEE),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.red.shade200),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.timer_outlined, size: 15, color: Colors.red),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                      'Deletes in ${_deleteCountdown(c.deleteScheduledAt!)} — last chance to stop.',
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.bold,
+                          color: Colors.red)),
+                ),
+              ],
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: _busy ? null : () => _cancelListDelete(c),
+                icon: const Icon(Icons.undo, size: 15),
+                label: const Text('Keep list'),
+                style: FilledButton.styleFrom(
+                    backgroundColor: _navy,
+                    visualDensity: VisualDensity.compact),
+              ),
+            ),
+          ],
+        ),
+      );
 
   // A STOCK-LIST box nested inside its brand box. Each list gets its own colour
   // from [_listPalette], cycled by its position in the brand.
@@ -795,7 +1026,7 @@ class _State extends State<ManageCatalogsScreen> {
                             fontSize: 14.5,
                             color: pal.border)),
                   ),
-                  if (!c.isActive)
+                  if (c.hiddenByStockist && !c.pendingDelete)
                     Container(
                       margin: const EdgeInsets.only(right: 4),
                       padding: const EdgeInsets.symmetric(
@@ -815,17 +1046,19 @@ class _State extends State<ManageCatalogsScreen> {
                   _rowIcon(Icons.edit_outlined, 'Rename', _navy,
                       _busy ? null : () => _renameDialog(c)),
                   _rowIcon(
-                      c.isActive
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      c.isActive ? 'Hide list' : 'Show list',
+                      c.hiddenByStockist
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      c.hiddenByStockist ? 'Show list' : 'Hide list',
                       Colors.grey.shade700,
-                      _busy
-                          ? null
-                          : () => _run(() =>
-                              _data.setCatalogActive(c.id, !c.isActive))),
+                      _busy ? null : () => _toggleListHidden(c)),
+                  // Delete appears only once the list is hidden (parallel to brands).
+                  if (c.hiddenByStockist && !c.pendingDelete)
+                    _rowIcon(Icons.delete_outline, 'Delete list', Colors.red,
+                        _busy ? null : () => _confirmScheduleListDelete(c)),
                 ],
               ),
+              if (c.pendingDelete) _listDeleteCountdown(c),
               // Info line: enquiries + dealers (dealers tappable).
               if (enq > 0 || dealers > 0)
                 Padding(

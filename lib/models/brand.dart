@@ -18,6 +18,14 @@ class Brand {
   /// buyers don't) or 'off' (hidden — never returned to the stockist).
   final String status;
 
+  /// Stockist hid this brand from buyers (they still see + manage it). Separate
+  /// from the admin [status] 'off'.
+  final bool hiddenByStockist;
+
+  /// When non-null, the brand is scheduled for hard deletion 24h after this time
+  /// (the stockist can cancel until then).
+  final DateTime? deleteScheduledAt;
+
   const Brand({
     required this.id,
     required this.name,
@@ -27,10 +35,15 @@ class Brand {
     this.catalogCount = 0,
     this.isDefault = false,
     this.status = 'live',
+    this.hiddenByStockist = false,
+    this.deleteScheduledAt,
   });
 
   /// Admin flagged this brand: buyers can't see it until corrected.
   bool get inCorrection => status == 'correction';
+
+  /// Deletion countdown running.
+  bool get pendingDelete => deleteScheduledAt != null;
 
   factory Brand.fromJson(Map<String, dynamic> j) => Brand(
         id: (j['id'] ?? '').toString(),
@@ -41,5 +54,9 @@ class Brand {
         catalogCount: (j['catalog_count'] as num?)?.toInt() ?? 0,
         isDefault: j['is_default'] as bool? ?? false,
         status: (j['status'] ?? 'live').toString(),
+        hiddenByStockist: j['hidden_by_stockist'] as bool? ?? false,
+        deleteScheduledAt: j['delete_scheduled_at'] == null
+            ? null
+            : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
       );
 }

@@ -18,6 +18,12 @@ class StockCatalog {
   /// live (enforced server-side). Private/non-Discover lists ignore it.
   final bool isAnonymous;
 
+  /// Stockist hid this list from buyers (they still see + manage it).
+  final bool hiddenByStockist;
+
+  /// When non-null, scheduled for hard deletion 24h after this time (cancellable).
+  final DateTime? deleteScheduledAt;
+
   const StockCatalog({
     required this.id,
     required this.stockistId,
@@ -29,9 +35,14 @@ class StockCatalog {
     required this.isActive,
     this.brandId,
     this.isAnonymous = false,
+    this.hiddenByStockist = false,
+    this.deleteScheduledAt,
   });
 
   bool get isPrivate => visibility == 'private';
+
+  /// Deletion countdown running.
+  bool get pendingDelete => deleteScheduledAt != null;
 
   factory StockCatalog.fromJson(Map<String, dynamic> j) => StockCatalog(
         id: j['id'] as String,
@@ -44,5 +55,9 @@ class StockCatalog {
         isActive: j['is_active'] as bool? ?? true,
         brandId: j['brand_id'] as String?,
         isAnonymous: j['is_anonymous'] as bool? ?? false,
+        hiddenByStockist: j['hidden_by_stockist'] as bool? ?? false,
+        deleteScheduledAt: j['delete_scheduled_at'] == null
+            ? null
+            : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
       );
 }
