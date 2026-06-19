@@ -1923,7 +1923,12 @@ bool _looksLikeDsr(_GeoRows g) {
   final footers = g.rows.where(_isDsrFooter).length;
   final hasCategory =
       g.rows.any((r) => r.any((t) => t.text.toUpperCase() == 'CATEGORY'));
-  return footers >= 1 && hasCategory;
+  // Unlabelled "Design Stock Report" variant: no Category/Size labels — each
+  // card stacks size / surface / name above a "<grade> BOX <qty>" footer. The
+  // report title is the reliable signal separating it from a generic layout.
+  final isStockReport = g.rows.any((r) =>
+      r.map((t) => t.text.toUpperCase()).join(' ').contains('STOCK REPORT'));
+  return (footers >= 1 && hasCategory) || (footers >= 2 && isStockReport);
 }
 
 // A right-block label row (so it can't be mistaken for the design-name line).
@@ -1984,11 +1989,18 @@ List<Map<String, dynamic>> _parseDesignsDsr(_GeoRows g) {
       if (y > prevFooterY && y < footY) band.add(r);
     }
 
-    // Design name = unlabelled alphabetic row closest above the footer.
+    // Design name = the data row closest above the footer that is neither a
+    // labelled field, a size-only row, nor a bare surface word. A purely
+    // numeric design code (e.g. "1515") is allowed — in both the labelled and
+    // the bare "Stock Report" variants the name is the row just above the
+    // footer.
     List<_Tok>? nameRow;
     for (final r in band) {
       if (_isDsrLabelRow(r)) continue;
-      if (!r.any((t) => RegExp(r'[A-Za-z]').hasMatch(t.text))) continue;
+      if (_isJunkRow(r.map((t) => t.text).join(' '))) continue; // title/date/page
+      if (r.every((t) => _sizeRe.hasMatch(t.text))) continue; // size-only row
+      if (r.length == 1 && _surfaceOf(r.first.text) != null) continue; // surface-only
+      if (!r.any((t) => RegExp(r'[A-Za-z0-9]').hasMatch(t.text))) continue;
       if (nameRow == null || r.first.yc > nameRow.first.yc) nameRow = r;
     }
     if (nameRow == null) { prevFooterY = footY; continue; }
@@ -2002,13 +2014,20 @@ List<Map<String, dynamic>> _parseDesignsDsr(_GeoRows g) {
     var surfaceRaw = '';
     for (final r in band) {
       if (sizeData.isEmpty) {
-        final m = RegExp(r'(\d{2,4})\s*[xX]\s*(\d{2,4})')
-            .firstMatch(_dsrValueAfter(r, 'SIZE'));
+        // Labelled "Size : 600X1200", else a bare NNNxNNN token in the card.
+        final labelled = _dsrValueAfter(r, 'SIZE');
+        final m = RegExp(r'(\d{2,4})\s*[xX]\s*(\d{2,4})').firstMatch(
+            labelled.isNotEmpty ? labelled : r.map((t) => t.text).join(' '));
         if (m != null) sizeData = '${m.group(1)}x${m.group(2)} mm';
       }
       if (surfaceRaw.isEmpty) {
+        // Labelled "Category : MATT", else a bare surface-only row ("MATT").
         final v = _dsrValueAfter(r, 'CATEGORY');
-        if (v.isNotEmpty) surfaceRaw = v;
+        if (v.isNotEmpty) {
+          surfaceRaw = v;
+        } else if (r.length == 1 && _surfaceOf(r.first.text) != null) {
+          surfaceRaw = r.first.text;
+        }
       }
     }
 
@@ -2324,7 +2343,7 @@ final _stockFooterRe = RegExp(
     caseSensitive: false);
 
 const Map<String, String> _kGradeQuality = {
-  'PRE': 'Premium', 'PREMIUM': 'Premium',
+  'PRE': 'Premium', 'PRA': 'Premium', 'PREMI': 'Premium', 'PREMIUM': 'Premium',
   'STD': 'Standard', 'STANDARD': 'Standard',
   'ECO': 'Economy', 'ECONOMY': 'Economy',
 };
