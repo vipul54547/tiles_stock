@@ -157,6 +157,10 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
         .length;
     if (stockFooters >= 2) {
       designMaps = _parseDesignsStock(lineRows); // DESIGN/GRADE/QTY/IMAGE + footers
+    } else if (_looksLikeDsr(geo)) {
+      designMaps = _parseDesignsDsr(geo); // "Design Stock Report" labelled cards
+    } else if (_looksLikeConfirmOrder(geo)) {
+      designMaps = _parseDesignsConfirmOrder(geo); // BRAND/DESIGN/GRADE/QTY table
     } else if (_looksLikeLabeled(wordRows)) {
       designMaps = _parseDesignsLabeled(wordRows); // "Design : …" key:value cards
     } else if (_looksLikeRak(wordRows)) {
@@ -1883,6 +1887,300 @@ List<Map<String, dynamic>> _parseDesignsLabeled(_GeoRows g) {
       'yc': g.rows[from].first.yc, // Design row → sits in the photo's band
       'sizeData': sizeData,
       'qualityData': null, // grade isn't an app quality → keep the filename one
+    });
+  }
+  return result;
+}
+
+// ── 'Design Stock Report' (DSR) labeled-card parser ─────────────────────────
+//
+// One card per tile: a photo on the left and a labelled block on the right —
+//
+//     [   photo   ]   Product   : VITRIFIED
+//                     Brand     : 2x4 MATT
+//                     Size      : 600X1200
+//                     Category  : MATT          <- surface
+//                     Weight    : 26.5
+//                     PCS per Box: 2
+//                     SqrFeet / 15.5 / 1.44
+//                     CRYSTELO GREY             <- design name (unlabelled box)
+//                     PRE   BOX   1300          <- grade + qty footer
+//
+// Each "<grade> BOX <qty>" footer closes one card. The design name is the
+// unlabelled alphabetic line just above the footer; size + surface come from
+// the "Size :" / "Category :" value cells. The name row's y sits inside the
+// photo, so position-based image matching keeps blank-photo tiles blank.
+
+// Footer = one row carrying a grade word (PRE/STD/ECO…), the literal 'BOX',
+// and an integer quantity.
+bool _isDsrFooter(List<_Tok> r) =>
+    r.any((t) => t.text.toUpperCase() == 'BOX') &&
+    r.any((t) => _kGradeQuality.containsKey(t.text.toUpperCase())) &&
+    r.any((t) => _isQtyToken(t.text));
+
+bool _looksLikeDsr(_GeoRows g) {
+  if (g.rows.isEmpty) return false;
+  final footers = g.rows.where(_isDsrFooter).length;
+  final hasCategory =
+      g.rows.any((r) => r.any((t) => t.text.toUpperCase() == 'CATEGORY'));
+  return footers >= 1 && hasCategory;
+}
+
+// A right-block label row (so it can't be mistaken for the design-name line).
+bool _isDsrLabelRow(List<_Tok> r) =>
+    r.any((t) => t.text == ':') ||
+    r.any((t) {
+      final u = t.text.toUpperCase();
+      return u == 'PRODUCT' ||
+          u == 'BRAND' ||
+          u == 'SIZE' ||
+          u == 'CATEGORY' ||
+          u == 'WEIGHT' ||
+          u == 'PCS' ||
+          u == 'BOX:' ||
+          u.startsWith('SQRFEET');
+    });
+
+// Value cell(s) sitting to the right of [label] on the same row.
+String _dsrValueAfter(List<_Tok> row, String label) {
+  final lab = row.where((t) => t.text.toUpperCase() == label).toList();
+  if (lab.isEmpty) return '';
+  final lx = lab.first.x0;
+  final vals = row
+      .where((t) =>
+          t.x0 > lx && t.text != ':' && t.text.toUpperCase() != label)
+      .toList()
+    ..sort((a, b) => a.x0.compareTo(b.x0));
+  return vals.map((t) => t.text).join(' ').trim();
+}
+
+List<Map<String, dynamic>> _parseDesignsDsr(_GeoRows g) {
+  final result = <Map<String, dynamic>>[];
+  var prevFooterY = -1e9;
+  int? curPage;
+
+  for (var fi = 0; fi < g.rows.length; fi++) {
+    final footer = g.rows[fi];
+    if (!_isDsrFooter(footer)) continue;
+    final page = footer.first.page;
+    final footY = footer.first.yc;
+    if (page != curPage) { curPage = page; prevFooterY = -1e9; }
+
+    final gradeTok = footer.firstWhere(
+        (t) => _kGradeQuality.containsKey(t.text.toUpperCase()),
+        orElse: () => footer.first);
+    final quality = _kGradeQuality[gradeTok.text.toUpperCase()];
+    final ints = footer.where((t) => _isQtyToken(t.text)).toList()
+      ..sort((a, b) => a.x0.compareTo(b.x0));
+    final qty =
+        ints.isEmpty ? null : int.tryParse(ints.last.text.replaceAll(RegExp(r'[^0-9]'), ''));
+    if (qty == null) { prevFooterY = footY; continue; }
+
+    // Rows of THIS card: above the footer, below the previous footer, same page.
+    final band = <List<_Tok>>[];
+    for (final r in g.rows) {
+      if (r.isEmpty || r.first.page != page) continue;
+      final y = r.first.yc;
+      if (y > prevFooterY && y < footY) band.add(r);
+    }
+
+    // Design name = unlabelled alphabetic row closest above the footer.
+    List<_Tok>? nameRow;
+    for (final r in band) {
+      if (_isDsrLabelRow(r)) continue;
+      if (!r.any((t) => RegExp(r'[A-Za-z]').hasMatch(t.text))) continue;
+      if (nameRow == null || r.first.yc > nameRow.first.yc) nameRow = r;
+    }
+    if (nameRow == null) { prevFooterY = footY; continue; }
+    final nameSorted = [...nameRow]..sort((a, b) => a.x0.compareTo(b.x0));
+    final name = _cleanName(nameSorted.map((t) => t.text).join(' '),
+        allowNumeric: true);
+    if (name.isEmpty) { prevFooterY = footY; continue; }
+
+    // Size + surface from their labelled value cells.
+    var sizeData = '';
+    var surfaceRaw = '';
+    for (final r in band) {
+      if (sizeData.isEmpty) {
+        final m = RegExp(r'(\d{2,4})\s*[xX]\s*(\d{2,4})')
+            .firstMatch(_dsrValueAfter(r, 'SIZE'));
+        if (m != null) sizeData = '${m.group(1)}x${m.group(2)} mm';
+      }
+      if (surfaceRaw.isEmpty) {
+        final v = _dsrValueAfter(r, 'CATEGORY');
+        if (v.isNotEmpty) surfaceRaw = v;
+      }
+    }
+
+    final surface =
+        surfaceRaw.isEmpty ? 'None' : (_surfaceOf(surfaceRaw) ?? 'None');
+    final finishLabel = surfaceRaw.isEmpty
+        ? null
+        : (surface == 'None'
+            ? _titleCaseFinish(surfaceRaw)
+            : _finishLabelFor(surfaceRaw, surface));
+
+    result.add({
+      'name': name,
+      'quantity': qty,
+      'surface': surface,
+      'finishLabel': finishLabel,
+      'surfaceRaw': surfaceRaw.isEmpty ? null : _titleCaseFinish(surfaceRaw),
+      'page': page,
+      'yc': nameRow.first.yc, // sits inside the photo → image anchor
+      'sizeData': sizeData.isEmpty ? null : sizeData,
+      'qualityData': quality,
+    });
+    prevFooterY = footY;
+  }
+  return result;
+}
+
+// ── 'CONFIRM ORDER' grade-table parser ──────────────────────────────────────
+//
+// A header table, one row per tile —
+//
+//     BRAND        DESIGN   GRADE   QTY.   IMAGE
+//     1.GOLDCOIN   1108     PRE     180    [photo]
+//     1.GOLDCOIN   1204     PRE     189    [photo]
+//
+// closed by a grand-total footer like "16X16 - MATT - PRE : 1573" that carries
+// the whole order's size (often in INCHES), surface and grade. The design name
+// is the DESIGN column; quality is the GRADE column; size + surface come from
+// the footer. (e.g. ALTROS CERAMIC "CONFIRM ORDER".)
+
+const Set<String> _kConfirmStopWords = {
+  'WEIGHT', 'GRAND', 'TOTAL', 'ACGROUP', 'EXECUTIVE', 'REMARK', 'SUBAC',
+};
+
+// "16X16" (inches, dims < 100) → nearest standard mm (×25.4, snapped to 50);
+// mm values (≥100) pass through. → "400x400 mm".
+String _confirmSize(String raw) {
+  final m = RegExp(r'(\d{2,4})\s*[xX]\s*(\d{2,4})').firstMatch(raw);
+  if (m == null) return '';
+  int dim(String s) {
+    final v = int.parse(s);
+    return v >= 100 ? v : (v * 25.4 / 50).round() * 50;
+  }
+  return '${dim(m.group(1)!)}x${dim(m.group(2)!)} mm';
+}
+
+bool _looksLikeConfirmOrder(_GeoRows g) {
+  for (final r in g.rows) {
+    final up =
+        r.map((t) => t.text.toUpperCase().replaceAll(RegExp(r'[^A-Z]'), ''));
+    final s = up.toSet();
+    final hasName = s.contains('DESIGN') || s.contains('NAME');
+    final hasGrade = s.contains('GRADE');
+    final hasQty = s.contains('QTY') || s.contains('QUANTITY');
+    if (hasName && hasGrade && hasQty) return true;
+  }
+  return false;
+}
+
+List<Map<String, dynamic>> _parseDesignsConfirmOrder(_GeoRows g) {
+  // Header row → column x-centres (name=DESIGN, grade=GRADE, qty=QTY, brand).
+  double? nameX, gradeX, qtyX, brandX;
+  var headerIdx = -1;
+  for (var i = 0; i < g.rows.length; i++) {
+    double? nx, gx, qx, bx;
+    for (final t in g.rows[i]) {
+      final u = t.text.toUpperCase().replaceAll(RegExp(r'[^A-Z]'), '');
+      if (u == 'DESIGN' || u == 'NAME') {
+        nx = t.xc;
+      } else if (u == 'GRADE') {
+        gx = t.xc;
+      } else if (u == 'QTY' || u == 'QUANTITY') {
+        qx = t.xc;
+      } else if (u == 'BRAND') {
+        bx = t.xc;
+      }
+    }
+    if (nx != null && gx != null && qx != null) {
+      nameX = nx; gradeX = gx; qtyX = qx; brandX = bx; headerIdx = i; break;
+    }
+  }
+  if (headerIdx < 0) return [];
+
+  // Order-wide size/surface/grade from the grand-total footer, if present.
+  var sizeData = '';
+  var surfaceRaw = '';
+  String? footerQuality;
+  for (final r in g.rows) {
+    final fm = _stockFooterRe.firstMatch(r.map((t) => t.text).join(' '));
+    if (fm != null) {
+      sizeData = _confirmSize(fm.group(1)!);
+      surfaceRaw = fm.group(2)!.replaceAll('-', ' ').trim();
+      footerQuality = _kGradeQuality[fm.group(3)!.toUpperCase()];
+      break;
+    }
+  }
+  final surface =
+      surfaceRaw.isEmpty ? 'None' : (_surfaceOf(surfaceRaw) ?? 'None');
+  final finishLabel = surfaceRaw.isEmpty
+      ? null
+      : (surface == 'None'
+          ? _titleCaseFinish(surfaceRaw)
+          : _finishLabelFor(surfaceRaw, surface));
+
+  // Assign each token to its nearest column anchor.
+  String nearest(_Tok t) {
+    final cols = <String, double>{
+      'name': nameX!, 'grade': gradeX!, 'qty': qtyX!,
+      if (brandX != null) 'brand': brandX,
+    };
+    var best = '';
+    var bd = 1e9;
+    cols.forEach((k, x) {
+      final d = (t.xc - x).abs();
+      if (d < bd) { bd = d; best = k; }
+    });
+    return best;
+  }
+
+  final result = <Map<String, dynamic>>[];
+  for (var i = headerIdx + 1; i < g.rows.length; i++) {
+    final r = g.rows[i];
+    final joined = r.map((t) => t.text).join(' ');
+    // Stop at the totals / metadata block; skip the grand-total footer line.
+    if (r.any((t) => _kConfirmStopWords
+        .contains(t.text.toUpperCase().replaceAll(RegExp(r'[^A-Z]'), '')))) {
+      break;
+    }
+    if (_stockFooterRe.hasMatch(joined)) continue;
+
+    final nameToks = r.where((t) => nearest(t) == 'name').toList()
+      ..sort((a, b) => a.x0.compareTo(b.x0));
+    final name = _cleanName(nameToks.map((t) => t.text).join(' '),
+        allowNumeric: true);
+    if (name.isEmpty || RegExp(r'^\d{2,4}[xX]\d{2,4}$').hasMatch(name)) continue;
+
+    int? qty;
+    for (final t in r.where((t) => nearest(t) == 'qty')) {
+      if (_isQtyToken(t.text)) {
+        qty = int.tryParse(t.text.replaceAll(RegExp(r'[^0-9]'), ''));
+        if (qty != null) break;
+      }
+    }
+    if (qty == null) continue;
+
+    final gradeTok = r.firstWhere(
+        (t) => nearest(t) == 'grade' &&
+            _kGradeQuality.containsKey(t.text.toUpperCase()),
+        orElse: () => r.first);
+    final quality =
+        _kGradeQuality[gradeTok.text.toUpperCase()] ?? footerQuality;
+
+    result.add({
+      'name': name,
+      'quantity': qty,
+      'surface': surface,
+      'finishLabel': finishLabel,
+      'surfaceRaw': surfaceRaw.isEmpty ? null : _titleCaseFinish(surfaceRaw),
+      'page': r.first.page,
+      'yc': r.first.yc, // text row aligns with its photo row → image anchor
+      'sizeData': sizeData.isEmpty ? null : sizeData,
+      'qualityData': quality,
     });
   }
   return result;
