@@ -14,6 +14,7 @@ import '../../widgets/notification_bell.dart';
 import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
 import '../../models/dna.dart';
+import 'dna_editor_sheet.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/account_actions.dart';
 
@@ -748,13 +749,14 @@ class _State extends State<StockistDashboardScreen> {
     return out;
   }
 
-  // Corner DNA indicator: green when fully tagged, red→amber gradient by how
-  // much is filled (any gap stays warm, never green). Tooltip shows the percent.
+  // Corner DNA indicator: shown ONLY while incomplete — full red = nothing
+  // tagged, fading toward amber as more gets filled. A fully-tagged design
+  // shows NO dot at all (a perfect design shouldn't be cluttered — see
+  // _designTile). Tooltip shows the percent.
   Widget _dnaDot(double fill) {
     final pct = (fill * 100).round();
-    final Color c = fill >= 1.0
-        ? const Color(0xFF2E7D32)
-        : Color.lerp(const Color(0xFFD32F2F), const Color(0xFFF9A825), fill)!;
+    final Color c =
+        Color.lerp(const Color(0xFFD32F2F), const Color(0xFFF9A825), fill)!;
     return Tooltip(
       message: 'Design DNA $pct% tagged',
       child: Container(
@@ -776,10 +778,27 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
+  // Tapping a design's DNA dot opens the same Design-DNA editor as the Library,
+  // resolving (find-or-create) its Library master first. Refreshes the dots on
+  // close so the just-tagged design updates immediately.
+  Future<void> _openDnaForDesign(TileDesign d) async {
+    final libId = await _service.libraryEnsureForDesign(d.id);
+    if (!mounted) return;
+    if (libId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not open Design DNA for this design.')));
+      return;
+    }
+    await showDnaEditor(context, libraryId: libId, designName: d.name);
+    if (mounted) _load();
+  }
+
   Widget _designTile(TileDesign d) {
     final outOfStock = d.boxQuantity == 0;
     final lowStock = !outOfStock && d.boxQuantity < _lowStockThreshold;
     final dnaFill = _dnaFill[d.id];
+    // Only flag designs that still need DNA work — fully-tagged ones show no dot.
+    final showDnaDot = dnaFill != null && dnaFill < 1.0;
     final isSelected = _selectedIds.contains(d.id);
     return GestureDetector(
       onLongPress: () => setState(() {
@@ -824,17 +843,23 @@ class _State extends State<StockistDashboardScreen> {
                         fontWeight: FontWeight.bold)),
               ),
             ),
-          // Top-left: DNA-completeness dot (always, when DNA is configured) +
-          // the out/low-stock badge beside it when relevant.
-          if (dnaFill != null || outOfStock || lowStock)
+          // Top-left: DNA-completeness dot (only while incomplete) + the
+          // out/low-stock badge beside it when relevant.
+          if (showDnaDot || outOfStock || lowStock)
             Positioned(
               top: 6,
               left: 6,
               child: Row(
                 children: [
-                  if (dnaFill != null) _dnaDot(dnaFill),
+                  if (showDnaDot)
+                    GestureDetector(
+                      // Tap the dot → open the Design-DNA editor for this design
+                      // (creating its Library master first if it has none yet).
+                      onTap: () => _openDnaForDesign(d),
+                      child: _dnaDot(dnaFill),
+                    ),
                   if (outOfStock || lowStock) ...[
-                    if (dnaFill != null) const SizedBox(width: 4),
+                    if (showDnaDot) const SizedBox(width: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 7, vertical: 3),

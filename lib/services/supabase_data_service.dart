@@ -1143,6 +1143,21 @@ class SupabaseDataService {
     }
   }
 
+  /// Find-or-create the Library master id for a stock design (so the dashboard
+  /// DNA dot can open the editor even for designs not yet in the Library).
+  /// Returns null on failure.
+  Future<String?> libraryEnsureForDesign(String designId) async {
+    try {
+      final res = await supabase
+          .rpc('library_ensure_for_design', params: {'p_design_id': designId});
+      final id = res?.toString() ?? '';
+      return id.isEmpty ? null : id;
+    } catch (e) {
+      debugPrint('libraryEnsureForDesign failed: $e');
+      return null;
+    }
+  }
+
   /// Atomic, all-or-nothing bulk import. Sends the whole batch + a client
   /// [batchId] (idempotency key) to one DB transaction: it builds library
   /// masters/images, creates/finds designs and adds stock together. If the call

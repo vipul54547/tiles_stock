@@ -798,7 +798,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   }
 
   Widget _buildIntro() => SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        // Bottom inset clears the system nav bar so the "Browse" button at the
+        // end isn't tucked under it (edge-to-edge).
+        padding: EdgeInsets.fromLTRB(
+            20, 20, 20, 20 + MediaQuery.viewPaddingOf(context).bottom),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -460,7 +460,9 @@ class _State extends State<AddEditStockScreen> {
               isDirty: _dirty,
               child: Form(
               key: _formKey,
-              onChanged: _markDirty,
+              // No blanket onChanged: it fired even on a no-op dropdown
+              // re-selection (Flutter calls didChange regardless), falsely
+              // marking the form dirty. Each input marks dirty itself instead.
               child: ListView(
                 // Bottom inset clears the system nav bar so the "Add Design"
                 // button is never hidden under it.
@@ -476,8 +478,10 @@ class _State extends State<AddEditStockScreen> {
                     if (_catalogs.length > 1) _buildCatalogPicker(),
                     _buildSurfaceSection(),
                     const SizedBox(height: 12),
-                    _buildDropdown('Tile Type', kTileTypes, _tileType,
-                        (v) => setState(() { _tileType = v!; _dirty = true; })),
+                    _buildDropdown('Tile Type', kTileTypes, _tileType, (v) {
+                      if (v == null || v == _tileType) return; // no real change
+                      setState(() { _tileType = v; _dirty = true; });
+                    }),
                     const SizedBox(height: 12),
                     _buildQualityPicker(),
                     const SizedBox(height: 12),
@@ -844,16 +848,19 @@ class _State extends State<AddEditStockScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildDropdown('Surface Type', _surfaces, _surface, (v) => setState(() {
-              _surface = v!;
-              _dirty = true;
-              // A word belongs to one finish — drop it if it doesn't map here.
-              if (!_wordsForSurface.contains(_finishWord)) {
-                _finishWord = '';
-                _finishAliasCtrl.clear();
-              }
-              _addingFinishWord = false;
-            })),
+        _buildDropdown('Surface Type', _surfaces, _surface, (v) {
+              if (v == null || v == _surface) return; // no real change → not dirty
+              setState(() {
+                _surface = v;
+                _dirty = true;
+                // A word belongs to one finish — drop it if it doesn't map here.
+                if (!_wordsForSurface.contains(_finishWord)) {
+                  _finishWord = '';
+                  _finishAliasCtrl.clear();
+                }
+                _addingFinishWord = false;
+              });
+            }),
         DropdownButtonFormField<String?>(
           initialValue: _addingFinishWord ? '__add__' : currentValue,
           isExpanded: true,
@@ -875,18 +882,22 @@ class _State extends State<AddEditStockScreen> {
                 child: Text('＋ Add new word…',
                     style: TextStyle(color: Color(0xFF1B4F72)))),
           ],
-          onChanged: (v) => setState(() {
-            _dirty = true;
-            if (v == '__add__') {
-              _addingFinishWord = true;
-              _finishAliasCtrl.clear();
-              _finishWord = '';
-            } else {
-              _addingFinishWord = false;
-              _finishWord = v ?? '';
-              _finishAliasCtrl.text = _finishWord;
-            }
-          }),
+          onChanged: (v) {
+            // Re-picking the value already shown is a no-op — don't dirty the form.
+            if (v == (_addingFinishWord ? '__add__' : currentValue)) return;
+            setState(() {
+              _dirty = true;
+              if (v == '__add__') {
+                _addingFinishWord = true;
+                _finishAliasCtrl.clear();
+                _finishWord = '';
+              } else {
+                _addingFinishWord = false;
+                _finishWord = v ?? '';
+                _finishAliasCtrl.text = _finishWord;
+              }
+            });
+          },
         ),
         if (_addingFinishWord)
           Padding(
@@ -895,7 +906,7 @@ class _State extends State<AddEditStockScreen> {
               controller: _finishAliasCtrl,
               autofocus: true,
               textCapitalization: TextCapitalization.words,
-              onChanged: (v) => _finishWord = v.trim(),
+              onChanged: (v) { _finishWord = v.trim(); _markDirty(); },
               decoration: const InputDecoration(
                 labelText: 'New finish word',
                 hintText: 'e.g. Carving, Lustra, Punch Ghr',
@@ -959,6 +970,7 @@ class _State extends State<AddEditStockScreen> {
       child: TextFormField(
         controller: ctrl,
         keyboardType: numeric ? TextInputType.number : TextInputType.text,
+        onChanged: (_) => _markDirty(), // typing marks the form dirty
         validator: required
             ? (v) => v!.trim().isEmpty ? 'Required' : null
             : null,
