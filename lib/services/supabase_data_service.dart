@@ -1173,6 +1173,7 @@ class SupabaseDataService {
     required String? brandId,
     required String pdfFilename,
     required List<Map<String, dynamic>> rows,
+    String mode = 'add', // 'add' | 'replace_all' (fully new) | 'replace_keep'
   }) async {
     try {
       final res = await supabase.rpc('import_stock_batch', params: {
@@ -1181,6 +1182,7 @@ class SupabaseDataService {
         'p_brand_id': brandId,
         'p_pdf_filename': pdfFilename,
         'p_rows': rows,
+        'p_mode': mode,
       });
       return res is Map
           ? Map<String, dynamic>.from(res)

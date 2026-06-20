@@ -1185,10 +1185,11 @@ class _State extends State<StockistDashboardScreen> {
                           : 'PDF adds your main brand designs + photos'),
                       onTap: () async {
                         Navigator.pop(ctx);
+                        // Unified PDF flow — every stockist (M and T/W) uses the
+                        // upgraded importer (modes + gated Step 2). The old
+                        // manufacturer screen is retired from routing.
                         await context.push(
-                            isImporter
-                                ? '/stockist/stock/import-supplier-pdf'
-                                : '/stockist/stock/upload',
+                            '/stockist/stock/import-supplier-pdf',
                             extra: effCatId);
                         _load();
                       },
@@ -1208,10 +1209,11 @@ class _State extends State<StockistDashboardScreen> {
                           : 'Parses designs + tile photos'),
                       onTap: () async {
                         Navigator.pop(ctx);
+                        // Unified PDF flow — every stockist (M and T/W) uses the
+                        // upgraded importer (modes + gated Step 2). The old
+                        // manufacturer screen is retired from routing.
                         await context.push(
-                            isImporter
-                                ? '/stockist/stock/import-supplier-pdf'
-                                : '/stockist/stock/upload',
+                            '/stockist/stock/import-supplier-pdf',
                             extra: effCatId);
                         _load();
                       },
