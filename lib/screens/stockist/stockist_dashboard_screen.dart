@@ -1171,9 +1171,11 @@ class _State extends State<StockistDashboardScreen> {
                         _load();
                       },
                     ),
-                  // PDF is main-brand only. Importers get the mapping-assisted
-                  // supplier importer; manufacturers get the structured flow.
-                  if (isMainBrand)
+                  // Importers (T/W) get PDF on ANY brand — each brand is its own
+                  // supplier range, so a per-brand supplier PDF is correct.
+                  // Manufacturers keep PDF on the main brand only (other brands
+                  // map onto existing masters via Excel).
+                  if (isImporter || isMainBrand)
                     ListTile(
                       leading: const Icon(Icons.picture_as_pdf,
                           color: Color(0xFF1B4F72)),
@@ -1195,9 +1197,9 @@ class _State extends State<StockistDashboardScreen> {
                       },
                     ),
                 ] else ...[
-                  // Brand is set up — normal stock upload. PDF is main-brand only.
-                  // Importers get the mapping-assisted supplier importer.
-                  if (isMainBrand)
+                  // Brand is set up — normal stock upload. Importers (T/W) get PDF
+                  // on ANY brand; manufacturers keep PDF on the main brand only.
+                  if (isImporter || isMainBrand)
                     ListTile(
                       leading: const Icon(Icons.picture_as_pdf,
                           color: Color(0xFF1B4F72)),
