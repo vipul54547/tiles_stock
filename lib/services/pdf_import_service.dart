@@ -15,6 +15,10 @@ class PdfImportResult {
   final int imageCount;   // how many images were extracted from the PDF
   final int rawLineCount; // total non-empty lines in extracted text (debug)
   final int digitLines;   // lines that started with a digit (debug)
+  /// True when the document looks like a quotation / invoice / other non-stock
+  /// PDF rather than a tile stock report (only ever set on the weak fallback
+  /// parse path). The importer rejects the whole file when this is set.
+  final bool looksNonStock;
 
   PdfImportResult({
     required this.size,
@@ -23,6 +27,7 @@ class PdfImportResult {
     this.imageCount = 0,
     this.rawLineCount = 0,
     this.digitLines = 0,
+    this.looksNonStock = false,
   });
 }
 
@@ -136,6 +141,8 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
   List<Map<String, dynamic>> designMaps = [];
   int dbgTotalLines = 0;
   List<List<Uint8List?>>? imagesPerPage; // image slots per page (null = N/A)
+  bool usedFallback = false; // true → only the weak adaptive/flat parser matched
+  bool looksNonStock = false; // true → looks like an invoice/quotation, not stock
   try {
     final doc = PdfDocument(inputBytes: bytes);
     final lines = PdfTextExtractor(doc).extractTextLines();
@@ -174,6 +181,7 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
         // Flat-text fallback has no page geometry; per-page matching is skipped.
         designMaps = _parseDesignsToMaps(PdfTextExtractor(doc).extractText());
       }
+      usedFallback = true;
     }
 
     // PRM + STOCK carry their size/quality in the data — lift the dominant value
@@ -228,6 +236,15 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
         m['surfaceRaw'] = fileFinish; // stockist-side wording → alias learning
       }
     }
+    // Non-stock gate: when only the weak adaptive/flat fallback matched (no
+    // recognised stock layout), a quotation / invoice can leak its prose lines
+    // in as "designs". Reject the whole document when too few of its rows look
+    // like real tile names (optionally reinforced by invoice markers). The
+    // recognised layout parsers are trusted formats and skip this check.
+    if (usedFallback) {
+      looksNonStock = _looksNonStock(bannerText, designMaps);
+    }
+
     // Per-page image matching needs page geometry on every design (adaptive &
     // PRM carry it; the flat fallback does not).
     if (designMaps.isNotEmpty &&
@@ -333,7 +350,63 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
     'cropRequests':   cropRequests,
     'dbgTotalLines':  dbgTotalLines,
     'dbgDigitLines':  dbgDigitLines,
+    'looksNonStock':  looksNonStock,
   };
+}
+
+// ── Non-stock document detection (fallback-path only) ─────────────────────────
+//
+// A plausible tile design name: short, with no contact/invoice prose. Used only
+// to score how "stock-like" a fallback-parsed document is — never to rename or
+// drop rows.
+bool _looksLikeDesignName(String name) {
+  final n = name.trim();
+  if (n.isEmpty) return false;
+  if (n.length > 60) return false;          // tile names are short, not sentences
+  if (n.contains('@')) return false;        // an email address
+  if (n.split(RegExp(r'\s+')).length > 9) return false; // prose, not a name
+  final u = n.toUpperCase();
+  if (RegExp(r'QUOTATION|QAUTATION|INVOICE|\bGST\b|E\s*-?\s*MAIL|GMAIL|'
+          r'\bRATE\b|DESCRIPTION|HTTP')
+      .hasMatch(u)) {
+    return false;
+  }
+  return true;
+}
+
+// Does this fallback-parsed document look like an invoice / quotation rather
+// than a tile stock list? Decided mainly by how many parsed rows carry a
+// plausible tile name; invoice markers in the text only reinforce a low ratio,
+// so a genuine stock report (mostly real names) is never rejected on markers
+// alone (suppliers often print an email / GST number in the header).
+bool _looksNonStock(String fullText, List<Map<String, dynamic>> designMaps) {
+  if (designMaps.isEmpty) return false; // nothing parsed → handled elsewhere
+  final t = fullText.toUpperCase();
+  var score = 0;
+  if (RegExp(r'QUOTATION|QAUTATION|PROFORMA|TAX\s+INVOICE|INVOICE\s+NO')
+      .hasMatch(t)) {
+    score += 2;
+  }
+  if (RegExp(r'[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}').hasMatch(t)) {
+    score += 2; // an email address
+  }
+  if (RegExp(r'\b[CSI]?GST\b').hasMatch(t)) {
+    score += 1;
+  }
+  if (RegExp(r'DESCRIPTION\s+RATE|RATE\s+TOTAL|GRAND\s+TOTAL|\bIFSC\b|'
+          r'A/C\s*NO|BANK\s+DETAIL')
+      .hasMatch(t)) {
+    score += 1;
+  }
+
+  final plausible = designMaps
+      .where((m) => _looksLikeDesignName((m['name'] as String?) ?? ''))
+      .length;
+  final ratio = plausible / designMaps.length;
+
+  // Reject only when the rows themselves look wrong: clearly junk (<25% real
+  // names), or mostly junk (<50%) backed by invoice markers.
+  return ratio < 0.25 || (ratio < 0.5 && score >= 2);
 }
 
 // ── Image → design matching ─────────────────────────────────────────────────
@@ -2744,12 +2817,13 @@ class PdfImportService {
     }
 
     return PdfImportResult(
-      size:         result['size']          as String,
-      quality:      result['quality']       as String,
-      designs:      designs,
-      imageCount:   designs.where((d) => d.imageBytes != null).length,
-      rawLineCount: result['dbgTotalLines'] as int? ?? 0,
-      digitLines:   result['dbgDigitLines'] as int? ?? 0,
+      size:          result['size']          as String,
+      quality:       result['quality']       as String,
+      designs:       designs,
+      imageCount:    designs.where((d) => d.imageBytes != null).length,
+      rawLineCount:  result['dbgTotalLines'] as int? ?? 0,
+      digitLines:    result['dbgDigitLines'] as int? ?? 0,
+      looksNonStock: result['looksNonStock'] as bool? ?? false,
     );
   }
 

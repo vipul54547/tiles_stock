@@ -328,6 +328,18 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     final parsed = await _pdfService.parsePdf(name, path);
     if (!mounted) return;
 
+    // Reject documents that aren't stock lists at all (quotation / invoice / etc.)
+    // before the stockist wastes time editing junk rows.
+    if (parsed.looksNonStock) {
+      _endProcessing();
+      setState(() => _filename = '');
+      await _alert('This doesn’t look like a stock list',
+          'This PDF looks like a quotation, invoice or another document — not a '
+          'tile stock report. Please upload your supplier’s stock list PDF '
+          '(designs with their sizes and box quantities).');
+      return;
+    }
+
     // Drop nameless rows (a design needs a name — it's the identity key). Reject
     // the WHOLE PDF only when nothing named remains.
     parsed.designs.removeWhere((d) => d.name.trim().isEmpty);
