@@ -173,18 +173,27 @@ class _State extends State<StockistDashboardScreen> {
     });
   }
 
-  // design → its catalogue's brand id (multi-brand). Null when unknown.
-  Map<String, String?> get _catalogBrand =>
-      {for (final c in _catalogs) c.id: c.brandId};
+  // A design's brand = its identity master's brand (carried on the holding now,
+  // not derived from a single list). Null when unknown. (stocklist-output)
   String? _designBrandId(TileDesign d) =>
-      d.catalogId == null ? null : _catalogBrand[d.catalogId];
+      (d.brandId != null && d.brandId!.isNotEmpty) ? d.brandId : null;
 
   // Stock-list helpers. The active lists in the current brand view drive the
   // dashboard's "filter by list" row; the name map labels each design's card.
   Map<String, String> get _catalogName =>
       {for (final c in _catalogs) c.id: c.name};
-  String? _designListName(TileDesign d) =>
-      d.catalogId == null ? null : _catalogName[d.catalogId];
+  // A design can be published in several lists; label it with the first one that
+  // matches the current brand view (else any). (stocklist-output)
+  String? _designListName(TileDesign d) {
+    final ids = d.catalogIds.where(_catalogName.containsKey).toList();
+    if (ids.isEmpty) return null;
+    final inBrand = _brandFilter == 'all'
+        ? ids.first
+        : ids.firstWhere(
+            (id) => _catalogs.any((c) => c.id == id && c.brandId == _brandFilter),
+            orElse: () => ids.first);
+    return _catalogName[inBrand];
+  }
   List<StockCatalog> get _filterLists {
     var cs = _catalogs.where((c) => c.isActive);
     if (_brandFilter != 'all') {
@@ -209,9 +218,10 @@ class _State extends State<StockistDashboardScreen> {
 
   List<TileDesign> get _filteredAndSorted {
     var base = _inStockDesigns;
-    // Filter by stock list (catalog). 'all' shows every list.
+    // Filter by stock list (catalog). 'all' shows every list. A design can be in
+    // several lists, so match membership. (stocklist-output)
     if (_catalogFilter != 'all') {
-      base = base.where((d) => d.catalogId == _catalogFilter).toList();
+      base = base.where((d) => d.catalogIds.contains(_catalogFilter)).toList();
     }
     var result = _selectedQualities.isEmpty
         ? base
@@ -912,10 +922,12 @@ class _State extends State<StockistDashboardScreen> {
       _library.any((e) => e.aliases.containsKey(b.id)) ||
       (b.isDefault && _library.isNotEmpty);
 
-  // Does this brand already have stock (designs in any of its lists)?
+  // Does this brand already have stock? A design belongs to the brand via its
+  // identity master (brandId), or is published in one of the brand's lists.
   bool _brandHasStock(Brand b) {
     final listIds = _listsForBrand(b).map((c) => c.id).toSet();
-    return _designs.any((d) => listIds.contains(d.catalogId));
+    return _designs.any((d) =>
+        d.brandId == b.id || d.catalogIds.any(listIds.contains));
   }
 
   // A brand-new brand: no Library designs AND no stock yet. Per the flow, the

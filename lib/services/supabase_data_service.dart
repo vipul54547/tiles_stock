@@ -91,6 +91,9 @@ class SupabaseDataService {
         stockistName: d['stockist_display_name'] ??
             (d['stockists'] != null ? (d['stockists']['name'] ?? '') : ''),
         catalogId:    d['catalog_id'] as String?,
+        catalogIds:   (d['catalog_ids'] as List?)?.map((e) => e.toString()).toList()
+                        ?? const [],
+        brandId:      (lib?['brand_id'] ?? d['brand_id'])?.toString(),
         // Brand the design is sold under (market_designs/my_private_designs);
         // masked to null for anonymous public listings. Empty for legacy rows.
         brandName:    d['brand_name'] ?? '',
@@ -120,7 +123,7 @@ class SupabaseDataService {
   // (now dropped) per-row columns. (identity split)
   static const _identityEmbed =
       'stockist_library(surface_type,stock_type,tile_type,pieces_per_box,'
-      'box_weight_kg,thickness_mm,colour,finish_label,image_url)';
+      'box_weight_kg,thickness_mm,colour,finish_label,image_url,brand_id)';
 
   Future<List<TileDesign>> getAllDesigns() async {
     try {
@@ -156,27 +159,58 @@ class SupabaseDataService {
 
   /// [inStockOnly] true hides out-of-stock / 0-box designs (buyer portfolio).
   /// The stockist's own dashboard leaves it false so they can see & restock them.
+  /// The CALLING stockist's own stock (holdings + identity + list memberships),
+  /// via the my_stock RPC. The [stockistUUID] arg is retained for call-site
+  /// compatibility but the RPC always scopes to the authenticated stockist.
+  /// [inStockOnly] hides 0-box holdings. (stocklist-output)
   Future<List<TileDesign>> getDesignsByStockist(String stockistUUID,
       {bool inStockOnly = false}) async {
     try {
-      var query = supabase
-          .from('designs')
-          .select('*, $_identityEmbed, stockists(sequential_id)')
-          .eq('stockist_id', stockistUUID);
+      final res = await supabase.rpc('my_stock');
+      final list = (res as List?) ?? const [];
+      var out = list
+          .map((e) => _toStockDesign(Map<String, dynamic>.from(e as Map)))
+          .toList();
       if (inStockOnly) {
-        // Buyer view of a stockist's portfolio: in-stock AND public-catalog only
-        // (private-catalog designs are reachable only via their own link).
-        query = query
-            .neq('status', 'out_of_stock')
-            .gt('box_quantity', 0)
-            .eq('is_market_visible', true);
+        out = out.where((d) => d.boxQuantity > 0).toList();
       }
-      final data = await query.order('created_at', ascending: false);
-      return data.map<TileDesign>((d) => _toDesign(d)).toList();
+      return out;
     } catch (e, st) {
-      debugPrint('SupabaseDataService.getDesignsByStockist failed ($stockistUUID): $e\n$st');
+      debugPrint('SupabaseDataService.getDesignsByStockist failed: $e\n$st');
       return [];
     }
+  }
+
+  // Maps a my_stock() row → TileDesign. Identity is flat here and stock_type is
+  // the BASE value, so it's clamped by the holding's quality. (stocklist-output)
+  TileDesign _toStockDesign(Map<String, dynamic> d) {
+    final img = (d['image_url'] ?? '').toString();
+    final quality = (d['quality'] ?? 'Standard').toString();
+    return TileDesign(
+      id:           d['id'],
+      name:         d['name'] ?? d['master_design_name'] ?? '',
+      size:         d['size'] ?? '',
+      boxQuantity:  d['box_quantity'] ?? 0,
+      surfaceType:  (d['surface_type'] ?? 'None').toString(),
+      finishLabel:  d['finish_label'] as String?,
+      piecesPerBox: (d['pieces_per_box'] ?? 0) as int,
+      boxWeightKg:  ((d['box_weight_kg'] ?? 0) as num).toDouble(),
+      thicknessMm:  ((d['thickness_mm'] ?? 0) as num).toDouble(),
+      colour:       (d['colour'] ?? '').toString(),
+      tileType:     (d['tile_type'] ?? '').toString(),
+      faceImageUrls: img.isEmpty ? const [] : [img],
+      stockistId:   (d['stockist_key'] ?? '').toString(),
+      catalogIds:   (d['catalog_ids'] as List?)?.map((e) => e.toString()).toList()
+                      ?? const [],
+      brandId:      d['brand_id']?.toString(),
+      updatedAt:    DateTime.parse(d['updated_at']),
+      quality:      quality,
+      stockType:    effectiveStockType((d['stock_type'] ?? 'Uncertain').toString(), quality),
+      createdAt:    d['created_at'] != null
+          ? DateTime.tryParse(d['created_at'].toString())
+          : null,
+      stockistPriority: ((d['stockist_priority'] ?? 0) as num).toDouble(),
+    );
   }
 
   Future<List<TileDesign>> searchDesigns({
@@ -214,32 +248,25 @@ class SupabaseDataService {
     }
   }
 
-  /// Creates a stock row. Identity (surface/tile_type/pieces/etc.) lives on the
-  /// master ([libraryId]) and is NOT written here — the stock row carries only
-  /// name/size (denormalized for matching), quality, quantity and the library
-  /// link. (identity split)
+  /// Adds stock for a Library design: upserts the holding by
+  /// (stockist, library_id, quality), publishes it into [catalogId] (membership),
+  /// and logs the stock-in. Identity lives on the master. (stocklist-output)
   Future<String?> addDesign({
-    required String stockistUUID,
-    required String name,
-    required String size,
+    required String libraryId,
     required String quality,
     required int    boxQuantity,
-    required String libraryId,
     String? catalogId,
   }) async {
     try {
-      final row = await supabase.from('designs').insert({
-        'stockist_id':   stockistUUID,
-        'catalog_id':    catalogId,
-        'name':          name,
-        'size':          size,
-        'quality':       quality,
-        'box_quantity':  boxQuantity,
-        'library_id':    libraryId,
-      }).select().single();
-      return row['id'] as String?;
+      final res = await supabase.rpc('stock_add_holding', params: {
+        'p_library_id': libraryId,
+        'p_quality':    quality,
+        'p_qty':        boxQuantity,
+        'p_catalog_id': catalogId,
+      });
+      return res?.toString();
     } catch (e, st) {
-      debugPrint('SupabaseDataService.addDesign failed ("$name"): $e\n$st');
+      debugPrint('SupabaseDataService.addDesign failed ($libraryId): $e\n$st');
       return null;
     }
   }

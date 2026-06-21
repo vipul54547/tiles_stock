@@ -290,23 +290,16 @@ class _State extends State<AddEditStockScreen> {
 
     bool ok;
     if (isEdit) {
-      // Only stock attributes are saved here: quality + (re-)assigned list.
-      // Quantity is changed via Recount; identity is edited in the Library.
-      ok = await _service.updateDesign(widget.designId!, {
-        'quality': _quality,
-        if (_catalogId != null) 'catalog_id': _catalogId,
-      });
+      // Only the quality is saved here. Quantity is changed via Recount; identity
+      // is edited in the Library; list membership is managed on the list.
+      ok = await _service.updateDesign(widget.designId!, {'quality': _quality});
     } else {
       final master = _selectedMaster!;
-      final name = _nameForBrand(master); // brand may have changed since pick
       final id = await _service.addDesign(
-        stockistUUID: currentStockistUUID,
-        name:         name,
-        size:         master.size,
+        libraryId:    master.id,
         quality:      _quality,
         boxQuantity:  int.tryParse(_qtyCtrl.text) ?? 0,
-        libraryId:    master.id,
-        catalogId:    _catalogId,
+        catalogId:    _catalogId, // publishes the design into this list (membership)
       );
       ok = id != null;
     }
@@ -416,7 +409,10 @@ class _State extends State<AddEditStockScreen> {
                     isEdit ? _buildIdentityCard() : _buildMasterPicker(),
                     if (isEdit || _selectedMaster != null) ...[
                       const SizedBox(height: 16),
-                      if (_catalogs.length > 1) _buildCatalogPicker(),
+                      // List picker only when adding — it chooses which list the
+                      // new design is published into. Membership of an existing
+                      // design is managed on the list, not here.
+                      if (!isEdit && _catalogs.length > 1) _buildCatalogPicker(),
                       _buildQualityPicker(),
                       const SizedBox(height: 16),
                       _buildQtyField(),

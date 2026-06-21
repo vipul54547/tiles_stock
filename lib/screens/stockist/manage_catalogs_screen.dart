@@ -85,9 +85,13 @@ class _State extends State<ManageCatalogsScreen> {
     for (final c in claimerList) {
       (claimers[c.catalogId] ??= []).add(c);
     }
+    // A design can be published in several lists now (membership), so bucket it
+    // under each list it belongs to. (stocklist-output)
     final byCat = <String, List<TileDesign>>{};
     for (final d in allDesigns) {
-      if (d.catalogId != null) (byCat[d.catalogId!] ??= []).add(d);
+      for (final cid in d.catalogIds) {
+        (byCat[cid] ??= []).add(d);
+      }
     }
     // Each list's share links (permanent + timed), fetched in parallel.
     final linkLists = await Future.wait(

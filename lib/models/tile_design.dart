@@ -30,9 +30,16 @@ class TileDesign {
   /// the masked trade name when the stockist is anonymous (from the
   /// `market_designs` view's `stockist_display_name`). Empty when unknown.
   final String stockistName;
-  /// The stock catalog this design belongs to (Father & Child). Null for legacy
-  /// rows; the stockist's default public catalog otherwise.
+  /// DEPRECATED single-list anchor. Stock is no longer tied to one list; a design
+  /// is a MEMBER of zero-or-more lists ([catalogIds]). Kept as a convenience =
+  /// first membership, for callers not yet migrated. (stocklist-output)
   final String? catalogId;
+  /// The output lists this design is published in (membership). Empty = not in
+  /// any list. (stocklist-output)
+  final List<String> catalogIds;
+  /// The design's brand = its identity master's brand. Drives the dashboard's
+  /// brand filter without going through a list. Empty/null when unknown.
+  final String? brandId;
   /// The brand this design is sold under (parent of the catalog). Shown on the
   /// card in place of the seller's company name. Empty for legacy/brandless
   /// rows, and masked (empty) for anonymous public listings — callers fall back
@@ -64,6 +71,8 @@ class TileDesign {
     required this.stockistId,
     this.stockistName = '',
     this.catalogId,
+    this.catalogIds = const [],
+    this.brandId,
     this.brandName = '',
     required this.updatedAt,
     required this.quality,
