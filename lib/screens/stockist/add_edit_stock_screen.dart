@@ -14,12 +14,14 @@ import '../../utils/tile_types.dart';
 import '../../utils/finishes.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/unsaved_changes.dart';
+import 'edit_design_image_screen.dart';
 
 // Add/Edit a stock design. Per [[project_stockist_library]] decision #7 this
-// screen is QUANTITY-ONLY: a design's identity (name, size, photo) lives in the
-// stockist's Design Library and is edited ONLY there. A new design is created by
-// picking a Library master (its name/size/photo are copied in); everything else
-// here is stock attributes (boxes, quality, finish, list…).
+// screen is QUANTITY-ONLY: a design's name & size live in the stockist's Design
+// Library and are edited ONLY there. The photo can be changed here via the
+// Change-image window (it replaces the shared MASTER image). A new design is
+// created by picking a Library master (its name/size/photo are copied in);
+// everything else here is stock attributes (boxes, quality, finish, list…).
 class AddEditStockScreen extends StatefulWidget {
   final String? designId;
   /// In add mode, the stock list to default to (its brand). Lets the dashboard
@@ -293,6 +295,71 @@ class _State extends State<AddEditStockScreen> {
     _selectMaster(picked);
   }
 
+  // ── Change image (edit mode) ───────────────────────────────────────────────
+  // Opens the dedicated Present-vs-New image window. The chosen photo replaces
+  // the MASTER image, so it updates everywhere this design appears (image lives
+  // on the master — [[project_stockist_library]]).
+  Future<void> _openImageEditor() async {
+    final newUrl = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => EditDesignImageScreen(
+          presentImageUrl: _imageUrl,
+          designName: _designName,
+          size: _size,
+        ),
+      ),
+    );
+    if (!mounted || newUrl == null || newUrl.isEmpty || newUrl == _imageUrl) {
+      return;
+    }
+    setState(() => _saving = true);
+    final master = _findMasterForDesign(await _service.getMyLibrary());
+    if (!mounted) return;
+    if (master == null) {
+      setState(() => _saving = false);
+      _snack('Could not find this design in your Library.', Colors.red);
+      return;
+    }
+    try {
+      await _service.upsertLibraryMaster(
+        id: master.id,
+        size: master.size,
+        masterName: master.masterName,
+        imageUrl: newUrl,
+        brandId: master.brandId.isNotEmpty ? master.brandId : _designBrandId,
+        aliases: master.aliases,
+      );
+      if (!mounted) return;
+      setState(() {
+        _imageUrl = newUrl;
+        _saving = false;
+      });
+      _snack('Image updated.', Colors.green);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _snack('Could not update image: $e', Colors.red);
+    }
+  }
+
+  // Resolve this design's library master by size + name (master name OR the
+  // current brand's alias). Requires a real name match so we never overwrite the
+  // wrong master's photo.
+  LibraryEntry? _findMasterForDesign(List<LibraryEntry> lib) {
+    final b = _designBrandId;
+    final wantName = _designName.trim().toLowerCase();
+    final wantSize = _size.trim().toLowerCase();
+    for (final e in lib) {
+      if (e.size.trim().toLowerCase() != wantSize) continue;
+      // A master belongs to one brand — match within this design's brand.
+      if (b != null && e.brandId.isNotEmpty && e.brandId != b) continue;
+      if (e.masterName.trim().toLowerCase() == wantName) return e;
+      final a = b == null ? null : e.aliases[b];
+      if (a != null && a.trim().toLowerCase() == wantName) return e;
+    }
+    return null;
+  }
+
   // ── Save (add or update) ──────────────────────────────────────────────────
 
   Future<void> _save() async {
@@ -562,19 +629,33 @@ class _State extends State<AddEditStockScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _saving ? null : _openImageEditor,
+              icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+              label: const Text('Change image'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF1B4F72),
+                side: const BorderSide(color: Color(0xFF1B4F72)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
           Row(
             children: [
               Icon(Icons.lock_outline, size: 13, color: Colors.grey.shade500),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                    'Name, size & photo are set in your Design Library.',
+                    'Name & size are set in your Design Library.',
                     style: TextStyle(
                         fontSize: 11, color: Colors.grey.shade600)),
               ),
               TextButton(
                 onPressed: () => context.push('/stockist/library'),
-                child: const Text('Edit in Library'),
+                child: const Text('Edit name/size'),
               ),
             ],
           ),

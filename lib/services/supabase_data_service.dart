@@ -397,6 +397,7 @@ class SupabaseDataService {
     required String size,
     required String masterName,
     String imageUrl = '',
+    String? brandId,
     Map<String, String> aliases = const {},
   }) async {
     final aliasJson = aliases.entries
@@ -410,6 +411,7 @@ class SupabaseDataService {
         'p_master_name': masterName,
         'p_image_url': imageUrl,
         'p_aliases': aliasJson,
+        'p_brand_id': brandId,
       });
       return (res ?? '').toString();
     } catch (e) {

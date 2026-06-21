@@ -537,13 +537,18 @@ class _State extends State<MyDesignLibraryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(e.masterName,
+                  // Headline composed LIVE = current brand name + clean design
+                  // name, so renaming a brand updates it everywhere (no stale
+                  // baked-in name).
+                  Text(e.displayName,
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 14)),
                   Text(e.size.replaceAll(' mm', ''),
                       style:
                           TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  if (e.aliases.isNotEmpty) ...[
+                  // Per-brand chips only matter when the design is linked to MORE
+                  // than one brand (M multi-brand); single brand is in the headline.
+                  if (e.aliases.length > 1) ...[
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 6,
@@ -663,13 +668,21 @@ class _EditorState extends State<_LibraryEditorScreen> {
   bool get _isEdit => widget.existing != null;
   Brand get _defaultBrand => widget.brands.first;
 
-  // Another master already uses this name + size (live warning before saving;
-  // the server also blocks it).
+  // A master is bound to ONE brand: the first brand the user named, else the
+  // default brand. (Identity is now per-brand, so this is the design's brand.)
+  String get _targetBrandId => widget.brands
+      .map((b) => b.id)
+      .firstWhere((id) => _aliasCtrls[id]?.text.trim().isNotEmpty ?? false,
+          orElse: () => _defaultBrand.id);
+
+  // Another master in the SAME brand already uses this name + size (live warning
+  // before saving; the server also blocks it). Duplicates are per-brand now.
   bool get _isDuplicate {
     final name = _master.text.trim().toLowerCase();
     if (name.isEmpty || _size.isEmpty) return false;
     return widget.all.any((e) =>
         e.id != widget.existing?.id &&
+        e.brandId == _targetBrandId &&
         e.masterName.trim().toLowerCase() == name &&
         e.size == _size);
   }
@@ -785,6 +798,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
         size: _size,
         masterName: master,
         imageUrl: _imageUrl,
+        brandId: _targetBrandId,
         aliases: aliases,
       );
       if (!mounted) return;
