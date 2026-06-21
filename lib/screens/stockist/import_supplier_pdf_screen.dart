@@ -14,6 +14,7 @@ import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/finishes.dart';
 import '../../widgets/upload_mode.dart';
+import '../../widgets/typewriter_text.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // T/W (Trader / Wholesaler = "importer") supplier-PDF importer.
@@ -42,14 +43,15 @@ import '../../widgets/upload_mode.dart';
 // done. Cancel/back before Save writes NOTHING.
 enum _Phase { mode, pick, edit, dedupe, ask, stock, review, done }
 
-// One set of rows in the parsed PDF that share a name + size — the machine can't
-// tell if they're the SAME design (duplicate line) or DIFFERENT designs that
-// happen to share a name; the stockist decides, using the photos.
+// One set of rows in the parsed PDF that share a name + size. By our identity rule
+// (name + size IS the library design) these ARE the same one design, so the only
+// question is which photo to keep. If the photos are genuinely different that's a
+// MISTAKE IN THE PDF (the same name + size given to two different designs) — not
+// ours to resolve; the stockist cancels and fixes the PDF.
 class _DupGroup {
   final String key;
   final List<_ImpRow> rows;
-  bool keepBoth = false;   // false = same design (merge) · true = different (rename)
-  _ImpRow? chosen;         // the photo/row to keep when merging
+  _ImpRow? chosen;         // the photo/row to keep; the rest fold in
   _DupGroup(this.key, this.rows) {
     chosen = rows.firstWhere((r) => r.imageBytes != null, orElse: () => rows.first);
   }
@@ -442,29 +444,12 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     ];
   }
 
-  // "Go ahead" on the dedupe page: apply each group's choice, then continue.
+  // "Keep & continue" on the dedupe page: for each same-name+size group keep the
+  // chosen photo's row, fold the others' boxes into it, drop them from the import.
+  // No rename / keep-both — by our identity rule (name + size) these are one design;
+  // genuinely different photos are a PDF mistake the stockist resolves by cancelling.
   void _applyDedupe() {
-    // For "keep both" groups every row must end up with a distinct name.
     for (final g in _dupGroups) {
-      if (!g.keepBoth) continue;
-      final seen = <String>{};
-      for (final r in g.rows) {
-        final n = r.name.trim().toLowerCase();
-        if (n.isEmpty) {
-          _toast('Give every design a name.', error: true);
-          return;
-        }
-        if (!seen.add('$n|${r.size.trim().toLowerCase()}')) {
-          _toast('Two designs still share a name — make each one different.',
-              error: true);
-          return;
-        }
-      }
-    }
-    // Merge the "same design" groups: keep the chosen photo's row, fold the others'
-    // boxes into it, drop them from the import.
-    for (final g in _dupGroups) {
-      if (g.keepBoth) continue;
       final carrier = g.chosen ?? g.rows.first;
       var sum = carrier.qty;
       for (final r in g.rows) {
@@ -474,16 +459,6 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       }
       carrier.include = true;
       carrier.qtyCtrl.text = sum > 0 ? '$sum' : '';
-    }
-    // A keep-both rename may have created a NEW clash with another group — re-check.
-    if (_findDuplicates().isNotEmpty) {
-      setState(() {
-        _dupGroups
-          ..clear()
-          ..addAll(_findDuplicates());
-      });
-      _toast('Some names still clash — please fix them.', error: true);
-      return;
     }
     _proceedAfterEdit();
   }
@@ -986,7 +961,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         const SizedBox(height: 12),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 28),
-          child: Text(
+          child: TypewriterText(
             'Import your supplier’s stock PDF. We read it as best we can, then '
             'you confirm every design before anything is saved.\n\n'
             'Step 1 builds your Design Library (names + sizes + any photos). '
@@ -1088,15 +1063,16 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         _contextChip(),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Text('Step 1b · Same name found',
+          child: Text('Step 1b · Same name + size found',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         ),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
-          child: Text(
-              'These designs share a name in your PDF. The same name can mean the '
-              'same design twice, or two different designs. Look at the photos and '
-              'decide for each one.',
+          child: TypewriterText(
+              'A design name + size appears more than once in your PDF. By name + '
+              'size they are one design, so just keep one photo. If the photos are '
+              'actually different, that is a mistake in your PDF (the same name + '
+              'size cannot be two different designs) — Cancel upload and fix it.',
               style: TextStyle(fontSize: 12.5, color: Colors.black54)),
         ),
         Align(
@@ -1140,7 +1116,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                       backgroundColor: const Color(0xFF1B4F72),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14)),
-                  child: const Text('Go ahead'),
+                  child: const Text('Keep & continue'),
                 ),
               ),
             ]),
@@ -1162,72 +1138,23 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                 style: const TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 14)),
             const SizedBox(height: 10),
-            if (!g.keepBoth) ...[
-              // SAME design — pick which photo to keep; the rest fold in.
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  for (final r in g.rows) _dupPhotoChoice(g, r),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                  'These are the SAME design — the chosen photo is kept and the '
-                  'boxes are added together.',
-                  style:
-                      TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => setState(() => g.keepBoth = true),
-                  icon: const Icon(Icons.call_split, size: 18),
-                  label: const Text('Different designs — keep both'),
-                ),
-              ),
-            ] else ...[
-              // DIFFERENT designs — keep both, give each a unique name.
-              for (final r in g.rows)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      GestureDetector(
-                          onTap: () => _showFullRow(r), child: _thumb(r)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            TextFormField(
-                              initialValue: r.name,
-                              decoration: const InputDecoration(
-                                  isDense: true,
-                                  labelText: 'Design name',
-                                  border: OutlineInputBorder()),
-                              onChanged: (v) => r.name = v,
-                            ),
-                            const SizedBox(height: 4),
-                            _scrapeDetail(r),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              Text('Give each design a different name so they stay separate.',
-                  style:
-                      TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => setState(() => g.keepBoth = false),
-                  icon: const Icon(Icons.merge_type, size: 18),
-                  label: const Text('Same design — merge instead'),
-                ),
-              ),
-            ],
+            // Same name + size = one library design. Pick the photo to keep; the
+            // rest fold in. If the photos are genuinely different, that's a PDF
+            // mistake — the stockist cancels the upload and fixes the PDF.
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final r in g.rows) _dupPhotoChoice(g, r),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+                'Same name + size = one design. If these photos are the same, keep '
+                'one (the boxes are added together). If the photos are different, '
+                'it is a mistake in your PDF — Cancel upload and fix it.',
+                style:
+                    TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
           ],
         ),
       ),
@@ -1763,9 +1690,15 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
 
   Widget _askHelp(String t) => Padding(
         padding: const EdgeInsets.only(top: 10),
-        child: Text(t,
-            style: TextStyle(
-                fontSize: 14, height: 1.4, color: Colors.grey.shade700)),
+        // Type-on reveal: paces the stockist through the instruction at each
+        // decision page instead of letting it be skimmed. Replays only when the
+        // step (text) changes; tap reveals the rest instantly.
+        child: TypewriterText(
+          t,
+          key: ValueKey(t),
+          style: TextStyle(
+              fontSize: 14, height: 1.4, color: Colors.grey.shade700),
+        ),
       );
 
   // A large tappable radio-style option row.
