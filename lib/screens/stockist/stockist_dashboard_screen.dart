@@ -922,13 +922,14 @@ class _State extends State<StockistDashboardScreen> {
   // stockist must set up its designs (Mapping) before uploading stock into it.
   bool _brandNeedsSetup(Brand b) => !_brandHasLibrary(b) && !_brandHasStock(b);
 
-  // A brand's active stock lists (legacy null-brand lists count as the default
-  // brand's). Every brand owns at least its 1 default list.
+  // A brand's active stock lists. Strict brand match — same rule as _filterLists,
+  // so the upload sheet and the dashboard list filter can never disagree. Every
+  // catalog now carries a brand_id (DB NOT NULL); the old null-brand fallback used
+  // to sweep legacy brandless leftovers onto the default brand, which surfaced a
+  // phantom extra list here that the dashboard didn't show.
   List<StockCatalog> _listsForBrand(Brand b) =>
       _catalogs
-          .where((c) =>
-              c.isActive &&
-              (c.brandId == b.id || (c.brandId == null && b.isDefault)))
+          .where((c) => c.isActive && c.brandId == b.id)
           .toList()
         ..sort((x, y) => x.sortOrder.compareTo(y.sortOrder));
 
