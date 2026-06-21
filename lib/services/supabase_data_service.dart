@@ -48,19 +48,39 @@ class SupabaseDataService {
 
   // ── helpers ──────────────────────────────────────────────────────────────
 
-  TileDesign _toDesign(Map<String, dynamic> d, {String? seqId}) => TileDesign(
+  TileDesign _toDesign(Map<String, dynamic> d, {String? seqId}) {
+    // Identity (surface/tile_type/stock_type/colour/pieces/weight/thickness/
+    // finish/image) lives on the MASTER. Buyer reads (market_designs + RPCs)
+    // expose it flat; the stockist's own direct `designs` reads embed it as a
+    // nested `stockist_library` object. Source from the master when present.
+    // (identity split)
+    final lib = d['stockist_library'] is Map
+        ? Map<String, dynamic>.from(d['stockist_library'] as Map)
+        : null;
+    final quality = (d['quality'] ?? 'Standard').toString();
+    final baseStock = (lib?['stock_type'] ?? d['stock_type'] ?? 'Uncertain')
+        .toString();
+    final libImg = (lib?['image_url'] ?? '').toString();
+    final faceImages = lib != null
+        ? (libImg.isEmpty ? const <String>[] : [libImg])
+        : List<String>.from(d['face_image_urls'] ?? const []);
+    return TileDesign(
         id:           d['id'],
         name:         d['name'],
         size:         d['size'],
         boxQuantity:  d['box_quantity'] ?? 0,
-        surfaceType:  d['surface_type'],
-        finishLabel:  d['finish_label'],
-        piecesPerBox: d['pieces_per_box'] ?? 0,
-        boxWeightKg:  (d['box_weight_kg']  ?? 0).toDouble(),
-        thicknessMm:  (d['thickness_mm']   ?? 0).toDouble(),
-        colour:       d['colour']    ?? '',
-        tileType:     d['tile_type'] ?? '',
-        faceImageUrls: List<String>.from(d['face_image_urls'] ?? []),
+        surfaceType:  (lib?['surface_type'] ?? d['surface_type'] ?? 'None')
+            .toString(),
+        finishLabel:  lib?['finish_label'] ?? d['finish_label'],
+        piecesPerBox: (lib?['pieces_per_box'] ?? d['pieces_per_box'] ?? 0)
+            as int,
+        boxWeightKg:  ((lib?['box_weight_kg'] ?? d['box_weight_kg'] ?? 0) as num)
+            .toDouble(),
+        thicknessMm:  ((lib?['thickness_mm'] ?? d['thickness_mm'] ?? 0) as num)
+            .toDouble(),
+        colour:       (lib?['colour'] ?? d['colour'] ?? '').toString(),
+        tileType:     (lib?['tile_type'] ?? d['tile_type'] ?? '').toString(),
+        faceImageUrls: faceImages,
         // market_designs exposes a flat (already-masked) `stockist_key`; the
         // member/stockist `designs` join exposes the nested stockists row.
         stockistId:   d['stockist_key'] ??
@@ -75,8 +95,12 @@ class SupabaseDataService {
         // masked to null for anonymous public listings. Empty for legacy rows.
         brandName:    d['brand_name'] ?? '',
         updatedAt:  DateTime.parse(d['updated_at']),
-        quality:    d['quality']    ?? 'Standard',
-        stockType:  d['stock_type'] ?? 'Uncertain',
+        quality:    quality,
+        // Flat reads (market_designs/RPCs) already clamp stock_type in SQL; the
+        // embedded-master case carries the base value, so clamp it here.
+        stockType:  lib != null
+            ? effectiveStockType(baseStock, quality)
+            : baseStock,
         createdAt:  d['created_at'] != null
             ? DateTime.tryParse(d['created_at'].toString())
             : null,
@@ -87,8 +111,16 @@ class SupabaseDataService {
                 0) as num)
             .toDouble(),
       );
+  }
 
   // ── designs ───────────────────────────────────────────────────────────────
+
+  // PostgREST embed of a stock row's identity master (designs.library_id ->
+  // stockist_library). Identity attributes are read from here, not from the
+  // (now dropped) per-row columns. (identity split)
+  static const _identityEmbed =
+      'stockist_library(surface_type,stock_type,tile_type,pieces_per_box,'
+      'box_weight_kg,thickness_mm,colour,finish_label,image_url)';
 
   Future<List<TileDesign>> getAllDesigns() async {
     try {
@@ -129,7 +161,7 @@ class SupabaseDataService {
     try {
       var query = supabase
           .from('designs')
-          .select('*, stockists(sequential_id)')
+          .select('*, $_identityEmbed, stockists(sequential_id)')
           .eq('stockist_id', stockistUUID);
       if (inStockOnly) {
         // Buyer view of a stockist's portfolio: in-stock AND public-catalog only
@@ -182,21 +214,17 @@ class SupabaseDataService {
     }
   }
 
+  /// Creates a stock row. Identity (surface/tile_type/pieces/etc.) lives on the
+  /// master ([libraryId]) and is NOT written here — the stock row carries only
+  /// name/size (denormalized for matching), quality, quantity and the library
+  /// link. (identity split)
   Future<String?> addDesign({
     required String stockistUUID,
     required String name,
     required String size,
-    required String surfaceType,
     required String quality,
-    required String colour,
-    required String stockType,
     required int    boxQuantity,
-    required int    piecesPerBox,
-    required double boxWeightKg,
-    required double thicknessMm,
-    String tileType = '',
-    required List<String> faceImageUrls,
-    String? finishLabel,
+    required String libraryId,
     String? catalogId,
   }) async {
     try {
@@ -205,17 +233,9 @@ class SupabaseDataService {
         'catalog_id':    catalogId,
         'name':          name,
         'size':          size,
-        'surface_type':  surfaceType,
-        'finish_label':  finishLabel,
         'quality':       quality,
-        'colour':        colour,
-        'stock_type':    stockType,
         'box_quantity':  boxQuantity,
-        'pieces_per_box': piecesPerBox,
-        'box_weight_kg': boxWeightKg,
-        'thickness_mm':  thicknessMm,
-        'tile_type':     tileType,
-        'face_image_urls': faceImageUrls,
+        'library_id':    libraryId,
       }).select().single();
       return row['id'] as String?;
     } catch (e, st) {
@@ -228,7 +248,7 @@ class SupabaseDataService {
     try {
       final data = await supabase
           .from('designs')
-          .select('*, stockists(sequential_id)')
+          .select('*, $_identityEmbed, stockists(sequential_id)')
           .eq('id', id)
           .single();
       return _toDesign(data);
@@ -399,6 +419,16 @@ class SupabaseDataService {
     String imageUrl = '',
     String? brandId,
     Map<String, String> aliases = const {},
+    // Identity attributes — pass to set/overwrite them on the master. Leave null
+    // to keep the existing values (e.g. the Change-image flow). (identity split)
+    String? surfaceType,
+    String? stockType,
+    String? tileType,
+    int? piecesPerBox,
+    double? boxWeightKg,
+    double? thicknessMm,
+    String? colour,
+    String? finishLabel,
   }) async {
     final aliasJson = aliases.entries
         .where((e) => e.value.trim().isNotEmpty)
@@ -412,6 +442,14 @@ class SupabaseDataService {
         'p_image_url': imageUrl,
         'p_aliases': aliasJson,
         'p_brand_id': brandId,
+        'p_surface': surfaceType,
+        'p_stock_type': stockType,
+        'p_tile_type': tileType,
+        'p_pieces': piecesPerBox,
+        'p_weight': boxWeightKg,
+        'p_thickness': thicknessMm,
+        'p_colour': colour,
+        'p_finish': finishLabel,
       });
       return (res ?? '').toString();
     } catch (e) {
@@ -2471,10 +2509,13 @@ class SupabaseDataService {
   }
 
   /// Number of designs currently using [name] as their surface_type. The admin
-  /// screen uses this to block deleting an in-use finish.
+  /// screen uses this to block deleting an in-use finish. Surface now lives on
+  /// the design identity (the master), so the count is taken there. (identity split)
   Future<int> countDesignsUsingSurface(String name) async {
-    final data =
-        await supabase.from('designs').select('id').eq('surface_type', name);
+    final data = await supabase
+        .from('stockist_library')
+        .select('id')
+        .eq('surface_type', name);
     return (data as List).length;
   }
 

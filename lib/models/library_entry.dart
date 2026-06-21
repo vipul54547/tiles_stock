@@ -20,6 +20,19 @@ class LibraryEntry {
   /// + the brand+name+size image lookup).
   final Map<String, String> aliases;
 
+  // ── Identity attributes (describe the DESIGN; set once, here in the Library).
+  // The stock row (designs) carries only quality + quantity. (identity split)
+  final String surfaceType;
+  /// Base restocking nature {Continuous, One Time, Uncertain}. The effective
+  /// value shown to buyers is clamped by the stock listing's quality.
+  final String stockType;
+  final String tileType;
+  final int piecesPerBox;
+  final double boxWeightKg;
+  final double thicknessMm;
+  final String colour;
+  final String? finishLabel;
+
   const LibraryEntry({
     required this.id,
     required this.size,
@@ -28,6 +41,14 @@ class LibraryEntry {
     this.brandId = '',
     this.brandName = '',
     this.aliases = const {},
+    this.surfaceType = 'None',
+    this.stockType = 'Uncertain',
+    this.tileType = '',
+    this.piecesPerBox = 0,
+    this.boxWeightKg = 0,
+    this.thicknessMm = 0,
+    this.colour = '',
+    this.finishLabel,
   });
 
   /// Headline composed LIVE = current brand name + clean design name. Falls back
@@ -51,6 +72,16 @@ class LibraryEntry {
       brandId: (j['brand_id'] ?? '').toString(),
       brandName: (j['brand_name'] ?? '').toString(),
       aliases: aliases,
+      surfaceType: (j['surface_type'] ?? 'None').toString(),
+      stockType: (j['stock_type'] ?? 'Uncertain').toString(),
+      tileType: (j['tile_type'] ?? '').toString(),
+      piecesPerBox: (j['pieces_per_box'] as num?)?.toInt() ?? 0,
+      boxWeightKg: (j['box_weight_kg'] as num?)?.toDouble() ?? 0,
+      thicknessMm: (j['thickness_mm'] as num?)?.toDouble() ?? 0,
+      colour: (j['colour'] ?? '').toString(),
+      finishLabel: (j['finish_label'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (j['finish_label'] as String).trim(),
     );
   }
 }

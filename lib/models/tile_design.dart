@@ -1,3 +1,13 @@
+/// Base restock nature CLAMPED by the listing's quality: Standard/seconds can
+/// never be 'Continuous' (not reliably reproduced). Mirrors the DB
+/// effective_stock_type() so direct (stockist-side) reads of the master's base
+/// value match what buyers see. (identity split)
+String effectiveStockType(String base, String quality) {
+  final b = base.trim().isEmpty ? 'Uncertain' : base.trim();
+  if (quality.trim().toLowerCase() == 'premium') return b;
+  return b == 'Continuous' ? 'One Time' : b;
+}
+
 class TileDesign {
   final String id;
   final String name;

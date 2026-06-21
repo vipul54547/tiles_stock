@@ -6,6 +6,8 @@ import '../../models/brand.dart';
 import '../../models/library_entry.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../utils/tile_types.dart';
+import '../../utils/finishes.dart';
 import 'dna_editor_sheet.dart';
 
 /// Stockist's own Design Library: master (physical) designs with their image +
@@ -660,6 +662,18 @@ class _EditorState extends State<_LibraryEditorScreen> {
   bool _uploading = false;
   bool _saving = false;
   bool _dirty = false;
+
+  // Identity (physical) attributes — the design IS these. Set once, here.
+  // (identity split)
+  final _piecesCtrl = TextEditingController();
+  final _weightCtrl = TextEditingController();
+  final _colourCtrl = TextEditingController();
+  final _finishCtrl = TextEditingController();
+  String _surface = 'None';
+  String _tileType = kTileTypes.first;
+  String _stockType = 'Uncertain';
+  List<String> _surfaces = const ['None'];
+  static const _stockTypes = ['Continuous', 'One Time', 'Uncertain'];
   // True once the user edits the master name by hand — until then it mirrors the
   // default brand's name (locked rule: first upload master name = brand-1 name).
   bool _masterTouched = false;
@@ -702,6 +716,13 @@ class _EditorState extends State<_LibraryEditorScreen> {
       e.aliases.forEach((bid, name) {
         _aliasCtrls[bid]?.text = name;
       });
+      _surface = e.surfaceType.isEmpty ? 'None' : e.surfaceType;
+      _tileType = kTileTypes.contains(e.tileType) ? e.tileType : kTileTypes.first;
+      _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
+      if (e.piecesPerBox > 0) _piecesCtrl.text = '${e.piecesPerBox}';
+      if (e.boxWeightKg > 0) _weightCtrl.text = _trimNum(e.boxWeightKg);
+      _colourCtrl.text = e.colour;
+      _finishCtrl.text = e.finishLabel ?? '';
     } else if (widget.sizes.isNotEmpty) {
       _size = widget.sizes.first;
     }
@@ -709,11 +730,39 @@ class _EditorState extends State<_LibraryEditorScreen> {
       if (_master.text != (widget.existing?.masterName ?? '')) _masterTouched = true;
       if (mounted) setState(() {}); // refresh the live duplicate hint
     });
+    _loadSurfaces();
+  }
+
+  static String _trimNum(double v) =>
+      v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
+
+  // Admin's live finish list (matches what stockists align PDFs to); 'None'
+  // first. Falls back to the built-in list if the fetch fails.
+  Future<void> _loadSurfaces() async {
+    try {
+      final types = await _data.getSurfaceTypes(activeOnly: true);
+      final names = types.map((t) => t.name).toList();
+      final all = ['None', ...names.where((n) => n != 'None')];
+      if (mounted && all.isNotEmpty) {
+        setState(() {
+          _surfaces = all;
+          if (!_surfaces.contains(_surface)) _surface = _surfaces.first;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _surfaces = ['None', ...kFinishes.where((f) => f != 'None')]);
+      }
+    }
   }
 
   @override
   void dispose() {
     _master.dispose();
+    _piecesCtrl.dispose();
+    _weightCtrl.dispose();
+    _colourCtrl.dispose();
+    _finishCtrl.dispose();
     for (final c in _aliasCtrls.values) {
       c.dispose();
     }
@@ -792,6 +841,10 @@ class _EditorState extends State<_LibraryEditorScreen> {
     final aliases = {
       for (final e in _aliasCtrls.entries) e.key: e.value.text.trim(),
     };
+    final pieces = int.tryParse(_piecesCtrl.text.trim()) ?? 0;
+    final weight = double.tryParse(_weightCtrl.text.trim()) ?? 0;
+    final thickness =
+        approxThicknessMm(_size, pieces, weight, _tileType) ?? 0;
     try {
       await _data.upsertLibraryMaster(
         id: widget.existing?.id,
@@ -800,6 +853,14 @@ class _EditorState extends State<_LibraryEditorScreen> {
         imageUrl: _imageUrl,
         brandId: _targetBrandId,
         aliases: aliases,
+        surfaceType: _surface,
+        stockType: _stockType,
+        tileType: _tileType,
+        piecesPerBox: pieces,
+        boxWeightKg: weight,
+        thicknessMm: thickness,
+        colour: _colourCtrl.text.trim(),
+        finishLabel: _finishCtrl.text.trim(),
       );
       if (!mounted) return;
       Navigator.pop(context, true);
@@ -951,6 +1012,8 @@ class _EditorState extends State<_LibraryEditorScreen> {
                   ],
                 ),
               ),
+            const SizedBox(height: 20),
+            _detailsSection(),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!, style: const TextStyle(color: Colors.red)),
@@ -975,6 +1038,117 @@ class _EditorState extends State<_LibraryEditorScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // ── Tile details (identity attributes) ─────────────────────────────────────
+  Widget _detailsSection() {
+    final pieces = int.tryParse(_piecesCtrl.text.trim()) ?? 0;
+    final weight = double.tryParse(_weightCtrl.text.trim()) ?? 0;
+    final thick = thicknessRangeLabel(_size, pieces, weight, _tileType);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Tile details',
+            style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: Colors.grey.shade800)),
+        const SizedBox(height: 2),
+        Text('These describe the design itself — set once. Stock screens only '
+            'ask for quality and quantity.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        const SizedBox(height: 10),
+        _dropdown('Surface / finish', _surfaces, _surface,
+            (v) => setState(() {
+                  _surface = v ?? _surface;
+                  _dirty = true;
+                })),
+        const SizedBox(height: 12),
+        _dropdown('Tile type', kTileTypes, _tileType,
+            (v) => setState(() {
+                  _tileType = v ?? _tileType;
+                  _dirty = true;
+                })),
+        const SizedBox(height: 12),
+        _dropdown('Restock type', _stockTypes, _stockType,
+            (v) => setState(() {
+                  _stockType = v ?? _stockType;
+                  _dirty = true;
+                })),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _piecesCtrl,
+              keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() => _dirty = true),
+              decoration: const InputDecoration(
+                  labelText: 'Pieces / box',
+                  isDense: true,
+                  border: OutlineInputBorder()),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _weightCtrl,
+              keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() => _dirty = true),
+              decoration: const InputDecoration(
+                  labelText: 'Box weight (kg)',
+                  isDense: true,
+                  border: OutlineInputBorder()),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 4),
+          child: Text(
+              thick == null
+                  ? 'Thickness: enter pieces & weight'
+                  : 'Approx. thickness: $thick',
+              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _colourCtrl,
+          textCapitalization: TextCapitalization.words,
+          onChanged: (_) => setState(() => _dirty = true),
+          decoration: const InputDecoration(
+              labelText: 'Colour (optional)',
+              isDense: true,
+              border: OutlineInputBorder()),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _finishCtrl,
+          textCapitalization: TextCapitalization.words,
+          onChanged: (_) => setState(() => _dirty = true),
+          decoration: const InputDecoration(
+              labelText: 'Your finish word (optional)',
+              helperText: 'e.g. Carving, Lustra, Punch Ghr — shown on the design',
+              helperMaxLines: 2,
+              isDense: true,
+              border: OutlineInputBorder()),
+        ),
+      ],
+    );
+  }
+
+  Widget _dropdown(String label, List<String> items, String value,
+      ValueChanged<String?> onChanged) {
+    final v = items.contains(value) ? value : (items.isEmpty ? null : items.first);
+    return DropdownButtonFormField<String>(
+      initialValue: v,
+      isExpanded: true,
+      decoration: InputDecoration(
+          labelText: label, isDense: true, border: const OutlineInputBorder()),
+      items: items
+          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+          .toList(),
+      onChanged: onChanged,
     );
   }
 

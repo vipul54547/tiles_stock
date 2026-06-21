@@ -9,24 +9,20 @@ import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
-import '../../utils/tile_sizes.dart';
-import '../../utils/tile_types.dart';
-import '../../utils/finishes.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/unsaved_changes.dart';
 import 'edit_design_image_screen.dart';
 
-// Add/Edit a stock design. Per [[project_stockist_library]] decision #7 this
-// screen is QUANTITY-ONLY: a design's name & size live in the stockist's Design
-// Library and are edited ONLY there. The photo can be changed here via the
-// Change-image window (it replaces the shared MASTER image). A new design is
-// created by picking a Library master (its name/size/photo are copied in);
-// everything else here is stock attributes (boxes, quality, finish, list…).
+// Add/Edit a stock design. After the identity-vs-stock split this screen is
+// STOCK-ONLY: a design's identity (name, size, photo, surface, tile type,
+// pieces, weight, thickness, colour, finish, base stock type) lives on its
+// master in the Design Library and is edited ONLY there. The only things set
+// here are the stock list, the quality and the box quantity. A new design is
+// created by picking a Library master (its identity is shown read-only).
 class AddEditStockScreen extends StatefulWidget {
   final String? designId;
   /// In add mode, the stock list to default to (its brand). Lets the dashboard
-  /// open Add already pointed at the brand the stockist was viewing, so a new
-  /// design never silently lands in another brand's list.
+  /// open Add already pointed at the brand the stockist was viewing.
   final String? initialCatalogId;
   const AddEditStockScreen({super.key, this.designId, this.initialCatalogId});
   @override
@@ -39,57 +35,45 @@ class _State extends State<AddEditStockScreen> {
   final _stockSvc = StockService();
   bool get isEdit => widget.designId != null;
 
-  final _qtyCtrl       = TextEditingController();
-  final _piecesCtrl    = TextEditingController();
-  final _weightCtrl    = TextEditingController();
-  final _thicknessCtrl = TextEditingController();
-  final _colourCtrl    = TextEditingController();
-  // Stockist's own wording for the chosen finish — learned as a surface_alias so
-  // future PDF uploads carrying this wording auto-align to the admin finish, and
-  // shown on the design as its finish_label. Picked from a dropdown of the
-  // stockist's existing words for this finish, or typed via "Add new".
-  final _finishAliasCtrl = TextEditingController();
-  Map<String, String> _surfaceAliases = {}; // raw word -> admin finish
-  String _finishWord = ''; // the currently chosen word for this design's finish
-  bool _addingFinishWord = false; // "Add new" reveals the text field
+  final _qtyCtrl = TextEditingController();
 
-  // Identity (name / size / photo) — sourced from the Library, NOT edited here.
+  // Identity (read-only here — sourced from the Library master).
   String _designName = '';
-  String _size       = kAllowedSizes.first;
+  String _size       = '';
   String _imageUrl   = '';
+  String _surface    = 'None';
+  String _tileType   = '';
+  String _colour     = '';
+  String? _finishLabel;
+  int    _pieces     = 0;
+  double _weight     = 0;
+  double _thickness  = 0;
+  // Base restock nature on the master; displayed effective value is clamped by
+  // the chosen quality.
+  String _stockTypeBase = 'Uncertain';
 
-  String _surface   = 'Matt';
-  String _tileType  = kTileTypes.first;
+  // Stock (editable here).
   String _quality   = 'Premium';
-  String _stockType = 'Uncertain';
 
-  List<String> _surfaces = kFinishes;   // replaced by admin master list on load
-  List<String> _sizes    = kAllowedSizes; // replaced by admin master list on load
-  List<StockCatalog> _catalogs = []; // the stockist's catalogs
-  String? _catalogId; // which catalog this design belongs to
-  String? _defaultBrandId; // fallback brand for legacy catalogs with no brand
-  List<Brand> _brands = []; // for labelling each list with its brand
+  List<StockCatalog> _catalogs = [];
+  String? _catalogId;
+  String? _defaultBrandId;
+  List<Brand> _brands = [];
 
-  // A catalogue's brand name (multi-brand), so the list picker is unambiguous.
   String _brandNameOf(StockCatalog c) {
     final m = _brands.where((b) => b.id == c.brandId).toList();
     return m.isEmpty ? '' : m.first.name;
   }
-  List<LibraryEntry> _masters = []; // this stockist's library, for the add picker
-  LibraryEntry? _selectedMaster;    // add mode: the chosen master
-  final _qualities  = ['Premium', 'Standard'];
-  // Quality gates stock type: Standard/seconds can never be 'Continuous' (not
-  // reliably reproduced); Premium can. Default is always 'Uncertain'.
-  List<String> get _stockTypes => _quality == 'Premium'
-      ? const ['Continuous', 'One Time', 'Uncertain']
-      : const ['One Time', 'Uncertain'];
+
+  List<LibraryEntry> _masters = [];
+  LibraryEntry? _selectedMaster;
+  final _qualities = ['Premium', 'Standard'];
 
   bool _pageLoading = false;
   bool _saving      = false;
-  bool _dirty       = false; // unsaved edits → pinned Save bar + exit guard
+  bool _dirty       = false;
 
-  // The brand this design belongs to (its list's brand, else default). Used to
-  // resolve a master's per-brand design name.
+  // The brand this design belongs to (its list's brand, else default).
   String? get _designBrandId {
     for (final c in _catalogs) {
       if (c.id == _catalogId) return c.brandId ?? _defaultBrandId;
@@ -97,18 +81,11 @@ class _State extends State<AddEditStockScreen> {
     return _defaultBrandId;
   }
 
-  // A master's design name under the current list's brand (alias), else its
-  // master name.
+  // A master's design name under the current list's brand (alias), else its name.
   String _nameForBrand(LibraryEntry m) {
     final b = _designBrandId;
     final alias = b == null ? null : m.aliases[b];
     return (alias != null && alias.trim().isNotEmpty) ? alias.trim() : m.masterName;
-  }
-
-  // Marks the form dirty on user edits. Ignored during the initial load/_fill
-  // so prefilling an existing design doesn't count as a change.
-  void _markDirty() {
-    if (!_pageLoading && !_dirty) setState(() => _dirty = true);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -120,34 +97,11 @@ class _State extends State<AddEditStockScreen> {
   }
 
   Future<void> _init() async {
-    await _loadSurfaces();
-    await _loadSizes();
     await _loadCatalogs();
-    await _loadSurfaceAliases();
     if (!isEdit) await _loadMasters();
     if (isEdit) await _loadExisting();
   }
 
-  // This stockist's own finish words (raw -> admin finish), to offer as a
-  // dropdown for "your name for this finish".
-  Future<void> _loadSurfaceAliases() async {
-    if (currentStockistUUID.isEmpty) return;
-    final aliases = await _service.getSurfaceAliases(currentStockistUUID);
-    if (mounted) setState(() => _surfaceAliases = aliases);
-  }
-
-  // The stockist's existing words mapped to the currently chosen finish.
-  List<String> get _wordsForSurface {
-    final out = _surfaceAliases.entries
-        .where((e) => e.value == _surface)
-        .map((e) => e.key)
-        .toList()
-      ..sort();
-    if (_finishWord.isNotEmpty && !out.contains(_finishWord)) out.add(_finishWord);
-    return out;
-  }
-
-  // The stockist's stock lists; default a NEW design to the first list.
   Future<void> _loadCatalogs() async {
     if (currentStockistUUID.isEmpty) return;
     final cats = await _service.getCatalogs(currentStockistUUID);
@@ -159,7 +113,6 @@ class _State extends State<AddEditStockScreen> {
       _defaultBrandId = def.isEmpty ? null : def.first.id;
       _catalogs = cats.where((c) => c.isActive).toList();
       if (!isEdit) {
-        // Prefer the list the dashboard passed (the brand being viewed).
         final initial = widget.initialCatalogId;
         if (initial != null && _catalogs.any((c) => c.id == initial)) {
           _catalogId ??= initial;
@@ -169,51 +122,15 @@ class _State extends State<AddEditStockScreen> {
     });
   }
 
-  // The Library masters available to pick from when adding a new design.
   Future<void> _loadMasters() async {
     final masters = await _service.getMyLibrary();
     if (!mounted) return;
     setState(() => _masters = masters);
   }
 
-  // Use the admin's live size list so the picker matches the master.
-  Future<void> _loadSizes() async {
-    try {
-      final names = await _service.getActiveSizeNames();
-      if (names.isNotEmpty && mounted) {
-        setState(() {
-          _sizes = names;
-          if (!_sizes.contains(_size)) _size = _sizes.first;
-        });
-      }
-    } catch (_) {
-      // keep kAllowedSizes fallback
-    }
-  }
-
-  // Use the admin's live finish list so the dropdown matches what stockists
-  // align their PDFs to. Falls back to kFinishes if the fetch fails.
-  Future<void> _loadSurfaces() async {
-    try {
-      final types = await _service.getSurfaceTypes(activeOnly: true);
-      final names = types.map((t) => t.name).toList();
-      if (names.isNotEmpty && mounted) {
-        setState(() {
-          _surfaces = names;
-          if (!_surfaces.contains(_surface)) _surface = _surfaces.first;
-        });
-      }
-    } catch (_) {
-      // keep kFinishes fallback
-    }
-  }
-
   @override
   void dispose() {
     _qtyCtrl.dispose();
-    _piecesCtrl.dispose();
-    _weightCtrl.dispose();    _thicknessCtrl.dispose();
-    _colourCtrl.dispose();    _finishAliasCtrl.dispose();
     super.dispose();
   }
 
@@ -227,37 +144,41 @@ class _State extends State<AddEditStockScreen> {
       setState(() => _pageLoading = false);
       return;
     }
-    _fill(design);
+    _fillFromDesign(design);
     setState(() => _pageLoading = false);
   }
 
-  void _fill(TileDesign d) {
-    _designName         = d.name;
-    _qtyCtrl.text       = d.boxQuantity.toString();
-    _piecesCtrl.text    = d.piecesPerBox.toString();
-    _weightCtrl.text    = d.boxWeightKg.toString();
-    _thicknessCtrl.text = d.thicknessMm.toString();
-    _colourCtrl.text    = d.colour;
-    _surface            = _surfaces.contains(d.surfaceType) ? d.surfaceType : _surfaces.first;
-    _finishWord         = d.finishLabel?.trim() ?? '';
-    _finishAliasCtrl.text = _finishWord;
-    _tileType           = kTileTypes.contains(d.tileType)   ? d.tileType   : kTileTypes.first;
-    _quality            = _qualities.contains(d.quality)    ? d.quality    : _qualities.first;
-    _stockType          = _stockTypes.contains(d.stockType) ? d.stockType  : 'Uncertain';
-    _imageUrl           = d.faceImageUrls.isEmpty ? '' : d.faceImageUrls.first;
-    // Preselect this design's catalog (only if it's still an active catalog).
+  void _fillFromDesign(TileDesign d) {
+    _designName    = d.name;
+    _size          = d.size;
+    _imageUrl      = d.faceImageUrls.isEmpty ? '' : d.faceImageUrls.first;
+    _surface       = d.surfaceType;
+    _tileType      = d.tileType;
+    _colour        = d.colour;
+    _finishLabel   = d.finishLabel;
+    _pieces        = d.piecesPerBox;
+    _weight        = d.boxWeightKg;
+    _thickness     = d.thicknessMm;
+    _stockTypeBase = d.stockType; // already effective at the row's quality
+    _qtyCtrl.text  = d.boxQuantity.toString();
+    _quality       = _qualities.contains(d.quality) ? d.quality : _qualities.first;
     if (d.catalogId != null && _catalogs.any((c) => c.id == d.catalogId)) {
       _catalogId = d.catalogId;
     }
+  }
 
-    // Match stored size to allowed list (handles old wrong formats too)
-    final key = d.size
-        .replaceAll(RegExp(r'[^0-9x]', caseSensitive: false), '')
-        .toLowerCase();
-    _size = _sizes.firstWhere(
-      (s) => s.replaceAll(RegExp(r'[^0-9x]', caseSensitive: false), '').toLowerCase() == key,
-      orElse: () => _sizes.isEmpty ? d.size : _sizes.first,
-    );
+  void _fillFromMaster(LibraryEntry m) {
+    _size          = m.size;
+    _imageUrl      = m.imageUrl;
+    _designName    = _nameForBrand(m);
+    _surface       = m.surfaceType;
+    _tileType      = m.tileType;
+    _colour        = m.colour;
+    _finishLabel   = m.finishLabel;
+    _pieces        = m.piecesPerBox;
+    _weight        = m.boxWeightKg;
+    _thickness     = m.thicknessMm;
+    _stockTypeBase = m.stockType;
   }
 
   // ── Library master picker (add mode) ───────────────────────────────────────
@@ -265,9 +186,7 @@ class _State extends State<AddEditStockScreen> {
   void _selectMaster(LibraryEntry m) {
     setState(() {
       _selectedMaster = m;
-      _size = m.size;
-      _imageUrl = m.imageUrl;
-      _designName = _nameForBrand(m);
+      _fillFromMaster(m);
       _dirty = true;
     });
   }
@@ -287,7 +206,6 @@ class _State extends State<AddEditStockScreen> {
     if (!mounted) return;
     if (picked == null) return;
     if (identical(picked, _addToLibrarySentinel)) {
-      // Send them to the Library to add a master, then reload the picker list.
       await context.push('/stockist/library');
       await _loadMasters();
       return;
@@ -296,9 +214,6 @@ class _State extends State<AddEditStockScreen> {
   }
 
   // ── Change image (edit mode) ───────────────────────────────────────────────
-  // Opens the dedicated Present-vs-New image window. The chosen photo replaces
-  // the MASTER image, so it updates everywhere this design appears (image lives
-  // on the master — [[project_stockist_library]]).
   Future<void> _openImageEditor() async {
     final newUrl = await Navigator.of(context).push<String>(
       MaterialPageRoute(
@@ -321,6 +236,8 @@ class _State extends State<AddEditStockScreen> {
       return;
     }
     try {
+      // Only the image is changed — identity params are left null so the
+      // master's other attributes are untouched.
       await _service.upsertLibraryMaster(
         id: master.id,
         size: master.size,
@@ -342,16 +259,12 @@ class _State extends State<AddEditStockScreen> {
     }
   }
 
-  // Resolve this design's library master by size + name (master name OR the
-  // current brand's alias). Requires a real name match so we never overwrite the
-  // wrong master's photo.
   LibraryEntry? _findMasterForDesign(List<LibraryEntry> lib) {
     final b = _designBrandId;
     final wantName = _designName.trim().toLowerCase();
     final wantSize = _size.trim().toLowerCase();
     for (final e in lib) {
       if (e.size.trim().toLowerCase() != wantSize) continue;
-      // A master belongs to one brand — match within this design's brand.
       if (b != null && e.brandId.isNotEmpty && e.brandId != b) continue;
       if (e.masterName.trim().toLowerCase() == wantName) return e;
       final a = b == null ? null : e.aliases[b];
@@ -375,61 +288,33 @@ class _State extends State<AddEditStockScreen> {
 
     setState(() => _saving = true);
 
-    final finishWord = _finishWord.trim();
     bool ok;
     if (isEdit) {
-      // Identity (name / size / photo) is intentionally omitted — it's edited
-      // only in the Library. box_quantity is omitted too (changed via Recount /
-      // dispatch / add-stock). Only stock attributes are saved here.
+      // Only stock attributes are saved here: quality + (re-)assigned list.
+      // Quantity is changed via Recount; identity is edited in the Library.
       ok = await _service.updateDesign(widget.designId!, {
-        'surface_type':  _surface,
-        'finish_label':  finishWord,
-        'tile_type':     _tileType,
-        'quality':       _quality,
-        'colour':        _colourCtrl.text.trim(),
-        'stock_type':    _stockType,
-        'pieces_per_box': int.tryParse(_piecesCtrl.text)   ?? 0,
-        'box_weight_kg': double.tryParse(_weightCtrl.text)    ?? 0,
-        'thickness_mm':  approxThicknessMm(_size,
-                int.tryParse(_piecesCtrl.text) ?? 0,
-                double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
+        'quality': _quality,
         if (_catalogId != null) 'catalog_id': _catalogId,
       });
     } else {
       final master = _selectedMaster!;
       final name = _nameForBrand(master); // brand may have changed since pick
       final id = await _service.addDesign(
-        stockistUUID:  currentStockistUUID,
-        name:          name,
-        size:          master.size,
-        surfaceType:   _surface,
-        finishLabel:   finishWord.isEmpty ? null : finishWord,
-        tileType:      _tileType,
-        quality:       _quality,
-        colour:        _colourCtrl.text.trim(),
-        stockType:     _stockType,
-        boxQuantity:   int.tryParse(_qtyCtrl.text)       ?? 0,
-        piecesPerBox:  int.tryParse(_piecesCtrl.text)    ?? 0,
-        boxWeightKg:   double.tryParse(_weightCtrl.text)    ?? 0,
-        thicknessMm:   approxThicknessMm(_size,
-                int.tryParse(_piecesCtrl.text) ?? 0,
-                double.tryParse(_weightCtrl.text) ?? 0, _tileType) ?? 0,
-        faceImageUrls: master.imageUrl.isNotEmpty ? [master.imageUrl] : const [],
-        catalogId:     _catalogId,
+        stockistUUID: currentStockistUUID,
+        name:         name,
+        size:         master.size,
+        quality:      _quality,
+        boxQuantity:  int.tryParse(_qtyCtrl.text) ?? 0,
+        libraryId:    master.id,
+        catalogId:    _catalogId,
       );
       ok = id != null;
-    }
-
-    // Learn the stockist's own finish wording -> chosen admin finish, so future
-    // PDF uploads carrying this wording auto-align (mirrors the upload screen).
-    if (ok && finishWord.isNotEmpty && _surface != 'None') {
-      await _service.upsertSurfaceAlias(currentStockistUUID, finishWord, _surface);
     }
 
     if (!mounted) return;
     setState(() {
       _saving = false;
-      if (ok) _dirty = false; // saved → let the pop through the exit guard
+      if (ok) _dirty = false;
     });
 
     _snack(ok ? 'Design saved.' : 'Failed to save. Please try again.',
@@ -466,7 +351,7 @@ class _State extends State<AddEditStockScreen> {
     if (!mounted) return;
     setState(() {
       _saving = false;
-      if (ok) _dirty = false; // deleted → allow the pop through the exit guard
+      if (ok) _dirty = false;
     });
 
     _snack(ok ? 'Design deleted.' : 'Delete failed.', ok ? Colors.green : Colors.red);
@@ -484,8 +369,6 @@ class _State extends State<AddEditStockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Add mode: no Save bar until a design is picked from the Library —
-      // there's nothing to save before that.
       bottomNavigationBar: (_pageLoading || (!isEdit && _selectedMaster == null))
           ? null
           : SaveBar(
@@ -495,7 +378,6 @@ class _State extends State<AddEditStockScreen> {
               dirty: _dirty,
             ),
       appBar: AppBar(
-        // maybePop (not pop) so the unsaved-changes guard can intercept.
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.maybePop(context),
@@ -526,78 +408,45 @@ class _State extends State<AddEditStockScreen> {
           : UnsavedChangesGuard(
               isDirty: _dirty,
               child: Form(
-              key: _formKey,
-              // No blanket onChanged: it fired even on a no-op dropdown
-              // re-selection (Flutter calls didChange regardless), falsely
-              // marking the form dirty. Each input marks dirty itself instead.
-              child: ListView(
-                // Bottom inset clears the system nav bar so the "Add Design"
-                // button is never hidden under it.
-                padding: EdgeInsets.fromLTRB(
-                    16, 16, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
-                children: [
-                  isEdit ? _buildIdentityReadonly() : _buildMasterPicker(),
-                  // Add mode: ask for stock details ONLY after a design is picked
-                  // from the Library → "pick design → quantity", not a blank form.
-                  // (Brand-1: new designs are created in the Library, never here.)
-                  if (isEdit || _selectedMaster != null) ...[
-                    const SizedBox(height: 12),
-                    if (_catalogs.length > 1) _buildCatalogPicker(),
-                    _buildSurfaceSection(),
-                    const SizedBox(height: 12),
-                    _buildDropdown('Tile Type', kTileTypes, _tileType, (v) {
-                      if (v == null || v == _tileType) return; // no real change
-                      setState(() { _tileType = v; _dirty = true; });
-                    }),
-                    const SizedBox(height: 12),
-                    _buildQualityPicker(),
-                    const SizedBox(height: 12),
-                    _buildStockTypePicker(),
-                    const SizedBox(height: 12),
-                    // Colour now lives in Design DNA (multi-select in the "+"
-                    // mapper), so it's no longer entered here. The controller is
-                    // kept wired to save so an existing design's colour is
-                    // preserved untouched.
-                    Row(children: [
-                      Expanded(child: _field(_piecesCtrl, 'Pieces/Box',
-                          numeric: true, required: true)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildQtyField()),
-                    ]),
-                    Row(children: [
-                      Expanded(child: _field(_weightCtrl, 'Box Weight (kg)',
-                          numeric: true, required: true)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildThicknessField()),
-                    ]),
-                  ] else
-                    Padding(
-                      padding: const EdgeInsets.only(top: 24),
-                      child: Row(
-                        children: [
-                          Icon(Icons.arrow_upward,
-                              size: 16, color: Colors.grey.shade500),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                                'Pick a design from your Library above, then enter '
-                                'its quantity. New designs are added in the Library.',
-                                style: TextStyle(
-                                    fontSize: 12.5, color: Colors.grey.shade600)),
-                          ),
-                        ],
+                key: _formKey,
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                      16, 16, 16, 16 + MediaQuery.of(context).viewPadding.bottom),
+                  children: [
+                    isEdit ? _buildIdentityCard() : _buildMasterPicker(),
+                    if (isEdit || _selectedMaster != null) ...[
+                      const SizedBox(height: 16),
+                      if (_catalogs.length > 1) _buildCatalogPicker(),
+                      _buildQualityPicker(),
+                      const SizedBox(height: 16),
+                      _buildQtyField(),
+                    ] else
+                      Padding(
+                        padding: const EdgeInsets.only(top: 24),
+                        child: Row(
+                          children: [
+                            Icon(Icons.arrow_upward,
+                                size: 16, color: Colors.grey.shade500),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                  'Pick a design from your Library above, then enter '
+                                  'its quantity. New designs are added in the Library.',
+                                  style: TextStyle(
+                                      fontSize: 12.5, color: Colors.grey.shade600)),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
     );
   }
 
-  // ── Identity: read-only (edit mode) ────────────────────────────────────────
-  // Name / size / photo live in the Library; show them, link out to edit there.
-  Widget _buildIdentityReadonly() {
+  // ── Identity card (read-only; edit mode + after picking in add mode) ───────
+  Widget _buildIdentityCard() {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -628,20 +477,22 @@ class _State extends State<AddEditStockScreen> {
               ),
             ],
           ),
+          _buildDetailChips(),
           const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _saving ? null : _openImageEditor,
-              icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-              label: const Text('Change image'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF1B4F72),
-                side: const BorderSide(color: Color(0xFF1B4F72)),
-                padding: const EdgeInsets.symmetric(vertical: 10),
+          if (isEdit)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _saving ? null : _openImageEditor,
+                icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                label: const Text('Change image'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1B4F72),
+                  side: const BorderSide(color: Color(0xFF1B4F72)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
               ),
             ),
-          ),
           const SizedBox(height: 6),
           Row(
             children: [
@@ -649,17 +500,53 @@ class _State extends State<AddEditStockScreen> {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                    'Name & size are set in your Design Library.',
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade600)),
+                    'These details are set in your Design Library.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
               ),
               TextButton(
                 onPressed: () => context.push('/stockist/library'),
-                child: const Text('Edit name/size'),
+                child: const Text('Edit in Library'),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  // Read-only chips summarising the master's identity attributes.
+  Widget _buildDetailChips() {
+    final eff = effectiveStockType(_stockTypeBase, _quality);
+    final chips = <String>[
+      if (_surface.isNotEmpty && _surface != 'None') _surface,
+      if (_tileType.isNotEmpty) _tileType,
+      if (_finishLabel != null && _finishLabel!.isNotEmpty) _finishLabel!,
+      if (_colour.isNotEmpty) _colour,
+      if (_pieces > 0) '$_pieces pcs/box',
+      if (_weight > 0) '${_weight.toStringAsFixed(_weight % 1 == 0 ? 0 : 1)} kg',
+      if (_thickness > 0) '~${_thickness.toStringAsFixed(1)} mm',
+      if (eff.isNotEmpty) eff,
+    ];
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: chips
+            .map((c) => Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Text(c,
+                      style: TextStyle(
+                          fontSize: 11.5, color: Colors.grey.shade700)),
+                ))
+            .toList(),
       ),
     );
   }
@@ -690,7 +577,7 @@ class _State extends State<AddEditStockScreen> {
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF1B4F72))),
                     SizedBox(height: 2),
-                    Text('Its name, size and photo come from the Library',
+                    Text('Its name, size, photo and details come from the Library',
                         style: TextStyle(fontSize: 11.5, color: Colors.grey)),
                   ],
                 ),
@@ -701,34 +588,16 @@ class _State extends State<AddEditStockScreen> {
         ),
       );
     }
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1B4F72).withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF1B4F72).withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        children: [
-          _identityThumb(),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(_designName.isEmpty ? '(unnamed)' : _designName,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 15)),
-                const SizedBox(height: 2),
-                Text(_size.replaceAll(' mm', ''),
-                    style:
-                        TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
-              ],
-            ),
-          ),
-          TextButton(onPressed: _openMasterPicker, child: const Text('Change')),
-        ],
-      ),
+    return Column(
+      children: [
+        _buildIdentityCard(),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+              onPressed: _openMasterPicker,
+              child: const Text('Change design')),
+        ),
+      ],
     );
   }
 
@@ -821,8 +690,6 @@ class _State extends State<AddEditStockScreen> {
               child: GestureDetector(
                 onTap: () => setState(() {
                   _quality = q;
-                  // Quality gates stock type — drop an now-invalid choice.
-                  if (!_stockTypes.contains(_stockType)) _stockType = 'Uncertain';
                   _dirty = true;
                 }),
                 child: Container(
@@ -854,235 +721,35 @@ class _State extends State<AddEditStockScreen> {
     );
   }
 
-  // ── Stock type picker ─────────────────────────────────────────────────────
-
-  Widget _buildStockTypePicker() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Design Stock Type',
-            style: TextStyle(color: Colors.grey, fontSize: 13)),
-        const SizedBox(height: 6),
-        Row(
-          children: _stockTypes.map((type) {
-            final sel = _stockType == type;
-            final icon = type == 'Continuous'
-                ? Icons.autorenew
-                : type == 'One Time'
-                    ? Icons.looks_one_outlined
-                    : type == 'Uncertain'
-                        ? Icons.help_outline
-                        : Icons.block_outlined;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => setState(() { _stockType = type; _dirty = true; }),
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
-                  decoration: BoxDecoration(
-                    color: sel ? const Color(0xFF1B4F72) : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                        color:
-                            sel ? const Color(0xFF1B4F72) : Colors.grey.shade300),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(icon,
-                          size: 16,
-                          color: sel ? Colors.white : Colors.grey.shade600),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(type,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color:
-                                    sel ? Colors.white : Colors.grey.shade700)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
-  // Surface Type = the canonical admin finish stored on the design. Beneath it,
-  // an OPTIONAL field lets the stockist type their own wording for this finish;
-  // on save it's learned as a surface_alias so future PDF uploads with that
-  // wording auto-align to the chosen finish (same mechanism as Upload Stock).
-  Widget _buildSurfaceSection() {
-    final words = _wordsForSurface;
-    // The dropdown shows the stockist's existing words for this finish; a final
-    // "+ Add new word" entry reveals a text field. "— None —" clears it.
-    final currentValue =
-        !_addingFinishWord && words.contains(_finishWord) ? _finishWord : null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildDropdown('Surface Type', _surfaces, _surface, (v) {
-              if (v == null || v == _surface) return; // no real change → not dirty
-              setState(() {
-                _surface = v;
-                _dirty = true;
-                // A word belongs to one finish — drop it if it doesn't map here.
-                if (!_wordsForSurface.contains(_finishWord)) {
-                  _finishWord = '';
-                  _finishAliasCtrl.clear();
-                }
-                _addingFinishWord = false;
-              });
-            }),
-        DropdownButtonFormField<String?>(
-          initialValue: _addingFinishWord ? '__add__' : currentValue,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            labelText: 'Your name for this finish (optional)',
-            helperText: 'Shown on the design + auto-aligns future PDF uploads.',
-            helperMaxLines: 2,
-            border: OutlineInputBorder(),
-          ),
-          items: [
-            const DropdownMenuItem<String?>(
-                value: null,
-                child: Text('— None —',
-                    style: TextStyle(color: Colors.black45))),
-            ...words.map((w) =>
-                DropdownMenuItem<String?>(value: w, child: Text(w))),
-            const DropdownMenuItem<String?>(
-                value: '__add__',
-                child: Text('＋ Add new word…',
-                    style: TextStyle(color: Color(0xFF1B4F72)))),
-          ],
-          onChanged: (v) {
-            // Re-picking the value already shown is a no-op — don't dirty the form.
-            if (v == (_addingFinishWord ? '__add__' : currentValue)) return;
-            setState(() {
-              _dirty = true;
-              if (v == '__add__') {
-                _addingFinishWord = true;
-                _finishAliasCtrl.clear();
-                _finishWord = '';
-              } else {
-                _addingFinishWord = false;
-                _finishWord = v ?? '';
-                _finishAliasCtrl.text = _finishWord;
-              }
-            });
-          },
-        ),
-        if (_addingFinishWord)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: TextFormField(
-              controller: _finishAliasCtrl,
-              autofocus: true,
-              textCapitalization: TextCapitalization.words,
-              onChanged: (v) { _finishWord = v.trim(); _markDirty(); },
-              decoration: const InputDecoration(
-                labelText: 'New finish word',
-                hintText: 'e.g. Carving, Lustra, Punch Ghr',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  Widget _buildDropdown(String label, List<String> items, String value,
-      void Function(String?) onChange) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: DropdownButtonFormField<String>(
-        initialValue: value,
-        decoration: InputDecoration(
-            labelText: label, border: const OutlineInputBorder()),
-        items: items
-            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-            .toList(),
-        onChanged: onChange,
-      ),
-    );
-  }
-
-  // Thickness is DERIVED (not entered): a 0.5 mm band computed from size,
-  // pieces/box, box weight and tile type. Read-only, and recomputes live as the
-  // weight/pieces fields (and tile-type/size, via setState) change.
-  Widget _buildThicknessField() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: ListenableBuilder(
-        listenable: Listenable.merge([_weightCtrl, _piecesCtrl]),
-        builder: (_, __) {
-          final pcs = int.tryParse(_piecesCtrl.text.trim()) ?? 0;
-          final wt = double.tryParse(_weightCtrl.text.trim()) ?? 0;
-          final range = thicknessRangeLabel(_size, pcs, wt, _tileType);
-          return InputDecorator(
-            decoration: const InputDecoration(
-              labelText: 'Thickness (approx)',
-              border: OutlineInputBorder(),
-            ),
-            child: Text(
-              range ?? 'enter weight & pieces',
-              style: TextStyle(
-                  color: range == null ? Colors.grey : Colors.black87),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _field(TextEditingController ctrl, String label,
-      {bool required = false, bool numeric = false}) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: TextFormField(
-        controller: ctrl,
-        keyboardType: numeric ? TextInputType.number : TextInputType.text,
-        onChanged: (_) => _markDirty(), // typing marks the form dirty
-        validator: required
-            ? (v) => v!.trim().isEmpty ? 'Required' : null
-            : null,
-        decoration: InputDecoration(
-            labelText: label, border: const OutlineInputBorder()),
-      ),
-    );
-  }
-
+  // ── Quantity ──────────────────────────────────────────────────────────────
   // Add mode: a normal editable Box Quantity field (the opening stock).
   // Edit mode: read-only — stock is changed through Recount so every change is
   // logged as an adjustment. Tapping opens the recount dialog.
   Widget _buildQtyField() {
     if (!isEdit) {
-      return _field(_qtyCtrl, 'Box Quantity', numeric: true, required: true);
+      return TextFormField(
+        controller: _qtyCtrl,
+        keyboardType: TextInputType.number,
+        onChanged: (_) {
+          if (!_dirty) setState(() => _dirty = true);
+        },
+        validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+        decoration: const InputDecoration(
+            labelText: 'Box Quantity', border: OutlineInputBorder()),
+      );
     }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: InkWell(
-        onTap: _saving ? null : _showRecountDialog,
-        borderRadius: BorderRadius.circular(4),
-        child: InputDecorator(
-          decoration: const InputDecoration(
-            labelText: 'Box Quantity',
-            helperText: 'Tap to recount',
-            border: OutlineInputBorder(),
-            suffixIcon: Icon(Icons.fact_check_outlined),
-          ),
-          child: Text(_qtyCtrl.text.isEmpty ? '0' : _qtyCtrl.text,
-              style: const TextStyle(fontSize: 16)),
+    return InkWell(
+      onTap: _saving ? null : _showRecountDialog,
+      borderRadius: BorderRadius.circular(4),
+      child: InputDecorator(
+        decoration: const InputDecoration(
+          labelText: 'Box Quantity',
+          helperText: 'Tap to recount',
+          border: OutlineInputBorder(),
+          suffixIcon: Icon(Icons.fact_check_outlined),
         ),
+        child: Text(_qtyCtrl.text.isEmpty ? '0' : _qtyCtrl.text,
+            style: const TextStyle(fontSize: 16)),
       ),
     );
   }
@@ -1096,8 +763,6 @@ class _State extends State<AddEditStockScreen> {
     'Other',
   ];
 
-  // Recount: the stockist enters the physically-counted boxes; we record the
-  // difference as an adjustment and update the design's stock.
   Future<void> _showRecountDialog() async {
     final current = int.tryParse(_qtyCtrl.text) ?? 0;
     final countCtrl = TextEditingController(text: '$current');
