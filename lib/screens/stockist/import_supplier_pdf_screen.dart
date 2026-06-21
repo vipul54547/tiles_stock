@@ -1191,18 +1191,26 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _thumb(r),
+                      GestureDetector(
+                          onTap: () => _showFullRow(r), child: _thumb(r)),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: TextFormField(
-                          initialValue: r.name,
-                          decoration: const InputDecoration(
-                              isDense: true,
-                              labelText: 'Design name',
-                              border: OutlineInputBorder()),
-                          onChanged: (v) => r.name = v,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            TextFormField(
+                              initialValue: r.name,
+                              decoration: const InputDecoration(
+                                  isDense: true,
+                                  labelText: 'Design name',
+                                  border: OutlineInputBorder()),
+                              onChanged: (v) => r.name = v,
+                            ),
+                            const SizedBox(height: 4),
+                            _scrapeDetail(r),
+                          ],
                         ),
                       ),
                     ],
@@ -1226,13 +1234,87 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     );
   }
 
-  // A selectable photo tile in the "same design" resolver.
+  // Compact readout of what the parser scraped for THIS row, shown on the
+  // duplicate resolver. The whole point: same-name rows usually differ by these
+  // fields (e.g. one ANT GREY in Glossy, another in Lustra), so the stockist can
+  // tell "same design twice" from "two different designs" at a glance.
+  Widget _scrapeDetail(_ImpRow r, {bool center = false}) {
+    final surface = r.surface.trim().isEmpty ? 'None' : r.surface.trim();
+    final parts = <String>[
+      'Box ${r.qty > 0 ? r.qty : '—'}',
+      surface,
+      if (r.quality.trim().isNotEmpty) r.quality.trim(),
+    ];
+    return Text(parts.join('  ·  '),
+        textAlign: center ? TextAlign.center : TextAlign.start,
+        style: TextStyle(
+            fontSize: 11, height: 1.2, color: Colors.grey.shade700));
+  }
+
+  // Full image + everything the parser scraped for this row, in a popup.
+  void _showFullRow(_ImpRow r) {
+    Widget img;
+    if (r.imageBytes != null) {
+      img = Image.memory(r.imageBytes!, fit: BoxFit.contain);
+    } else if (r.libImageUrl != null && r.libImageUrl!.isNotEmpty) {
+      img = CachedNetworkImage(imageUrl: r.libImageUrl!, fit: BoxFit.contain);
+    } else {
+      img = Container(
+        height: 160,
+        color: Colors.grey.shade200,
+        child: Icon(Icons.image_not_supported_outlined,
+            size: 40, color: Colors.grey.shade400),
+      );
+    }
+    final surface = r.surface.trim().isEmpty ? 'None' : r.surface.trim();
+    showDialog<void>(
+      context: context,
+      builder: (c) => Dialog(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8), child: img),
+              ),
+              const SizedBox(height: 12),
+              Text(r.name.trim(),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 6),
+              Text(
+                'Size: ${r.size}\n'
+                'Box quantity: ${r.qty > 0 ? r.qty : '—'}\n'
+                'Surface: $surface\n'
+                'Quality: ${r.quality.trim().isEmpty ? '—' : r.quality.trim()}',
+                style: TextStyle(fontSize: 13.5, color: Colors.grey.shade800),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                    onPressed: () => Navigator.pop(c),
+                    child: const Text('Close')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // A selectable photo tile in the "same design" resolver. Tap the photo to
+  // select it as the carrier; tap the magnifier to see the full image + details.
   Widget _dupPhotoChoice(_DupGroup g, _ImpRow r) {
     final sel = identical(g.chosen, r);
     return InkWell(
       onTap: () => setState(() => g.chosen = r),
       borderRadius: BorderRadius.circular(8),
       child: Container(
+        width: 104,
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
           border: Border.all(
@@ -1241,9 +1323,31 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(width: 64, height: 64, child: _thumbLarge(r)),
+            Stack(
+              children: [
+                SizedBox(width: 92, height: 92, child: _thumbLarge(r)),
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: GestureDetector(
+                    onTap: () => _showFullRow(r),
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(5)),
+                      child: const Icon(Icons.zoom_in,
+                          size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 4),
+            _scrapeDetail(r, center: true),
+            const SizedBox(height: 2),
             Icon(sel ? Icons.check_circle : Icons.circle_outlined,
                 size: 18,
                 color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade400),
