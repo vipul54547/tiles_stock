@@ -55,6 +55,11 @@ class _State extends State<AddEditStockScreen> {
   // Stock (editable here).
   String _quality   = 'Premium';
 
+  // Edit mode: the lists this design may be published in + which are ticked.
+  // (membership — stocklist-output)
+  List<Map<String, dynamic>> _lists = [];
+  final Set<String> _memberIds = {};
+
   List<StockCatalog> _catalogs = [];
   String? _catalogId;
   String? _defaultBrandId;
@@ -145,7 +150,17 @@ class _State extends State<AddEditStockScreen> {
       return;
     }
     _fillFromDesign(design);
-    setState(() => _pageLoading = false);
+    final lists = await _service.getDesignLists(widget.designId!);
+    if (!mounted) return;
+    setState(() {
+      _lists = lists;
+      _memberIds
+        ..clear()
+        ..addAll(lists
+            .where((l) => l['member'] == true)
+            .map((l) => l['catalog_id'].toString()));
+      _pageLoading = false;
+    });
   }
 
   void _fillFromDesign(TileDesign d) {
@@ -290,9 +305,12 @@ class _State extends State<AddEditStockScreen> {
 
     bool ok;
     if (isEdit) {
-      // Only the quality is saved here. Quantity is changed via Recount; identity
-      // is edited in the Library; list membership is managed on the list.
+      // Quality + which lists this design is published in (membership). Quantity
+      // is changed via Recount; identity is edited in the Library.
       ok = await _service.updateDesign(widget.designId!, {'quality': _quality});
+      if (ok) {
+        await _service.setDesignLists(widget.designId!, _memberIds.toList());
+      }
     } else {
       final master = _selectedMaster!;
       final id = await _service.addDesign(
@@ -416,6 +434,10 @@ class _State extends State<AddEditStockScreen> {
                       _buildQualityPicker(),
                       const SizedBox(height: 16),
                       _buildQtyField(),
+                      if (isEdit) ...[
+                        const SizedBox(height: 20),
+                        _buildListsSection(),
+                      ],
                     ] else
                       Padding(
                         padding: const EdgeInsets.only(top: 24),
@@ -656,6 +678,83 @@ class _State extends State<AddEditStockScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // ── Published-in lists (membership; edit mode) ─────────────────────────────
+  Widget _buildListsSection() {
+    final multiBrand =
+        _lists.map((l) => l['brand_id']).toSet().length > 1;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Show in lists',
+            style: TextStyle(color: Colors.grey, fontSize: 13)),
+        const SizedBox(height: 2),
+        Text(
+            _lists.isEmpty
+                ? 'No lists available for this design’s brand yet.'
+                : 'Pick which of your stock lists show this design to buyers.',
+            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+        const SizedBox(height: 6),
+        if (_lists.isNotEmpty)
+          Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              children: [
+                for (var i = 0; i < _lists.length; i++) ...[
+                  if (i > 0) const Divider(height: 1),
+                  CheckboxListTile(
+                    dense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    value: _memberIds.contains(_lists[i]['catalog_id'].toString()),
+                    title: Text(_lists[i]['name']?.toString() ?? '',
+                        style: const TextStyle(fontSize: 14)),
+                    subtitle: (multiBrand &&
+                            (_lists[i]['brand_name']?.toString() ?? '').isNotEmpty)
+                        ? Text(_lists[i]['brand_name'].toString(),
+                            style: const TextStyle(fontSize: 11))
+                        : null,
+                    onChanged: (v) {
+                      final id = _lists[i]['catalog_id'].toString();
+                      setState(() {
+                        if (v == true) {
+                          _memberIds.add(id);
+                        } else {
+                          _memberIds.remove(id);
+                        }
+                        _dirty = true;
+                      });
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+        if (_lists.isNotEmpty && _memberIds.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(
+              children: [
+                Icon(Icons.visibility_off_outlined,
+                    size: 14, color: Colors.orange.shade700),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                      'Not in any list — buyers won’t see this design until you '
+                      'tick a list.',
+                      style: TextStyle(
+                          fontSize: 11.5, color: Colors.orange.shade800)),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 

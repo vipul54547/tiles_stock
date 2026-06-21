@@ -284,6 +284,34 @@ class SupabaseDataService {
     }
   }
 
+  /// The lists a design is eligible for (every active list whose brand carries it)
+  /// each with a `member` flag. Keyed by the holding id. (stocklist-output)
+  Future<List<Map<String, dynamic>>> getDesignLists(String designId) async {
+    try {
+      final res = await supabase
+          .rpc('design_lists', params: {'p_design_id': designId});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getDesignLists failed ($designId): $e\n$st');
+      return [];
+    }
+  }
+
+  /// Sets exactly which lists a design is published in (membership). Only the
+  /// caller's own eligible lists are affected. (stocklist-output)
+  Future<bool> setDesignLists(String designId, List<String> catalogIds) async {
+    try {
+      await supabase.rpc('set_design_lists',
+          params: {'p_design_id': designId, 'p_catalog_ids': catalogIds});
+      return true;
+    } catch (e, st) {
+      debugPrint('setDesignLists failed ($designId): $e\n$st');
+      return false;
+    }
+  }
+
   Future<bool> updateDesign(String designId, Map<String, dynamic> data) async {
     try {
       await supabase.from('designs').update(data).eq('id', designId);
