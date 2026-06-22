@@ -71,6 +71,15 @@ class _MistakeGroup {
   }
 }
 
+// One scraped surface value + how many rows carry it + the admin finish it maps to,
+// used by the Map-surfaces step.
+class _SurfGroup {
+  final String label; // the raw surface as scraped from the PDF
+  String choice;      // the admin finish it maps to
+  int count = 0;
+  _SurfGroup({required this.label, required this.choice});
+}
+
 enum _QualityMode { premium, standard, both }
 
 // Step 2 is a guided wizard — one full-screen question per sub-step. Instruction
@@ -228,6 +237,12 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   bool _singleSurface = false;
   String _singleSurfaceValue = 'None';
 
+  // Admin finishes + this stockist's learned surface aliases — used by the
+  // Map-surfaces step to align the PDF's scraped surface text to a real finish
+  // (and remember the alias for next time). Falls back to the static list.
+  List<String> _finishes = kFinishes;
+  Map<String, String> _aliases = {};
+
   // Outcome counters (Phase 2).
   int _builtMasters = 0;
   int _createdDesigns = 0;
@@ -337,6 +352,11 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     try {
       final sizes = await _dataSvc.getActiveSizeNames();
       if (sizes.isNotEmpty) _sizes = sizes;
+      // Admin finishes + learned surface aliases for the Map-surfaces step.
+      final fins = await _dataSvc.getSurfaceTypes(activeOnly: true);
+      final finNames = fins.map((t) => t.name).toList();
+      if (finNames.isNotEmpty) _finishes = finNames;
+      _aliases = await _dataSvc.getSurfaceAliases(currentStockistUUID);
       // Resolve the chosen brand (default brand when none was passed). Upload fills
       // P_Stock for this brand — no stock list is targeted.
       final brands = await _dataSvc.getMyBrands();
@@ -758,7 +778,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
 
   // Wizard done → Step 3 (Quantities). Re-checks the compulsory gates defensively
   // and resolves the document-wide surface for the "not in PDF" branch.
-  void _enterStock() {
+  Future<void> _enterStock() async {
     // Identity gates only apply when the batch has a brand-new design.
     if (_hasNewDesigns) {
       if (_tileType == null) {
@@ -779,8 +799,126 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       for (final r in _rows) {
         r.surface = s;
       }
+    } else {
+      // Surface came from the PDF — align each scraped surface to a real finish
+      // (and learn the alias). Cancel keeps the stockist on the surface question.
+      final ok = await _mapSurfacesStep();
+      if (!ok) return;
     }
     setState(() => _phase = _Phase.stock);
+  }
+
+  // Map each distinct scraped surface to one of the admin finishes (like the Excel
+  // importer's "Map Finishes"), then apply it to every row + learn the alias so the
+  // next upload of this supplier needs no mapping. Returns false on cancel.
+  Future<bool> _mapSurfacesStep() async {
+    final groups = <String, _SurfGroup>{}; // normalized raw → group
+    for (final r in _kept) {
+      final raw = r.surface.trim();
+      if (raw.isEmpty || raw.toLowerCase() == 'none') continue;
+      final key = normalizeSurfaceRaw(raw);
+      final g = groups.putIfAbsent(key, () {
+        final aliased = _aliases[key];
+        final init = (aliased != null && _finishes.contains(aliased))
+            ? aliased
+            : (_finishes.contains(raw)
+                ? raw
+                : (_finishes.isNotEmpty ? _finishes.first : 'None'));
+        return _SurfGroup(label: raw, choice: init);
+      });
+      g.count++;
+    }
+    if (groups.isEmpty) return true; // nothing scraped to map
+
+    final keys = groups.keys.toList();
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Map surfaces'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                    'Match each surface from your PDF to one of your finishes. '
+                    'Applies to every design with that surface, and is remembered '
+                    'for next time.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: keys.map((k) {
+                        final g = groups[k]!;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 5,
+                                child: Text('${g.label}  (${g.count})',
+                                    style: const TextStyle(fontSize: 13)),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 5,
+                                child: DropdownButton<String>(
+                                  isExpanded: true,
+                                  value: _surfaceOptions.contains(g.choice)
+                                      ? g.choice
+                                      : _surfaceOptions.first,
+                                  items: _surfaceOptions
+                                      .map((f) => DropdownMenuItem(
+                                          value: f, child: Text(f)))
+                                      .toList(),
+                                  onChanged: (v) =>
+                                      setLocal(() => g.choice = v ?? g.choice),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Apply')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return false;
+
+    for (final r in _kept) {
+      final raw = r.surface.trim();
+      if (raw.isEmpty || raw.toLowerCase() == 'none') {
+        r.surface = 'None';
+        continue;
+      }
+      final g = groups[normalizeSurfaceRaw(raw)];
+      if (g != null) r.surface = g.choice;
+    }
+    // Learn the alias (raw wording → chosen finish) for next time.
+    for (final k in keys) {
+      final g = groups[k]!;
+      if (g.choice != 'None' && currentStockistUUID.isNotEmpty) {
+        await _dataSvc.upsertSurfaceAlias(currentStockistUUID, k, g.choice);
+      }
+    }
+    return true;
   }
 
   // Multi-size PDF: never rejected — the Library is already built (Step 1). We
@@ -2662,7 +2800,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     );
   }
 
-  List<String> get _surfaceOptions => ['None', ...kFinishes];
+  List<String> get _surfaceOptions => ['None', ..._finishes];
 
   Widget _doneBody() {
     return Padding(
