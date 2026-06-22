@@ -71,6 +71,22 @@ class _MistakeGroup {
   }
 }
 
+// Per-size packing for a MIXED-size PDF — tile type / pieces / weight differ by
+// size, so they're asked once per distinct size (instead of once for the batch,
+// which only works for a single-size file).
+class _SizePacking {
+  String? tileType;
+  final TextEditingController piecesCtrl = TextEditingController();
+  final TextEditingController weightCtrl = TextEditingController();
+  int get pieces => int.tryParse(piecesCtrl.text.trim()) ?? 0;
+  double get weight => double.tryParse(weightCtrl.text.trim()) ?? 0;
+  bool get complete => tileType != null && pieces > 0 && weight > 0;
+  void dispose() {
+    piecesCtrl.dispose();
+    weightCtrl.dispose();
+  }
+}
+
 // One scraped surface value + how many rows carry it + the admin finish it maps to,
 // used by the Map-surfaces step.
 class _SurfGroup {
@@ -87,6 +103,7 @@ enum _QualityMode { premium, standard, both }
 // the options appear on the following page only after the answer.
 enum _AskStep {
   quality,
+  sizePacking,   // per-size tile type + pieces + weight (only when the PDF is MIXED size)
   tileSame,      // "Is the whole PDF one tile type?" (Yes/No, no options shown)
   tilePick,      // pick the one tile type (only if tileSame == Yes)
   tileBlocked,   // "split the PDF" dead-end (only if tileSame == No)
@@ -189,6 +206,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // (the stockist picks it, applied to all rows); false = MIXED sizes (each row's
   // size is set on the design list). Drives whether the top "Size for all" box shows.
   bool? _oneSize;
+  // Mixed sizes chosen but the PDF carries no per-design size → show the "why this
+  // can't be imported + what to do" explanation instead of dumping to the home page.
+  bool _mixNoSize = false;
 
   // Working set.
   final List<_ImpRow> _rows = [];
@@ -233,6 +253,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // Box weight (kg, compulsory) — feeds the derived thickness.
   final TextEditingController _boxWeightCtrl = TextEditingController();
 
+  // Per-size packing for a MIXED-size PDF (size → tile type/pieces/weight).
+  final Map<String, _SizePacking> _sizePacking = {};
+
   // Surface, when NOT in the PDF: optionally one surface for the whole list.
   bool _singleSurface = false;
   String _singleSurfaceValue = 'None';
@@ -262,6 +285,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     _ticker?.cancel();
     _customPiecesCtrl.dispose();
     _boxWeightCtrl.dispose();
+    for (final p in _sizePacking.values) {
+      p.dispose();
+    }
     for (final r in _rows) {
       r.dispose();
     }
@@ -303,10 +329,33 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   double get _boxWeightKg =>
       double.tryParse(_boxWeightCtrl.text.trim()) ?? 0;
 
-  // Distinct admin sizes among the kept rows — >1 means a multi-size PDF, which
-  // can't carry one tile type / pieces / weight, so it builds the Library only.
+  // Distinct admin sizes among the kept rows — >1 means a MIXED-size PDF, which
+  // asks tile type / pieces / weight PER SIZE (so it can still add stock).
   Set<String> get _keptSizes => _kept.map((r) => r.size.trim()).toSet();
   bool get _isMultiSize => _keptSizes.length > 1;
+
+  // Mixed-size packing helpers.
+  void _ensureSizePacking() {
+    for (final s in _keptSizes) {
+      _sizePacking.putIfAbsent(s, () => _SizePacking());
+    }
+  }
+
+  bool get _sizePackingComplete =>
+      _keptSizes.every((s) => _sizePacking[s]?.complete ?? false);
+
+  // Resolved packing for a row: per-size when the PDF is mixed-size, else batch.
+  ({String tileType, int pieces, double weight}) _packingFor(_ImpRow r) {
+    if (_isMultiSize) {
+      final p = _sizePacking[r.size.trim()];
+      return (
+        tileType: p?.tileType ?? '',
+        pieces: p?.pieces ?? 0,
+        weight: p?.weight ?? 0,
+      );
+    }
+    return (tileType: _tileType ?? '', pieces: _piecesPerBox, weight: _boxWeightKg);
+  }
 
   // Start a timed processing pass: resets + starts the elapsed clock and ticks
   // the UI every second so the timer in the overlay counts up live.
@@ -481,6 +530,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     setState(() {
       _restock = false;
       _oneSize = null;
+      _mixNoSize = false;
       _phase = _Phase.sizeAsk;
     });
   }
@@ -584,12 +634,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     _proceedAfterEdit();
   }
 
-  // Edit/dedupe resolved → multi-size check → Step 2 wizard.
+  // Edit/dedupe resolved → Step 2 wizard. A mixed-size PDF is no longer punted to
+  // library-only — Step 2 asks packing per size so it can add stock too.
   void _proceedAfterEdit() {
-    if (_isMultiSize) {
-      _confirmMultiSizeLibraryOnly();
-      return;
-    }
     setState(() {
       _askStep = _AskStep.quality; // restart the wizard at the first question
       _phase = _Phase.ask;
@@ -703,6 +750,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     switch (_askStep) {
       case _AskStep.quality:
         setState(() => _phase = _Phase.edit);
+      case _AskStep.sizePacking:
+        setState(() => _askStep = _AskStep.quality);
       case _AskStep.tileSame:
         setState(() => _askStep = _AskStep.quality);
       case _AskStep.tilePick:
@@ -713,9 +762,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       case _AskStep.weight:
         setState(() => _askStep = _AskStep.pieces);
       case _AskStep.surfaceInPdf:
-        // Back over the identity block only when it was shown (new designs).
-        setState(() =>
-            _askStep = _hasNewDesigns ? _AskStep.weight : _AskStep.quality);
+        // Walk back into the identity block only when it was shown.
+        setState(() => _askStep = !_hasNewDesigns
+            ? _AskStep.quality
+            : (_isMultiSize ? _AskStep.sizePacking : _AskStep.weight));
       case _AskStep.surfaceChoice:
         setState(() => _askStep = _AskStep.surfaceInPdf);
     }
@@ -725,10 +775,23 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   void _askNext() {
     switch (_askStep) {
       case _AskStep.quality:
-        // New designs need their identity (tile type/pieces/weight); if the batch
-        // is entirely existing designs, skip straight to the surface question.
-        setState(() => _askStep =
-            _hasNewDesigns ? _AskStep.tileSame : _AskStep.surfaceInPdf);
+        // No new design → skip identity entirely. New + mixed size → ask packing
+        // per size. New + single size → the one-tile-type wizard.
+        if (!_hasNewDesigns) {
+          setState(() => _askStep = _AskStep.surfaceInPdf);
+        } else if (_isMultiSize) {
+          _ensureSizePacking();
+          setState(() => _askStep = _AskStep.sizePacking);
+        } else {
+          setState(() => _askStep = _AskStep.tileSame);
+        }
+      case _AskStep.sizePacking:
+        if (!_sizePackingComplete) {
+          _toast('Fill tile type, pieces and weight for every size.',
+              error: true);
+          return;
+        }
+        setState(() => _askStep = _AskStep.surfaceInPdf);
       case _AskStep.tilePick:
         if (_tileType == null) {
           _toast('Pick one tile type to continue.', error: true);
@@ -779,19 +842,27 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // Wizard done → Step 3 (Quantities). Re-checks the compulsory gates defensively
   // and resolves the document-wide surface for the "not in PDF" branch.
   Future<void> _enterStock() async {
-    // Identity gates only apply when the batch has a brand-new design.
+    // Identity gates only apply when the batch has a brand-new design. Mixed-size
+    // uses per-size packing; single-size uses the one tile type / pieces / weight.
     if (_hasNewDesigns) {
-      if (_tileType == null) {
-        setState(() => _askStep = _AskStep.tileSame);
-        return;
-      }
-      if (_piecesPerBox <= 0) {
-        setState(() => _askStep = _AskStep.pieces);
-        return;
-      }
-      if (_boxWeightKg <= 0) {
-        setState(() => _askStep = _AskStep.weight);
-        return;
+      if (_isMultiSize) {
+        if (!_sizePackingComplete) {
+          setState(() => _askStep = _AskStep.sizePacking);
+          return;
+        }
+      } else {
+        if (_tileType == null) {
+          setState(() => _askStep = _AskStep.tileSame);
+          return;
+        }
+        if (_piecesPerBox <= 0) {
+          setState(() => _askStep = _AskStep.pieces);
+          return;
+        }
+        if (_boxWeightKg <= 0) {
+          setState(() => _askStep = _AskStep.weight);
+          return;
+        }
       }
     }
     if (!_surfacePresent) {
@@ -921,36 +992,6 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     return true;
   }
 
-  // Multi-size PDF: never rejected — the Library is already built (Step 1). We
-  // explain why bulk stock can't run, then save the Library only and point the
-  // stockist to finish each design's detail there (compulsory fields stay
-  // compulsory in the Library editor).
-  Future<void> _confirmMultiSizeLibraryOnly() async {
-    final sizes = (_keptSizes.toList()..sort()).join(', ');
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Multiple sizes in this PDF'),
-        content: Text(
-            'This PDF has more than one size ($sizes). Tile type, pieces per box '
-            'and weight can’t be set in bulk across different sizes, so stock '
-            'can’t be added here.\n\nWe’ll add all ${_kept.length} designs to your '
-            'Library (names, sizes and photos). Then open each one in your Library '
-            'to add its tile type, quantity and packing — the required fields are '
-            'still required there.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Back')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Build Library only')),
-        ],
-      ),
-    );
-    if (go == true) _save(libraryOnly: true);
-  }
-
   // Stock → Review (read-only confirm with Save / Cancel).
   void _goToReview() => setState(() => _phase = _Phase.review);
 
@@ -993,16 +1034,13 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       }
     }
 
-    // 2) Build the batch payload. A multi-size library-only save carries no stock
-    //    or packing (qty 0, no tile type / pieces / weight) — the stockist finishes
-    //    each design in the Library. The single-size flow stamps the batch tile
-    //    type + pieces + weight and the server-irrelevant derived thickness.
-    final pieces = _piecesPerBox;
-    final weight = _boxWeightKg;
-    final tileType = _tileType ?? '';
+    // 2) Build the batch payload. Packing (tile type / pieces / weight) is resolved
+    //    PER ROW: per-size for a mixed-size PDF, else the one batch value. The
+    //    derived thickness is computed from that row's packing + size.
     final rows = kept.map((r) {
-      final thick = (!libraryOnly && pieces > 0 && weight > 0)
-          ? approxThicknessMm(r.size.trim(), pieces, weight, tileType)
+      final pk = _packingFor(r);
+      final thick = (!libraryOnly && pk.pieces > 0 && pk.weight > 0)
+          ? approxThicknessMm(r.size.trim(), pk.pieces, pk.weight, pk.tileType)
           : null;
       return <String, dynamic>{
         'name': r.name.trim(),
@@ -1013,9 +1051,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         if (r.uploadedUrl != null && r.contributeImage) 'image_url': r.uploadedUrl,
         'stock_type': 'Uncertain',
         if (!libraryOnly) ...{
-          'tile_type': tileType,
-          'pieces_per_box': pieces,
-          'box_weight_kg': weight,
+          'tile_type': pk.tileType,
+          'pieces_per_box': pk.pieces,
+          'box_weight_kg': pk.weight,
           if (thick != null) 'thickness_mm': thick,
         },
       };
@@ -1450,7 +1488,17 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                 )
               else
                 OutlinedButton.icon(
-                  onPressed: _busy ? null : () => setState(() => _oneSize = null),
+                  // From the "no size" explanation, Back returns to the question;
+                  // otherwise it returns to the one/mixed choice.
+                  onPressed: _busy
+                      ? null
+                      : () => setState(() {
+                            if (_mixNoSize) {
+                              _mixNoSize = false;
+                            } else {
+                              _oneSize = null;
+                            }
+                          }),
                   icon: const Icon(Icons.arrow_back, size: 18),
                   label: const Text('Back'),
                   style: OutlinedButton.styleFrom(
@@ -1467,6 +1515,17 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14)),
                     child: const Text('Continue'),
+                  ),
+                )
+              else if (_mixNoSize)
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                        _busy ? null : () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade700,
+                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                    child: const Text('Cancel upload'),
                   ),
                 ),
             ]),
@@ -1515,18 +1574,50 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         ),
       ]);
     }
+    // Mixed sizes, but the PDF has no per-design size → explain why + what to do.
+    if (_mixNoSize) {
+      return ListView(children: [
+        _askHeading('A mixed-size PDF needs a size for each design'),
+        _askHelp('Because this file has more than one size, we need the size '
+            'written next to each design. Without it we can’t tell which design '
+            'is which size, so the stock would be added wrong.\n\n'
+            'What to do — either:\n'
+            '•  Split the PDF into one file per size, then upload each one and '
+            'choose “One size”, or\n'
+            '•  Add the size next to each design in the PDF and upload again.'),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFF8E1),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFFFE082)),
+          ),
+          child: Row(children: [
+            Icon(Icons.lightbulb_outline,
+                size: 18, color: Colors.orange.shade800),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                  'Tip: one file per size is the quickest — each uploads cleanly '
+                  'as a single size.',
+                  style:
+                      TextStyle(fontSize: 12, color: Colors.orange.shade900)),
+            ),
+          ]),
+        ),
+      ]);
+    }
     // Mixed sizes → the size must be present per design in the PDF.
     return ListView(children: [
       _askHeading('Is each design’s size written in this PDF?'),
       _askHelp('A mixed-size file must list a size for every design. If yes, '
-          'continue and set each design’s size on the next screen. If the PDF '
-          'has no sizes, a mixed-size file can’t be imported — cancel and split '
-          'the PDF by size.'),
+          'continue and set each design’s size on the next screen.'),
       const SizedBox(height: 24),
       _yesNo(
           selected: null,
           onYes: _proceedMix,
-          onNo: () => Navigator.of(context).pop()),
+          onNo: () => setState(() => _mixNoSize = true)),
     ]);
   }
 
@@ -1718,16 +1809,14 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         _contextChip(),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Text('Step 1 · Same name + size — which photo?',
+          child: Text('Step 1 · Same name, different photos',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         ),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
           child: TypewriterText(
-              'A name + size appears with more than one photo. If it is one design, '
-              'pick the photo to keep — different surfaces/qualities still stay as '
-              'separate stock. If they are actually different designs, turn on '
-              '"different designs" and give each a unique name.',
+              'These designs share a name but came with different photos. For each '
+              'one, just tell us: is it the SAME design, or DIFFERENT designs?',
               style: TextStyle(fontSize: 12.5, color: Colors.black54)),
         ),
         Align(
@@ -1783,7 +1872,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
 
   Widget _dupGroupCard(_DupGroup g) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -1792,52 +1881,69 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             Text('“${g.rows.first.name.trim()}”  ·  ${g.rows.first.size}',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 8),
+            const SizedBox(height: 2),
+            Text('Came with ${g.rows.length} different photos.',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+            const SizedBox(height: 10),
+            // Lead with the only decision: same design, or different designs.
+            Row(children: [
+              Expanded(
+                  child: _dupModeBtn(g, false, 'Same design', Icons.copy_all)),
+              const SizedBox(width: 8),
+              Expanded(
+                  child: _dupModeBtn(
+                      g, true, 'Different designs', Icons.call_split)),
+            ]),
+            const SizedBox(height: 12),
             if (!g.keepBoth) ...[
-              // One design — pick the photo that represents it. The differing
-              // surface/quality rows still become separate stock lines on save.
+              Text('Tap the photo that shows this design:',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
                 children: [for (final r in g.rows) _dupPhotoChoice(g, r)],
               ),
-              const SizedBox(height: 8),
-              Text(
-                  'One design — pick its photo. The different surfaces/qualities '
-                  'above stay as separate stock lines (boxes are NOT merged).',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
             ] else ...[
-              // Different designs — give each a unique name so they split into
-              // separate library designs.
-              for (final r in g.rows) _dupRenameRow(r),
+              Text('Give each design its own name:',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
               const SizedBox(height: 4),
-              Text(
-                  'Different designs — each needs its own name. They become '
-                  'separate library designs.',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+              for (final r in g.rows) _dupRenameRow(r),
             ],
-            const SizedBox(height: 6),
-            // Toggle between "one design (pick photo)" and "different designs (rename)".
-            InkWell(
-              onTap: () => setState(() => g.keepBoth = !g.keepBoth),
-              child: Row(
-                children: [
-                  Icon(
-                      g.keepBoth
-                          ? Icons.check_box
-                          : Icons.check_box_outline_blank,
-                      size: 18,
-                      color: const Color(0xFF1B4F72)),
-                  const SizedBox(width: 6),
-                  const Expanded(
-                    child: Text('These are different designs — keep both',
-                        style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF1B4F72))),
-                  ),
-                ],
-              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // A segmented "Same design / Different designs" button for the dedupe card.
+  Widget _dupModeBtn(
+      _DupGroup g, bool keepBothVal, String label, IconData icon) {
+    final sel = g.keepBoth == keepBothVal;
+    return GestureDetector(
+      onTap: () => setState(() => g.keepBoth = keepBothVal),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        decoration: BoxDecoration(
+          color: sel ? const Color(0xFF1B4F72) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade300),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon,
+                size: 16,
+                color: sel ? Colors.white : const Color(0xFF1B4F72)),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: sel ? Colors.white : Colors.black87)),
             ),
           ],
         ),
@@ -1958,13 +2064,15 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // select it as the carrier; tap the magnifier to see the full image + details.
   Widget _dupPhotoChoice(_DupGroup g, _ImpRow r) {
     final sel = identical(g.chosen, r);
+    final surface = r.surface.trim().isEmpty ? 'None' : r.surface.trim();
     return InkWell(
       onTap: () => setState(() => g.chosen = r),
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        width: 104,
-        padding: const EdgeInsets.all(4),
+        width: 140,
+        padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(
+          color: sel ? const Color(0xFFE3F2FD) : Colors.white,
           border: Border.all(
               color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade300,
               width: sel ? 2.5 : 1),
@@ -1975,30 +2083,47 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           children: [
             Stack(
               children: [
-                SizedBox(width: 92, height: 92, child: _thumbLarge(r)),
+                SizedBox(width: 128, height: 128, child: _thumbLarge(r)),
                 Positioned(
                   right: 2,
                   top: 2,
                   child: GestureDetector(
                     onTap: () => _showFullRow(r),
                     child: Container(
-                      padding: const EdgeInsets.all(3),
+                      padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
                           color: Colors.black54,
                           borderRadius: BorderRadius.circular(5)),
                       child: const Icon(Icons.zoom_in,
-                          size: 16, color: Colors.white),
+                          size: 18, color: Colors.white),
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            _scrapeDetail(r, center: true),
-            const SizedBox(height: 2),
-            Icon(sel ? Icons.check_circle : Icons.circle_outlined,
-                size: 18,
-                color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade400),
+            const SizedBox(height: 5),
+            // Just the surface — the thing that differs — not box/quality clutter.
+            Text('Surface: $surface',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            const SizedBox(height: 3),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(sel ? Icons.check_circle : Icons.circle_outlined,
+                    size: 17,
+                    color:
+                        sel ? const Color(0xFF1B4F72) : Colors.grey.shade400),
+                const SizedBox(width: 4),
+                Text(sel ? 'Keep this' : 'Tap to keep',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: sel ? FontWeight.w600 : FontWeight.normal,
+                        color: sel
+                            ? const Color(0xFF1B4F72)
+                            : Colors.grey.shade600)),
+              ],
+            ),
           ],
         ),
       ),
@@ -2134,6 +2259,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     switch (s) {
       case _AskStep.quality:
         return 'Quality';
+      case _AskStep.sizePacking:
+        return 'Packing per size';
       case _AskStep.tileSame:
       case _AskStep.tilePick:
       case _AskStep.tileBlocked:
@@ -2148,10 +2275,16 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     }
   }
 
+  // Total Step-2 questions: 2 when all designs exist (quality + surface), 3 for a
+  // mixed-size new batch (quality + per-size packing + surface), else 5.
+  int get _askTotal => !_hasNewDesigns ? 2 : (_isMultiSize ? 3 : 5);
+
   int _askPhaseNum(_AskStep s) {
     switch (s) {
       case _AskStep.quality:
         return 1;
+      case _AskStep.sizePacking:
+        return 2;
       case _AskStep.tileSame:
       case _AskStep.tilePick:
       case _AskStep.tileBlocked:
@@ -2162,8 +2295,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         return 4;
       case _AskStep.surfaceInPdf:
       case _AskStep.surfaceChoice:
-        // When the identity block is skipped (no new designs) surface is step 2.
-        return _hasNewDesigns ? 5 : 2;
+        return _askTotal; // surface is always the last step
     }
   }
 
@@ -2181,7 +2313,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 15)),
               ),
-              Text('${_askPhaseNum(_askStep)} of ${_hasNewDesigns ? 5 : 2}',
+              Text('${_askPhaseNum(_askStep)} of $_askTotal',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
             ],
           ),
@@ -2222,6 +2354,76 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     );
   }
 
+  // One size's packing inputs (tile type + pieces + weight) for the mixed-size step.
+  Widget _sizePackingCard(String size) {
+    final p = _sizePacking.putIfAbsent(size, () => _SizePacking());
+    final thick = (p.pieces > 0 && p.weight > 0)
+        ? approxThicknessMm(
+            size, p.pieces, p.weight, p.tileType ?? kTileTypes.first)
+        : null;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(size,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: p.tileType,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'Tile type',
+                  border: OutlineInputBorder()),
+              items: kTileTypes
+                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                  .toList(),
+              onChanged: (v) => setState(() => p.tileType = v),
+            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: p.piecesCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Pieces / box',
+                      border: OutlineInputBorder()),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: p.weightCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Box weight (kg)',
+                      border: OutlineInputBorder()),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ]),
+            if (thick != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('≈ ${thick.toStringAsFixed(1)} mm thick',
+                    style:
+                        TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _askPage() {
     switch (_askStep) {
       case _AskStep.quality:
@@ -2238,6 +2440,17 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           _bigChoice('Both — the grade is written in the PDF',
               _qualityMode == _QualityMode.both,
               () => setState(() => _qualityMode = _QualityMode.both)),
+        ]);
+
+      case _AskStep.sizePacking:
+        final sizes = _keptSizes.toList()..sort();
+        return ListView(children: [
+          _askHeading('Packing for each size'),
+          _askHelp('This PDF has more than one size. Pieces per box and box weight '
+              'differ by size — set them per size. Applies to every design of that '
+              'size.'),
+          const SizedBox(height: 12),
+          for (final s in sizes) _sizePackingCard(s),
         ]);
 
       case _AskStep.tileSame:
@@ -2619,13 +2832,19 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                         'Library-only (no quantity)', kept.length - withQty.length),
                     const Divider(height: 18),
                     _reviewLine('Mode', _mode?.label ?? 'Add only', isText: true),
-                    _reviewLine('Tile type', _tileType ?? '—', isText: true),
-                    _reviewLine('Pieces / box',
-                        _piecesPerBox > 0 ? '$_piecesPerBox' : '—',
-                        isText: true),
-                    _reviewLine('Box weight',
-                        _boxWeightKg > 0 ? '$_boxWeightKg kg' : '—',
-                        isText: true),
+                    if (_isMultiSize)
+                      _reviewLine('Packing',
+                          'Per size (${_keptSizes.length} sizes)',
+                          isText: true)
+                    else ...[
+                      _reviewLine('Tile type', _tileType ?? '—', isText: true),
+                      _reviewLine('Pieces / box',
+                          _piecesPerBox > 0 ? '$_piecesPerBox' : '—',
+                          isText: true),
+                      _reviewLine('Box weight',
+                          _boxWeightKg > 0 ? '$_boxWeightKg kg' : '—',
+                          isText: true),
+                    ],
                     _reviewLine('Brand', _brandName, isText: true),
                     _reviewLine('Added to', 'Your stock (add to a list after)',
                         isText: true),
