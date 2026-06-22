@@ -40,7 +40,7 @@ import '../../widgets/typewriter_text.dart';
 // mode + guarded confirm) → pick → edit (names/sizes) → ask (quality / surface /
 // tile type / pieces / weight) → stock (quantities) → review (Save / Cancel) →
 // done. Cancel/back before Save writes NOTHING.
-enum _Phase { mode, pick, sizeAsk, mistakes, edit, dedupe, ask, stock, review, done }
+enum _Phase { mode, pick, reveal, sizeAsk, mistakes, edit, dedupe, ask, stock, review, done }
 
 // Step-1 (library building): rows that share a name + size but carry DIFFERENT
 // photos. By default they're ONE library design (the stockist picks which photo
@@ -256,6 +256,12 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // Per-size packing for a MIXED-size PDF (size → tile type/pieces/weight).
   final Map<String, _SizePacking> _sizePacking = {};
 
+  // Live "design reveal" after parse — designs appear one-by-one (non-interactive)
+  // with a new/already-in-library signal so the stockist absorbs what's happening.
+  int _revealCount = 0;
+  Timer? _revealTimer;
+  final ScrollController _revealScroll = ScrollController();
+
   // Surface, when NOT in the PDF: optionally one surface for the whole list.
   bool _singleSurface = false;
   String _singleSurfaceValue = 'None';
@@ -283,6 +289,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _revealTimer?.cancel();
+    _revealScroll.dispose();
     _customPiecesCtrl.dispose();
     _boxWeightCtrl.dispose();
     for (final p in _sizePacking.values) {
@@ -516,9 +524,35 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     _endProcessing();
     if (!mounted) return;
     _batchId = const Uuid().v4(); // one idempotency key per parsed PDF
-    // Pure restock? Every row already exists as a holding (name+size+quality+
-    // surface) → skip the size question, design list and Step-2; go straight to
-    // quantities. Use each row's own grade + surface (nothing to ask).
+    _startReveal();
+  }
+
+  // ── Live design reveal (non-interactive) ─────────────────────────────────────
+  // Designs appear one-by-one with a new/already-in-library signal so the stockist
+  // sees what's going into the library. No tapping; auto-paced (~2.5s total
+  // regardless of count); Continue when done.
+  void _startReveal() {
+    _revealTimer?.cancel();
+    _revealCount = 0;
+    final n = _kept.length;
+    final interval = n == 0 ? 1 : (2500 ~/ n).clamp(40, 150);
+    setState(() => _phase = _Phase.reveal);
+    _revealTimer = Timer.periodic(Duration(milliseconds: interval), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (_revealCount >= n) {
+        t.cancel();
+        return;
+      }
+      setState(() => _revealCount++);
+    });
+  }
+
+  // Reveal done → the real routing: pure-restock express, else the size question.
+  void _afterReveal() {
+    _revealTimer?.cancel();
     if (_allHoldingsMatch) {
       _restock = true;
       _qualityMode = _QualityMode.both;
@@ -526,7 +560,6 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       setState(() => _phase = _Phase.stock);
       return;
     }
-    // Otherwise ask the size question (one size vs mixed) — no silent default.
     setState(() {
       _restock = false;
       _oneSize = null;
@@ -1246,6 +1279,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         return _modeBody();
       case _Phase.pick:
         return _pickBody();
+      case _Phase.reveal:
+        return _revealBody();
       case _Phase.sizeAsk:
         return _sizeAskBody();
       case _Phase.mistakes:
@@ -1455,6 +1490,140 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   }
 
   // ── Step 1 · size question (one size vs mixed) ───────────────────────────────
+  // ── Live design reveal (non-interactive) ─────────────────────────────────────
+  Widget _revealBody() {
+    final rows = _kept;
+    final n = rows.length;
+    final shown = _revealCount > n ? n : _revealCount;
+    final done = shown >= n;
+    final newCount = rows
+        .take(shown)
+        .where((r) => !_libKeys.contains(_libKey(r.name, r.size)))
+        .length;
+    // Keep the newest revealed design in view.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_revealScroll.hasClients) {
+        _revealScroll.animateTo(_revealScroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+      }
+    });
+    return Column(
+      children: [
+        _contextChip(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+          child: Row(children: [
+            Expanded(
+              child: Text(done ? 'Designs read' : 'Reading your designs…',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15)),
+            ),
+            Text('$shown of $n',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+          ]),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+                value: n == 0 ? 1 : shown / n,
+                minHeight: 6,
+                backgroundColor: Colors.grey.shade200),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Row(children: [
+            _legendDot(const Color(0xFF2E7D32), 'New to library'),
+            const SizedBox(width: 14),
+            _legendDot(const Color(0xFF1B4F72), 'Already in library'),
+          ]),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView.separated(
+            controller: _revealScroll,
+            itemCount: shown,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) => _revealRow(rows[i]),
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: done && !_busy ? _afterReveal : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B4F72),
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: Text(done ? 'Continue  ($newCount new)' : 'Reading…'),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _legendDot(Color c, String label) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+          const SizedBox(width: 5),
+          Text(label,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+        ],
+      );
+
+  Widget _revealRow(_ImpRow r) {
+    final inLib = _libKeys.contains(_libKey(r.name, r.size));
+    final dot = inLib ? const Color(0xFF1B4F72) : const Color(0xFF2E7D32);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(children: [
+        Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        _thumb(r),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(r.name.trim().isEmpty ? '(no name)' : r.name.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style:
+                      const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+              Text(r.size,
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        _flag(inLib ? 'In library' : 'New',
+            inLib ? const Color(0xFF1B4F72) : const Color(0xFF2E7D32)),
+        if (r.imageBytes == null) ...[
+          const SizedBox(width: 6),
+          _flag('No photo', Colors.orange.shade700),
+        ],
+      ]),
+    );
+  }
+
   Widget _sizeAskBody() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
