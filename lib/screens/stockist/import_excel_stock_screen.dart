@@ -71,6 +71,12 @@ class _XlsRow {
   TileDesign? match;      // matched existing design (name+size+quality)
   String action = 'skip'; // 'update' | 'new' | 'map' | 'skip'
   bool include = true;    // unchecked = excluded from import
+  bool isNewDesign = false; // name+size not yet in the library (needs identity)
+  // New design missing compulsory identity (tile type / pieces / weight) — blocks
+  // Save until filled (in-app) or the row is excluded. Existing designs skip this.
+  bool get needsFill =>
+      isNewDesign &&
+      (tileType.trim().isEmpty || (pieces ?? 0) <= 0 || (weight ?? 0) <= 0);
   // Combined sheet (brand-name columns): the per-brand names on this row and the
   // master name, written into the Library during the same import. mapOnly = the
   // chosen brand has no name here (tile not sold under it) → map, but no stock.
@@ -107,6 +113,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // images, so this is the only photo per row; never borrows across stockists.
   Map<String, String> _libImages = {};
   List<LibraryEntry> _library = []; // this stockist's own master designs
+  final Set<String> _libKeys = {};  // name|size of existing library designs (+aliases)
+  // Quantity mode: false = Add only (top-up); true = Update & keep (set to file).
+  bool _overwrite = false;
   String? _defaultBrandId;
   bool _parsed = false;
   bool _importing = false;
@@ -175,6 +184,17 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       _library = currentStockistUUID.isEmpty
           ? <LibraryEntry>[]
           : await _dataSvc.getMyLibrary();
+      // Existing library identities (name|size, master + aliases) → tells us which
+      // rows are brand-new designs (and so must carry tile type / pieces / weight).
+      _libKeys
+        ..clear()
+        ..addAll([
+          for (final e in _library) ...[
+            '${e.masterName.trim().toLowerCase()}|${_sizeKey(e.size)}',
+            for (final a in e.aliases.values)
+              '${a.trim().toLowerCase()}|${_sizeKey(e.size)}',
+          ]
+        ]);
       _dnaAttrs = currentStockistUUID.isEmpty
           ? <DnaAttribute>[]
           : await _dataSvc.dnaCatalog();
@@ -459,14 +479,22 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (q.isEmpty) { r.error = "Unknown quality '${r.qualityRaw}'"; continue; }
       r.quality = q;
       if (r.qty < 0) { r.error = 'Missing / invalid box quantity'; continue; }
-      // Tile type is compulsory and must match a known body type (no silent
-      // default). Matched case-insensitively against the canonical list.
-      if (r.tileType.trim().isEmpty) { r.error = 'Missing tile type'; continue; }
-      final tt = kTileTypes.firstWhere(
-          (t) => t.toLowerCase() == r.tileType.trim().toLowerCase(),
-          orElse: () => '');
-      if (tt.isEmpty) { r.error = "Unknown tile type '${r.tileType}'"; continue; }
-      r.tileType = tt;
+      // Brand-new design? (name+size not yet in the library.) Only new designs must
+      // carry identity (tile type / pieces / weight); existing designs already have
+      // it. A new design left blank is NOT an error — it's a "needs fill" row that
+      // blocks Save until completed or excluded (see needsFill).
+      r.isNewDesign =
+          !_libKeys.contains('${r.name.trim().toLowerCase()}|${_sizeKey(r.size)}');
+      // Tile type: validate the wording if given; never block on blank here.
+      if (r.tileType.trim().isNotEmpty) {
+        final tt = kTileTypes.firstWhere(
+            (t) => t.toLowerCase() == r.tileType.trim().toLowerCase(),
+            orElse: () => '');
+        if (tt.isEmpty) { r.error = "Unknown tile type '${r.tileType}'"; continue; }
+        r.tileType = tt;
+      } else {
+        r.tileType = '';
+      }
 
       // Align finish via learned alias (only matters when a finish is given).
       if (r.surfaceRaw.trim().isNotEmpty) {
@@ -680,8 +708,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         row['master_name'] = r.masterName.trim();
         row['aliases'] = aliasJson;
         mapped++;
-      } else if (!hasDna) {
-        row['skip_master'] = true; // plain row, no DNA: leave the Library untouched
+      } else if (!hasDna && !r.isNewDesign) {
+        // EXISTING plain design, no DNA → leave the Library untouched. A NEW design
+        // must keep skip_master OFF so its identity (tile type/pieces/weight) is set.
+        row['skip_master'] = true;
       }
       // A plain row WITH DNA keeps skip_master off so a master exists to tag it.
       if (hasDna) row['dna'] = r.dna;
@@ -704,6 +734,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         brandId: brandId,
         pdfFilename: _filename,
         rows: rows,
+        mode: _overwrite ? 'replace_keep' : 'add',
       );
     } catch (e) {
       if (!mounted) return;
@@ -902,6 +933,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final maps = _rows.where((r) => r.valid && r.action == 'map').length;
     final skipped = _rows.where((r) => !r.valid).length;
     final willImport = _rows.where((r) => r.valid && r.include).length;
+    // New designs still missing identity → block Save until filled or excluded.
+    final incomplete =
+        _rows.where((r) => r.valid && r.include && r.needsFill).length;
     final allDone = !_importing && _done > 0 && _done >= willImport;
 
     return Column(
@@ -915,6 +949,29 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               'Adding to: ${_brandName.isEmpty ? 'your stock' : _brandName} · your stock',
               style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
         ),
+        // Quantity mode — Add only (top-up) vs Update & keep (set to file numbers).
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: Row(children: [
+            Expanded(
+                child: _modeBtn('Add only', 'top-up boxes', !_overwrite,
+                    () => setState(() => _overwrite = false))),
+            const SizedBox(width: 8),
+            Expanded(
+                child: _modeBtn('Update & keep', 'set to file numbers', _overwrite,
+                    () => setState(() => _overwrite = true))),
+          ]),
+        ),
+        if (incomplete > 0)
+          Container(
+            width: double.infinity,
+            color: const Color(0xFFFFF3E0),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+                '$incomplete new design${incomplete == 1 ? '' : 's'} need Tile Type, '
+                'Pieces and Box Weight. Fill them below (or untick the row) to import.',
+                style: TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
+          ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: const Color(0xFF1B4F72).withValues(alpha: 0.06),
@@ -940,12 +997,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     color: Color(0xFF2E7D32))
               else
                 ElevatedButton.icon(
-                  onPressed: willImport > 0 ? _startImport : null,
+                  onPressed:
+                      (willImport > 0 && incomplete == 0) ? _startImport : null,
                   icon: const Icon(Icons.upload_rounded, size: 16),
-                  label: Text('Import $willImport'),
+                  label: Text(incomplete > 0
+                      ? 'Fill $incomplete to import'
+                      : 'Import $willImport'),
                   style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1B4F72),
-                      foregroundColor: Colors.white),
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey.shade300),
                 ),
             ],
           ),
@@ -1116,6 +1177,76 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                   .toList(),
             ),
           ],
+          // New design → identity (tile type / pieces / weight) is compulsory and
+          // editable here. Existing designs skip this (identity already set).
+          if (r.valid && r.include && r.isNewDesign) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                flex: 4,
+                child: DropdownButtonFormField<String>(
+                  key: ValueKey('tt_${r.rowNum}'),
+                  initialValue:
+                      kTileTypes.contains(r.tileType) ? r.tileType : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Tile type',
+                      border: OutlineInputBorder()),
+                  items: kTileTypes
+                      .map((t) => DropdownMenuItem(
+                          value: t,
+                          child:
+                              Text(t, style: const TextStyle(fontSize: 12))))
+                      .toList(),
+                  onChanged: _importing
+                      ? null
+                      : (v) => setState(() => r.tileType = v ?? ''),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                flex: 3,
+                child: TextFormField(
+                  key: ValueKey('pc_${r.rowNum}'),
+                  initialValue: (r.pieces ?? 0) > 0 ? '${r.pieces}' : '',
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Pieces',
+                      border: OutlineInputBorder()),
+                  onChanged: (v) =>
+                      setState(() => r.pieces = int.tryParse(v.trim())),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                flex: 3,
+                child: TextFormField(
+                  key: ValueKey('wt_${r.rowNum}'),
+                  initialValue: (r.weight ?? 0) > 0 ? '${r.weight}' : '',
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Weight kg',
+                      border: OutlineInputBorder()),
+                  onChanged: (v) =>
+                      setState(() => r.weight = double.tryParse(v.trim())),
+                ),
+              ),
+            ]),
+            if (r.needsFill)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                    'New design — fill tile type, pieces and weight (or untick).',
+                    style: TextStyle(
+                        fontSize: 10.5,
+                        color: Colors.orange.shade800,
+                        fontWeight: FontWeight.w600)),
+              ),
+          ],
           if (!r.valid) ...[
             const SizedBox(height: 4),
             Text(r.error!,
@@ -1125,6 +1256,36 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     fontWeight: FontWeight.w600)),
           ],
         ],
+      ),
+    );
+  }
+
+  // Segmented Add-only / Update&keep button for the quantity mode.
+  Widget _modeBtn(String title, String sub, bool sel, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: _importing ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          color: sel ? const Color(0xFF1B4F72) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade300),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.bold,
+                    color: sel ? Colors.white : Colors.black87)),
+            Text(sub,
+                style: TextStyle(
+                    fontSize: 10,
+                    color: sel ? Colors.white70 : Colors.grey)),
+          ],
+        ),
       ),
     );
   }
