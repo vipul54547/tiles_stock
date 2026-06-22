@@ -70,6 +70,14 @@ const List<String> _standardQtyHeaders = [
   'standard stock', 'stand',
 ];
 
+// M_Stockist desktop-export ("ENTRY.xlsx") shape: a per-ROW brand name lives in
+// BoxPack (or Brand), the same design recurs per batch, and grades are wide
+// PRE/STD columns. Detected + imported via the dedicated entry path (batch-sum,
+// brand-value map). Category there carries the finish.
+const List<String> _boxPackHeaders = ['boxpack', 'box pack', 'box_pack'];
+const List<String> _brandColHeaders = ['brand', 'brand name', 'company', 'company name'];
+const List<String> _categoryHeaders = ['category', 'cat'];
+
 // One parsed spreadsheet row + its resolution against existing stock.
 class _XlsRow {
   final int rowNum;
@@ -368,6 +376,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     // Detect each fixed logical column by header synonym.
     final header =
         sheet.rows.first.map((c) => _normHeader(c?.value?.toString() ?? '')).toList();
+
+    // M_Stockist ENTRY format → dedicated batch-sum / brand-value path.
+    if (_isEntryFormat(header)) {
+      await _parseEntryFormat(sheet, header);
+      return;
+    }
+
     final colOf = <String, int>{};
     _headerSynonyms.forEach((field, syns) {
       colOf[field] = header.indexWhere((h) => syns.contains(h));
@@ -585,6 +600,303 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     setState(() {
       _rows = parsed; _parsed = true; _done = 0; _libImages = _ownLibImages();
     });
+  }
+
+  // ── M_Stockist ENTRY.xlsx (batch-sum + per-row brand value) ─────────────────
+
+  // The export shape: a per-row brand name in BoxPack (or Brand), wide PRE/STD
+  // grade columns, the same design recurring per batch. Detected by BoxPack +
+  // (PRE|STD) + a design-name column.
+  bool _isEntryFormat(List<String> header) {
+    final hasBoxpack = header.any((h) => _boxPackHeaders.contains(h));
+    final hasGrades = header.any((h) =>
+        _premiumQtyHeaders.contains(h) || _standardQtyHeaders.contains(h));
+    final hasName = header.any((h) => _headerSynonyms['name']!.contains(h));
+    return hasBoxpack && hasGrades && hasName;
+  }
+
+  // Drop a placeholder brand value ("--", "-", blank).
+  String _cleanBrandVal(String s) {
+    final t = s.trim();
+    return (t.isEmpty || t == '--' || t == '-') ? '' : t;
+  }
+
+  // Strip a trailing "(2PCS …)" note from a size cell → "800X1600 (2PCS)" = "800X1600".
+  String _cleanSize(String raw) {
+    var s = raw.trim();
+    final p = s.indexOf('(');
+    if (p >= 0) s = s.substring(0, p).trim();
+    return s;
+  }
+
+  Future<void> _parseEntryFormat(Sheet sheet, List<String> header) async {
+    int idx(List<String> syns) => header.indexWhere((h) => syns.contains(h));
+    final nameCol = idx(_headerSynonyms['name']!);
+    final sizeCol = idx(_headerSynonyms['size']!);
+    final catCol = idx(_categoryHeaders);
+    final preCol = header.indexWhere((h) => _premiumQtyHeaders.contains(h));
+    final stdCol = header.indexWhere((h) => _standardQtyHeaders.contains(h));
+    final brandCol = idx(_brandColHeaders);
+    final boxpackCol = header.indexWhere((h) => _boxPackHeaders.contains(h));
+
+    String cellAt(List<Data?> row, int i) {
+      if (i < 0 || i >= row.length) return '';
+      return row[i]?.value?.toString().trim() ?? '';
+    }
+
+    final dataRows = <List<Data?>>[];
+    for (var r = 1; r < sheet.rows.length; r++) {
+      final row = sheet.rows[r];
+      final blank = row.every((c) =>
+          c == null || c.value == null || c.value.toString().trim().isEmpty);
+      if (!blank) dataRows.add(row);
+    }
+    if (dataRows.isEmpty) {
+      setState(() => _blockError = 'No data rows found (only a header?).');
+      return;
+    }
+
+    // Brand value column = Brand when it has real values, else BoxPack. Confirmed.
+    final brandColReal = brandCol >= 0 &&
+        dataRows.any((row) => _cleanBrandVal(cellAt(row, brandCol)).isNotEmpty);
+    final autoCol = brandColReal
+        ? brandCol
+        : (boxpackCol >= 0 ? boxpackCol : brandCol);
+    final brandValCol = await _confirmBrandColumn(header, brandCol, boxpackCol, autoCol);
+    if (brandValCol == null) return; // cancelled
+
+    final brandValues = <String>{};
+    for (final row in dataRows) {
+      final b = _cleanBrandVal(cellAt(row, brandValCol));
+      if (b.isNotEmpty) brandValues.add(b);
+    }
+    final brandMap = await _mapBrandValues(brandValues.toList()..sort());
+    if (brandMap == null) return; // cancelled
+
+    // Sum PRE→Premium, STD→Standard across each design's batch rows; collect the
+    // brand faces it was packed under; Category → surface; clean the size note.
+    final agg = <String, _EntryAgg>{};
+    for (final row in dataRows) {
+      final dn = cellAt(row, nameCol).trim();
+      if (dn.isEmpty) continue;
+      final sz = _cleanSize(cellAt(row, sizeCol));
+      final key = '${dn.toLowerCase()}|${_sizeKey(sz)}';
+      final a = agg.putIfAbsent(key, () => _EntryAgg(name: dn, size: sz));
+      if (preCol >= 0) a.premium += _toInt(cellAt(row, preCol)) ?? 0;
+      if (stdCol >= 0) a.standard += _toInt(cellAt(row, stdCol)) ?? 0;
+      if (catCol >= 0 && a.surface.isEmpty) a.surface = cellAt(row, catCol).trim();
+      final bid = brandMap[_cleanBrandVal(cellAt(row, brandValCol))];
+      if (bid != null) a.brandIds.add(bid);
+    }
+
+    final parsed = <_XlsRow>[];
+    var n = 1;
+    for (final a in agg.values) {
+      final brandNames = {for (final bid in a.brandIds) bid: a.name};
+      void emit(String quality, int qty) {
+        if (qty <= 0) return;
+        final x = _XlsRow(
+          rowNum: n++,
+          name: a.name,
+          sizeRaw: a.size,
+          qualityRaw: quality,
+          surfaceRaw: a.surface,
+          tileType: '',
+          colour: '',
+          qty: qty,
+          pieces: null,
+          weight: null,
+        );
+        x.brandNames = Map.of(brandNames);
+        x.masterName = a.name;
+        parsed.add(x);
+      }
+
+      emit('Premium', a.premium);
+      emit('Standard', a.standard);
+    }
+    if (parsed.isEmpty) {
+      setState(() => _blockError = 'No Premium/Standard stock found in the file.');
+      return;
+    }
+
+    _combined = true; // each design writes master + brand aliases into the Library
+    _wideQty = true; // grades came from wide PRE/STD columns
+    _validateAndResolve(parsed);
+    final ok = await _mapFinishesStep(parsed); // Category (GLOSSY…) → admin finish
+    if (!ok) return;
+    final okDna = await _mapDnaStep(parsed);
+    if (!okDna) return;
+    _computeActions(parsed);
+    setState(() {
+      _rows = parsed; _parsed = true; _done = 0; _libImages = _ownLibImages();
+    });
+  }
+
+  // "Which column is the brand?" — auto-picks Brand (if real) else BoxPack, lets
+  // the stockist switch. Returns the chosen column index, or null on cancel.
+  Future<int?> _confirmBrandColumn(
+      List<String> header, int brandCol, int boxpackCol, int autoCol) async {
+    final candidates = <int>[
+      if (brandCol >= 0) brandCol,
+      if (boxpackCol >= 0) boxpackCol,
+    ];
+    if (candidates.isEmpty) return autoCol;
+    var chosen = autoCol >= 0 ? autoCol : candidates.first;
+    String label(int i) =>
+        (i >= 0 && i < header.length && header[i].isNotEmpty) ? header[i] : 'column ${i + 1}';
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Which column is the brand?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'Each row names the brand this design is packed under. Confirm '
+                  'the column that holds it.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+              const SizedBox(height: 12),
+              DropdownButton<int>(
+                isExpanded: true,
+                value: chosen,
+                items: candidates
+                    .map((i) => DropdownMenuItem(value: i, child: Text(label(i))))
+                    .toList(),
+                onChanged: (v) => setLocal(() => chosen = v ?? chosen),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Continue')),
+          ],
+        ),
+      ),
+    );
+    return ok == true ? chosen : null;
+  }
+
+  // Map each distinct brand value → an existing brand or a new one. Returns
+  // { brandValue : brandId }, or null on cancel. New brands are created on Apply.
+  static const _kCreateBrand = '__create__';
+  Future<Map<String, String>?> _mapBrandValues(List<String> values) async {
+    if (values.isEmpty) return {};
+    // value → chosen ('__create__' or an existing brand id). Default: match an
+    // existing brand by name, else create.
+    final choice = <String, String>{};
+    for (final v in values) {
+      final m = _brands
+          .where((b) => b.name.trim().toLowerCase() == v.trim().toLowerCase())
+          .toList();
+      choice[v] = m.isEmpty ? _kCreateBrand : m.first.id;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Match brands'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                    'Link each brand from your file to one of your brands, or '
+                    'create it. Designs are filed under the brand you pick.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: values.map((v) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 4,
+                                child: Text(v,
+                                    style: const TextStyle(fontSize: 13)),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 5,
+                                child: DropdownButton<String>(
+                                  isExpanded: true,
+                                  value: choice[v],
+                                  items: [
+                                    DropdownMenuItem(
+                                        value: _kCreateBrand,
+                                        child: Text('➕ Create “$v”',
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                color: Color(0xFF2E7D32)))),
+                                    ..._brands.map((b) => DropdownMenuItem(
+                                        value: b.id,
+                                        child: Text(b.name,
+                                            style:
+                                                const TextStyle(fontSize: 12)))),
+                                  ],
+                                  onChanged: (val) =>
+                                      setLocal(() => choice[v] = val ?? choice[v]!),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Apply')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return null;
+
+    // Resolve creates → real brand ids (server enforces the brand limit).
+    final result = <String, String>{};
+    for (final entry in choice.entries) {
+      if (entry.value == _kCreateBrand) {
+        try {
+          final id = await _dataSvc.createBrand(entry.key);
+          if (id.isEmpty) throw 'no id';
+          result[entry.key] = id;
+        } catch (e) {
+          if (mounted) {
+            _snack('Could not create brand “${entry.key}” — $e', Colors.red);
+          }
+          return null; // abort; stockist resolves and re-runs
+        }
+      } else {
+        result[entry.key] = entry.value;
+      }
+    }
+    // Refresh the brand list so newly created brands are known downstream.
+    try {
+      _brands = await _dataSvc.getMyBrands();
+    } catch (_) {/* keep what we have */}
+    return result;
   }
 
   // Canonical admin size for a raw size cell, or '' when not in the size list.
@@ -1784,4 +2096,16 @@ class _DnaMapGroup {
       {required this.attributeId,
       required this.attributeName,
       required this.label});
+}
+
+// One M_Stockist design while summing its batch rows: the brand faces it was
+// packed under + the running Premium/Standard totals + its finish.
+class _EntryAgg {
+  final String name;
+  final String size;
+  int premium = 0;
+  int standard = 0;
+  String surface = '';
+  final Set<String> brandIds = {};
+  _EntryAgg({required this.name, required this.size});
 }
