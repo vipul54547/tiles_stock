@@ -55,6 +55,19 @@ const List<String> _masterHeaders = [
   'master_design', 'masterdesign',
 ];
 
+// WIDE quantity layout: separate Premium / Standard box-count columns on one row
+// (instead of a quality column + single qty). When either is present, each row
+// expands into one holding per quality. PRE→Premium, STD→Standard (the only two
+// qualities we keep; GOLD/ECO etc. are out of scope).
+const List<String> _premiumQtyHeaders = [
+  'premium', 'pre', 'prm', 'premium qty', 'premium box', 'premium boxes',
+  'premium stock', 'prem',
+];
+const List<String> _standardQtyHeaders = [
+  'standard', 'std', 'standard qty', 'standard box', 'standard boxes',
+  'standard stock', 'stand',
+];
+
 // One parsed spreadsheet row + its resolution against existing stock.
 class _XlsRow {
   final int rowNum;
@@ -136,6 +149,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   List<Brand> _brands = []; // for labelling each brand-name column
   List<DnaAttribute> _dnaAttrs = []; // DNA catalog (for auto-detecting columns)
   List<String> _dnaDetected = []; // names of DNA columns found in this sheet
+  bool _wideQty = false; // sheet had wide Premium/Standard columns (row → 2 holdings)
   // attributeId -> set of already-resolvable words (lowercased): canonical value
   // names + this stockist's learned aliases. A detected DNA word NOT in this set
   // needs the Map-DNA step (else dna_resolve would silently drop it).
@@ -320,6 +334,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     });
     final masterCol = header.indexWhere((h) => _masterHeaders.contains(h));
 
+    // Wide Premium/Standard quantity columns (optional). When present, each row
+    // becomes one holding per quality and the quality + single-qty columns are
+    // no longer required.
+    final premCol = header.indexWhere((h) => _premiumQtyHeaders.contains(h));
+    final stdCol = header.indexWhere((h) => _standardQtyHeaders.contains(h));
+    final wideQty = premCol >= 0 || stdCol >= 0;
+
     // Combined sheet: any remaining header matching one of this stockist's brand
     // names becomes that brand's design-name column. The CHOSEN upload brand's
     // column supplies the stock design name; ALL brand columns are written into
@@ -327,6 +348,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final usedCols = {
       ...colOf.values.where((i) => i >= 0),
       if (masterCol >= 0) masterCol,
+      if (premCol >= 0) premCol,
+      if (stdCol >= 0) stdCol,
     };
     final brandCols = <int, String>{}; // colIndex -> brandId
     for (var i = 0; i < header.length; i++) {
@@ -364,9 +387,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final hasNameSource =
         chosenBrandCol != null || masterCol >= 0 || nameCol >= 0;
 
-    final missing = ['size', 'quality', 'qty', 'tiletype']
-        .where((f) => (colOf[f] ?? -1) < 0)
-        .toList();
+    // In wide mode the quality + single-qty columns are replaced by the
+    // Premium/Standard box columns, so they're no longer required.
+    final missing = [
+      'size',
+      if (!wideQty) 'quality',
+      if (!wideQty) 'qty',
+      'tiletype',
+    ].where((f) => (colOf[f] ?? -1) < 0).toList();
     if (!hasNameSource) missing.insert(0, 'name');
     if (missing.isNotEmpty) {
       final names = {
@@ -418,22 +446,20 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               ? chosenName
               : (brandNames.isNotEmpty ? brandNames.values.first : nameVal));
 
-      final xls = _XlsRow(
-        rowNum: r + 1,
-        name: stockName,
-        sizeRaw: cell(row, 'size'),
-        qualityRaw: cell(row, 'quality'),
-        surfaceRaw: cell(row, 'surface'),
-        tileType: cell(row, 'tiletype'),
-        colour: cell(row, 'colour'),
-        qty: _toInt(cell(row, 'qty')) ?? -1,
-        pieces: _toInt(cell(row, 'pieces')),
-        weight: _toDouble(cell(row, 'weight')),
-      );
-      xls.brandNames = brandNames;
-      xls.masterName = masterName;
+      // Shared fields, parsed once per sheet row (a wide-mode row may fan out
+      // into a Premium + a Standard holding that share all of these).
+      final sizeRaw = cell(row, 'size');
+      final surfaceRaw = cell(row, 'surface');
+      final tileType = cell(row, 'tiletype');
+      final colour = cell(row, 'colour');
+      final pieces = _toInt(cell(row, 'pieces'));
+      final weight = _toDouble(cell(row, 'weight'));
+      // No name under the chosen brand but other brands named → map only (can't
+      // make stock for a brand this tile isn't sold under).
+      final mapOnly = hasBrandCols && chosenName.isEmpty && brandNames.isNotEmpty;
       // Auto-detected DNA: split each cell on comma/slash so multi-value
       // attributes (e.g. Colour) carry several words; blanks dropped.
+      final dna = <String, List<String>>{};
       dnaCols.forEach((i, attr) {
         final raw = cellAt(row, i);
         if (raw.isEmpty) return;
@@ -442,12 +468,53 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             .map((w) => w.trim())
             .where((w) => w.isNotEmpty)
             .toList();
-        if (words.isNotEmpty) xls.dna[attr.id] = words;
+        if (words.isNotEmpty) dna[attr.id] = words;
       });
-      // No name under the chosen brand but other brands named → map only (can't
-      // make stock for a brand this tile isn't sold under).
-      xls.mapOnly = hasBrandCols && chosenName.isEmpty && brandNames.isNotEmpty;
-      parsed.add(xls);
+
+      // Quantity parts → one holding per quality. Map-only rows carry no stock;
+      // wide mode emits a part for each Premium/Standard column that has a value;
+      // otherwise the single quality + qty columns (unchanged behaviour).
+      final parts = <({String quality, int qty})>[];
+      if (mapOnly) {
+        parts.add((quality: '', qty: 0));
+      } else if (wideQty) {
+        if (premCol >= 0) {
+          final v = cellAt(row, premCol);
+          if (v.isNotEmpty) parts.add((quality: 'Premium', qty: _toInt(v) ?? -1));
+        }
+        if (stdCol >= 0) {
+          final v = cellAt(row, stdCol);
+          if (v.isNotEmpty) {
+            parts.add((quality: 'Standard', qty: _toInt(v) ?? -1));
+          }
+        }
+      } else {
+        parts.add(
+            (quality: cell(row, 'quality'), qty: _toInt(cell(row, 'qty')) ?? -1));
+      }
+
+      for (final part in parts) {
+        final xls = _XlsRow(
+          rowNum: r + 1,
+          name: stockName,
+          sizeRaw: sizeRaw,
+          qualityRaw: part.quality,
+          surfaceRaw: surfaceRaw,
+          tileType: tileType,
+          colour: colour,
+          qty: part.qty,
+          pieces: pieces,
+          weight: weight,
+        );
+        xls.brandNames = brandNames;
+        xls.masterName = masterName;
+        // Each sub-row gets its own DNA copy (the Map-DNA step mutates per row).
+        xls.dna = {
+          for (final e in dna.entries) e.key: List<String>.from(e.value)
+        };
+        xls.mapOnly = mapOnly;
+        parsed.add(xls);
+      }
     }
 
     if (parsed.isEmpty) {
@@ -455,6 +522,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       return;
     }
     _combined = hasBrandCols;
+    _wideQty = wideQty;
 
     _validateAndResolve(parsed);
 
@@ -941,6 +1009,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   void _reset() => setState(() {
         _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = '';
         _libImages = {}; _combined = false; _batchId = ''; _dnaDetected = [];
+        _wideQty = false;
       });
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -1198,6 +1267,26 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     '— values will be tagged automatically.',
                     style: const TextStyle(
                         fontSize: 11, color: Color(0xFF6A1B9A)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (_wideQty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: const Color(0xFF1B4F72).withValues(alpha: 0.06),
+            child: const Row(
+              children: [
+                Icon(Icons.view_column_outlined,
+                    size: 15, color: Color(0xFF1B4F72)),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Premium / Standard columns detected — each row becomes a '
+                    'separate Premium and Standard stock line.',
+                    style: TextStyle(fontSize: 11, color: Color(0xFF1B4F72)),
                   ),
                 ),
               ],
