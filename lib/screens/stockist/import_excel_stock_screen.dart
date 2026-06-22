@@ -18,13 +18,12 @@ import '../../models/choice_state.dart';
 // Bulk stock import from an Excel (.xlsx) list — for stockists who keep a plain
 // spreadsheet (design, size, quality, boxes) instead of a PDF with images.
 //
-// Core idea ("image once, quantity many times"): a design is identified by
-// Name + Size + Quality. A matched row just UPDATES the box quantity and reuses
-// the design's existing photo — no image/PDF parsing. Unmatched rows are added
-// as new designs (no photo, added later). Surface/Finish is OPTIONAL: aligned to
-// the admin finishes after upload (Map Finishes), blank keeps the existing
-// finish, and a finish that differs from the existing one is flagged as a
-// conflict for the stockist to resolve.
+// Core idea ("image once, quantity many times"): a stock line (P_Stock holding) is
+// keyed by Name + Size + Quality + Surface. A row that matches all four UPDATES the
+// box quantity and reuses the design's existing photo — no image/PDF parsing. Any
+// row that doesn't match is added as a NEW holding (a different surface is simply a
+// different stock line, never a "conflict"). Surface is aligned to the admin
+// finishes first via Map Finishes (which also learns the alias).
 class ImportExcelStockScreen extends StatefulWidget {
   /// Brand chosen at the Upload tap; upload fills P_Stock for this brand (lists are
   /// curated separately). Null falls back to the default brand.
@@ -70,8 +69,7 @@ class _XlsRow {
   String surface = 'None'; // resolved admin finish (after Map Finishes)
   String rawKey = '';     // normalised raw surface for alias learning
   TileDesign? match;      // matched existing design (name+size+quality)
-  String action = 'skip'; // 'update' | 'new' | 'conflict' | 'map' | 'skip'
-  bool conflictAsNew = false; // conflict: true=add as new design, false=correct finish
+  String action = 'skip'; // 'update' | 'new' | 'map' | 'skip'
   bool include = true;    // unchecked = excluded from import
   // Combined sheet (brand-name columns): the per-brand names on this row and the
   // master name, written into the Library during the same import. mapOnly = the
@@ -485,31 +483,29 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     }
   }
 
-  // Match by Name + Size + Quality; decide update / new / conflict.
+  String _surfKey(String s) =>
+      s.trim().isEmpty ? 'none' : s.trim().toLowerCase();
+
+  // A holding is keyed by Name + Size + Quality + Surface (surface is a stock-line
+  // dimension on P_Stock). Match all four → update; otherwise → new. A different
+  // surface is simply a different stock line, never a "conflict".
   void _computeActions(List<_XlsRow> rows) {
     for (final r in rows) {
       if (!r.valid) { r.action = 'skip'; continue; }
       if (r.mapOnly) { r.action = 'map'; continue; }
       final needle = r.name.trim().toLowerCase();
+      final surf = _surfKey(r.surface);
       final matches = _existing.where((d) =>
           d.name.trim().toLowerCase() == needle &&
           _sizeKey(d.size) == _sizeKey(r.size) &&
-          d.quality == r.quality).toList();
-      final hasFinish = r.surfaceRaw.trim().isNotEmpty;
+          d.quality == r.quality &&
+          _surfKey(d.surfaceType) == surf).toList();
       if (matches.isEmpty) {
         r.match = null;
         r.action = 'new';
-        if (!hasFinish) r.surface = _finishes.contains('None') ? 'None' : r.surface;
       } else {
         r.match = matches.first;
-        if (!hasFinish) {
-          r.surface = r.match!.surfaceType; // blank = keep existing
-          r.action = 'update';
-        } else if (r.surface == r.match!.surfaceType) {
-          r.action = 'update';
-        } else {
-          r.action = 'conflict'; // finish differs from existing
-        }
+        r.action = 'update';
       }
     }
   }
@@ -629,7 +625,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     // design — preserving the old behaviour exactly. Map-only rows carry qty 0
     // (library mapping, no stock). force_new replays the stockist's "add as new"
     // choice on a finish conflict; update_surface replays a finish correction.
-    int mapped = 0, news = 0, fixes = 0, imagesFromLibrary = 0;
+    int mapped = 0, news = 0, imagesFromLibrary = 0;
     final rows = <Map<String, dynamic>>[];
     final learned = <String, String>{};
 
@@ -656,13 +652,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       }
 
       final libUrl = libImages[designImageKey(r.name, r.size)];
-      final addAsNew =
-          r.action == 'new' || (r.action == 'conflict' && r.conflictAsNew);
-      final correctFinish = r.action == 'conflict' &&
-          !r.conflictAsNew &&
-          r.match != null &&
-          r.surface != r.match!.surfaceType;
 
+      // The holding is resolved server-side by (library, quality, surface), so the
+      // client just sends the row's fields — no force_new / conflict flags needed.
       final row = <String, dynamic>{
         'name': r.name,
         'size': r.size,
@@ -680,11 +672,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     ? r.tileType
                     : kTileTypes.first) ??
             0,
-        'force_new': addAsNew,
-        'update_surface': correctFinish,
         if (libUrl != null) 'image_url': libUrl,
         if (r.surfaceRaw.trim().isNotEmpty) 'finish_label': r.surfaceRaw.trim(),
-        if (r.match != null && !addAsNew) 'design_id': r.match!.id,
       };
       final hasDna = r.dna.isNotEmpty;
       if (isCombined) {
@@ -699,8 +688,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       rows.add(row);
 
       if (libUrl != null) imagesFromLibrary++;
-      if (addAsNew) news++;
-      if (correctFinish) fixes++;
+      if (r.action == 'new') news++;
       // Remember the finish wording → chosen finish for next time.
       if (r.rawKey.isNotEmpty && r.surface != 'None') learned[r.rawKey] = r.surface;
     }
@@ -735,7 +723,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final created = (res['created'] as num?)?.toInt() ?? news;
     final updated = (res['updated'] as num?)?.toInt() ?? 0;
     final dnaTagged = (res['dna_tagged'] as num?)?.toInt() ?? 0;
-    final fixNote = fixes > 0 ? ' · $fixes finish corrected' : '';
     final libNote = imagesFromLibrary > 0
         ? ' · $imagesFromLibrary photos from library'
         : '';
@@ -743,7 +730,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final dnaNote = dnaTagged > 0 ? ' · $dnaTagged DNA tagged' : '';
     final brandNote = _brandName.isEmpty ? '' : ' → $_brandName';
     _snack(
-        'Done — $updated updated, $created new$mapNote$dnaNote$fixNote$libNote$brandNote. '
+        'Done — $updated updated, $created new$mapNote$dnaNote$libNote$brandNote. '
         'Add designs to a stock list to show buyers.',
         Colors.green);
     if (updated + created + mapped > 0) Navigator.of(context).pop();
@@ -912,7 +899,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   Widget _buildReview() {
     final updates = _rows.where((r) => r.valid && r.action == 'update').length;
     final news = _rows.where((r) => r.valid && r.action == 'new').length;
-    final conflicts = _rows.where((r) => r.valid && r.action == 'conflict').length;
     final maps = _rows.where((r) => r.valid && r.action == 'map').length;
     final skipped = _rows.where((r) => !r.valid).length;
     final willImport = _rows.where((r) => r.valid && r.include).length;
@@ -937,10 +923,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               _chip('$updates', 'Update', const Color(0xFF1B4F72)),
               const SizedBox(width: 10),
               _chip('$news', 'New', const Color(0xFF2E7D32)),
-              if (conflicts > 0) ...[
-                const SizedBox(width: 10),
-                _chip('$conflicts', 'Conflict', Colors.orange.shade800),
-              ],
               if (maps > 0) ...[
                 const SizedBox(width: 10),
                 _chip('$maps', 'Map only', const Color(0xFF6A1B9A)),
@@ -1044,9 +1026,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     if (!r.valid) {
       border = Colors.red.shade200; bg = const Color(0xFFFFEBEE);
       tag = 'SKIP'; tagColor = Colors.red;
-    } else if (r.action == 'conflict') {
-      border = Colors.orange.shade300; bg = const Color(0xFFFFF3E0);
-      tag = 'CONFLICT'; tagColor = Colors.orange.shade800;
     } else if (r.action == 'new') {
       border = Colors.green.shade200; bg = const Color(0xFFE8F5E9);
       tag = 'NEW'; tagColor = const Color(0xFF2E7D32);
@@ -1145,57 +1124,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     color: Colors.red.shade700,
                     fontWeight: FontWeight.w600)),
           ],
-          if (r.valid && r.action == 'conflict') ...[
-            const SizedBox(height: 6),
-            Text(
-                'Exists as "${r.match!.surfaceType}", your file says "${r.surface}".',
-                style: TextStyle(fontSize: 11, color: Colors.orange.shade900)),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: _conflictChoice(r, false,
-                      'Correct finish', '→ ${r.surface}'),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _conflictChoice(r, true,
-                      'Different design', 'add as new'),
-                ),
-              ],
-            ),
-          ],
         ],
-      ),
-    );
-  }
-
-  Widget _conflictChoice(_XlsRow r, bool asNew, String title, String sub) {
-    final selected = r.conflictAsNew == asNew;
-    return GestureDetector(
-      onTap: _importing ? null : () => setState(() => r.conflictAsNew = asNew),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF1B4F72) : Colors.white,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-              color: selected ? const Color(0xFF1B4F72) : Colors.grey.shade300),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: selected ? Colors.white : Colors.black87)),
-            Text(sub,
-                style: TextStyle(
-                    fontSize: 10,
-                    color: selected ? Colors.white70 : Colors.grey)),
-          ],
-        ),
       ),
     );
   }
