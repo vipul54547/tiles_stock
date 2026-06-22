@@ -8,7 +8,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/pdf_import_service.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
-import '../../models/stock_catalog.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_sizes.dart';
 import '../../utils/tile_types.dart';
@@ -41,18 +40,33 @@ import '../../widgets/typewriter_text.dart';
 // mode + guarded confirm) → pick → edit (names/sizes) → ask (quality / surface /
 // tile type / pieces / weight) → stock (quantities) → review (Save / Cancel) →
 // done. Cancel/back before Save writes NOTHING.
-enum _Phase { mode, pick, edit, dedupe, ask, stock, review, done }
+enum _Phase { mode, pick, sizeAsk, mistakes, edit, dedupe, ask, stock, review, done }
 
-// One set of rows in the parsed PDF that share a name + size. By our identity rule
-// (name + size IS the library design) these ARE the same one design, so the only
-// question is which photo to keep. If the photos are genuinely different that's a
-// MISTAKE IN THE PDF (the same name + size given to two different designs) — not
-// ours to resolve; the stockist cancels and fixes the PDF.
+// Step-1 (library building): rows that share a name + size but carry DIFFERENT
+// photos. By default they're ONE library design (the stockist picks which photo
+// represents it; the differing surface/quality rows stay as separate stock lines).
+// If they're genuinely different designs the stockist flips "keep both" and renames
+// each so they become separate library designs.
 class _DupGroup {
   final String key;
   final List<_ImpRow> rows;
-  _ImpRow? chosen;         // the photo/row to keep; the rest fold in
+  _ImpRow? chosen;       // the row whose photo becomes the library image
+  bool keepBoth = false; // true = different designs → rename each to split them
   _DupGroup(this.key, this.rows) {
+    chosen = rows.firstWhere((r) => r.imageBytes != null, orElse: () => rows.first);
+  }
+}
+
+// Step-0: rows identical on ALL of name + size + quality + surface — the SAME stock
+// line listed twice = a mistake in the PDF. Resolved by merging (sum the boxes) or
+// keeping just one. Distinct from the Step-1 library dedupe (same name + size but a
+// different IMAGE / a genuine design question).
+class _MistakeGroup {
+  final String key;
+  final List<_ImpRow> rows;
+  _ImpRow? chosen;   // the row to keep (its photo + values)
+  bool merge = true; // true = sum the boxes into the kept row; false = keep one
+  _MistakeGroup(this.key, this.rows) {
     chosen = rows.firstWhere((r) => r.imageBytes != null, orElse: () => rows.first);
   }
 }
@@ -89,6 +103,10 @@ class _ImpRow {
   final Uint8List? imageBytes; // photo from the PDF (null = none)
   bool include = true; // include this design when building the Library
 
+  // Step-1: when several rows share a name+size (= one library design) only the
+  // chosen row's photo goes to the master; the others skip contributing an image.
+  bool contributeImage = true;
+
   // Set during Phase 1 commit, reused in Phase 2 so we never re-upload.
   String? masterId;
   String? uploadedUrl; // Cloudinary URL of the PDF photo, once uploaded
@@ -119,10 +137,11 @@ class _ImpRow {
 }
 
 class ImportSupplierPdfScreen extends StatefulWidget {
-  /// The stock list chosen at the Upload tap. Fixes the brand (a list belongs to
-  /// exactly one brand). Null falls back to the stockist's first list.
-  final String? initialCatalogId;
-  const ImportSupplierPdfScreen({super.key, this.initialCatalogId});
+  /// The brand chosen at the Upload tap. Upload fills P_Stock for this brand; it
+  /// no longer targets a stock list (lists are curated separately). Null falls
+  /// back to the stockist's default brand.
+  final String? initialBrandId;
+  const ImportSupplierPdfScreen({super.key, this.initialBrandId});
 
   @override
   State<ImportSupplierPdfScreen> createState() => _ImportSupplierPdfScreenState();
@@ -150,14 +169,17 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   double? _progress; // 0..1 determinate; null = indeterminate
   String _progressDetail = '';
 
-  // Brand / list context (the brand is fixed by the chosen list).
-  String? _catalogId;
+  // Brand context. Upload fills P_Stock for this brand; no stock list is targeted.
   String? _brandId;
-  String _catalogName = '';
   String _brandName = '';
 
-  // Master sizes the admin allows (for the per-row size dropdown).
+  // Master sizes the admin allows (for the size dropdowns).
   List<String> _sizes = kAllowedSizes;
+
+  // Step-1 size question. null = not answered; true = the whole PDF is ONE size
+  // (the stockist picks it, applied to all rows); false = MIXED sizes (each row's
+  // size is set on the design list). Drives whether the top "Size for all" box shows.
+  bool? _oneSize;
 
   // Working set.
   final List<_ImpRow> _rows = [];
@@ -175,6 +197,14 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
 
   // Same-name duplicate groups in the parsed PDF, resolved on the dedupe page.
   final List<_DupGroup> _dupGroups = [];
+
+  // Step-0 exact-duplicate (name+size+quality+surface) groups = PDF mistakes.
+  final List<_MistakeGroup> _mistakeGroups = [];
+
+  // name|size keys of designs ALREADY in this stockist's library (master + brand
+  // aliases). Step-2 skips the set-once identity questions when the batch adds no
+  // brand-new design (existing designs already carry tile type / pieces / weight).
+  final Set<String> _libKeys = {};
 
   // Tile Type (compulsory, single per PDF). _tileTypeSel holds the single chosen
   // type (a set so the existing _tileType getter keeps working).
@@ -202,7 +232,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   @override
   void initState() {
     super.initState();
-    _catalogId = widget.initialCatalogId;
+    _brandId = widget.initialBrandId;
     _loadConfig();
   }
 
@@ -218,6 +248,15 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   }
 
   // ── Step-2 resolved values ───────────────────────────────────────────────────
+  String _libKey(String name, String size) =>
+      '${name.trim().toLowerCase()}|${size.trim().toLowerCase()}';
+
+  // True when at least one kept design is NOT already in the library (so its
+  // set-once identity attrs — tile type / pieces / weight — must be asked). When
+  // every design already exists, Step-2 skips straight to the surface question.
+  bool get _hasNewDesigns =>
+      _kept.any((r) => !_libKeys.contains(_libKey(r.name, r.size)));
+
   String? get _tileType =>
       _tileTypeSel.length == 1 ? _tileTypeSel.first : null;
 
@@ -275,33 +314,30 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     if (currentStockistUUID.isEmpty) return;
     setState(() => _busy = true);
     try {
-      final cats = await _dataSvc.getCatalogs(currentStockistUUID);
       final sizes = await _dataSvc.getActiveSizeNames();
       if (sizes.isNotEmpty) _sizes = sizes;
-      // Resolve the chosen list → its brand.
-      StockCatalog? cat;
-      for (final c in cats) {
-        if (c.id == _catalogId) {
-          cat = c;
-          break;
-        }
-      }
-      cat ??= cats.isNotEmpty ? cats.first : null;
-      if (cat != null) {
-        _catalogId = cat.id;
-        _brandId = cat.brandId;
-        _catalogName = cat.name;
-      }
-      if (_brandId != null) {
-        final brands = await _dataSvc.getMyBrands();
-        for (final b in brands) {
-          if (b.id == _brandId) {
-            _brandName = b.name;
-            break;
-          }
-        }
+      // Resolve the chosen brand (default brand when none was passed). Upload fills
+      // P_Stock for this brand — no stock list is targeted.
+      final brands = await _dataSvc.getMyBrands();
+      if (brands.isNotEmpty) {
+        final brand = brands.firstWhere((b) => b.id == _brandId,
+            orElse: () => brands.firstWhere((b) => b.isDefault,
+                orElse: () => brands.first));
+        _brandId = brand.id;
+        _brandName = brand.name;
       }
       if (_sizes.isNotEmpty) _docSize = _sizes.first;
+      // Existing library identities (name+size, master + aliases) — drives the
+      // Step-2 "ask only when something is new" shortcut.
+      final lib = await _dataSvc.getMyLibrary();
+      _libKeys
+        ..clear()
+        ..addAll([
+          for (final e in lib) ...[
+            _libKey(e.masterName, e.size),
+            for (final a in e.aliases.values) _libKey(a, e.size),
+          ]
+        ]);
     } catch (_) {
       // Non-fatal — the picker still works with fallbacks.
     } finally {
@@ -366,7 +402,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       ..clear()
       ..addAll(parsed.designs.map((d) => _ImpRow(
             name: d.name.trim(),
-            size: _docSize,
+            // Per-design size from the PDF when the layout carries one (mixed-size
+            // files); else the document size. The stockist can still override it.
+            size: _normaliseSize(d.sizeRaw ?? '') ?? _docSize,
             imageBytes: d.imageBytes,
             qty: d.quantity,
             surface: d.surface,
@@ -379,7 +417,73 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     _endProcessing();
     if (!mounted) return;
     _batchId = const Uuid().v4(); // one idempotency key per parsed PDF
-    setState(() => _phase = _Phase.edit);
+    // First ask the size question (one size vs mixed) — no silent default.
+    setState(() {
+      _oneSize = null;
+      _phase = _Phase.sizeAsk;
+    });
+  }
+
+  // ── Step 1 · size question ───────────────────────────────────────────────────
+  // A size from the uploaded file's NAME (e.g. "800X1600 PRE.pdf" → 800x1600 mm),
+  // mapped to an admin size, used to cross-check the stockist's one-size pick.
+  String? _filenameSize() {
+    final m = RegExp(r'(\d{2,4})\s*[xX]\s*(\d{2,4})').firstMatch(_filename);
+    if (m == null) return null;
+    return _normaliseSize('${m.group(1)}x${m.group(2)}');
+  }
+
+  // "One size" confirmed: apply it to every row, cross-check the filename, then on
+  // to Step-0. A filename size that disagrees with the pick raises a proceed/cancel.
+  Future<void> _confirmOneSize() async {
+    final picked = _docSize;
+    final fileSize = _filenameSize();
+    if (fileSize != null && fileSize != picked) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Size mismatch'),
+          content: Text(
+              'You picked “$picked”, but the PDF file name looks like “$fileSize”. '
+              'They are different.\n\nUse your pick “$picked” and continue, or '
+              'cancel to choose again?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Continue')),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+    for (final r in _rows) {
+      r.size = picked;
+    }
+    _afterSize();
+  }
+
+  // "Mixed sizes" + the size is in the PDF: go on; the stockist sets each row's
+  // size on the design list (the parser carries only one document size).
+  void _proceedMix() {
+    _afterSize();
+  }
+
+  // Size resolved → Step-0 exact-duplicate scan, then the design list (Step 1).
+  void _afterSize() {
+    final mistakes = _findMistakes();
+    setState(() {
+      if (mistakes.isNotEmpty) {
+        _mistakeGroups
+          ..clear()
+          ..addAll(mistakes);
+        _phase = _Phase.mistakes;
+      } else {
+        _phase = _Phase.edit;
+      }
+    });
   }
 
   /// Map the parser's "600x1200 mm" style to one of the admin's master sizes if
@@ -438,29 +542,96 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       final key = '${r.name.trim().toLowerCase()}|${r.size.trim().toLowerCase()}';
       (byKey[key] ??= []).add(r);
     }
+    // Only flag a name+size group when 2+ rows carry a PHOTO — that's the genuine
+    // "which image is this design?" question. Rows that merely differ by
+    // surface/quality (≤1 photo) are one design with separate stock lines and pass
+    // straight through (no folding — they become separate holdings on save).
     return [
       for (final e in byKey.entries)
-        if (e.value.length > 1) _DupGroup(e.key, e.value)
+        if (e.value.length > 1 &&
+            e.value.where((r) => r.imageBytes != null).length > 1)
+          _DupGroup(e.key, e.value)
     ];
   }
 
-  // "Keep & continue" on the dedupe page: for each same-name+size group keep the
-  // chosen photo's row, fold the others' boxes into it, drop them from the import.
-  // No rename / keep-both — by our identity rule (name + size) these are one design;
-  // genuinely different photos are a PDF mistake the stockist resolves by cancelling.
+  // "Continue" on the dedupe page. Same-design groups: keep every row (they stay as
+  // separate stock lines by surface/quality) but only the chosen row's photo goes to
+  // the master. Keep-both groups: every row must have a unique name (they become
+  // separate library designs). Nothing is folded — quantities are never merged here.
   void _applyDedupe() {
+    // Validate keep-both names first (so we don't half-apply).
     for (final g in _dupGroups) {
+      if (!g.keepBoth) continue;
+      final seen = <String>{};
+      for (final r in g.rows) {
+        final n = r.name.trim().toLowerCase();
+        if (n.isEmpty) {
+          _toast('Give every design a name to keep them separate.', error: true);
+          return;
+        }
+        if (!seen.add(n)) {
+          _toast('Two designs still share the name "${r.name.trim()}" — make them different.',
+              error: true);
+          return;
+        }
+      }
+    }
+    for (final g in _dupGroups) {
+      if (g.keepBoth) {
+        for (final r in g.rows) {
+          r.include = true;
+          r.contributeImage = true; // each is its own design now
+        }
+      } else {
+        final carrier = g.chosen ?? g.rows.first;
+        for (final r in g.rows) {
+          r.include = true;
+          r.contributeImage = identical(r, carrier);
+        }
+      }
+    }
+    _proceedAfterEdit();
+  }
+
+  // ── Step 0 · exact-duplicate (PDF mistake) detection ─────────────────────────
+  // A genuine duplicate = identical name + size + quality + surface (the SAME stock
+  // line listed twice in the PDF). Other same-name rows (differing surface / quality
+  // / image) are NOT mistakes — they're handled when building the library (Step 1).
+  List<_MistakeGroup> _findMistakes() {
+    final byKey = <String, List<_ImpRow>>{};
+    for (final r in _rows) {
+      if (!r.include || r.name.trim().isEmpty) continue;
+      final key = [
+        r.name.trim().toLowerCase(),
+        r.size.trim().toLowerCase(),
+        r.quality.trim().toLowerCase(),
+        r.surface.trim().toLowerCase(),
+      ].join('|');
+      (byKey[key] ??= []).add(r);
+    }
+    return [
+      for (final e in byKey.entries)
+        if (e.value.length > 1) _MistakeGroup(e.key, e.value)
+    ];
+  }
+
+  int _mistakeSum(_MistakeGroup g) => g.rows.fold<int>(0, (n, r) => n + r.qty);
+
+  // "Continue" on Step 0: per group keep the chosen row; Merge sums the others'
+  // boxes into it, Keep-one just drops them. Then on to build the library (Step 1).
+  void _applyMistakes() {
+    for (final g in _mistakeGroups) {
       final carrier = g.chosen ?? g.rows.first;
       var sum = carrier.qty;
       for (final r in g.rows) {
         if (identical(r, carrier)) continue;
-        sum += r.qty;
+        if (g.merge) sum += r.qty;
         r.include = false;
       }
       carrier.include = true;
-      carrier.qtyCtrl.text = sum > 0 ? '$sum' : '';
+      if (g.merge) carrier.qtyCtrl.text = sum > 0 ? '$sum' : '';
     }
-    _proceedAfterEdit();
+    setState(() => _phase = _Phase.edit);
   }
 
   // ── Step 2 wizard navigation ─────────────────────────────────────────────────
@@ -481,7 +652,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       case _AskStep.weight:
         setState(() => _askStep = _AskStep.pieces);
       case _AskStep.surfaceInPdf:
-        setState(() => _askStep = _AskStep.weight);
+        // Back over the identity block only when it was shown (new designs).
+        setState(() =>
+            _askStep = _hasNewDesigns ? _AskStep.weight : _AskStep.quality);
       case _AskStep.surfaceChoice:
         setState(() => _askStep = _AskStep.surfaceInPdf);
     }
@@ -491,7 +664,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   void _askNext() {
     switch (_askStep) {
       case _AskStep.quality:
-        setState(() => _askStep = _AskStep.tileSame);
+        // New designs need their identity (tile type/pieces/weight); if the batch
+        // is entirely existing designs, skip straight to the surface question.
+        setState(() => _askStep =
+            _hasNewDesigns ? _AskStep.tileSame : _AskStep.surfaceInPdf);
       case _AskStep.tilePick:
         if (_tileType == null) {
           _toast('Pick one tile type to continue.', error: true);
@@ -542,17 +718,20 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // Wizard done → Step 3 (Quantities). Re-checks the compulsory gates defensively
   // and resolves the document-wide surface for the "not in PDF" branch.
   void _enterStock() {
-    if (_tileType == null) {
-      setState(() => _askStep = _AskStep.tileSame);
-      return;
-    }
-    if (_piecesPerBox <= 0) {
-      setState(() => _askStep = _AskStep.pieces);
-      return;
-    }
-    if (_boxWeightKg <= 0) {
-      setState(() => _askStep = _AskStep.weight);
-      return;
+    // Identity gates only apply when the batch has a brand-new design.
+    if (_hasNewDesigns) {
+      if (_tileType == null) {
+        setState(() => _askStep = _AskStep.tileSame);
+        return;
+      }
+      if (_piecesPerBox <= 0) {
+        setState(() => _askStep = _AskStep.pieces);
+        return;
+      }
+      if (_boxWeightKg <= 0) {
+        setState(() => _askStep = _AskStep.weight);
+        return;
+      }
     }
     if (!_surfacePresent) {
       final s = _singleSurface ? _singleSurfaceValue : 'None';
@@ -625,7 +804,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           _progressDetail = 'Preparing ${r.name} (${i + 1} of ${kept.length})';
         });
       }
-      if (r.imageBytes != null && r.uploadedUrl == null) {
+      if (r.imageBytes != null && r.contributeImage && r.uploadedUrl == null) {
         setState(() => _progressDetail = 'Uploading image for ${r.name}…');
         final up = await CloudinaryService.uploadImageBytes(
           r.imageBytes!,
@@ -652,7 +831,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         'quality': _qualityOf(r),
         'surface': libraryOnly ? 'None' : r.surface,
         'qty': libraryOnly ? 0 : r.qty,
-        if (r.uploadedUrl != null) 'image_url': r.uploadedUrl,
+        if (r.uploadedUrl != null && r.contributeImage) 'image_url': r.uploadedUrl,
         'stock_type': 'Uncertain',
         if (!libraryOnly) ...{
           'tile_type': tileType,
@@ -674,7 +853,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     try {
       final res = await _dataSvc.importStockBatch(
         batchId: _batchId,
-        catalogId: _catalogId,
+        catalogId: null, // upload fills P_Stock; lists are curated separately
         brandId: _brandId,
         pdfFilename: _filename,
         rows: rows,
@@ -807,11 +986,6 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF1B4F72))),
-                    Text('List   ·  ${_catalogName.isEmpty ? '—' : _catalogName}',
-                        style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF1B4F72))),
                   ],
                 ),
               ),
@@ -855,6 +1029,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         return _modeBody();
       case _Phase.pick:
         return _pickBody();
+      case _Phase.sizeAsk:
+        return _sizeAskBody();
+      case _Phase.mistakes:
+        return _mistakesBody();
       case _Phase.edit:
         return _editBody();
       case _Phase.dedupe:
@@ -885,8 +1063,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Brand: ${_brandName.isEmpty ? '—' : _brandName}'
-                '   ·   List: ${_catalogName.isEmpty ? '—' : _catalogName}',
+                'Brand: ${_brandName.isEmpty ? '—' : _brandName}',
                 style: const TextStyle(fontSize: 12.5, color: Color(0xFF1B4F72)),
               ),
             ),
@@ -897,9 +1074,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   }
 
   // Step 1a — choose the upload mode, then a guarded 5-second confirm that names
-  // the exact brand + list. Only on confirm do we move on to pick the PDF.
+  // the exact brand. Only on confirm do we move on to pick the PDF.
   Future<void> _pickMode(UploadMode m) async {
-    final ok = await showUploadModeConfirm(context, m, _brandName, _catalogName);
+    final ok = await showUploadModeConfirm(context, m, _brandName);
     if (!ok || !mounted) return;
     setState(() {
       _mode = m;
@@ -922,7 +1099,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           child: Text('Pick one — we’ll confirm before anything changes.',
               style: TextStyle(fontSize: 12.5, color: Colors.black54)),
         ),
-        for (final m in UploadMode.values)
+        // "Fully new" (zero everything else) needed a single list to scope to;
+        // upload now fills P_Stock for the whole brand, so only the safe top-up /
+        // set-matched modes are offered here.
+        for (final m in const [UploadMode.add, UploadMode.updateKeep])
           Card(
             margin: const EdgeInsets.fromLTRB(16, 6, 16, 0),
             child: ListTile(
@@ -1007,7 +1187,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             ],
           ),
         ),
-        // Doc-wide size — most supplier PDFs are a single size per file.
+        // Doc-wide size — shown only when the stockist chose "one size" (Step 1).
+        if (_oneSize == true)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
           child: Row(
@@ -1056,6 +1237,301 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     );
   }
 
+  // ── Step 1 · size question (one size vs mixed) ───────────────────────────────
+  Widget _sizeAskBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _contextChip(),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Text('Step 1 · Size',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+            child: _sizeAskPage(),
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Row(children: [
+              if (_oneSize == null)
+                OutlinedButton(
+                  onPressed:
+                      _busy ? null : () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade700,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 14)),
+                  child: const Text('Cancel upload'),
+                )
+              else
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : () => setState(() => _oneSize = null),
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: const Text('Back'),
+                  style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 18, vertical: 14)),
+                ),
+              const SizedBox(width: 12),
+              if (_oneSize == true)
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _busy ? null : _confirmOneSize,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1B4F72),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                    child: const Text('Continue'),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sizeAskPage() {
+    if (_oneSize == null) {
+      return ListView(children: [
+        _askHeading('Does this PDF have one size, or a mix of sizes?'),
+        _askHelp('Most supplier PDFs are a single size per file. Pick "One size" '
+            'to choose it once for every design, or "Mixed sizes" if the file '
+            'lists different sizes.'),
+        const SizedBox(height: 16),
+        _bigChoice('One size — the whole file is a single size', false,
+            () => setState(() => _oneSize = true)),
+        _bigChoice('Mixed sizes — different sizes in one file', false,
+            () => setState(() => _oneSize = false)),
+      ]);
+    }
+    if (_oneSize == true) {
+      return ListView(children: [
+        _askHeading('Which size?'),
+        _askHelp('Pick the one size that matches every design in this PDF. It is '
+            'applied to all of them.'),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0xFF1B4F72)),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: DropdownButton<String>(
+            value: _sizes.contains(_docSize) ? _docSize : null,
+            isExpanded: true,
+            underline: const SizedBox.shrink(),
+            hint: const Text('Pick a size'),
+            items: _sizes
+                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                .toList(),
+            onChanged: (v) => setState(() => _docSize = v ?? _docSize),
+          ),
+        ),
+      ]);
+    }
+    // Mixed sizes → the size must be present per design in the PDF.
+    return ListView(children: [
+      _askHeading('Is each design’s size written in this PDF?'),
+      _askHelp('A mixed-size file must list a size for every design. If yes, '
+          'continue and set each design’s size on the next screen. If the PDF '
+          'has no sizes, a mixed-size file can’t be imported — cancel and split '
+          'the PDF by size.'),
+      const SizedBox(height: 24),
+      _yesNo(
+          selected: null,
+          onYes: _proceedMix,
+          onNo: () => Navigator.of(context).pop()),
+    ]);
+  }
+
+  // ── Step 0 · resolve exact-duplicate rows (PDF mistakes) ─────────────────────
+  Widget _mistakesBody() {
+    return Column(
+      children: [
+        _contextChip(),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Text('Step 0 · Possible mistakes in your PDF',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
+          child: TypewriterText(
+              'These rows are identical in name, size, quality AND surface — the '
+              'same stock line appears more than once in your PDF. Merge them (add '
+              'the boxes together) or keep just one.',
+              style: TextStyle(fontSize: 12.5, color: Colors.black54)),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            itemCount: _mistakeGroups.length,
+            itemBuilder: (_, i) => _mistakeCard(_mistakeGroups[i]),
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Row(children: [
+              OutlinedButton(
+                onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red.shade700,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 18, vertical: 14)),
+                child: const Text('Cancel upload'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _busy ? null : _applyMistakes,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1B4F72),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14)),
+                  child: const Text('Continue'),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _mistakeCard(_MistakeGroup g) {
+    final first = g.rows.first;
+    final surface = first.surface.trim().isEmpty ? 'None' : first.surface.trim();
+    final quality = first.quality.trim().isEmpty ? '—' : first.quality.trim();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('“${first.name.trim()}”  ·  ${first.size}',
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            const SizedBox(height: 2),
+            Text('$quality  ·  $surface  ·  appears ${g.rows.length} times',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [for (final r in g.rows) _mistakePhoto(g, r)],
+            ),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: _mistakeChoice(
+                    g, true, 'Merge', 'add boxes → ${_mistakeSum(g)} total'),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _mistakeChoice(
+                    g, false, 'Keep one', 'keep the selected row only'),
+              ),
+            ]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // A selectable row tile in Step 0 (the kept row's photo + box count). Tap to
+  // select which row survives; the magnifier opens the full scraped detail.
+  Widget _mistakePhoto(_MistakeGroup g, _ImpRow r) {
+    final sel = identical(g.chosen, r);
+    return InkWell(
+      onTap: () => setState(() => g.chosen = r),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 104,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          border: Border.all(
+              color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade300,
+              width: sel ? 2.5 : 1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              children: [
+                SizedBox(width: 92, height: 92, child: _thumbLarge(r)),
+                Positioned(
+                  right: 2,
+                  top: 2,
+                  child: GestureDetector(
+                    onTap: () => _showFullRow(r),
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(5)),
+                      child: const Icon(Icons.zoom_in,
+                          size: 16, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text('Box ${r.qty > 0 ? r.qty : '—'}',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            const SizedBox(height: 2),
+            Icon(sel ? Icons.check_circle : Icons.circle_outlined,
+                size: 18,
+                color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade400),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _mistakeChoice(
+      _MistakeGroup g, bool mergeVal, String title, String sub) {
+    final selected = g.merge == mergeVal;
+    return GestureDetector(
+      onTap: () => setState(() => g.merge = mergeVal),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF1B4F72) : Colors.white,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+              color: selected ? const Color(0xFF1B4F72) : Colors.grey.shade300),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: selected ? Colors.white : Colors.black87)),
+            Text(sub,
+                style: TextStyle(
+                    fontSize: 10,
+                    color: selected ? Colors.white70 : Colors.grey)),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── Step 1b · resolve same-name duplicates ───────────────────────────────────
   Widget _dedupeBody() {
     return Column(
@@ -1063,16 +1539,16 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         _contextChip(),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Text('Step 1b · Same name + size found',
+          child: Text('Step 1 · Same name + size — which photo?',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         ),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
           child: TypewriterText(
-              'A design name + size appears more than once in your PDF. By name + '
-              'size they are one design, so just keep one photo. If the photos are '
-              'actually different, that is a mistake in your PDF (the same name + '
-              'size cannot be two different designs) — Cancel upload and fix it.',
+              'A name + size appears with more than one photo. If it is one design, '
+              'pick the photo to keep — different surfaces/qualities still stay as '
+              'separate stock. If they are actually different designs, turn on '
+              '"different designs" and give each a unique name.',
               style: TextStyle(fontSize: 12.5, color: Colors.black54)),
         ),
         Align(
@@ -1116,7 +1592,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                       backgroundColor: const Color(0xFF1B4F72),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14)),
-                  child: const Text('Keep & continue'),
+                  child: const Text('Continue'),
                 ),
               ),
             ]),
@@ -1137,26 +1613,92 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             Text('“${g.rows.first.name.trim()}”  ·  ${g.rows.first.size}',
                 style: const TextStyle(
                     fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 10),
-            // Same name + size = one library design. Pick the photo to keep; the
-            // rest fold in. If the photos are genuinely different, that's a PDF
-            // mistake — the stockist cancels the upload and fixes the PDF.
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                for (final r in g.rows) _dupPhotoChoice(g, r),
-              ],
-            ),
             const SizedBox(height: 8),
-            Text(
-                'Same name + size = one design. If these photos are the same, keep '
-                'one (the boxes are added together). If the photos are different, '
-                'it is a mistake in your PDF — Cancel upload and fix it.',
-                style:
-                    TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+            if (!g.keepBoth) ...[
+              // One design — pick the photo that represents it. The differing
+              // surface/quality rows still become separate stock lines on save.
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [for (final r in g.rows) _dupPhotoChoice(g, r)],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                  'One design — pick its photo. The different surfaces/qualities '
+                  'above stay as separate stock lines (boxes are NOT merged).',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+            ] else ...[
+              // Different designs — give each a unique name so they split into
+              // separate library designs.
+              for (final r in g.rows) _dupRenameRow(r),
+              const SizedBox(height: 4),
+              Text(
+                  'Different designs — each needs its own name. They become '
+                  'separate library designs.',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+            ],
+            const SizedBox(height: 6),
+            // Toggle between "one design (pick photo)" and "different designs (rename)".
+            InkWell(
+              onTap: () => setState(() => g.keepBoth = !g.keepBoth),
+              child: Row(
+                children: [
+                  Icon(
+                      g.keepBoth
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 18,
+                      color: const Color(0xFF1B4F72)),
+                  const SizedBox(width: 6),
+                  const Expanded(
+                    child: Text('These are different designs — keep both',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1B4F72))),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  // A rename row used when a same-name+size group is split into different designs:
+  // its photo + scraped detail + an editable name (must end up unique in the group).
+  Widget _dupRenameRow(_ImpRow r) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () => _showFullRow(r),
+            child: SizedBox(width: 52, height: 52, child: _thumbLarge(r)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  initialValue: r.name,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: 'Design name',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (v) => r.name = v,
+                ),
+                const SizedBox(height: 2),
+                _scrapeDetail(r),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1383,21 +1925,26 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          SizedBox(
-            width: 110,
-            child: DropdownButtonFormField<String>(
-              initialValue: _sizes.contains(r.size) ? r.size : null,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                  isDense: true, border: OutlineInputBorder()),
-              items: _sizes
-                  .map((s) => DropdownMenuItem(
-                      value: s,
-                      child: Text(s, style: const TextStyle(fontSize: 12))))
-                  .toList(),
-              onChanged: (v) => setState(() => r.size = v ?? r.size),
-            ),
-          ),
+          // Mixed-size PDF → each row picks its own size; one-size → just show it.
+          if (_oneSize == false)
+            SizedBox(
+              width: 110,
+              child: DropdownButtonFormField<String>(
+                initialValue: _sizes.contains(r.size) ? r.size : null,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                    isDense: true, border: OutlineInputBorder()),
+                items: _sizes
+                    .map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(s, style: const TextStyle(fontSize: 12))))
+                    .toList(),
+                onChanged: (v) => setState(() => r.size = v ?? r.size),
+              ),
+            )
+          else
+            Text(r.size,
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
         ],
       ),
     );
@@ -1436,7 +1983,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         return 4;
       case _AskStep.surfaceInPdf:
       case _AskStep.surfaceChoice:
-        return 5;
+        // When the identity block is skipped (no new designs) surface is step 2.
+        return _hasNewDesigns ? 5 : 2;
     }
   }
 
@@ -1454,11 +2002,36 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 15)),
               ),
-              Text('${_askPhaseNum(_askStep)} of 5',
+              Text('${_askPhaseNum(_askStep)} of ${_hasNewDesigns ? 5 : 2}',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
             ],
           ),
         ),
+        if (!_hasNewDesigns)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_outline,
+                      size: 16, color: Color(0xFF2E7D32)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                        'These designs are already in your library — we only need '
+                        'grade, surface and quantities.',
+                        style: TextStyle(
+                            fontSize: 11.5, color: Colors.green.shade900)),
+                  ),
+                ],
+              ),
+            ),
+          ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
@@ -1856,7 +2429,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                         _boxWeightKg > 0 ? '$_boxWeightKg kg' : '—',
                         isText: true),
                     _reviewLine('Brand', _brandName, isText: true),
-                    _reviewLine('Stock list', _catalogName, isText: true),
+                    _reviewLine('Added to', 'Your stock (add to a list after)',
+                        isText: true),
                   ],
                 ),
               ),

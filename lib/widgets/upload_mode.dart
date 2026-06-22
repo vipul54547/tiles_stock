@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 // The three stock-upload modes, shared by the PDF importer and the Excel importer.
-// Scope of "unmatched" is ALWAYS the Brand + Stock list being uploaded into.
-//  • add        — quantity += uploaded (top-up); unmatched kept.
-//  • fullyNew   — quantity = uploaded; unmatched in THIS list zeroed (out-of-stock,
-//                 never deleted — image + DNA stay in the Library).
-//  • updateKeep — quantity = uploaded; unmatched kept.
+// Upload fills P_Stock (the holding) for the chosen BRAND — it no longer targets a
+// stock list (lists are an output structure, curated separately).
+//  • add        — quantity += uploaded (top-up); other holdings kept.
+//  • fullyNew   — quantity = uploaded; this brand's other holdings zeroed. NOTE:
+//                 not offered on the decoupled upload path yet (brand-wide replace
+//                 semantics TBD); the enum is kept for the future.
+//  • updateKeep — quantity = uploaded for matched; other holdings kept.
 enum UploadMode { add, fullyNew, updateKeep }
 
 const _navy = Color(0xFF1B4F72);
@@ -38,13 +40,14 @@ extension UploadModeX on UploadMode {
   String get short {
     switch (this) {
       case UploadMode.add:
-        return 'Add these boxes on top of the current stock.';
+        return 'Add these boxes on top of stock that matches by design + size + '
+            'quality + surface.';
       case UploadMode.fullyNew:
         return 'This file is my full current stock — set these and zero anything '
-            'in this list not in the file.';
+            'in this brand not in the file.';
       case UploadMode.updateKeep:
-        return "Set these designs to the file's numbers; leave my other designs "
-            'alone.';
+        return "Set matching stock (design + size + quality + surface) to the "
+            "file's numbers; leave my other designs alone.";
     }
   }
 
@@ -61,34 +64,38 @@ extension UploadModeX on UploadMode {
 
   bool get isDestructive => this == UploadMode.fullyNew;
 
-  /// The consequence message for the guarded confirm — names the exact brand + list.
-  String consequence(String brand, String list) {
-    final dest = 'Brand:  $brand\nList:   $list';
+  /// The consequence message for the guarded confirm — names the exact brand. The
+  /// stock fills P_Stock; lists are curated separately afterward.
+  String consequence(String brand) {
+    final dest = 'Brand:  $brand';
     switch (this) {
       case UploadMode.add:
-        return 'The boxes in this file will be ADDED on top of the current stock '
-            'in:\n\n$dest';
+        return 'The boxes in this file will be ADDED on top of your current stock '
+            '(matched by design + size + quality + surface) in:\n\n$dest\n\nThe '
+            'designs go into your stock — add them to a stock list afterwards to '
+            'show buyers.';
       case UploadMode.fullyNew:
-        return 'This REPLACES the stock in:\n\n$dest\n\nEvery design in this file '
-            'is set to its number, and any design in this list that is NOT in the '
-            'file is set to 0 boxes (out of stock). Designs, images and DNA stay '
-            'in your Library.';
+        return 'This REPLACES your stock in:\n\n$dest\n\nEvery design in this file '
+            'is set to its number, and any other design in this brand is set to 0 '
+            'boxes (out of stock). Designs, images and DNA stay in your Library.';
       case UploadMode.updateKeep:
-        return 'This SETS the stock for the designs in this file, in:\n\n$dest\n\n'
-            'Your other designs in this list are left unchanged.';
+        return 'This SETS the stock for the designs in this file (matched by '
+            'design + size + quality + surface), in:\n\n$dest\n\nYour other '
+            'designs are left unchanged. Add the designs to a stock list '
+            'afterwards to show buyers.';
     }
   }
 }
 
 /// 5-second guarded confirm shown after a mode is picked. Returns true only if
-/// the user confirms AFTER the countdown finishes. Names the exact brand + list
-/// so a destructive "Fully new" can never be tapped through blindly.
+/// the user confirms AFTER the countdown finishes. Names the exact brand so a
+/// destructive mode can never be tapped through blindly.
 Future<bool> showUploadModeConfirm(
-    BuildContext context, UploadMode mode, String brand, String list) async {
+    BuildContext context, UploadMode mode, String brand) async {
   final ok = await showDialog<bool>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _ModeConfirmDialog(mode: mode, brand: brand, list: list),
+    builder: (_) => _ModeConfirmDialog(mode: mode, brand: brand),
   );
   return ok ?? false;
 }
@@ -96,9 +103,7 @@ Future<bool> showUploadModeConfirm(
 class _ModeConfirmDialog extends StatefulWidget {
   final UploadMode mode;
   final String brand;
-  final String list;
-  const _ModeConfirmDialog(
-      {required this.mode, required this.brand, required this.list});
+  const _ModeConfirmDialog({required this.mode, required this.brand});
   @override
   State<_ModeConfirmDialog> createState() => _ModeConfirmDialogState();
 }
@@ -138,9 +143,7 @@ class _ModeConfirmDialogState extends State<_ModeConfirmDialog> {
         ],
       ),
       content: Text(
-        widget.mode.consequence(
-            widget.brand.isEmpty ? '—' : widget.brand,
-            widget.list.isEmpty ? '—' : widget.list),
+        widget.mode.consequence(widget.brand.isEmpty ? '—' : widget.brand),
         style: const TextStyle(fontSize: 13.5, height: 1.35),
       ),
       actions: [

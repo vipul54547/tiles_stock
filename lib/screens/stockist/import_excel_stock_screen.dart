@@ -7,7 +7,6 @@ import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/tile_size.dart';
-import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
 import '../../models/dna.dart';
@@ -27,9 +26,10 @@ import '../../models/choice_state.dart';
 // finish, and a finish that differs from the existing one is flagged as a
 // conflict for the stockist to resolve.
 class ImportExcelStockScreen extends StatefulWidget {
-  /// Catalog chosen at the Upload tap; null falls back to the default public one.
-  final String? initialCatalogId;
-  const ImportExcelStockScreen({super.key, this.initialCatalogId});
+  /// Brand chosen at the Upload tap; upload fills P_Stock for this brand (lists are
+  /// curated separately). Null falls back to the default brand.
+  final String? initialBrandId;
+  const ImportExcelStockScreen({super.key, this.initialBrandId});
   @override
   State<ImportExcelStockScreen> createState() => _ImportExcelStockScreenState();
 }
@@ -122,19 +122,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   List<String> _finishes = kFinishes;
   List<String> _sizes = kAllowedSizes;
   List<TileSize> _tileSizes = []; // full size rows (with inch/feet aliases)
-  List<StockCatalog> _catalogs = []; // stockist's catalogs (upload target)
-  String? _catalogId; // chosen target catalog
+  String? _brandId; // chosen brand — upload fills P_Stock for it (no list target)
+  String _brandName = '';
   Map<String, String> _aliases = {};
   List<TileDesign> _existing = [];
-  List<Brand> _brands = []; // for labelling each list with its brand
+  List<Brand> _brands = []; // for labelling each brand-name column
   List<DnaAttribute> _dnaAttrs = []; // DNA catalog (for auto-detecting columns)
   List<String> _dnaDetected = []; // names of DNA columns found in this sheet
-
-  // A catalogue's brand name (multi-brand), so the target picker is unambiguous.
-  String _brandNameOf(StockCatalog c) {
-    final m = _brands.where((b) => b.id == c.brandId).toList();
-    return m.isEmpty ? '' : m.first.name;
-  }
 
   // A brand's name by id, for the per-row mapping chips ('?' when unknown).
   String _brandLabel(String id) {
@@ -145,7 +139,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   @override
   void initState() {
     super.initState();
-    _catalogId = widget.initialCatalogId; // chosen at the Upload tap
+    _brandId = widget.initialBrandId; // chosen at the Upload tap
   }
 
   void _snack(String m, [Color? c]) => ScaffoldMessenger.of(context)
@@ -176,9 +170,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       _existing = currentStockistUUID.isEmpty
           ? []
           : await _dataSvc.getDesignsByStockist(currentStockistUUID);
-      final catalogs = currentStockistUUID.isEmpty
-          ? <StockCatalog>[]
-          : await _dataSvc.getCatalogs(currentStockistUUID);
       final brands = currentStockistUUID.isEmpty
           ? <Brand>[]
           : await _dataSvc.getMyBrands();
@@ -191,21 +182,22 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           : await _dataSvc.dnaCatalog();
       final def = brands.where((b) => b.isDefault).toList();
       _defaultBrandId = def.isEmpty ? null : def.first.id;
+      // Resolve the chosen brand (default brand fallback). Upload fills P_Stock.
+      if (brands.isNotEmpty) {
+        final brand = brands.firstWhere((b) => b.id == _brandId,
+            orElse: () => brands.firstWhere((b) => b.isDefault,
+                orElse: () => brands.first));
+        _brandId = brand.id;
+        _brandName = brand.name;
+      }
       if (names.isNotEmpty) _finishes = names;
       if (sizeNames.isNotEmpty) _sizes = sizeNames;
       _tileSizes = tileSizes;
-      _catalogs = catalogs.where((c) => c.isActive).toList();
-      _catalogId ??= _defaultCatalogId();
     } catch (_) {/* keep fallbacks */}
   }
 
-  // Brand the import writes to: the chosen list's brand, else the default brand.
-  String? get _uploadBrandId {
-    for (final c in _catalogs) {
-      if (c.id == _catalogId) return c.brandId ?? _defaultBrandId;
-    }
-    return _defaultBrandId;
-  }
+  // Brand the import writes to (chosen at the Upload tap).
+  String? get _uploadBrandId => _brandId ?? _defaultBrandId;
 
   // (name+size → own image url) map from this stockist's library for the target
   // list's brand, across all sizes present. Keyed by [designImageKey]; includes
@@ -224,14 +216,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       }
     }
     return out;
-  }
-
-  // Default import target: first active public catalog, else the first.
-  String? _defaultCatalogId() {
-    for (final c in _catalogs) {
-      if (!c.isPrivate) return c.id;
-    }
-    return _catalogs.isEmpty ? null : _catalogs.first.id;
   }
 
   String _normHeader(String h) =>
@@ -728,7 +712,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     try {
       res = await _dataSvc.importStockBatch(
         batchId: _batchId,
-        catalogId: _catalogId,
+        catalogId: null, // upload fills P_Stock; lists are curated separately
         brandId: brandId,
         pdfFilename: _filename,
         rows: rows,
@@ -757,13 +741,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         : '';
     final mapNote = mapped > 0 ? ' · $mapped mapped to library' : '';
     final dnaNote = dnaTagged > 0 ? ' · $dnaTagged DNA tagged' : '';
-    StockCatalog? cat;
-    for (final c in _catalogs) {
-      if (c.id == _catalogId) { cat = c; break; }
-    }
-    final catNote = cat == null ? '' : ' → "${cat.name}"';
+    final brandNote = _brandName.isEmpty ? '' : ' → $_brandName';
     _snack(
-        'Done — $updated updated, $created new$mapNote$dnaNote$fixNote$libNote$catNote.',
+        'Done — $updated updated, $created new$mapNote$dnaNote$fixNote$libNote$brandNote. '
+        'Add designs to a stock list to show buyers.',
         Colors.green);
     if (updated + created + mapped > 0) Navigator.of(context).pop();
   }
@@ -939,37 +920,15 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
     return Column(
       children: [
-        // Which catalog this import goes into (only when there's a choice).
-        if (_catalogs.length > 1)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(
-              children: [
-                const Text('Add to: ', style: TextStyle(fontSize: 12)),
-                Expanded(
-                  child: DropdownButton<String>(
-                    isExpanded: true,
-                    value: _catalogId,
-                    items: _catalogs
-                        .map((c) => DropdownMenuItem(
-                            value: c.id,
-                            child: Text(
-                                '${_brands.length > 1 && _brandNameOf(c).isNotEmpty ? '${_brandNameOf(c)} · ' : ''}${c.name}${c.isPrivate ? '  (private)' : ''}',
-                                style: const TextStyle(fontSize: 13))))
-                        .toList(),
-                    onChanged: _importing
-                        ? null
-                        : (v) => setState(() {
-                              _catalogId = v ?? _catalogId;
-                              // Switching list may switch brand → refresh which
-                              // own-library photos apply.
-                              _libImages = _ownLibImages();
-                            }),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        // Destination = the chosen brand's stock (P_Stock). Lists are curated
+        // separately, so there's no list picker here.
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          alignment: Alignment.centerLeft,
+          child: Text(
+              'Adding to: ${_brandName.isEmpty ? 'your stock' : _brandName} · your stock',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
+        ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: const Color(0xFF1B4F72).withValues(alpha: 0.06),

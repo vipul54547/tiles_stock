@@ -57,6 +57,9 @@ class _State extends State<ManageCatalogsScreen> {
   // Max ACTIVE (non-expired) custom links allowed per stock list. Keeps the
   // links panel from ballooning and nudges the stockist to reuse live links.
   static const int _maxActiveLinks = 4;
+  // The stockist's admin-set cap on active stock lists per brand (default 3).
+  // Gates the per-brand "Add stock list" action; the server enforces it too.
+  int _listLimit = 3;
   bool _loading = true;
   bool _busy = false;
 
@@ -78,6 +81,7 @@ class _State extends State<ManageCatalogsScreen> {
     setState(() => _loading = true);
     final items = await _data.getCatalogs(currentStockistUUID);
     final brands = await _data.getMyBrands();
+    final listLimit = await _data.myStockListLimit();
     final inq = await _data.getCatalogInquiryCounts(currentStockistUUID);
     final claimerList = await _data.getMyCatalogClaimers();
     final allDesigns = await _data.getDesignsByStockist(currentStockistUUID);
@@ -103,6 +107,7 @@ class _State extends State<ManageCatalogsScreen> {
     setState(() {
       _items = items;
       _brands = brands;
+      _listLimit = listLimit;
       _inq = inq;
       _claimers = claimers;
       _catLinks = catLinks;
@@ -151,6 +156,37 @@ class _State extends State<ManageCatalogsScreen> {
   }
 
   // ── Stock list create / rename / delete ──────────────────────────────────
+  // Stockist creates a new stock list inside a brand (up to [_listLimit] active
+  // lists per brand; the server enforces the cap, empty/duplicate names too).
+  Future<void> _createListDialog(Brand b) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('New stock list — ${b.name}'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+              hintText: 'List name (e.g. Premium, Floor Tiles)',
+              border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Create')),
+        ],
+      ),
+    );
+    final name = ctrl.text.trim();
+    if (ok != true || name.isEmpty) return;
+    await _run(() => _data.createStockList(b.id, name));
+  }
+
   Future<void> _renameDialog(StockCatalog c) async {
     final ctrl = TextEditingController(text: c.name);
     final ok = await showDialog<bool>(
@@ -734,18 +770,16 @@ class _State extends State<ManageCatalogsScreen> {
             ),
           ),
           if (open) ...[
-            // List count only — lists are admin-controlled (auto-created from the
-            // admin's per-brand limit); the stockist just renames them.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 8, 4),
-              child: Text(
-                  '${lists.length} stock list${lists.length == 1 ? '' : 's'}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-            ),
+            // List count + "Add stock list". A stockist may create up to
+            // [_listLimit] ACTIVE lists per brand (server-enforced); past that the
+            // Add button is disabled with an "ask admin" hint. The default brand
+            // also gets the action — only deletion/hide stays default-brand-gated.
+            _brandListHeader(b, lists),
             if (lists.isEmpty)
               const Padding(
                 padding: EdgeInsets.fromLTRB(14, 0, 14, 12),
-                child: Text('No stock lists yet — the admin enables these.',
+                child: Text(
+                    'No stock lists yet — tap “Add stock list” to create one.',
                     style: TextStyle(fontSize: 12, color: Colors.grey)),
               )
             else
@@ -761,6 +795,41 @@ class _State extends State<ManageCatalogsScreen> {
             // Stockist-side brand visibility + deletion (non-default only).
             if (!b.isDefault) _brandAdminControls(b),
           ],
+        ],
+      ),
+    );
+  }
+
+  // Header row inside an open brand box: "<active> of <limit> lists" + the
+  // "Add stock list" action. Disabled (with an ask-admin hint) at the cap, or
+  // while a brand deletion is pending.
+  Widget _brandListHeader(Brand b, List<StockCatalog> lists) {
+    final activeCount = lists.where((c) => c.isActive).length;
+    final atCap = activeCount >= _listLimit;
+    final canAdd = !atCap && !b.pendingDelete && !_busy;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 8, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+                '$activeCount of $_listLimit stock list'
+                '${_listLimit == 1 ? '' : 's'}'
+                '${atCap ? ' · limit reached — ask admin for more' : ''}',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: atCap ? Colors.orange.shade800 : Colors.grey.shade700)),
+          ),
+          TextButton.icon(
+            onPressed: canAdd ? () => _createListDialog(b) : null,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Add stock list', style: TextStyle(fontSize: 12.5)),
+            style: TextButton.styleFrom(
+                foregroundColor: _navy,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(0, 34),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+          ),
         ],
       ),
     );

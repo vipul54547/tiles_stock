@@ -227,7 +227,7 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/stockist/stock/import-supplier-pdf',
       builder: (_, state) =>
-          ImportSupplierPdfScreen(initialCatalogId: state.extra as String?),
+          ImportSupplierPdfScreen(initialBrandId: state.extra as String?),
     ),
     GoRoute(
       path: '/stockist/catalogs',
@@ -244,7 +244,7 @@ final GoRouter _router = GoRouter(
     GoRoute(
       path: '/stockist/stock/import-excel',
       builder: (_, state) =>
-          ImportExcelStockScreen(initialCatalogId: state.extra as String?),
+          ImportExcelStockScreen(initialBrandId: state.extra as String?),
     ),
     GoRoute(
       path: '/stockist/stock/dispatch',

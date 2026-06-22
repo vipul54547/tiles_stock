@@ -50,6 +50,10 @@ class PdfDesignRow {
   /// when the layout carries a grade per design (PRM / STOCK cards). Null when the
   /// PDF has no per-row grade — callers fall back to the document quality.
   String? qualityRaw;
+  /// Per-row size read from the PDF (e.g. "800x1600 mm"), when the layout carries a
+  /// size per design. Null when the PDF has no per-row size — callers fall back to
+  /// the document size. Lets a mixed-size PDF fill each design's size automatically.
+  String? sizeRaw;
 
   /// Raw JPEG bytes for this design's photo. From the PDF when one was matched,
   /// or set later when the stockist picks/takes a photo in the import preview.
@@ -70,6 +74,7 @@ class PdfDesignRow {
     this.finishLabel,
     this.surfaceRaw,
     this.qualityRaw,
+    this.sizeRaw,
     this.imageBytes,
     this.isNew = true,
     this.currentQuantity = 0,
@@ -2802,6 +2807,7 @@ class PdfImportService {
         finishLabel: m['finishLabel'] as String?,
         surfaceRaw:  m['surfaceRaw']  as String?,
         qualityRaw:  m['qualityData'] as String?,
+        sizeRaw:     m['sizeData']    as String?,
         imageBytes:  i < imageList.length ? imageList[i] as Uint8List? : null,
       );
     });

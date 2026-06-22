@@ -964,16 +964,16 @@ class _State extends State<StockistDashboardScreen> {
         ],
       );
 
-  // Upload is BRAND-FIRST: a stock list always belongs to one brand, so you pick
-  // the BRAND, its stock list is taken automatically (only asked when the brand
-  // has more than one), then the source. The chosen list — and therefore its
-  // brand — is passed to the importer. PDF is offered only for the main brand
+  // Upload is BRAND-ONLY: you pick the BRAND, then the source. The import fills
+  // P_Stock for that brand (quantity + quality + surface); it does NOT target a
+  // stock list — designs are curated into output lists separately afterwards. The
+  // brand is passed to the importer. PDF is offered only for the main brand
   // (others import via Excel, decision #5).
   void _showUploadSourceSheet() {
-    final brands = _brands.where((b) => _listsForBrand(b).isNotEmpty).toList();
+    final brands = List<Brand>.from(_brands);
     if (brands.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No stock lists to upload into yet.')));
+          const SnackBar(content: Text('No brand to upload into yet.')));
       return;
     }
     Brand? brandOf(String? id) {
@@ -989,7 +989,6 @@ class _State extends State<StockistDashboardScreen> {
     // auto-resolve. Seed from the brand currently being viewed, if any.
     String? selBrandId =
         brands.any((b) => b.id == _brandFilter) ? _brandFilter : null;
-    String? catId;
 
     // Quiet, non-blocking upsell: once a stockist SEES Brand/List as named
     // things, they realise they can ask for more — admin grants (and can charge).
@@ -1014,19 +1013,11 @@ class _State extends State<StockistDashboardScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
           // Resolve the current step. 1 brand auto-selects; >1 forces a pick.
+          // Upload fills P_Stock for the brand — there is no stock-list pick.
           final brand =
               brandOf(selBrandId) ?? (brands.length == 1 ? brands.first : null);
-          final lists =
-              brand == null ? <StockCatalog>[] : _listsForBrand(brand);
-          // Keep a valid prior list pick; auto when the brand has exactly one.
-          final effCatId = brand == null
-              ? null
-              : (catId != null && lists.any((c) => c.id == catId))
-                  ? catId
-                  : (lists.length == 1 ? lists.first.id : null);
           final mustPickBrand = brand == null;
-          final mustPickList = brand != null && effCatId == null;
-          final ready = effCatId != null;
+          final ready = brand != null;
           final isMainBrand = brand?.isDefault ?? false;
           final needsSetup = brand != null && _brandNeedsSetup(brand);
           // Trader / Wholesaler: ingests an arbitrary EXTERNAL supplier PDF via
@@ -1052,41 +1043,10 @@ class _State extends State<StockistDashboardScreen> {
                           color: Color(0xFF1B4F72)),
                       title: Text(b.name),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => setS(() {
-                        selBrandId = b.id;
-                        catId = null;
-                      }),
+                      onTap: () => setS(() => selBrandId = b.id),
                     ),
                 ],
-                // STEP 2 — choose this brand's stock list (only when >1, none yet).
-                if (mustPickList) ...[
-                  ListTile(
-                    contentPadding: const EdgeInsets.only(left: 8, right: 16),
-                    leading: brands.length > 1
-                        ? IconButton(
-                            icon: const Icon(Icons.arrow_back),
-                            tooltip: 'Back to brands',
-                            onPressed: () => setS(() {
-                              selBrandId = null;
-                              catId = null;
-                            }),
-                          )
-                        : const Icon(Icons.inventory_2_outlined,
-                            color: Color(0xFF1B4F72)),
-                    title: Text('${brand.name} · choose stock list',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
-                  for (final c in lists)
-                    ListTile(
-                      leading: const Icon(Icons.inventory_2_outlined,
-                          color: Color(0xFF1B4F72)),
-                      title: Text(c.name),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => setS(() => catId = c.id),
-                    ),
-                ],
-                // STEP 3 — destination resolved: show WHERE it lands, then source.
+                // STEP 2 — destination resolved (brand): show it, then the source.
                 if (ready) ...[
                   Container(
                     margin: const EdgeInsets.fromLTRB(16, 16, 16, 4),
@@ -1098,22 +1058,22 @@ class _State extends State<StockistDashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Adding to',
+                        Text('Adding to your stock',
                             style: TextStyle(
                                 fontSize: 11.5, color: Colors.grey.shade700)),
                         const SizedBox(height: 5),
-                        _destLine('Brand', brand!.name),
-                        const SizedBox(height: 2),
-                        _destLine('List',
-                            lists.firstWhere((c) => c.id == effCatId).name),
-                        if (brands.length > 1 || lists.length > 1) ...[
+                        _destLine('Brand', brand.name),
+                        const SizedBox(height: 4),
+                        Text(
+                            'Goes into your stock (P_Stock). Choose which stock '
+                            'lists show it afterwards.',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade600)),
+                        if (brands.length > 1) ...[
                           const SizedBox(height: 8),
                           InkWell(
-                            onTap: () => setS(() {
-                              if (brands.length > 1) selBrandId = null;
-                              catId = null;
-                            }),
-                            child: const Text('Change',
+                            onTap: () => setS(() => selBrandId = null),
+                            child: const Text('Change brand',
                                 style: TextStyle(
                                     fontSize: 12.5,
                                     color: Color(0xFF1B4F72),
@@ -1205,7 +1165,7 @@ class _State extends State<StockistDashboardScreen> {
                         // manufacturer screen is retired from routing.
                         await context.push(
                             '/stockist/stock/import-supplier-pdf',
-                            extra: effCatId);
+                            extra: brand.id);
                         _load();
                       },
                     ),
@@ -1229,7 +1189,7 @@ class _State extends State<StockistDashboardScreen> {
                         // manufacturer screen is retired from routing.
                         await context.push(
                             '/stockist/stock/import-supplier-pdf',
-                            extra: effCatId);
+                            extra: brand.id);
                         _load();
                       },
                     ),
@@ -1243,7 +1203,7 @@ class _State extends State<StockistDashboardScreen> {
                     onTap: () async {
                       Navigator.pop(ctx);
                       await context.push('/stockist/stock/import-excel',
-                          extra: effCatId);
+                          extra: brand.id);
                       _load();
                     },
                   ),
