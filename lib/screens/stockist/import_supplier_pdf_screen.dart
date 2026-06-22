@@ -206,6 +206,12 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // brand-new design (existing designs already carry tile type / pieces / weight).
   final Set<String> _libKeys = {};
 
+  // name|size|quality|surface keys of this stockist's existing P_Stock holdings.
+  // When EVERY row in the PDF matches one, it's a pure restock → skip straight to
+  // quantities (nothing else to set). Set true on that path for the stock banner.
+  final Set<String> _holdingKeys = {};
+  bool _restock = false;
+
   // Tile Type (compulsory, single per PDF). _tileTypeSel holds the single chosen
   // type (a set so the existing _tileType getter keeps working).
   final Set<String> _tileTypeSel = {};
@@ -256,6 +262,21 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // every design already exists, Step-2 skips straight to the surface question.
   bool get _hasNewDesigns =>
       _kept.any((r) => !_libKeys.contains(_libKey(r.name, r.size)));
+
+  String _holdingKey(String name, String size, String quality, String surface) {
+    final s = surface.trim().isEmpty ? 'none' : surface.trim().toLowerCase();
+    return '${name.trim().toLowerCase()}|${size.trim().toLowerCase()}'
+        '|${quality.trim().toLowerCase()}|$s';
+  }
+
+  // Pure restock = every kept row already exists as a holding (name + size +
+  // quality + surface all match). Nothing to set but quantities.
+  bool get _allHoldingsMatch {
+    final kept = _kept;
+    if (kept.isEmpty || _holdingKeys.isEmpty) return false;
+    return kept.every((r) =>
+        _holdingKeys.contains(_holdingKey(r.name, r.size, r.quality, r.surface)));
+  }
 
   String? get _tileType =>
       _tileTypeSel.length == 1 ? _tileTypeSel.first : null;
@@ -338,6 +359,15 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             for (final a in e.aliases.values) _libKey(a, e.size),
           ]
         ]);
+      // Existing P_Stock holdings (name+size+quality+surface) — drives the pure
+      // restock shortcut (skip straight to quantities).
+      final holdings = await _dataSvc.getDesignsByStockist(currentStockistUUID);
+      _holdingKeys
+        ..clear()
+        ..addAll([
+          for (final d in holdings)
+            _holdingKey(d.name, d.size, d.quality, d.surfaceType)
+        ]);
     } catch (_) {
       // Non-fatal — the picker still works with fallbacks.
     } finally {
@@ -417,8 +447,19 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     _endProcessing();
     if (!mounted) return;
     _batchId = const Uuid().v4(); // one idempotency key per parsed PDF
-    // First ask the size question (one size vs mixed) — no silent default.
+    // Pure restock? Every row already exists as a holding (name+size+quality+
+    // surface) → skip the size question, design list and Step-2; go straight to
+    // quantities. Use each row's own grade + surface (nothing to ask).
+    if (_allHoldingsMatch) {
+      _restock = true;
+      _qualityMode = _QualityMode.both;
+      _surfacePresent = true;
+      setState(() => _phase = _Phase.stock);
+      return;
+    }
+    // Otherwise ask the size question (one size vs mixed) — no silent default.
     setState(() {
+      _restock = false;
       _oneSize = null;
       _phase = _Phase.sizeAsk;
     });
@@ -2360,6 +2401,25 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             ],
           ),
         ),
+        if (_restock)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(8)),
+            child: Row(children: [
+              const Icon(Icons.bolt, size: 16, color: Color(0xFF2E7D32)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    'Quick restock — every design already exists (same size, '
+                    'quality + surface). Just set the box quantities.',
+                    style:
+                        TextStyle(fontSize: 11.5, color: Colors.green.shade900)),
+              ),
+            ]),
+          ),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Text('Blank or 0 quantity = added to your Library only, no '
