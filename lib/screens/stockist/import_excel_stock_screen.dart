@@ -136,6 +136,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   List<Brand> _brands = []; // for labelling each brand-name column
   List<DnaAttribute> _dnaAttrs = []; // DNA catalog (for auto-detecting columns)
   List<String> _dnaDetected = []; // names of DNA columns found in this sheet
+  // attributeId -> set of already-resolvable words (lowercased): canonical value
+  // names + this stockist's learned aliases. A detected DNA word NOT in this set
+  // needs the Map-DNA step (else dna_resolve would silently drop it).
+  Map<String, Set<String>> _dnaKnown = {};
 
   // A brand's name by id, for the per-row mapping chips ('?' when unknown).
   String _brandLabel(String id) {
@@ -198,6 +202,29 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       _dnaAttrs = currentStockistUUID.isEmpty
           ? <DnaAttribute>[]
           : await _dataSvc.dnaCatalog();
+      // Build the "already resolvable" word set per attribute = canonical value
+      // names + this stockist's learned aliases (dna_my_words is {valueId:[word]}).
+      // Mirrors dna_resolve's two-step match so the Map-DNA step only surfaces
+      // words that would otherwise be dropped.
+      _dnaKnown = {for (final a in _dnaAttrs) a.id: <String>{}};
+      final valueAttr = <String, String>{}; // valueId -> attributeId
+      for (final a in _dnaAttrs) {
+        for (final v in a.values) {
+          _dnaKnown[a.id]!.add(v.name.trim().toLowerCase());
+          valueAttr[v.id] = a.id;
+        }
+      }
+      if (currentStockistUUID.isNotEmpty) {
+        final myWords = await _dataSvc.dnaMyWords(); // {valueId: [raw words]}
+        myWords.forEach((valueId, words) {
+          final attr = valueAttr[valueId];
+          if (attr != null) {
+            for (final w in words) {
+              _dnaKnown[attr]!.add(w.trim().toLowerCase());
+            }
+          }
+        });
+      }
       final def = brands.where((b) => b.isDefault).toList();
       _defaultBrandId = def.isEmpty ? null : def.first.id;
       // Resolve the chosen brand (default brand fallback). Upload fills P_Stock.
@@ -436,6 +463,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final ok = await _mapFinishesStep(parsed);
     if (!ok) return; // cancelled
 
+    // Align any DNA words that don't already resolve (canonical name or learned
+    // alias) to a canonical value, and learn them — so dna_resolve can't drop
+    // them on import. Skips entirely when every detected word already resolves.
+    final okDna = await _mapDnaStep(parsed);
+    if (!okDna) return; // cancelled
+
     _computeActions(parsed);
 
     // Auto-match this stockist's OWN library photos by name+size so the preview
@@ -628,6 +661,144 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (!r.valid || r.surfaceRaw.trim().isEmpty) continue;
       final g = groups[r.rawKey];
       if (g != null) r.surface = g.choice;
+    }
+    return true;
+  }
+
+  // ── Map Design DNA (only words that don't already resolve) ──────────────────
+  // dna_resolve matches a raw word to a canonical value by exact name OR a learned
+  // alias; anything else is silently dropped on import. This step surfaces those
+  // unresolved words, lets the stockist align each to a canonical value, and LEARNS
+  // the alias (dna_learn_alias) BEFORE the import call so dna_resolve then picks it
+  // up. Free-text attributes (no fixed value list) are left untouched.
+  Future<bool> _mapDnaStep(List<_XlsRow> rows) async {
+    final attrById = {for (final a in _dnaAttrs) a.id: a};
+    final groups = <String, _DnaMapGroup>{}; // attrId|wordLower → group
+    for (final r in rows) {
+      if (!r.valid || r.dna.isEmpty) continue;
+      r.dna.forEach((attrId, words) {
+        final attr = attrById[attrId];
+        if (attr == null || attr.isFreeText || attr.values.isEmpty) return;
+        for (final w in words) {
+          final word = w.trim();
+          if (word.isEmpty) continue;
+          final lower = word.toLowerCase();
+          if (_dnaKnown[attrId]?.contains(lower) ?? false) continue; // resolves
+          final g = groups.putIfAbsent(
+              '$attrId|$lower',
+              () => _DnaMapGroup(
+                  attributeId: attrId, attributeName: attr.name, label: word));
+          g.count++;
+        }
+      });
+    }
+    if (groups.isEmpty) return true; // every DNA word already resolves
+
+    final keys = groups.keys.toList();
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Map Design DNA'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                    'Some DNA words from your file don’t match a known value. '
+                    'Match each to a standard value so it isn’t lost — we’ll '
+                    'remember your wording next time. Leave as Ignore to skip.',
+                    style: TextStyle(fontSize: 12, color: Colors.black54)),
+                const SizedBox(height: 12),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: keys.map((k) {
+                        final g = groups[k]!;
+                        final attr = attrById[g.attributeId]!;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 5,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(attr.name,
+                                        style: const TextStyle(
+                                            fontSize: 11, color: Colors.black54)),
+                                    Text('${g.label}  (${g.count})',
+                                        style: const TextStyle(fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 5,
+                                child: DropdownButton<String>(
+                                  isExpanded: true,
+                                  value: g.choice,
+                                  items: [
+                                    const DropdownMenuItem(
+                                        value: '',
+                                        child: Text('— Ignore —',
+                                            style: TextStyle(
+                                                color: Colors.black45))),
+                                    ...attr.values.map((v) => DropdownMenuItem(
+                                        value: v.id, child: Text(v.name))),
+                                  ],
+                                  onChanged: (v) =>
+                                      setLocal(() => g.choice = v ?? ''),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Apply')),
+          ],
+        ),
+      ),
+    );
+    if (result != true) return false;
+
+    // Learn each mapped word NOW (before import) so dna_resolve sees it, and add
+    // it to _dnaKnown so a re-run doesn't re-ask. Ignored words are stripped from
+    // the rows so they don't linger in the payload.
+    final ignored = <String>{}; // 'attrId|wordLower' left as Ignore
+    for (final g in groups.values) {
+      if (g.choice.isEmpty) {
+        ignored.add('${g.attributeId}|${g.label.toLowerCase()}');
+        continue;
+      }
+      await _dataSvc.dnaLearnAlias(g.attributeId, g.label, g.choice);
+      _dnaKnown[g.attributeId]?.add(g.label.toLowerCase());
+    }
+    if (ignored.isNotEmpty) {
+      for (final r in rows) {
+        if (r.dna.isEmpty) continue;
+        r.dna.removeWhere((attrId, words) {
+          words.removeWhere(
+              (w) => ignored.contains('$attrId|${w.trim().toLowerCase()}'));
+          return words.isEmpty;
+        });
+      }
     }
     return true;
   }
@@ -1296,4 +1467,16 @@ class _FinishGroup {
   String choice;
   int count = 0;
   _FinishGroup({required this.label, required this.choice});
+}
+
+class _DnaMapGroup {
+  final String attributeId;
+  final String attributeName;
+  final String label;     // the original raw word from the file
+  String choice = '';      // chosen value id; '' = ignore
+  int count = 0;
+  _DnaMapGroup(
+      {required this.attributeId,
+      required this.attributeName,
+      required this.label});
 }

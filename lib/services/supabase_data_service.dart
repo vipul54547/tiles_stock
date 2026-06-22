@@ -1147,6 +1147,19 @@ class SupabaseDataService {
         params: {'p_value_id': valueId, 'p_words': words});
   }
 
+  /// Learn/repoint ONE import alias: next time this stockist's import contains
+  /// [rawText] under [attributeId], it auto-resolves to [valueId]. Non-destructive
+  /// (leaves the value's other words intact) — the twin of [upsertSurfaceAlias]
+  /// for Design DNA, used by the importer's Map-DNA step.
+  Future<void> dnaLearnAlias(
+      String attributeId, String rawText, String valueId) async {
+    await supabase.rpc('dna_learn_alias', params: {
+      'p_attribute_id': attributeId,
+      'p_raw': rawText,
+      'p_value_id': valueId,
+    });
+  }
+
   /// Set (replace) a design's values for one attribute (single or multi).
   Future<void> dnaSetDesign(
       String libraryId, String attributeId, List<String> valueIds) async {
@@ -2585,6 +2598,65 @@ class SupabaseDataService {
   }
 
   // ── surface aliases (per-stockist learned PDF-word → finish mapping) ────────
+
+  /// This stockist's surface words grouped by admin finish: { finishName : [raw
+  /// words] }. The inverse view of [getSurfaceAliases], for the My Words screen
+  /// where each admin finish shows the stockist's own words mapped to it.
+  Future<Map<String, List<String>>> getSurfaceWordsByFinish(
+      String stockistUUID) async {
+    final flat = await getSurfaceAliases(stockistUUID); // {raw : finish}
+    final out = <String, List<String>>{};
+    flat.forEach((raw, finish) {
+      (out[finish] ??= <String>[]).add(raw);
+    });
+    for (final list in out.values) {
+      list.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    }
+    return out;
+  }
+
+  /// Replace this stockist's surface words for one admin finish [surfaceName]:
+  /// removes dropped words, upserts the rest (keyed on the normalised raw word,
+  /// repointing a word that was on another finish). The surface twin of
+  /// [dnaSetValueWords]. No-ops silently if [surfaceName] isn't a known finish.
+  Future<void> setSurfaceWords(
+      String stockistUUID, String surfaceName, List<String> words) async {
+    try {
+      final st = await supabase
+          .from('surface_types')
+          .select('id')
+          .eq('name', surfaceName)
+          .maybeSingle();
+      if (st == null) return;
+      final stId = st['id'];
+      final keys = <String>{};
+      for (final w in words) {
+        final k = normalizeSurfaceRaw(w);
+        if (k.isNotEmpty) keys.add(k);
+      }
+      // Drop this stockist's existing words for this finish that are gone now.
+      final existing = await supabase
+          .from('surface_aliases')
+          .select('id, raw_text')
+          .eq('stockist_id', stockistUUID)
+          .eq('surface_type_id', stId);
+      for (final row in existing) {
+        if (!keys.contains(row['raw_text'] as String)) {
+          await supabase.from('surface_aliases').delete().eq('id', row['id']);
+        }
+      }
+      // Upsert each remaining word → this finish (repoints if it sat elsewhere).
+      for (final k in keys) {
+        await supabase.from('surface_aliases').upsert({
+          'stockist_id': stockistUUID,
+          'raw_text': k,
+          'surface_type_id': stId,
+        }, onConflict: 'stockist_id,raw_text');
+      }
+    } catch (e, stk) {
+      debugPrint('setSurfaceWords failed ("$surfaceName"): $e\n$stk');
+    }
+  }
 
   /// Returns this stockist's learned aliases as { normalisedRaw : finishName }.
   /// Used during PDF upload to auto-align a raw surface word to the official
