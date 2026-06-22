@@ -40,6 +40,7 @@ dependencies:
   http: ^1.2.0
   excel: ^4.0.6
   syncfusion_flutter_pdf: ^28.1.33
+  syncfusion_flutter_xlsio: ^28.1.33   # generates the downloadable stock template (real dropdowns)
   image: ^4.3.0
   image_picker: ^1.1.2
   pdfx: ^2.6.0   # on-device PDF page rasteriser (pdfium) for the crop fallback

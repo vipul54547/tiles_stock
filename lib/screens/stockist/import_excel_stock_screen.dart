@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -5,6 +6,7 @@ import 'package:excel/excel.dart' hide Border, BorderStyle;
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/excel_template_service.dart';
 import '../../models/tile_design.dart';
 import '../../models/tile_size.dart';
 import '../../models/brand.dart';
@@ -133,6 +135,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   bool _parsed = false;
   bool _importing = false;
   bool _loading = false;
+  bool _downloading = false; // building/saving the blank template
   bool _combined = false; // sheet had brand-name columns → also map the Library
   String _filename = '';
   String _blockError = ''; // header / file-level problem
@@ -171,6 +174,42 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       .showSnackBar(SnackBar(content: Text(m), backgroundColor: c));
 
   // ── Pick & parse ───────────────────────────────────────────────────────────
+
+  // Build the blank template (.xlsx with dropdowns) and let the stockist save it.
+  // Skin = M (wide brand columns + Premium/Standard) when they run >1 brand, else
+  // single-brand. Needs the admin vocab + brands → loads config first.
+  Future<void> _downloadTemplate() async {
+    setState(() => _downloading = true);
+    try {
+      await _loadConfig();
+      final bytes = ExcelTemplateService.buildStockTemplate(
+        multiBrand: _brands.length > 1,
+        sizes: _sizes,
+        finishes: _finishes,
+        tileTypes: kTileTypes,
+        dnaAttrs: _dnaAttrs,
+        brands: _brands,
+      );
+      final safeBrand = _brandName.trim().isEmpty
+          ? 'stock'
+          : _brandName.trim().replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_');
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save stock template',
+        fileName: 'tiles_${safeBrand}_template.xlsx',
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx'],
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (!mounted) return;
+      if (path != null) {
+        _snack('Template saved. Fill it, then upload it here.', Colors.green);
+      }
+    } catch (e) {
+      if (mounted) _snack('Could not create template — $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
 
   Future<void> _pickAndParse() async {
     final res = await FilePicker.platform.pickFiles(
@@ -1089,6 +1128,36 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               ),
             ],
             const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: _downloading ? null : _downloadTemplate,
+                icon: _downloading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.download_rounded),
+                label: Text(
+                    _downloading ? 'Preparing…' : 'Download blank template',
+                    style: const TextStyle(fontSize: 14.5)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B4F72),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Pre-filled headers with dropdowns for size, quality, surface, '
+              'tile type and DNA — pick values instead of typing.',
+              style: TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               height: 52,
