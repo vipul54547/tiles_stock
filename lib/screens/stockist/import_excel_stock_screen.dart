@@ -86,6 +86,7 @@ class _XlsRow {
   TileDesign? match;      // matched existing design (name+size+quality)
   String action = 'skip'; // 'update' | 'new' | 'map' | 'skip'
   bool include = true;    // unchecked = excluded from import
+  bool editing = false;   // per-cell editor expanded for this row
   bool isNewDesign = false; // name+size not yet in the library (needs identity)
   // New design missing compulsory identity (tile type / pieces / weight) — blocks
   // Save until filled (in-app) or the row is excluded. Existing designs skip this.
@@ -676,6 +677,17 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         r.action = 'update';
       }
     }
+  }
+
+  // Re-run validation + action matching for a single row after a per-cell edit,
+  // so its tag (NEW/UPDATE/SKIP), error and new-design state refresh live. The
+  // edit fields write the canonical value straight onto sizeRaw/qualityRaw/
+  // surfaceRaw, which re-resolve to themselves.
+  void _reResolve(_XlsRow r) {
+    r.error = null;
+    _validateAndResolve([r]);
+    _computeActions([r]);
+    setState(() {});
   }
 
   // ── Map Finishes (only for finishes actually present in the file) ───────────
@@ -1470,6 +1482,22 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               const SizedBox(width: 6),
               Text('Row ${r.rowNum}',
                   style: const TextStyle(fontSize: 10, color: Colors.grey)),
+              if (!r.mapOnly)
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    iconSize: 18,
+                    tooltip: r.editing ? 'Done editing' : 'Edit row',
+                    icon: Icon(r.editing ? Icons.check : Icons.edit_outlined,
+                        color: const Color(0xFF1B4F72)),
+                    onPressed: _importing
+                        ? null
+                        : () => setState(() => r.editing = !r.editing),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 2),
@@ -1484,6 +1512,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                   ].join('  ·  '),
             style: const TextStyle(fontSize: 12, color: Colors.black54),
           ),
+          // Per-cell edit: fix name / size / quality / surface / boxes inline for
+          // ANY row (re-resolves the tag + errors live). Map-only rows excluded.
+          if (r.editing && !r.mapOnly) _rowEditor(r),
           // Combined sheet: show the per-brand names this row maps into the
           // Library, so the stockist can verify the cross-brand link.
           if (r.valid && r.brandNames.isNotEmpty) ...[
@@ -1514,7 +1545,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               Expanded(
                 flex: 4,
                 child: DropdownButtonFormField<String>(
-                  key: ValueKey('tt_${r.rowNum}'),
+                  key: ValueKey('tt_${identityHashCode(r)}'),
                   initialValue:
                       kTileTypes.contains(r.tileType) ? r.tileType : null,
                   isExpanded: true,
@@ -1537,7 +1568,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               Expanded(
                 flex: 3,
                 child: TextFormField(
-                  key: ValueKey('pc_${r.rowNum}'),
+                  key: ValueKey('pc_${identityHashCode(r)}'),
                   initialValue: (r.pieces ?? 0) > 0 ? '${r.pieces}' : '',
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
@@ -1552,7 +1583,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               Expanded(
                 flex: 3,
                 child: TextFormField(
-                  key: ValueKey('wt_${r.rowNum}'),
+                  key: ValueKey('wt_${identityHashCode(r)}'),
                   initialValue: (r.weight ?? 0) > 0 ? '${r.weight}' : '',
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
@@ -1584,6 +1615,122 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     color: Colors.red.shade700,
                     fontWeight: FontWeight.w600)),
           ],
+        ],
+      ),
+    );
+  }
+
+  // Inline per-cell editor for one row (name / size / quality / surface / boxes).
+  // Each field writes the canonical value onto the raw field and re-resolves.
+  Widget _rowEditor(_XlsRow r) {
+    final id = identityHashCode(r);
+    final surfOpts =
+        _finishes.contains('None') ? _finishes : <String>['None', ..._finishes];
+    const qualities = ['Premium', 'Standard'];
+    InputDecoration dec(String label) => InputDecoration(
+        isDense: true,
+        labelText: label,
+        border: const OutlineInputBorder(),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 8, vertical: 10));
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        children: [
+          TextFormField(
+            key: ValueKey('nm_$id'),
+            initialValue: r.name,
+            style: const TextStyle(fontSize: 12),
+            decoration: dec('Design name'),
+            onChanged: (v) {
+              r.name = v.trim();
+              _reResolve(r);
+            },
+          ),
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('sz_$id'),
+                initialValue: _sizes.contains(r.size) ? r.size : null,
+                isExpanded: true,
+                decoration: dec('Size'),
+                items: _sizes
+                    .map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(s, style: const TextStyle(fontSize: 12))))
+                    .toList(),
+                onChanged: _importing
+                    ? null
+                    : (v) {
+                        if (v == null) return;
+                        r.sizeRaw = v;
+                        _reResolve(r);
+                      },
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('ql_$id'),
+                initialValue:
+                    qualities.contains(r.quality) ? r.quality : null,
+                isExpanded: true,
+                decoration: dec('Quality'),
+                items: qualities
+                    .map((q) => DropdownMenuItem(
+                        value: q,
+                        child: Text(q, style: const TextStyle(fontSize: 12))))
+                    .toList(),
+                onChanged: _importing
+                    ? null
+                    : (v) {
+                        if (v == null) return;
+                        r.qualityRaw = v;
+                        _reResolve(r);
+                      },
+              ),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                key: ValueKey('sf_$id'),
+                initialValue:
+                    surfOpts.contains(r.surface) ? r.surface : 'None',
+                isExpanded: true,
+                decoration: dec('Surface'),
+                items: surfOpts
+                    .map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Text(s, style: const TextStyle(fontSize: 12))))
+                    .toList(),
+                onChanged: _importing
+                    ? null
+                    : (v) {
+                        if (v == null) return;
+                        r.surfaceRaw = v == 'None' ? '' : v;
+                        r.surface = v;
+                        _reResolve(r);
+                      },
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: TextFormField(
+                key: ValueKey('qt_$id'),
+                initialValue: r.qty >= 0 ? '${r.qty}' : '',
+                keyboardType: TextInputType.number,
+                style: const TextStyle(fontSize: 12),
+                decoration: dec('Boxes'),
+                onChanged: (v) {
+                  r.qty = _toInt(v) ?? -1;
+                  _reResolve(r);
+                },
+              ),
+            ),
+          ]),
         ],
       ),
     );
