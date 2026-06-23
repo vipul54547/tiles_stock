@@ -43,6 +43,12 @@ class _ImgDesign {
   bool include = true;
   int rotation = 0; // 0 / 90 / 180 / 270
   String? error; // set during commit on failure
+  // Per-design packing — seeded from the size/surface defaults on entering
+  // Preview, then individually overridable (two designs of one size can differ).
+  String? surface;
+  String? tileType;
+  int? pieces;
+  String weight = '';
   _ImgDesign({
     required this.path,
     required this.sizeFolder,
@@ -103,6 +109,13 @@ class _State extends State<AdminBulkImageImportScreen> {
   bool _stripSuffix = false; // strip trailing _A/_B from filenames
   Set<String> _existingKeys = {}; // "name|size|brandId" already in the library
 
+  // Per-design text controllers, OWNED by the State (keyed by file path) so the
+  // typed name/weight survive a row being disposed+rebuilt while scrolling — the
+  // model (`d`) stays the source of truth, the controller just keeps the widget
+  // text alive. Without this, edits to scrolled-past rows were lost.
+  final Map<String, TextEditingController> _nameCtrls = {};
+  final Map<String, TextEditingController> _weightCtrls = {};
+
   // Commit progress
   int _done = 0, _failed = 0, _total = 0;
 
@@ -111,6 +124,28 @@ class _State extends State<AdminBulkImageImportScreen> {
     super.initState();
     _load();
   }
+
+  @override
+  void dispose() {
+    _disposePreviewCtrls();
+    super.dispose();
+  }
+
+  void _disposePreviewCtrls() {
+    for (final c in _nameCtrls.values) {
+      c.dispose();
+    }
+    for (final c in _weightCtrls.values) {
+      c.dispose();
+    }
+    _nameCtrls.clear();
+    _weightCtrls.clear();
+  }
+
+  TextEditingController _nameCtrl(_ImgDesign d) =>
+      _nameCtrls.putIfAbsent(d.path, () => TextEditingController(text: d.name));
+  TextEditingController _weightCtrl(_ImgDesign d) =>
+      _weightCtrls.putIfAbsent(d.path, () => TextEditingController(text: d.weight));
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -255,6 +290,37 @@ class _State extends State<AdminBulkImageImportScreen> {
     return _existingKeys.contains('${d.name.toLowerCase()}|$size|$_brandId');
   }
 
+  // Surface picklist for the per-design dropdown — admin surfaces plus 'None'
+  // (a design from a folder without a surface subfolder defaults to None).
+  List<String> get _surfaceOptions =>
+      [..._adminSurfaces, if (!_adminSurfaces.contains('None')) 'None'];
+
+  // Seed each design's packing from the size/surface defaults, then show
+  // Preview where they become individually editable. One-way (Preview only
+  // exits via Import or Restart), so defaults always flow in cleanly.
+  void _enterPreview() {
+    // Drop any controllers from a previous preview so they re-seed from the
+    // values we set below (handles Restart / re-scanning the same folder).
+    _disposePreviewCtrls();
+    for (final d in _designs) {
+      final pack = _sizePacks[d.sizeFolder];
+      d.surface = d.surfaceFolder.isEmpty
+          ? 'None'
+          : (_surfaceMap[d.surfaceFolder] ?? 'None');
+      d.tileType = pack?.tileType;
+      d.pieces = pack?.pieces;
+      d.weight = pack?.weight ?? '';
+    }
+    setState(() => _phase = _Phase.preview);
+  }
+
+  // An included design is importable when its packing is fully filled.
+  bool _designReady(_ImgDesign d) =>
+      (d.surface ?? '').isNotEmpty &&
+      (d.tileType ?? '').isNotEmpty &&
+      (d.pieces ?? 0) > 0 &&
+      (double.tryParse(d.weight.trim()) ?? 0) > 0;
+
   // ── Commit ───────────────────────────────────────────────────────────────
   Future<void> _commit() async {
     final todo = _designs.where((d) => d.include).toList();
@@ -271,10 +337,14 @@ class _State extends State<AdminBulkImageImportScreen> {
         final res = await CloudinaryService.uploadImageBytes(bytes,
             filename: '${d.name}.jpg');
         if (!res.ok) throw res.error ?? 'upload failed';
-        final surface = d.surfaceFolder.isEmpty
-            ? 'None'
-            : (_surfaceMap[d.surfaceFolder] ?? 'None');
-        final weight = double.tryParse(pack.weight.trim()) ?? 0;
+        // Per-design values win; the size-pack default is the fallback.
+        final surface = (d.surface ?? '').isNotEmpty
+            ? d.surface!
+            : (d.surfaceFolder.isEmpty
+                ? 'None'
+                : (_surfaceMap[d.surfaceFolder] ?? 'None'));
+        final weightStr = d.weight.trim().isNotEmpty ? d.weight : pack.weight;
+        final weight = double.tryParse(weightStr.trim()) ?? 0;
         await _data.adminLibraryUpsert(
           seq: seq,
           size: pack.adminSize!,
@@ -282,8 +352,8 @@ class _State extends State<AdminBulkImageImportScreen> {
           brandId: _brandId!,
           imageUrl: res.url!,
           surface: surface,
-          tileType: pack.tileType,
-          pieces: pack.pieces,
+          tileType: (d.tileType ?? '').isNotEmpty ? d.tileType : pack.tileType,
+          pieces: d.pieces ?? pack.pieces,
           weight: weight,
         );
         d.error = null;
@@ -432,7 +502,7 @@ class _State extends State<AdminBulkImageImportScreen> {
           const SizedBox(height: 20),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: _navy),
-            onPressed: _mapReady ? () => setState(() => _phase = _Phase.preview) : null,
+            onPressed: _mapReady ? _enterPreview : null,
             child: Text(_mapReady
                 ? 'Continue to preview'
                 : 'Fill every size: admin size, tile type, pieces, weight'),
@@ -530,9 +600,11 @@ class _State extends State<AdminBulkImageImportScreen> {
       );
 
   Widget _buildPreview() {
-    final on = _designs.where((d) => d.include).length;
-    final existing = _designs.where((d) => d.include && _isExisting(d)).length;
+    final included = _designs.where((d) => d.include).toList();
+    final on = included.length;
+    final existing = included.where(_isExisting).length;
     final fresh = on - existing;
+    final notReady = included.where((d) => !_designReady(d)).length;
     return Column(
       children: [
         Container(
@@ -541,14 +613,22 @@ class _State extends State<AdminBulkImageImportScreen> {
           padding: const EdgeInsets.all(12),
           child: Row(children: [
             Expanded(
-              child: Text(
-                  '$on selected · $fresh new · $existing already in library',
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('$on selected · $fresh new · $existing already in library',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  if (notReady > 0)
+                    Text('$notReady need surface / tile type / pieces / weight',
+                        style: const TextStyle(fontSize: 11.5, color: Colors.red)),
+                ],
+              ),
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: _navy),
-              onPressed: on > 0 ? _commit : null,
+              onPressed: (on > 0 && notReady == 0) ? _commit : null,
               icon: const Icon(Icons.cloud_upload, size: 18),
               label: Text('Import $on'),
             ),
@@ -557,6 +637,9 @@ class _State extends State<AdminBulkImageImportScreen> {
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(8),
+            // Keep a large cache so rows aren't disposed while scrolling —
+            // belt-and-braces with the State-owned controllers above.
+            cacheExtent: 100000,
             itemCount: _designs.length,
             itemBuilder: (_, i) => _previewRow(_designs[i]),
           ),
@@ -567,64 +650,154 @@ class _State extends State<AdminBulkImageImportScreen> {
 
   Widget _previewRow(_ImgDesign d) {
     final size = _sizePacks[d.sizeFolder]?.adminSize ?? d.sizeFolder;
-    final surface = d.surfaceFolder.isEmpty ? 'None' : (_surfaceMap[d.surfaceFolder] ?? 'None');
     return Card(
+      key: ValueKey(d.path),
       margin: const EdgeInsets.only(bottom: 6),
       child: Padding(
         padding: const EdgeInsets.all(8),
-        child: Row(children: [
-          Checkbox(
-            value: d.include,
-            onChanged: (v) => setState(() => d.include = v ?? true),
-          ),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: RotatedBox(
-              quarterTurns: d.rotation ~/ 90,
-              child: Image.file(File(d.path),
-                  width: 56, height: 56, fit: BoxFit.cover, cacheWidth: 120,
-                  errorBuilder: (_, __, ___) => Container(
-                      width: 56, height: 56, color: Colors.grey.shade200,
-                      child: const Icon(Icons.broken_image, size: 18))),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextFormField(
-                  initialValue: d.name,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  decoration: const InputDecoration(
-                      isDense: true, border: InputBorder.none, hintText: 'design name'),
-                  onChanged: (v) => d.name = v.trim(),
+        child: Column(
+          children: [
+            Row(children: [
+              Checkbox(
+                value: d.include,
+                onChanged: (v) => setState(() => d.include = v ?? true),
+              ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: RotatedBox(
+                  quarterTurns: d.rotation ~/ 90,
+                  child: Image.file(File(d.path),
+                      width: 56, height: 56, fit: BoxFit.cover, cacheWidth: 120,
+                      errorBuilder: (_, __, ___) => Container(
+                          width: 56, height: 56, color: Colors.grey.shade200,
+                          child: const Icon(Icons.broken_image, size: 18))),
                 ),
-                Text('$size  ·  $surface',
-                    style: const TextStyle(fontSize: 11.5, color: Colors.black54)),
-              ],
-            ),
-          ),
-          Builder(builder: (_) {
-            final ex = _isExisting(d);
-            final c = ex ? _navy : const Color(0xFF2E7D32);
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                  color: c.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(4)),
-              child: Text(ex ? 'EXISTS' : 'NEW',
-                  style: TextStyle(
-                      fontSize: 9, fontWeight: FontWeight.bold, color: c)),
-            );
-          }),
-          const SizedBox(width: 4),
-          IconButton(
-            tooltip: 'Rotate 90°',
-            icon: const Icon(Icons.rotate_right, color: _navy),
-            onPressed: () => setState(() => d.rotation = (d.rotation + 90) % 360),
-          ),
-        ]),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextFormField(
+                      key: ValueKey('name_${d.path}'),
+                      controller: _nameCtrl(d),
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600),
+                      decoration: const InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: 'design name'),
+                      onChanged: (v) => d.name = v.trim(),
+                    ),
+                    Text(size,
+                        style: const TextStyle(
+                            fontSize: 11.5, color: Colors.black54)),
+                  ],
+                ),
+              ),
+              Builder(builder: (_) {
+                final ex = _isExisting(d);
+                final c = ex ? _navy : const Color(0xFF2E7D32);
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: c.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4)),
+                  child: Text(ex ? 'EXISTS' : 'NEW',
+                      style: TextStyle(
+                          fontSize: 9, fontWeight: FontWeight.bold, color: c)),
+                );
+              }),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Rotate 90°',
+                icon: const Icon(Icons.rotate_right, color: _navy),
+                onPressed: () =>
+                    setState(() => d.rotation = (d.rotation + 90) % 360),
+              ),
+            ]),
+            // Per-design packing — pre-filled from the size/surface defaults,
+            // overridable so two designs of one size can differ.
+            const SizedBox(height: 6),
+            Row(children: [
+              Expanded(
+                flex: 6,
+                child: DropdownButtonFormField<String>(
+                  key: ValueKey('surf_${d.path}'),
+                  initialValue:
+                      _surfaceOptions.contains(d.surface) ? d.surface : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Surface',
+                      border: OutlineInputBorder()),
+                  items: _surfaceOptions
+                      .map((s) => DropdownMenuItem(
+                          value: s,
+                          child: Text(s, style: const TextStyle(fontSize: 12))))
+                      .toList(),
+                  onChanged: (v) => setState(() => d.surface = v),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                flex: 6,
+                child: DropdownButtonFormField<String>(
+                  key: ValueKey('tt_${d.path}'),
+                  initialValue:
+                      kTileTypes.contains(d.tileType) ? d.tileType : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Tile type',
+                      border: OutlineInputBorder()),
+                  items: kTileTypes
+                      .map((t) => DropdownMenuItem(
+                          value: t,
+                          child: Text(t, style: const TextStyle(fontSize: 12))))
+                      .toList(),
+                  onChanged: (v) => setState(() => d.tileType = v),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                flex: 4,
+                child: DropdownButtonFormField<int>(
+                  key: ValueKey('pcs_${d.path}'),
+                  initialValue: const [1, 2, 3, 4, 5, 6, 8, 10, 12]
+                          .contains(d.pieces)
+                      ? d.pieces
+                      : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Pcs',
+                      border: OutlineInputBorder()),
+                  items: const [1, 2, 3, 4, 5, 6, 8, 10, 12]
+                      .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
+                      .toList(),
+                  onChanged: (v) => setState(() => d.pieces = v),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                flex: 5,
+                child: TextFormField(
+                  key: ValueKey('wt_${d.path}'),
+                  controller: _weightCtrl(d),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  style: const TextStyle(fontSize: 12),
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Wt (kg)',
+                      border: OutlineInputBorder()),
+                  onChanged: (v) => setState(() => d.weight = v),
+                ),
+              ),
+            ]),
+          ],
+        ),
       ),
     );
   }
