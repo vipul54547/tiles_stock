@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
-import 'package:excel/excel.dart' hide Border, BorderStyle;
+import 'package:excel/excel.dart' hide Border, BorderStyle, TextSpan;
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
@@ -1670,6 +1670,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final incomplete =
         _rows.where((r) => r.valid && r.include && r.needsFill).length;
     final allDone = !_importing && _done > 0 && _done >= willImport;
+    // Group rows by design identity (name+size) — identity shown once, a line
+    // per quality (see _groupedRows).
+    final groups = _groupedRows();
 
     return Column(
       children: [
@@ -1788,8 +1791,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           child: ListView.builder(
             padding: EdgeInsets.fromLTRB(
                 12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
-            itemCount: _rows.length,
-            itemBuilder: (_, i) => _rowCard(_rows[i]),
+            itemCount: groups.length,
+            itemBuilder: (_, i) => _groupCard(groups[i]),
           ),
         ),
       ],
@@ -1832,113 +1835,123 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         child: Icon(Icons.image_outlined, size: 16, color: Colors.grey.shade400),
       );
 
-  Widget _rowCard(_XlsRow r) {
-    final Color border, bg;
-    String tag;
-    Color tagColor;
+  // Tag + colours for one stock line (holding) by its resolved action.
+  ({String tag, Color color, Color border, Color bg}) _rowStyle(_XlsRow r) {
     if (!r.valid) {
-      border = Colors.red.shade200; bg = const Color(0xFFFFEBEE);
-      tag = 'SKIP'; tagColor = Colors.red;
+      return (tag: 'SKIP', color: Colors.red,
+          border: Colors.red.shade200, bg: const Color(0xFFFFEBEE));
     } else if (r.action == 'new') {
-      border = Colors.green.shade200; bg = const Color(0xFFE8F5E9);
-      tag = 'NEW'; tagColor = const Color(0xFF2E7D32);
+      return (tag: 'NEW', color: const Color(0xFF2E7D32),
+          border: Colors.green.shade200, bg: const Color(0xFFE8F5E9));
     } else if (r.action == 'map') {
-      border = const Color(0xFFE1BEE7); bg = const Color(0xFFF3E5F5);
-      tag = 'MAP'; tagColor = const Color(0xFF6A1B9A);
-    } else {
-      border = Colors.blue.shade100; bg = const Color(0xFFE3F2FD);
-      tag = 'UPDATE'; tagColor = const Color(0xFF1B4F72);
+      return (tag: 'MAP', color: const Color(0xFF6A1B9A),
+          border: const Color(0xFFE1BEE7), bg: const Color(0xFFF3E5F5));
     }
+    return (tag: 'UPDATE', color: const Color(0xFF1B4F72),
+        border: Colors.blue.shade100, bg: const Color(0xFFE3F2FD));
+  }
+
+  // Group rows by design identity (name + size) so a design with several
+  // qualities (wide Premium/Standard, ENTRY batches) shows as ONE card: the
+  // identity (tile type / pieces / weight — same for every quality because it
+  // lives on the library, keyed by name+size) is shown and filled once, and each
+  // quality is a separate stock line. Order = first appearance.
+  List<List<_XlsRow>> _groupedRows() {
+    final groups = <String, List<_XlsRow>>{};
+    final order = <String>[];
+    for (final r in _rows) {
+      final key = '${r.name.trim().toLowerCase()}|'
+          '${_sizeKey(r.size.isNotEmpty ? r.size : r.sizeRaw)}';
+      final g = groups[key];
+      if (g == null) {
+        groups[key] = [r];
+        order.add(key);
+      } else {
+        g.add(r);
+      }
+    }
+    return [for (final k in order) groups[k]!];
+  }
+
+  Widget _groupCard(List<_XlsRow> group) {
+    final first = group.first;
+    final size = first.size.isNotEmpty ? first.size : first.sizeRaw;
+    final hasInvalid = group.any((r) => !r.valid);
+    final hasNew = group.any((r) => r.valid && r.action == 'new');
+    // Card colour: skip(red) if any line invalid, else new(green) if any new,
+    // else the first line's style (update / map).
+    final head = hasInvalid
+        ? _rowStyle(group.firstWhere((r) => !r.valid))
+        : hasNew
+            ? _rowStyle(group.firstWhere((r) => r.action == 'new'))
+            : _rowStyle(first);
+    final isNew = group.any((r) => r.valid && r.isNewDesign);
+    final mapOnly = group.every((r) => r.mapOnly);
+    final brandNames = group
+        .firstWhere((r) => r.brandNames.isNotEmpty, orElse: () => first)
+        .brandNames;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: bg,
+        color: head.bg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: border),
+        border: Border.all(color: head.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Design identity (shown ONCE) ──
           Row(
             children: [
-              if (r.valid) ...[ _libThumb(r), const SizedBox(width: 8) ],
-              if (r.valid)
-                Checkbox(
-                  value: r.include,
-                  visualDensity: VisualDensity.compact,
-                  onChanged: _importing
-                      ? null
-                      : (v) => setState(() => r.include = v ?? true),
-                ),
+              if (!hasInvalid) ...[_libThumb(first), const SizedBox(width: 8)],
               Expanded(
-                child: Text(r.name.isEmpty ? '(no name)' : r.name,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13),
-                    overflow: TextOverflow.ellipsis),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: tagColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(first.name.isEmpty ? '(no name)' : first.name,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13.5),
+                        overflow: TextOverflow.ellipsis),
+                    Text(size.isEmpty ? '(no size)' : size,
+                        style: const TextStyle(
+                            fontSize: 11.5, color: Colors.black54)),
+                  ],
                 ),
-                child: Text(tag,
-                    style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                        color: tagColor)),
               ),
-              const SizedBox(width: 6),
-              Text('Row ${r.rowNum}',
-                  style: const TextStyle(fontSize: 10, color: Colors.grey)),
-              if (!r.mapOnly)
-                SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 18,
-                    tooltip: r.editing ? 'Done editing' : 'Edit row',
-                    icon: Icon(r.editing ? Icons.check : Icons.edit_outlined,
-                        color: const Color(0xFF1B4F72)),
-                    onPressed: _importing
-                        ? null
-                        : () => setState(() => r.editing = !r.editing),
+              if (group.length > 1)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1B4F72).withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(4),
                   ),
+                  child: Text('${group.length} qualities',
+                      style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B4F72))),
                 ),
             ],
           ),
-          const SizedBox(height: 2),
-          Text(
-            r.mapOnly
-                ? '${r.size.isNotEmpty ? r.size : r.sizeRaw}  ·  map only (not sold under this brand)'
-                : [
-                    if (r.size.isNotEmpty) r.size else r.sizeRaw,
-                    if (r.quality.isNotEmpty) r.quality else r.qualityRaw,
-                    if (r.qty >= 0) '${r.qty} boxes',
-                    if (r.surfaceRaw.trim().isNotEmpty) r.surface,
-                  ].join('  ·  '),
-            style: const TextStyle(fontSize: 12, color: Colors.black54),
-          ),
-          // Per-cell edit: fix name / size / quality / surface / boxes inline for
-          // ANY row (re-resolves the tag + errors live). Map-only rows excluded.
-          if (r.editing && !r.mapOnly) _rowEditor(r),
-          // Combined sheet: show the per-brand names this row maps into the
-          // Library, so the stockist can verify the cross-brand link.
-          if (r.valid && r.brandNames.isNotEmpty) ...[
-            const SizedBox(height: 5),
+          const SizedBox(height: 4),
+          // ── One line per quality / stock line ──
+          ...group.map(_qualityLine),
+          // ── Per-brand names written to the Library (shown ONCE) ──
+          if (brandNames.isNotEmpty) ...[
+            const SizedBox(height: 6),
             Wrap(
               spacing: 6,
               runSpacing: 4,
-              children: r.brandNames.entries
+              children: brandNames.entries
                   .map((a) => Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 7, vertical: 3),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF6A1B9A).withValues(alpha: 0.08),
+                          color:
+                              const Color(0xFF6A1B9A).withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text('${_brandLabel(a.key)}: ${a.value}',
@@ -1948,86 +1961,194 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                   .toList(),
             ),
           ],
-          // New design → identity (tile type / pieces / weight) is compulsory and
-          // editable here. Existing designs skip this (identity already set).
-          if (r.valid && r.include && r.isNewDesign) ...[
-            const SizedBox(height: 8),
-            Row(children: [
-              Expanded(
-                flex: 4,
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey('tt_${identityHashCode(r)}'),
-                  initialValue:
-                      kTileTypes.contains(r.tileType) ? r.tileType : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                      isDense: true,
-                      labelText: 'Tile type',
-                      border: OutlineInputBorder()),
-                  items: kTileTypes
-                      .map((t) => DropdownMenuItem(
-                          value: t,
-                          child:
-                              Text(t, style: const TextStyle(fontSize: 12))))
-                      .toList(),
-                  onChanged: _importing
+          // ── Identity fields — filled ONCE for the whole design (new only) ──
+          if (isNew && !mapOnly) _groupIdentity(group),
+        ],
+      ),
+    );
+  }
+
+  // One stock line (quality + surface + qty) inside a design group, with its own
+  // include checkbox, NEW/UPDATE/SKIP tag and inline editor. Quality is shown
+  // prominently so a multi-quality design never reads as a duplicate.
+  Widget _qualityLine(_XlsRow r) {
+    final st = _rowStyle(r);
+    final rest = [
+      if (r.surfaceRaw.trim().isNotEmpty) r.surface,
+      if (r.qty >= 0) '${r.qty} boxes',
+    ].join('  ·  ');
+    final quality = r.quality.isNotEmpty ? r.quality : r.qualityRaw;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            SizedBox(
+              width: 28,
+              child: r.valid
+                  ? Checkbox(
+                      value: r.include,
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: _importing
+                          ? null
+                          : (v) => setState(() => r.include = v ?? true),
+                    )
+                  : null,
+            ),
+            Expanded(
+              child: r.mapOnly
+                  ? const Text('map only (not sold under this brand)',
+                      style: TextStyle(fontSize: 12, color: Colors.black54))
+                  : Text.rich(
+                      TextSpan(children: [
+                        TextSpan(
+                            text: quality.isEmpty ? '(no quality)' : quality,
+                            style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1B4F72))),
+                        if (rest.isNotEmpty)
+                          TextSpan(
+                              text: '   $rest',
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.black54)),
+                      ]),
+                      overflow: TextOverflow.ellipsis),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: st.color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(st.tag,
+                  style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: st.color)),
+            ),
+            Text('  Row ${r.rowNum}',
+                style: const TextStyle(fontSize: 9.5, color: Colors.grey)),
+            if (!r.mapOnly && r.valid)
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 17,
+                  tooltip: r.editing ? 'Done' : 'Edit this line',
+                  icon: Icon(r.editing ? Icons.check : Icons.edit_outlined,
+                      color: const Color(0xFF1B4F72)),
+                  onPressed: _importing
                       ? null
-                      : (v) => setState(() => r.tileType = v ?? ''),
+                      : () => setState(() => r.editing = !r.editing),
                 ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                flex: 3,
-                child: TextFormField(
-                  key: ValueKey('pc_${identityHashCode(r)}'),
-                  initialValue: (r.pieces ?? 0) > 0 ? '${r.pieces}' : '',
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      isDense: true,
-                      labelText: 'Pieces',
-                      border: OutlineInputBorder()),
-                  onChanged: (v) =>
-                      setState(() => r.pieces = int.tryParse(v.trim())),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                flex: 3,
-                child: TextFormField(
-                  key: ValueKey('wt_${identityHashCode(r)}'),
-                  initialValue: (r.weight ?? 0) > 0 ? '${r.weight}' : '',
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                      isDense: true,
-                      labelText: 'Weight kg',
-                      border: OutlineInputBorder()),
-                  onChanged: (v) =>
-                      setState(() => r.weight = double.tryParse(v.trim())),
-                ),
-              ),
-            ]),
-            if (r.needsFill)
-              Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Text(
-                    'New design — fill tile type, pieces and weight (or untick).',
-                    style: TextStyle(
-                        fontSize: 10.5,
-                        color: Colors.orange.shade800,
-                        fontWeight: FontWeight.w600)),
               ),
           ],
-          if (!r.valid) ...[
-            const SizedBox(height: 4),
-            Text(r.error!,
+        ),
+        if (!r.valid)
+          Padding(
+            padding: const EdgeInsets.only(left: 28, bottom: 2),
+            child: Text(r.error ?? 'Invalid row',
                 style: TextStyle(
                     fontSize: 11,
                     color: Colors.red.shade700,
                     fontWeight: FontWeight.w600)),
-          ],
-        ],
-      ),
+          ),
+        if (r.editing && !r.mapOnly) _rowEditor(r),
+      ],
+    );
+  }
+
+  // The design's identity — tile type / pieces / weight — shown ONCE and written
+  // to EVERY quality line in the group (it lives on the library, keyed by
+  // name+size, so it can't differ per quality). Blocks Save until filled.
+  Widget _groupIdentity(List<_XlsRow> group) {
+    final first = group.first;
+    final id = identityHashCode(first);
+    void setAll(void Function(_XlsRow) f) =>
+        setState(() { for (final r in group) { f(r); } });
+    final needsFill = group.any((r) => r.valid && r.include && r.needsFill);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        const Text('Fill once for this design:',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.black54)),
+        const SizedBox(height: 4),
+        Row(children: [
+          Expanded(
+            flex: 4,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('tt_$id'),
+              initialValue:
+                  kTileTypes.contains(first.tileType) ? first.tileType : null,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'Tile type',
+                  border: OutlineInputBorder()),
+              items: kTileTypes
+                  .map((t) => DropdownMenuItem(
+                      value: t,
+                      child: Text(t, style: const TextStyle(fontSize: 12))))
+                  .toList(),
+              onChanged:
+                  _importing ? null : (v) => setAll((r) => r.tileType = v ?? ''),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            flex: 3,
+            child: TextFormField(
+              key: ValueKey('pc_$id'),
+              initialValue: (first.pieces ?? 0) > 0 ? '${first.pieces}' : '',
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'Pieces',
+                  border: OutlineInputBorder()),
+              onChanged: (v) {
+                final n = int.tryParse(v.trim());
+                setAll((r) => r.pieces = n);
+              },
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            flex: 3,
+            child: TextFormField(
+              key: ValueKey('wt_$id'),
+              initialValue: (first.weight ?? 0) > 0 ? '${first.weight}' : '',
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                  isDense: true,
+                  labelText: 'Weight kg',
+                  border: OutlineInputBorder()),
+              onChanged: (v) {
+                final w = double.tryParse(v.trim());
+                setAll((r) => r.weight = w);
+              },
+            ),
+          ),
+        ]),
+        if (needsFill)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(
+                'New design — fill tile type, pieces and weight (or untick).',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    color: Colors.orange.shade800,
+                    fontWeight: FontWeight.w600)),
+          ),
+      ],
     );
   }
 
