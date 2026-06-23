@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -59,6 +60,24 @@ class _SizePack {
 }
 
 enum _Phase { pick, map, preview, committing, done }
+
+// EXIF-bake → manual rotate → downscale to ~2000px → JPEG q85. Top-level + sync
+// so it can run inside Isolate.run (off the UI thread). Reads the file itself so
+// only the path (sendable) crosses the isolate boundary.
+Uint8List _processImageSync(String path, int rotation) {
+  final raw = File(path).readAsBytesSync();
+  var im = img.decodeImage(raw);
+  if (im == null) throw 'unsupported/corrupt image';
+  im = img.bakeOrientation(im);
+  if (rotation != 0) im = img.copyRotate(im, angle: rotation);
+  final longest = im.width > im.height ? im.width : im.height;
+  if (longest > 2000) {
+    im = im.width >= im.height
+        ? img.copyResize(im, width: 2000)
+        : img.copyResize(im, height: 2000);
+  }
+  return Uint8List.fromList(img.encodeJpg(im, quality: 85));
+}
 
 class _State extends State<AdminBulkImageImportScreen> {
   final _data = SupabaseDataService();
@@ -262,20 +281,13 @@ class _State extends State<AdminBulkImageImportScreen> {
     if (mounted) setState(() => _phase = _Phase.done);
   }
 
-  // EXIF-bake → rotate (manual) → downscale to ~2000px → JPEG q85.
-  Future<Uint8List> _processImage(_ImgDesign d) async {
-    final raw = await File(d.path).readAsBytes();
-    var im = img.decodeImage(raw);
-    if (im == null) throw 'unsupported/corrupt image';
-    im = img.bakeOrientation(im);
-    if (d.rotation != 0) im = img.copyRotate(im, angle: d.rotation);
-    final longest = im.width > im.height ? im.width : im.height;
-    if (longest > 2000) {
-      im = im.width >= im.height
-          ? img.copyResize(im, width: 2000)
-          : img.copyResize(im, height: 2000);
-    }
-    return Uint8List.fromList(img.encodeJpg(im, quality: 85));
+  // Run the heavy decode/resize/encode in a BACKGROUND ISOLATE so the UI never
+  // freezes and the progress counter updates live (30 MB+ JPEGs are CPU-heavy).
+  // Capture only primitives (path, rotation) across the isolate boundary.
+  Future<Uint8List> _processImage(_ImgDesign d) {
+    final path = d.path;
+    final rot = d.rotation;
+    return Isolate.run(() => _processImageSync(path, rot));
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
