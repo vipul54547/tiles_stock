@@ -386,9 +386,31 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       return;
     }
 
+    // A header that exactly matches a (value-list) Design DNA attribute name
+    // belongs to DNA, not to a generic synonym field — e.g. "Colour" is the DNA
+    // Colour attribute, NOT the free-text colour field (whose synonyms would
+    // otherwise swallow the header and block DNA tagging). Reserve those columns
+    // so the synonym matching below skips them and DNA detection claims them.
+    final dnaNameCols = <int>{};
+    for (final attr in _dnaAttrs) {
+      if (attr.isFreeText) continue;
+      final h = _normHeader(attr.name);
+      if (h.isEmpty) continue;
+      final i = header.indexWhere((x) => x == h);
+      if (i >= 0) dnaNameCols.add(i);
+    }
+
     final colOf = <String, int>{};
     _headerSynonyms.forEach((field, syns) {
-      colOf[field] = header.indexWhere((h) => syns.contains(h));
+      var idx = -1;
+      for (var i = 0; i < header.length; i++) {
+        if (dnaNameCols.contains(i)) continue; // reserved for DNA
+        if (syns.contains(header[i])) {
+          idx = i;
+          break;
+        }
+      }
+      colOf[field] = idx;
     });
     final masterCol = header.indexWhere((h) => _masterHeaders.contains(h));
 
