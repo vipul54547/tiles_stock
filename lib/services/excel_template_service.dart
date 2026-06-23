@@ -54,45 +54,63 @@ class ExcelTemplateService {
       });
 
       // ── Stock sheet headers (order = skin) ──
+      // Columns are grouped left→right into blocks, colour-coded on the header so
+      // the stockist sees at a glance what to re-enter vs what to set once:
+      //   • DAILY (navy)  → identity + the value that changes every upload
+      //     (quality / quantity). Fill on every row.
+      //   • SET-ONCE (grey) → Surface, Tile Type, Pieces/Box, Weight, DNA. Only a
+      //     NEW design needs these; for an existing design the importer reuses the
+      //     stored value, so they can be left blank.
+      //   • BRAND (purple, M only) → this design's name under each brand.
+      const dailyColor = '#1B4F72';
+      const onceColor = '#6C7A89';
+      const brandColor = '#6A1B9A';
+
       final headers = <String>[];
       // Each entry maps its column to the Lists header it should validate against
-      // (null = free text / number, no dropdown).
+      // (null = free text / number, no dropdown), plus its header colour.
       final validateWith = <String?>[];
-      void col(String h, String? listHeader) {
+      final headerColor = <String>[];
+      void col(String h, String? listHeader, String color) {
         headers.add(h);
         validateWith.add(listHeader);
+        headerColor.add(color);
       }
 
       if (multiBrand) {
-        col('Master Design', null);
+        col('Master Design', null, dailyColor);
         for (final b in brands) {
-          col(b.name, null);
+          col(b.name, null, brandColor);
         }
-        col('Size', 'Size');
-        col('Surface', 'Surface');
-        col('Premium', null);
-        col('Standard', null);
-        col('Tile Type', 'Tile Type');
-        col('Pieces/Box', null);
-        col('Weight (kg)', null);
+        col('Size', 'Size', dailyColor);
+        col('Premium', null, dailyColor);
+        col('Standard', null, dailyColor);
+        col('Surface', 'Surface', onceColor);
+        col('Tile Type', 'Tile Type', onceColor);
+        col('Pieces/Box', null, onceColor);
+        col('Weight (kg)', null, onceColor);
       } else {
-        col('Design Name', null);
-        col('Size', 'Size');
-        col('Quality', 'Quality');
-        col('Box Qty', null);
-        col('Surface', 'Surface');
-        col('Tile Type', 'Tile Type');
-        col('Pieces/Box', null);
-        col('Weight (kg)', null);
+        col('Design Name', null, dailyColor);
+        col('Size', 'Size', dailyColor);
+        col('Quality', 'Quality', dailyColor);
+        col('Box Qty', null, dailyColor);
+        col('Surface', 'Surface', onceColor);
+        col('Tile Type', 'Tile Type', onceColor);
+        col('Pieces/Box', null, onceColor);
+        col('Weight (kg)', null, onceColor);
       }
       for (final a in dnaUsable) {
-        col(a.name, a.name);
+        col(a.name, a.name, onceColor);
       }
 
       for (var i = 0; i < headers.length; i++) {
         final cell = stock.getRangeByIndex(1, i + 1);
         cell.setText(headers[i]);
-        cell.cellStyle.bold = true;
+        cell.cellStyle
+          ..bold = true
+          ..fontColor = '#FFFFFF'
+          ..backColor = headerColor[i]
+          ..hAlign = HAlignType.center;
       }
 
       // ── Dropdowns: each validated column over the data rows, sourced from Lists ──
@@ -113,6 +131,27 @@ class ExcelTemplateService {
       for (var i = 1; i <= headers.length; i++) {
         stock.autoFitColumn(i);
       }
+      // Keep the header visible while scrolling the data rows.
+      stock.getRangeByName('A2').freezePanes();
+
+      // Colour legend on the (helper) Lists sheet so the header colours are
+      // self-explanatory. lc is the next free column after the vocab columns;
+      // leave a one-column gap so it doesn't touch a validation range.
+      final legendCol = lc + 1;
+      lists.getRangeByIndex(1, legendCol).setText('Colour guide');
+      lists.getRangeByIndex(1, legendCol).cellStyle.bold = true;
+      lists
+          .getRangeByIndex(2, legendCol)
+          .setText('Navy = fill every time (identity + quantity)');
+      lists
+          .getRangeByIndex(3, legendCol)
+          .setText('Grey = fill ONCE for a new design, then leave blank');
+      if (multiBrand) {
+        lists
+            .getRangeByIndex(4, legendCol)
+            .setText("Purple = this design's name under each brand");
+      }
+      lists.autoFitColumn(legendCol);
 
       return wb.saveAsStream();
     } finally {

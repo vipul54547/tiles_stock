@@ -1002,12 +1002,20 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     setState(() {});
   }
 
-  // ── Map Finishes (only for finishes actually present in the file) ───────────
+  // ── Map Finishes (only for finishes that don't already resolve) ─────────────
+  // Mirrors the DNA step: a finish that already matches an admin finish exactly
+  // (or via a learned alias) needs no mapping, so it's skipped. A stockist who
+  // picks from the template's Surface dropdown therefore never sees this step;
+  // it only surfaces genuine mismatches (their own wording / own spreadsheet).
 
   Future<bool> _mapFinishesStep(List<_XlsRow> rows) async {
     final groups = <String, _FinishGroup>{}; // rawKey → group
     for (final r in rows) {
       if (!r.valid || r.surfaceRaw.trim().isEmpty) continue;
+      final aliased = _aliases[r.rawKey];
+      final resolves = (aliased != null && _finishes.contains(aliased)) ||
+          _finishes.contains(r.surfaceRaw.trim());
+      if (resolves) continue; // already an admin finish — nothing to map
       final initial = _finishes.contains(r.surface)
           ? r.surface
           : (_finishes.isNotEmpty ? _finishes.first : r.surface);
