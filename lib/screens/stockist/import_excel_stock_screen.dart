@@ -140,6 +140,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   final Set<String> _libKeys = {};  // name|size of existing library designs (+aliases)
   // Quantity mode: false = Add only (top-up); true = Update & keep (set to file).
   bool _overwrite = false;
+  // The quantity mode is chosen up-front (a dedicated step) BEFORE picking a
+  // file, so it never reappears as a toggle on the Review screen.
+  bool _modeChosen = false;
   String? _defaultBrandId;
   bool _parsed = false;
   bool _importing = false;
@@ -1380,7 +1383,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   void _reset() => setState(() {
         _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = '';
         _libImages = {}; _combined = false; _batchId = ''; _dnaDetected = [];
-        _wideQty = false;
+        _wideQty = false; _modeChosen = false; // back to the quantity-mode step
       });
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -1401,15 +1404,85 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _parsed
-              ? _buildReview()
-              : _buildIntro(),
+          : !_modeChosen
+              ? _buildModeStep()
+              : _parsed
+                  ? _buildReview()
+                  : _buildIntro(),
+    );
+  }
+
+  // Step 1 (before any file): choose how the file's box numbers are applied.
+  // Picking one advances to the Browse/import page; the choice is shown read-only
+  // on Review, never again as a second toggle.
+  Widget _buildModeStep() {
+    Widget card(String title, String sub, IconData icon, bool overwrite) =>
+        InkWell(
+          onTap: () => setState(() {
+            _overwrite = overwrite;
+            _modeChosen = true;
+          }),
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            margin: const EdgeInsets.only(bottom: 14),
+            decoration: BoxDecoration(
+              border: Border.all(color: const Color(0xFF1B4F72), width: 1.5),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(children: [
+              Icon(icon, color: const Color(0xFF1B4F72), size: 30),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1B4F72))),
+                    const SizedBox(height: 3),
+                    Text(sub,
+                        style: const TextStyle(
+                            fontSize: 12.5, color: Colors.black54)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Color(0xFF1B4F72)),
+            ]),
+          ),
+        );
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(
+          20, 24, 20, 20 + MediaQuery.viewPaddingOf(context).bottom),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('How should the box numbers be applied?',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          const Text(
+              'Pick once before choosing your file. You can change it later '
+              'with Reset.',
+              style: TextStyle(fontSize: 12.5, color: Colors.black54)),
+          const SizedBox(height: 20),
+          card('Add only',
+              "Top-up — add the file's boxes to what you already have",
+              Icons.add_circle_outline, false),
+          card('Update & keep',
+              "Set — replace each design's boxes with the file's number",
+              Icons.sync_alt, true),
+        ],
+      ),
     );
   }
 
   Widget _buildIntro() => SingleChildScrollView(
-        // Bottom inset clears the system nav bar so the "Browse" button at the
-        // end isn't tucked under it (edge-to-edge).
+        // Bottom inset clears the system nav bar so the bottom button isn't
+        // tucked under it (edge-to-edge).
         padding: EdgeInsets.fromLTRB(
             20, 20, 20, 20 + MediaQuery.viewPaddingOf(context).bottom),
         child: Column(
@@ -1441,11 +1514,41 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            const Text('Columns',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 14),
+            // Chosen quantity mode (read-only) + a way back to the mode step.
+            Row(children: [
+              Icon(_overwrite ? Icons.sync_alt : Icons.add_circle_outline,
+                  size: 18, color: const Color(0xFF1B4F72)),
+              const SizedBox(width: 6),
+              Text('Mode: ${_overwrite ? 'Update & keep' : 'Add only'}',
+                  style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1B4F72))),
+              const Spacer(),
+              TextButton(
+                onPressed: () => setState(() => _modeChosen = false),
+                child: const Text('Change'),
+              ),
+            ]),
             const SizedBox(height: 8),
-            _colTable(),
+            // Primary action — Browse — on top.
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: _pickAndParse,
+                icon: const Icon(Icons.folder_open_rounded),
+                label: const Text('Browse & Pick Excel (.xlsx)',
+                    style: TextStyle(fontSize: 15)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B4F72),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
             if (_blockError.isNotEmpty) ...[
               const SizedBox(height: 16),
               Container(
@@ -1460,24 +1563,30 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               ),
             ],
             const SizedBox(height: 22),
+            const Text('Columns',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 8),
+            _colTable(),
+            const SizedBox(height: 22),
+            // Template download — rarely used — kept at the bottom, secondary.
             SizedBox(
               width: double.infinity,
               height: 48,
-              child: ElevatedButton.icon(
+              child: OutlinedButton.icon(
                 onPressed: _downloading ? null : _downloadTemplate,
                 icon: _downloading
                     ? const SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
+                            strokeWidth: 2, color: Color(0xFF1B4F72)))
                     : const Icon(Icons.download_rounded),
                 label: Text(
                     _downloading ? 'Preparing…' : 'Download blank template',
                     style: const TextStyle(fontSize: 14.5)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1B4F72),
-                  foregroundColor: Colors.white,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1B4F72),
+                  side: const BorderSide(color: Color(0xFF1B4F72), width: 1.5),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),
                 ),
@@ -1488,23 +1597,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               'Pre-filled headers with dropdowns for size, quality, surface, '
               'tile type and DNA — pick values instead of typing.',
               style: TextStyle(fontSize: 11, color: Colors.black54),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: OutlinedButton.icon(
-                onPressed: _pickAndParse,
-                icon: const Icon(Icons.folder_open_rounded),
-                label: const Text('Browse & Pick Excel (.xlsx)',
-                    style: TextStyle(fontSize: 15)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF1B4F72),
-                  side: const BorderSide(color: Color(0xFF1B4F72), width: 1.5),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
             ),
           ],
         ),
@@ -1590,17 +1682,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               'Adding to: ${_brandName.isEmpty ? 'your stock' : _brandName} · your stock',
               style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
         ),
-        // Quantity mode — Add only (top-up) vs Update & keep (set to file numbers).
+        // Quantity mode was chosen up-front — shown read-only here (no toggle).
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Row(children: [
-            Expanded(
-                child: _modeBtn('Add only', 'top-up boxes', !_overwrite,
-                    () => setState(() => _overwrite = false))),
-            const SizedBox(width: 8),
-            Expanded(
-                child: _modeBtn('Update & keep', 'set to file numbers', _overwrite,
-                    () => setState(() => _overwrite = true))),
+            Icon(_overwrite ? Icons.sync_alt : Icons.add_circle_outline,
+                size: 15, color: Colors.grey.shade600),
+            const SizedBox(width: 5),
+            Text(
+                'Mode: ${_overwrite ? 'Update & keep (set to file)' : 'Add only (top-up)'}',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
           ]),
         ),
         if (incomplete > 0)
@@ -2057,34 +2148,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   }
 
   // Segmented Add-only / Update&keep button for the quantity mode.
-  Widget _modeBtn(String title, String sub, bool sel, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: _importing ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          color: sel ? const Color(0xFF1B4F72) : Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-              color: sel ? const Color(0xFF1B4F72) : Colors.grey.shade300),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title,
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.bold,
-                    color: sel ? Colors.white : Colors.black87)),
-            Text(sub,
-                style: TextStyle(
-                    fontSize: 10,
-                    color: sel ? Colors.white70 : Colors.grey)),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class _FinishGroup {
