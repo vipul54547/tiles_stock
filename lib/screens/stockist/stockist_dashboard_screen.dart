@@ -1128,6 +1128,23 @@ class _State extends State<StockistDashboardScreen> {
                       ],
                     ),
                   ),
+                  // Manual activation: add a single design by hand, pre-pointed
+                  // at this brand (via its seeded stock list), so an empty brand
+                  // can be activated without an Excel/PDF file.
+                  ListTile(
+                    leading: const Icon(Icons.add_circle_outline,
+                        color: Color(0xFF2E7D32)),
+                    title: const Text('Add a design manually'),
+                    subtitle: const Text(
+                        'Create one design under this brand to activate it'),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      final lists = _listsForBrand(brand);
+                      await context.push('/stockist/stock/add',
+                          extra: lists.isEmpty ? null : lists.first.id);
+                      _load();
+                    },
+                  ),
                   // Manufacturers map cross-brand design names in via Excel;
                   // importers don't (their design name IS the master), so they
                   // skip this and import the supplier PDF directly.
