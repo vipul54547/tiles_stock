@@ -101,6 +101,7 @@ class _State extends State<AdminBulkImageImportScreen> {
   final Map<String, _SizePack> _sizePacks = {}; // sizeFolder → packing
   final Map<String, String> _surfaceMap = {}; // surfaceFolder → admin surface
   bool _stripSuffix = false; // strip trailing _A/_B from filenames
+  Set<String> _existingKeys = {}; // "name|size|brandId" already in the library
 
   // Commit progress
   int _done = 0, _failed = 0, _total = 0;
@@ -203,6 +204,13 @@ class _State extends State<AdminBulkImageImportScreen> {
           });
         }
       }
+      // Preload the stockist's existing library keys → flag NEW vs already-in.
+      final lib = await _data.adminStockistLibrary(_stockist!.id);
+      _existingKeys = {
+        for (final m in lib)
+          '${(m['master_design_name'] ?? '').toString().toLowerCase()}'
+          '|${m['size']}|${m['brand_id']}'
+      };
       setState(() => _phase = _Phase.map);
     } catch (e) {
       setState(() => _error = 'Could not read the folder — $e');
@@ -238,6 +246,14 @@ class _State extends State<AdminBulkImageImportScreen> {
           p.tileType.isNotEmpty &&
           p.pieces > 0 &&
           (double.tryParse(p.weight.trim()) ?? 0) > 0);
+
+  // Already in the stockist's library? Matches admin_library_upsert's key
+  // (name + mapped size + the chosen brand) so it predicts create-vs-match.
+  bool _isExisting(_ImgDesign d) {
+    final size = _sizePacks[d.sizeFolder]?.adminSize;
+    if (size == null) return false;
+    return _existingKeys.contains('${d.name.toLowerCase()}|$size|$_brandId');
+  }
 
   // ── Commit ───────────────────────────────────────────────────────────────
   Future<void> _commit() async {
@@ -515,6 +531,8 @@ class _State extends State<AdminBulkImageImportScreen> {
 
   Widget _buildPreview() {
     final on = _designs.where((d) => d.include).length;
+    final existing = _designs.where((d) => d.include && _isExisting(d)).length;
+    final fresh = on - existing;
     return Column(
       children: [
         Container(
@@ -522,9 +540,12 @@ class _State extends State<AdminBulkImageImportScreen> {
           color: _navy.withValues(alpha: 0.06),
           padding: const EdgeInsets.all(12),
           child: Row(children: [
-            Text('$on of ${_designs.length} selected',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
-            const Spacer(),
+            Expanded(
+              child: Text(
+                  '$on selected · $fresh new · $existing already in library',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(width: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: _navy),
               onPressed: on > 0 ? _commit : null,
@@ -584,6 +605,20 @@ class _State extends State<AdminBulkImageImportScreen> {
               ],
             ),
           ),
+          Builder(builder: (_) {
+            final ex = _isExisting(d);
+            final c = ex ? _navy : const Color(0xFF2E7D32);
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                  color: c.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(4)),
+              child: Text(ex ? 'EXISTS' : 'NEW',
+                  style: TextStyle(
+                      fontSize: 9, fontWeight: FontWeight.bold, color: c)),
+            );
+          }),
+          const SizedBox(width: 4),
           IconButton(
             tooltip: 'Rotate 90°',
             icon: const Icon(Icons.rotate_right, color: _navy),

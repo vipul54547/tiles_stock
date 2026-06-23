@@ -689,6 +689,22 @@ class SupabaseDataService {
     }
   }
 
+  /// Admin: a target stockist's library keys (master name + size + brand) for the
+  /// bulk-import preview's NEW vs already-in-library flag. Admin-role enforced.
+  Future<List<Map<String, dynamic>>> adminStockistLibrary(
+      String sequentialId) async {
+    try {
+      final res = await supabase
+          .rpc('admin_stockist_library', params: {'p_seq': sequentialId});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('adminStockistLibrary failed: $e\n$st');
+      return [];
+    }
+  }
+
   /// Admin: set one brand's stock-list limit; the brand auto-fills its lists up
   /// to the new number (never deletes).
   Future<void> setBrandStockListLimit(String brandId, int limit) async {
