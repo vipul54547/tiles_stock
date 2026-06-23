@@ -1,0 +1,111 @@
+"""Generate ready-to-upload test fixtures for the Excel import path.
+
+Outputs to docs/templates/test_fixtures/:
+  • tw_filled.xlsx     — our T/W template, filled to exercise daily-only update,
+                         new-design set-once, finish-mismatch map, DNA map, and
+                         an invalid row.
+  • m_combined.xlsx    — our M template (master + brand cols + wide Premium/
+                         Standard), incl. a map-only row and a two-quality row.
+  • mock_entry.xlsx    — the M_Stockist "ENTRY.xlsx" desktop export shape: same
+                         design across batches (sum), brand in BoxPack (Brand all
+                         "--"), GOLD/ECO present (dropped), a "(2PCS)" size note.
+
+Headers match the importer's synonyms / the template exactly so detection works.
+Run: python tool/make_test_fixtures.py
+"""
+import os
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+
+OUT_DIR = os.path.join("docs", "templates", "test_fixtures")
+os.makedirs(OUT_DIR, exist_ok=True)
+
+HEAD = Font(bold=True, color="FFFFFF")
+NAVY = PatternFill("solid", fgColor="1B4F72")
+
+
+def _write(ws, headers, rows):
+    for c, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=c, value=h)
+        cell.font = HEAD
+        cell.fill = NAVY
+        ws.column_dimensions[cell.column_letter].width = max(12, len(str(h)) + 2)
+    for r, row in enumerate(rows, 2):
+        for c, v in enumerate(row, 1):
+            ws.cell(row=r, column=c, value=v)
+    ws.freeze_panes = "A2"
+
+
+# ── tw_filled.xlsx ──────────────────────────────────────────────────────────
+# Matches the T/W template headers exactly. Admin config assumed in test account:
+#   sizes incl 800x1600/600x1200/600x600 · finishes None/Matt/Glossy/Carving ·
+#   colours White/Blue/Beige · Look Marble/Wood.
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = "Stock"
+_write(ws,
+    ["Design Name", "Size", "Quality", "Box Qty",
+     "Surface", "Tile Type", "Pieces/Box", "Weight (kg)", "Colour", "Look"],
+    [
+        # daily-only: set-once block blank (existing design → updates qty only)
+        ["Statuario Gold", "800x1600", "Premium", 150, "", "", "", "", "", ""],
+        # new design, full set-once + exact dropdown values → NO map steps
+        ["Carrara Blue", "600x1200", "Standard", 80, "Matt", "Porcelain", 4, 24, "Blue", "Marble"],
+        # own surface wording (not an admin finish) → triggers Map Finishes
+        ["Onyx Storm", "600x600", "Premium", 40, "glossy finish", "Ceramic", 6, 18, "White", "Wood"],
+        # unknown colour word → triggers Map DNA (learns alias)
+        ["Wood Teak", "600x1200", "Standard", 25, "Matt", "Porcelain", 4, 22, "Walnut", "Wood"],
+        # invalid size → row flagged, excluded until fixed
+        ["Bad Size", "999x999", "Premium", 10, "Matt", "Ceramic", 5, 20, "White", "Marble"],
+    ])
+wb.save(os.path.join(OUT_DIR, "tw_filled.xlsx"))
+
+# ── m_combined.xlsx ─────────────────────────────────────────────────────────
+# Matches the M template: master + one col per brand + wide Premium/Standard.
+# Brand columns must be the EXACT brand names in the test account.
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = "Stock"
+_write(ws,
+    ["Master Design", "BOTTEGA", "CERA TILES", "ENNFACE", "Size",
+     "Premium", "Standard", "Surface", "Tile Type", "Pieces/Box", "Weight (kg)",
+     "Colour", "Look"],
+    [
+        # combined: 2 brand aliases, Premium holding only
+        ["CLOUD ONYX", "Bottega Cloud", "Cera Onyx", "", "800x1600",
+         252, 0, "Matt", "PGVT & GVT", 3, 35, "White", "Marble"],
+        # chosen-brand (e.g. BOTTEGA) cell blank, other brand named → MAP ONLY (qty 0)
+        ["PLAIN KHAKHI", "", "", "Enn Khakhi", "600x1200",
+         0, 32, "Glossy", "Porcelain", 4, 24, "Beige", "Wood"],
+        # both qualities filled → fans into Premium + Standard holdings
+        ["DUNE BEIGE", "Bottega Dune", "Cera Dune", "Enn Dune", "600x600",
+         100, 50, "Matt", "Ceramic", 6, 18, "Beige", "Marble"],
+    ])
+wb.save(os.path.join(OUT_DIR, "m_combined.xlsx"))
+
+# ── mock_entry.xlsx ─────────────────────────────────────────────────────────
+# The M_Stockist desktop export. Brand col all "--" → brand lives in BoxPack.
+# Same design repeats per batch → importer SUMs PRE/STD; GOLD/ECO dropped;
+# "(2PCS)" stripped from size.
+wb = openpyxl.Workbook()
+ws = wb.active
+ws.title = "ENTRY"
+_write(ws,
+    ["No", "DesignName", "Product", "Brand", "Size", "Category", "Batch/Shade",
+     "BoxPack", "Item Status", "Location", "PRE", "STD", "GOLD", "ECO", "Total",
+     "Entry Date"],
+    [
+        [1, "CLOUD ONYX", "Tile", "--", "800X1600 (2PCS)", "GLOSSY", "260619/-",
+         "BOTTEGA", "Active", "A02", 252, 0, 10, 5, 267, "2026-06-19"],
+        [2, "CLOUD ONYX", "Tile", "--", "800X1600 (2PCS)", "GLOSSY", "260619/A",
+         "PLAIN KHAKHI", "Active", "D-36", 0, 32, 0, 0, 32, "2026-06-19"],
+        [3, "DESERT SAND", "Tile", "--", "600X1200", "MATT", "260620/-",
+         "CERA TILES", "Active", "B11", 120, 60, 0, 0, 180, "2026-06-20"],
+        [4, "DESERT SAND", "Tile", "--", "600X1200", "MATT", "260620/B",
+         "ENNFACE", "Active", "C03", 48, 0, 20, 0, 68, "2026-06-20"],
+    ])
+wb.save(os.path.join(OUT_DIR, "mock_entry.xlsx"))
+
+print("Wrote fixtures to", OUT_DIR)
+for f in ("tw_filled.xlsx", "m_combined.xlsx", "mock_entry.xlsx"):
+    print("  -", f)

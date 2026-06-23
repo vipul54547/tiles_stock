@@ -44,7 +44,7 @@ const Map<String, List<String>> _headerSynonyms = {
   'qty':      ['qty', 'quantity', 'box', 'boxes', 'box qty', 'box quantity', 'stock', 'stock qty', 'no of box', 'nos', 'pcs box'],
   'surface':  ['surface', 'finish', 'surface type', 'finish type', 'surface finish'],
   'tiletype': ['tile type', 'type', 'body', 'body type', 'tiletype'],
-  'weight':   ['weight', 'box weight', 'box weight (kg)', 'weight kg', 'wt', 'weight/box'],
+  'weight':   ['weight', 'box weight', 'box weight (kg)', 'weight (kg)', 'weight kg', 'wt', 'weight/box'],
   'pieces':   ['pieces', 'pieces/box', 'pcs', 'pcs/box', 'pieces per box', 'piece', 'pc'],
   'colour':   ['colour', 'color', 'shade'],
 };
