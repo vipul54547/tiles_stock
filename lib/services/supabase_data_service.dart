@@ -512,6 +512,48 @@ class SupabaseDataService {
     }
   }
 
+  /// Admin-on-behalf library upsert for the bulk image-folder import. Creates or
+  /// matches a master for stockist [seq] (sequential_id); always sets the brand
+  /// alias = [masterName] under [brandId] (so the design carries its name in that
+  /// brand). Admin-role enforced server-side (admin_library_upsert).
+  Future<String> adminLibraryUpsert({
+    required String seq,
+    required String size,
+    required String masterName,
+    required String brandId,
+    String imageUrl = '',
+    String? surface,
+    String? tileType,
+    int? pieces,
+    double? weight,
+    double? thickness,
+    Map<String, String>? aliases,
+  }) async {
+    final a = (aliases ?? {brandId: masterName})
+        .entries
+        .where((e) => e.value.trim().isNotEmpty)
+        .map((e) => {'brand_id': e.key, 'name': e.value.trim()})
+        .toList();
+    try {
+      final res = await supabase.rpc('admin_library_upsert', params: {
+        'p_seq': seq,
+        'p_size': size,
+        'p_master_name': masterName,
+        'p_brand_id': brandId,
+        'p_image_url': imageUrl,
+        'p_surface': surface,
+        'p_tile_type': tileType,
+        'p_pieces': pieces,
+        'p_weight': weight,
+        'p_thickness': thickness,
+        'p_aliases': a,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   Future<void> deleteLibraryMaster(String id) async {
     try {
       await supabase.rpc('library_delete_master', params: {'p_id': id});

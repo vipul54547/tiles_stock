@@ -88,6 +88,10 @@ class AdminPanelScreen extends StatelessWidget {
           _adminCard(Icons.bar_chart_outlined, 'Inquiry Reports',
               'All inquiries across stockists', Colors.purple,
               onTap: () => context.push('/admin/inquiry-report')),
+          _adminCard(Icons.drive_folder_upload_outlined, 'Bulk image import',
+              'Seed a stockist library from an image folder (desktop)',
+              const Color(0xFF2E7D32),
+              onTap: () => context.push('/admin/bulk-image-import')),
 
         ],
 
