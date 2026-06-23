@@ -172,9 +172,16 @@ class _State extends State<AdminBulkImageImportScreen> {
           );
         });
         if (d.surfaceFolder.isNotEmpty) {
-          _surfaceMap.putIfAbsent(d.surfaceFolder,
-              () => _adminSurfaces.contains('None') ? 'None'
-                  : (_adminSurfaces.isNotEmpty ? _adminSurfaces.first : 'None'));
+          _surfaceMap.putIfAbsent(d.surfaceFolder, () {
+            // Auto-match the folder word to an admin surface, case-insensitively
+            // ("MATT" → "Matt"); fall back to None only when nothing matches.
+            final m = _adminSurfaces.where(
+                (s) => s.toLowerCase() == d.surfaceFolder.trim().toLowerCase());
+            if (m.isNotEmpty) return m.first;
+            return _adminSurfaces.contains('None')
+                ? 'None'
+                : (_adminSurfaces.isNotEmpty ? _adminSurfaces.first : 'None');
+          });
         }
       }
       setState(() => _phase = _Phase.map);
