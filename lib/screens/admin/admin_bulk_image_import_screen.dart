@@ -128,7 +128,15 @@ class _State extends State<AdminBulkImageImportScreen> {
       final files = root
           .listSync(recursive: true, followLinks: false)
           .whereType<File>()
-          .where((f) => _imgExts.contains(_ext(f.path)))
+          .where((f) {
+            final base = f.path.split(Platform.pathSeparator).last;
+            // Skip hidden / OS-junk that a Mac-made zip leaves behind: AppleDouble
+            // "._*" resource forks, ".DS_Store", "Thumbs.db" — they're not real
+            // images (decode fails) and would create garbage "._design" entries.
+            if (base.startsWith('.')) return false;
+            if (base.toLowerCase() == 'thumbs.db') return false;
+            return _imgExts.contains(_ext(f.path));
+          })
           .toList();
       if (files.isEmpty) {
         setState(() => _error = 'No image files (.jpg/.png/.webp) under that folder.');
@@ -281,17 +289,25 @@ class _State extends State<AdminBulkImageImportScreen> {
             ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error.isNotEmpty && _phase == _Phase.pick
-              ? _errorBox()
-              : switch (_phase) {
-                  _Phase.pick => _buildPick(),
-                  _Phase.map => _buildMap(),
-                  _Phase.preview => _buildPreview(),
-                  _Phase.committing => _buildProgress(),
-                  _Phase.done => _buildDone(),
-                },
+      // Centred + width-capped so it stays usable on a wide desktop monitor
+      // instead of stretching full-width (this runs on the Windows admin build).
+      body: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error.isNotEmpty && _phase == _Phase.pick
+                  ? _errorBox()
+                  : switch (_phase) {
+                      _Phase.pick => _buildPick(),
+                      _Phase.map => _buildMap(),
+                      _Phase.preview => _buildPreview(),
+                      _Phase.committing => _buildProgress(),
+                      _Phase.done => _buildDone(),
+                    },
+        ),
+      ),
     );
   }
 
