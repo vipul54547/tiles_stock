@@ -469,11 +469,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
     // In wide mode the quality + single-qty columns are replaced by the
     // Premium/Standard box columns, so they're no longer required.
+    // Tile Type is NOT a required column: a quantity-only / restock sheet (all
+    // existing designs) needs no identity, and a NEW design without it is caught
+    // per-row by needsFill (filled in-app or excluded) — same as pieces/weight.
     final missing = [
       'size',
       if (!wideQty) 'quality',
       if (!wideQty) 'qty',
-      'tiletype',
     ].where((f) => (colOf[f] ?? -1) < 0).toList();
     if (!hasNameSource) missing.insert(0, 'name');
     if (missing.isNotEmpty) {
@@ -1630,7 +1632,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       ('Size', 'required — must match your sizes', true),
       ('Quality', 'required — Premium / Standard', true),
       ('Box Quantity', 'required — the boxes to add', true),
-      ('Tile Type', 'required — the tile body type', true),
+      ('Tile Type', 'new designs only — else taken from your library', false),
       ('Surface / Finish', 'optional — mapped after upload', false),
       ('Box Weight', 'optional — for thickness', false),
       ('Pieces/Box', 'optional — for sq.ft', false),
