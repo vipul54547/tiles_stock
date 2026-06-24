@@ -113,7 +113,13 @@ class _State extends State<ImportMappingExcelScreen> {
     try {
       book = Excel.decodeBytes(bytes);
     } catch (_) {
-      setState(() => _blockError = 'Could not read the Excel file.');
+      // Same dead-end the stock importer guards against: some exporters write
+      // valid-but-unusual .xlsx (e.g. inline-string files) the reader rejects.
+      // Re-saving from Excel/Sheets rewrites the file cleanly — give that fix.
+      setState(() => _blockError =
+          "Couldn't read this Excel file — it may be saved in an unusual format. "
+          'Open it in Excel or Google Sheets, choose Save As → .xlsx, then upload '
+          'it again.');
       return;
     }
     if (book.tables.isEmpty) {
