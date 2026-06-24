@@ -815,25 +815,28 @@ class _EditorState extends State<_LibraryEditorScreen> {
       .firstWhere((id) => _aliasCtrls[id]?.text.trim().isNotEmpty ?? false,
           orElse: () => _defaultBrand.id);
 
-  // A duplicate = the SAME tile already in the library (live warning; the server
-  // also blocks it). M: brand-AGNOSTIC — one tile is one box across all brands,
-  // keyed by name+size+SURFACE. T/W: brand silo (name+size within the brand).
-  bool get _isDuplicate {
+  // The SAME tile already in the library, or null. M: brand-AGNOSTIC — one tile
+  // is one box across all brands, keyed by name+size+SURFACE. T/W: brand silo.
+  LibraryEntry? get _dupMatch {
     final name = _master.text.trim().toLowerCase();
-    if (name.isEmpty || _size.isEmpty) return false;
+    if (name.isEmpty || _size.isEmpty) return null;
     final isM = currentStockistBusinessType == 'M';
     final surf = _surface.trim().isEmpty ? 'none' : _surface.trim().toLowerCase();
-    return widget.all.any((e) =>
-        e.id != widget.existing?.id &&
-        e.masterName.trim().toLowerCase() == name &&
-        e.size == _size &&
-        (isM
-            ? (e.surfaceType.trim().isEmpty
-                    ? 'none'
-                    : e.surfaceType.trim().toLowerCase()) ==
-                surf
-            : e.brandId == _targetBrandId));
+    for (final e in widget.all) {
+      if (e.id == widget.existing?.id) continue;
+      if (e.masterName.trim().toLowerCase() != name || e.size != _size) continue;
+      final hit = isM
+          ? (e.surfaceType.trim().isEmpty
+                  ? 'none'
+                  : e.surfaceType.trim().toLowerCase()) ==
+              surf
+          : e.brandId == _targetBrandId;
+      if (hit) return e;
+    }
+    return null;
   }
+
+  bool get _isDuplicate => _dupMatch != null;
 
   @override
   void initState() {
@@ -953,6 +956,83 @@ class _EditorState extends State<_LibraryEditorScreen> {
     }
   }
 
+  // M auto-link: the entered tile already exists — ADD the brand name(s) the
+  // stockist typed onto that existing box (merged with its current names), so a
+  // duplicate master is never created.
+  Future<void> _offerLinkToExisting(LibraryEntry dup) async {
+    const navy = Color(0xFF1B4F72);
+    final entered = <String, String>{
+      for (final e in _aliasCtrls.entries)
+        if (e.value.text.trim().isNotEmpty) e.key: e.value.text.trim()
+    };
+    // Only the names that are genuinely NEW on the existing tile.
+    final adding = <String, String>{
+      for (final e in entered.entries)
+        if ((dup.aliases[e.key] ?? '').trim().toLowerCase() !=
+            e.value.toLowerCase())
+          e.key: e.value
+    };
+    final brandList = adding.keys
+        .map((id) => widget.brands
+            .firstWhere((b) => b.id == id,
+                orElse: () => const Brand(id: '', name: '?'))
+            .name)
+        .join(', ');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('This tile is already in your library'),
+        content: Text(adding.isEmpty
+            ? '"${dup.masterName}" (${dup.size}) already exists. There is no new '
+                'brand name to add.'
+            : '"${dup.masterName}" (${dup.size}) already exists. Add your '
+                'name${adding.length > 1 ? 's' : ''} ($brandList) to it instead '
+                'of creating a duplicate?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          if (adding.isNotEmpty)
+            FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: navy),
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('Add to it')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await _data.upsertLibraryMaster(
+        id: dup.id,
+        size: dup.size,
+        masterName: dup.masterName,
+        imageUrl: dup.imageUrl,
+        brandId: null, // M boxes are brand-agnostic
+        aliases: {...dup.aliases, ...adding},
+        surfaceType: dup.surfaceType,
+        stockType: dup.stockType,
+        tileType: dup.tileType,
+        piecesPerBox: dup.piecesPerBox,
+        boxWeightKg: dup.boxWeightKg,
+        thicknessMm: dup.thicknessMm,
+        colour: dup.colour,
+        finishLabel: dup.finishLabel,
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '$e';
+      });
+    }
+  }
+
   Future<void> _save() async {
     final master = _master.text.trim();
     if (master.isEmpty) {
@@ -963,10 +1043,17 @@ class _EditorState extends State<_LibraryEditorScreen> {
       setState(() => _error = 'Pick a size.');
       return;
     }
-    if (_isDuplicate) {
-      setState(() => _error =
-          'This tile "$master" ($_size) is already in your library — open it '
-          'from the list to add another brand\'s name.');
+    final dup = _dupMatch;
+    if (dup != null) {
+      // M, adding: the same tile already exists — offer to ADD this brand's
+      // name onto it (link), instead of spawning a duplicate master.
+      if (widget.existing == null && currentStockistBusinessType == 'M') {
+        await _offerLinkToExisting(dup);
+        return;
+      }
+      // T/W silo, or renaming onto another tile while editing → a real clash.
+      setState(() =>
+          _error = 'You already have "$master" at size $_size in your library.');
       return;
     }
     setState(() {
@@ -1109,9 +1196,13 @@ class _EditorState extends State<_LibraryEditorScreen> {
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 labelText: 'Master design name',
-                helperText: 'Your internal name for this tile',
+                // M: a match isn't an error — saving will add the brand name to
+                // the existing tile, so we hint (not red-error). T/W: hard clash.
+                helperText: (_isDuplicate && currentStockistBusinessType == 'M')
+                    ? 'Already in your library — saving adds your brand name to it'
+                    : 'Your internal name for this tile',
                 border: const OutlineInputBorder(),
-                errorText: _isDuplicate
+                errorText: (_isDuplicate && currentStockistBusinessType != 'M')
                     ? 'You already have "${_master.text.trim()}" at this size'
                     : null,
               ),
