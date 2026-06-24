@@ -321,6 +321,13 @@ class _State extends State<AdminBulkImageImportScreen> {
     return _existingKeys.contains('${d.name.toLowerCase()}|$size|$_brandId');
   }
 
+  // Name of the currently-selected brand (for the header), looked up from the
+  // loaded brand list by its id. '' until a brand is chosen.
+  String get _selectedBrandName {
+    final m = _brands.where((b) => b['id'] == _brandId);
+    return m.isNotEmpty ? (m.first['name'] ?? '').toString() : '';
+  }
+
   // Surface picklist for the per-design dropdown — admin surfaces plus 'None'
   // (a design from a folder without a surface subfolder defaults to None).
   List<String> get _surfaceOptions =>
@@ -433,7 +440,27 @@ class _State extends State<AdminBulkImageImportScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bulk image import (admin)'),
+        // Once a stockist+brand are picked, keep them in the header for the rest
+        // of the flow (map→preview→upload→done) so the admin never loses track of
+        // which library they're filling.
+        title: (_stockist != null && _phase != _Phase.pick)
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Bulk image import (admin)',
+                      style: TextStyle(fontSize: 16)),
+                  Text(
+                    '${_stockist!.name}'
+                    '${_selectedBrandName.isNotEmpty ? '  ·  $_selectedBrandName' : ''}',
+                    style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.white70),
+                  ),
+                ],
+              )
+            : const Text('Bulk image import (admin)'),
         actions: [
           if (_phase != _Phase.pick && _phase != _Phase.committing)
             TextButton.icon(
@@ -858,6 +885,15 @@ class _State extends State<AdminBulkImageImportScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_stockist != null) ...[
+              Text(_stockist!.name,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
+              if (_selectedBrandName.isNotEmpty)
+                Text(_selectedBrandName,
+                    style: const TextStyle(fontSize: 13, color: _navy)),
+              const SizedBox(height: 20),
+            ],
             const CircularProgressIndicator(),
             const SizedBox(height: 16),
             Text('Importing… ${_done + _failed} / $_total'),
