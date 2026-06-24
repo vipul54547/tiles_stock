@@ -62,20 +62,32 @@ _write(
 
 # m_combined.xlsx — matches the M template: master + one col per brand + wide
 # Premium/Standard. Brand columns must be the EXACT brand names in the account.
+#
+# Extended to carry a column for EVERY brand on the test account (cura ceramic =
+# the default/main brand named after the stockist, plus BOTTEGA/CERA TILES/ENNFACE)
+# AND a junk "ZZ JUNKCOL" column that is NOT a brand → the importer must IGNORE it
+# (no alias written). Header matching is case-insensitive (_normHeader lowercases),
+# so "cura ceramic" matches the main brand regardless of its stored casing. If the
+# account's main brand is named differently, rename that column to match.
 _write(
     os.path.join(OUT_DIR, "m_combined.xlsx"), "Stock",
-    ["Master Design", "BOTTEGA", "CERA TILES", "ENNFACE", "Size",
+    ["Master Design", "cura ceramic", "BOTTEGA", "CERA TILES", "ENNFACE",
+     "ZZ JUNKCOL", "Size",
      "Premium", "Standard", "Surface", "Tile Type", "Pieces/Box", "Weight (kg)",
      "Colour", "Look"],
     [
-        # combined: 2 brand aliases, Premium holding only
-        ["CLOUD ONYX", "Bottega Cloud", "Cera Onyx", "", "800x1600",
+        # 3 real brand aliases (cura/BOTTEGA/CERA) + a junk col that must be ignored;
+        # Premium holding only.
+        ["CLOUD ONYX", "Cura Cloud", "Bottega Cloud", "Cera Onyx", "",
+         "Junk Cloud", "800x1600",
          252, 0, "Matt", "PGVT & GVT", 3, 35, "White", "Marble"],
         # chosen-brand (e.g. BOTTEGA) cell blank, other brand named -> MAP ONLY (qty 0)
-        ["PLAIN KHAKHI", "", "", "Enn Khakhi", "600x1200",
+        ["PLAIN KHAKHI", "", "", "", "Enn Khakhi",
+         "", "600x1200",
          0, 32, "Glossy", "Porcelain", 4, 24, "Beige", "Wood"],
-        # both qualities filled -> fans into Premium + Standard holdings
-        ["DUNE BEIGE", "Bottega Dune", "Cera Dune", "Enn Dune", "600x600",
+        # all 4 brand cols filled + both qualities -> 4 aliases, Premium + Standard holdings
+        ["DUNE BEIGE", "Cura Dune", "Bottega Dune", "Cera Dune", "Enn Dune",
+         "", "600x600",
          100, 50, "Matt", "Ceramic", 6, 18, "Beige", "Marble"],
     ])
 
