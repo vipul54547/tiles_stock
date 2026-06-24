@@ -539,33 +539,77 @@ class _State extends State<MyDesignLibraryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Headline composed LIVE = current brand name + clean design
-                  // name, so renaming a brand updates it everywhere (no stale
-                  // baked-in name).
-                  Text(e.displayName,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 14)),
+                  // Title = the MASTER identity name only (no brand prefix) + a
+                  // small "Master" tag, so the stockist sees the design's one true
+                  // name; each brand's own name is in the chips below.
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(e.masterName,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade200,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text('Master',
+                            style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey.shade600)),
+                      ),
+                    ],
+                  ),
                   Text(e.size.replaceAll(' mm', ''),
                       style:
                           TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  // Per-brand chips only matter when the design is linked to MORE
-                  // than one brand (M multi-brand); single brand is in the headline.
-                  if (e.aliases.length > 1) ...[
+                  // Per-brand chips show what each brand calls this tile — shown
+                  // for every design (1+ brands) so the brand→name mapping is
+                  // always visible. Two-tone pill: solid navy = the BRAND, light =
+                  // that brand's design name — so "my brand vs its name" is obvious.
+                  if (e.aliases.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 6,
                       runSpacing: 4,
                       children: e.aliases.entries.map((a) {
                         return Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 3),
+                          clipBehavior: Clip.antiAlias,
                           decoration: BoxDecoration(
-                            color: _navy.withValues(alpha: 0.06),
                             borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                                color: _navy.withValues(alpha: 0.20)),
                           ),
-                          child: Text('${_brandName(a.key)}: ${a.value}',
-                              style: const TextStyle(
-                                  fontSize: 11, color: _navy)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Solid segment = the BRAND name.
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                color: _navy,
+                                child: Text(_brandName(a.key),
+                                    style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white)),
+                              ),
+                              // Light segment = that brand's design name.
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                color: _navy.withValues(alpha: 0.06),
+                                child: Text(a.value,
+                                    style: const TextStyle(
+                                        fontSize: 11, color: _navy)),
+                              ),
+                            ],
+                          ),
                         );
                       }).toList(),
                     ),
