@@ -969,6 +969,59 @@ class _State extends State<StockistDashboardScreen> {
   // stock list — designs are curated into output lists separately afterwards. The
   // brand is passed to the importer. PDF is offered only for the main brand
   // (others import via Excel, decision #5).
+  // "+ Add" splits the two real intents BEFORE anything else, so the stockist
+  // never lands on a screen that conflates them: STOCK = how many boxes (qty);
+  // DESIGN = the tile's identity (name, brands, photo) in the Library.
+  void _showAddIntentSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text('What do you want to add?',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined,
+                  color: Color(0xFF2E7D32), size: 28),
+              title: const Text('Stock',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+              subtitle: const Text('Add or update how many boxes you have'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final lists = _filterLists;
+                await context.push('/stockist/stock/add',
+                    extra: lists.isEmpty ? null : lists.first.id);
+                _load();
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.collections_bookmark_outlined,
+                  color: Color(0xFF1B4F72), size: 28),
+              title: const Text('Design',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+              subtitle:
+                  const Text('Add or edit a design — its name, brands and photo'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.push('/stockist/library');
+                _load();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showUploadSourceSheet() {
     final brands = List<Brand>.from(_brands);
     if (brands.isEmpty) {
@@ -1250,13 +1303,8 @@ class _State extends State<StockistDashboardScreen> {
           _actionBtn('Upload', Icons.upload_file, const Color(0xFF1B4F72),
               _showUploadSourceSheet),
           const SizedBox(width: 6),
-          _actionBtn('Add', Icons.add, const Color(0xFF2E7D32), () async {
-            // Default the new design to a list in the brand being viewed.
-            final lists = _filterLists;
-            await context.push('/stockist/stock/add',
-                extra: lists.isEmpty ? null : lists.first.id);
-            _load();
-          }),
+          _actionBtn('Add', Icons.add, const Color(0xFF2E7D32),
+              _showAddIntentSheet),
           const SizedBox(width: 6),
           _actionBtn('Records', Icons.receipt_long_outlined,
               const Color(0xFF6A1B9A), () async {
