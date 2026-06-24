@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' hide Border, BorderStyle;
 import '../../services/supabase_data_service.dart';
 import '../../models/brand.dart';
+import '../../models/library_entry.dart';
 import '../../models/tile_size.dart';
 import '../../models/choice_state.dart';
 import '../../utils/tile_sizes.dart';
@@ -38,6 +39,13 @@ class _MapRow {
   String size = ''; // canonical admin size after validation
   String master = ''; // resolved master name (master col, else default brand)
   String? error;
+  // Bulk-reconcile: the existing box this row will fold into. [autoLink] is the
+  // matcher's own verdict (name/alias + size); [forced] is a human override
+  // ("link to THIS tile instead"). [similar] = same-size near-matches surfaced
+  // as a duplicate-risk warning when the row would otherwise create a new tile.
+  LibraryEntry? autoLink;
+  LibraryEntry? forced;
+  List<LibraryEntry> similar = const [];
   _MapRow({
     required this.rowNum,
     required this.sizeRaw,
@@ -45,6 +53,19 @@ class _MapRow {
     required this.brandNames,
   });
   bool get valid => error == null;
+
+  // The box this row resolves to (human override wins), or null = create new.
+  LibraryEntry? get target => forced ?? autoLink;
+  bool get willCreate => valid && target == null;
+  // What we actually send to the server: a forced/auto link rewrites the name
+  // (and surface) to the target box so the merge-by-name RPC folds into it.
+  String get effMaster => target?.masterName ?? master;
+  String get effSurface => target?.surfaceType ?? 'None';
+}
+
+// Sentinel popped by the link picker to mean "clear the link → create new".
+class _ClearLink {
+  const _ClearLink();
 }
 
 class _State extends State<ImportMappingExcelScreen> {
@@ -53,6 +74,7 @@ class _State extends State<ImportMappingExcelScreen> {
   List<Brand> _brands = [];
   List<String> _sizes = [];
   List<TileSize> _tileSizes = [];
+  List<LibraryEntry> _library = []; // current library, for bulk-reconcile
   String? _defaultBrandId;
 
   List<_MapRow> _rows = [];
@@ -73,6 +95,7 @@ class _State extends State<ImportMappingExcelScreen> {
     if (currentStockistUUID.isEmpty) return;
     final brands = await _data.getMyBrands();
     final tileSizes = await _data.getTileSizes(activeOnly: true);
+    final library = await _data.getMyLibrary();
     if (!mounted) return;
     brands.sort((a, b) {
       if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
@@ -83,6 +106,7 @@ class _State extends State<ImportMappingExcelScreen> {
       _brands = brands;
       _tileSizes = tileSizes;
       _sizes = tileSizes.map((s) => s.name).toList();
+      _library = library;
       _defaultBrandId = def.isEmpty ? null : def.first.id;
     });
   }
@@ -223,11 +247,173 @@ class _State extends State<ImportMappingExcelScreen> {
       if (r.brandNames.isEmpty) { r.error = 'No brand names on this row'; continue; }
     }
 
+    _computeDispositions(parsed);
+
     setState(() {
       _rows = parsed;
       _unmatchedHeaders = unmatched;
       _parsed = true;
       _done = 0;
+    });
+  }
+
+  // ── Bulk reconcile ─────────────────────────────────────────────────────────
+
+  // For each valid row, work out (client-side, mirroring the server matcher)
+  // whether it will LINK into an existing box or CREATE a new one — so the human
+  // sees the outcome BEFORE committing (this is where #7 used to bite at scale).
+  void _computeDispositions(List<_MapRow> rows) {
+    final isM = currentStockistBusinessType == 'M';
+    for (final r in rows) {
+      r.autoLink = null;
+      r.forced = null;
+      r.similar = const [];
+      if (!r.valid) continue;
+      final name = r.master.toLowerCase();
+
+      // 1) Alias hit: any of this row's brand-names already names a same-size box
+      //    under that same brand → certainly the same box.
+      LibraryEntry? hit;
+      for (final e in _library) {
+        if (e.size != r.size) continue;
+        for (final a in r.brandNames.entries) {
+          if ((e.aliases[a.key] ?? '').trim().toLowerCase() ==
+              a.value.trim().toLowerCase()) {
+            hit = e;
+            break;
+          }
+        }
+        if (hit != null) break;
+      }
+      // 2) Else name+size. M = brand-agnostic; T/W = brand-scoped silo.
+      hit ??= () {
+        for (final e in _library) {
+          if (e.size != r.size || e.masterName.trim().toLowerCase() != name) {
+            continue;
+          }
+          if (isM) return e;
+          if (e.brandId == r.brandNames.keys.first) return e;
+        }
+        return null;
+      }();
+      r.autoLink = hit;
+
+      // 3) Duplicate-risk: a row that would CREATE but has a same-size box whose
+      //    name overlaps (one contains the other) — likely the same tile typed
+      //    differently. Surface it so the human can force-link instead.
+      if (hit == null && name.isNotEmpty) {
+        r.similar = _library
+            .where((e) =>
+                e.size == r.size &&
+                e.masterName.trim().toLowerCase() != name &&
+                (e.masterName.trim().toLowerCase().contains(name) ||
+                    name.contains(e.masterName.trim().toLowerCase())))
+            .take(3)
+            .toList();
+      }
+    }
+  }
+
+  // Human override: open a search picker over the library so the row can be
+  // force-linked to a chosen existing box (or cleared back to "create new").
+  Future<void> _pickLinkTarget(_MapRow r) async {
+    var query = r.master;
+    final chosen = await showModalBottomSheet<Object?>(
+      context: context,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final q = query.trim().toLowerCase();
+          // Same-size first (the only valid link targets share the row's size).
+          final list = _library.where((e) {
+            if (e.size != r.size) return false;
+            if (q.isEmpty) return true;
+            final hay = '${e.masterName} ${e.aliases.values.join(' ')}'.toLowerCase();
+            return hay.contains(q);
+          }).toList()
+            ..sort((a, b) =>
+                a.masterName.toLowerCase().compareTo(b.masterName.toLowerCase()));
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+                  child: Text('Link row ${r.rowNum} to an existing ${r.size.replaceAll(' mm', '')} tile',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: TextField(
+                    autofocus: true,
+                    controller: TextEditingController(text: query)
+                      ..selection =
+                          TextSelection.collapsed(offset: query.length),
+                    onChanged: (v) => setSheet(() => query = v),
+                    decoration: const InputDecoration(
+                      hintText: 'Search your library',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                if (r.forced != null || r.autoLink != null)
+                  ListTile(
+                    leading: const Icon(Icons.add_box_outlined, color: _navy),
+                    title: const Text('Create a new tile instead'),
+                    onTap: () => Navigator.pop(ctx, const _ClearLink()),
+                  ),
+                Flexible(
+                  child: list.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text('No ${r.size.replaceAll(' mm', '')} tiles match.',
+                              style: TextStyle(color: Colors.grey.shade600)))
+                      : ListView(
+                          shrinkWrap: true,
+                          children: [
+                            for (final e in list)
+                              ListTile(
+                                dense: true,
+                                title: Text(e.masterName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis),
+                                subtitle: e.aliases.isEmpty
+                                    ? null
+                                    : Text(
+                                        e.aliases.entries
+                                            .map((a) =>
+                                                '${_brandName(a.key)}: ${a.value}')
+                                            .join('  ·  '),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 11)),
+                                trailing: const Icon(Icons.link, color: _navy),
+                                onTap: () => Navigator.pop(ctx, e),
+                              ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    if (chosen == null) return; // dismissed — no change
+    setState(() {
+      if (chosen is _ClearLink) {
+        r.forced = null;
+        r.autoLink = null; // human explicitly wants a new tile
+        r.similar = const [];
+      } else if (chosen is LibraryEntry) {
+        r.forced = chosen;
+        r.similar = const [];
+      }
     });
   }
 
@@ -241,10 +427,13 @@ class _State extends State<ImportMappingExcelScreen> {
     String? lastError;
     for (final r in toDo) {
       try {
+        // A linked row (auto or forced) is sent under the TARGET box's name +
+        // surface, so the merge-by-name server matcher folds it into that box.
         await _data.libraryMapUpsert(
           size: r.size,
-          masterName: r.master,
+          masterName: r.effMaster,
           aliases: r.brandNames,
+          surface: r.effSurface,
         );
         ok++;
       } catch (e) {
@@ -400,6 +589,9 @@ class _State extends State<ImportMappingExcelScreen> {
   Widget _buildReview() {
     final valid = _rows.where((r) => r.valid).length;
     final skipped = _rows.length - valid;
+    final newCount = _rows.where((r) => r.willCreate).length;
+    final linkCount = _rows.where((r) => r.valid && r.target != null).length;
+    final riskCount = _rows.where((r) => r.willCreate && r.similar.isNotEmpty).length;
     final allDone = !_importing && _done > 0 && _done >= valid;
     return Column(
       children: [
@@ -413,12 +605,35 @@ class _State extends State<ImportMappingExcelScreen> {
                 '${_unmatchedHeaders.join(', ')}',
                 style: TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
           ),
+        if (riskCount > 0)
+          Container(
+            width: double.infinity,
+            color: const Color(0xFFFFF3E0),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    size: 16, color: Colors.orange.shade900),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                      '$riskCount new row${riskCount == 1 ? '' : 's'} look close to a '
+                      'tile you already have — open them to link instead of '
+                      'duplicating.',
+                      style:
+                          TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
+                ),
+              ],
+            ),
+          ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: _navy.withValues(alpha: 0.06),
           child: Row(
             children: [
-              _chip('$valid', 'To map', _navy),
+              _chip('$newCount', 'New', const Color(0xFF2E7D32)),
+              const SizedBox(width: 12),
+              _chip('$linkCount', 'To existing', _navy),
               if (skipped > 0) ...[
                 const SizedBox(width: 12),
                 _chip('$skipped', 'Skipped', Colors.red),
@@ -515,6 +730,10 @@ class _State extends State<ImportMappingExcelScreen> {
                   .toList(),
             ),
           ],
+          if (r.valid) ...[
+            const SizedBox(height: 8),
+            _dispositionRow(r),
+          ],
           if (!r.valid) ...[
             const SizedBox(height: 4),
             Text(r.error!,
@@ -525,6 +744,69 @@ class _State extends State<ImportMappingExcelScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  // The reconcile verdict for one row: a NEW / LINK badge, the target box (if
+  // linking), a duplicate-risk hint, and a tap to override the link.
+  Widget _dispositionRow(_MapRow r) {
+    final target = r.target;
+    final isLink = target != null;
+    final forced = r.forced != null;
+    final color = isLink ? _navy : const Color(0xFF2E7D32);
+    final label = isLink
+        ? (forced ? 'Linked → ${target.masterName}' : 'Adds to ${target.masterName}')
+        : 'New tile';
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: color.withValues(alpha: 0.30)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(isLink ? Icons.link : Icons.add_box_outlined,
+                  size: 13, color: color),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: color,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
+        if (r.willCreate && r.similar.isNotEmpty) ...[
+          const SizedBox(width: 6),
+          Icon(Icons.warning_amber_rounded,
+              size: 14, color: Colors.orange.shade800),
+          const SizedBox(width: 2),
+          Flexible(
+            child: Text('like "${r.similar.first.masterName}"',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 10.5, color: Colors.orange.shade900)),
+          ),
+        ],
+        const Spacer(),
+        TextButton(
+          onPressed: _importing ? null : () => _pickLinkTarget(r),
+          style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+          child: Text(isLink ? 'Change' : 'Link…',
+              style: const TextStyle(fontSize: 11)),
+        ),
+      ],
     );
   }
 }
