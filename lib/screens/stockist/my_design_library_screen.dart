@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/brand.dart';
+import '../../models/choice_state.dart';
 import '../../models/library_entry.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
@@ -814,16 +815,24 @@ class _EditorState extends State<_LibraryEditorScreen> {
       .firstWhere((id) => _aliasCtrls[id]?.text.trim().isNotEmpty ?? false,
           orElse: () => _defaultBrand.id);
 
-  // Another master in the SAME brand already uses this name + size (live warning
-  // before saving; the server also blocks it). Duplicates are per-brand now.
+  // A duplicate = the SAME tile already in the library (live warning; the server
+  // also blocks it). M: brand-AGNOSTIC — one tile is one box across all brands,
+  // keyed by name+size+SURFACE. T/W: brand silo (name+size within the brand).
   bool get _isDuplicate {
     final name = _master.text.trim().toLowerCase();
     if (name.isEmpty || _size.isEmpty) return false;
+    final isM = currentStockistBusinessType == 'M';
+    final surf = _surface.trim().isEmpty ? 'none' : _surface.trim().toLowerCase();
     return widget.all.any((e) =>
         e.id != widget.existing?.id &&
-        e.brandId == _targetBrandId &&
         e.masterName.trim().toLowerCase() == name &&
-        e.size == _size);
+        e.size == _size &&
+        (isM
+            ? (e.surfaceType.trim().isEmpty
+                    ? 'none'
+                    : e.surfaceType.trim().toLowerCase()) ==
+                surf
+            : e.brandId == _targetBrandId));
   }
 
   @override
@@ -955,8 +964,9 @@ class _EditorState extends State<_LibraryEditorScreen> {
       return;
     }
     if (_isDuplicate) {
-      setState(() =>
-          _error = 'You already have "$master" at size $_size in your library.');
+      setState(() => _error =
+          'This tile "$master" ($_size) is already in your library — open it '
+          'from the list to add another brand\'s name.');
       return;
     }
     setState(() {
