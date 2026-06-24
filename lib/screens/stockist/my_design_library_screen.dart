@@ -109,6 +109,37 @@ class _State extends State<MyDesignLibraryScreen> {
       _brands.firstWhere((b) => b.id == brandId,
           orElse: () => const Brand(id: '', name: '?')).name;
 
+  // Two-tone pill used wherever we show a brand→name pair (library card + the
+  // merge picker): solid navy = the BRAND, light = that brand's design name, so
+  // "my brand vs its name" reads at a glance.
+  Widget _brandNamePill(String brandId, String name) => Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: _navy.withValues(alpha: 0.20)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              color: _navy,
+              child: Text(_brandName(brandId),
+                  style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              color: _navy.withValues(alpha: 0.06),
+              child: Text(name,
+                  style: const TextStyle(fontSize: 11, color: _navy)),
+            ),
+          ],
+        ),
+      );
+
   Future<void> _openEditor([LibraryEntry? entry]) async {
     if (_brands.isEmpty) {
       _snack('Add a brand first — designs live under a brand.', error: true);
@@ -171,81 +202,163 @@ class _State extends State<MyDesignLibraryScreen> {
       _snack('No other ${keep.size.replaceAll(' mm', '')} designs to merge.');
       return;
     }
+    var query = '';
     final chosen = await showModalBottomSheet<LibraryEntry>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Fold a duplicate into "${keep.masterName}"',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 15)),
-                  const SizedBox(height: 2),
-                  Text(
-                      'Pick the same tile listed twice. Its brand names, DNA and '
-                      'photo move here; the duplicate is removed. Stock is '
-                      'unchanged.',
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                ],
-              ),
-            ),
-            const Divider(height: 12),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                itemCount: candidates.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 4),
-                itemBuilder: (_, i) {
-                  final c = candidates[i];
-                  return ListTile(
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: SizedBox(
-                        width: 44,
-                        height: 44,
-                        child: c.imageUrl.isEmpty
-                            ? Container(
-                                color: Colors.grey.shade100,
-                                child: Icon(Icons.image_outlined,
-                                    size: 20, color: Colors.grey.shade400))
-                            : CachedNetworkImage(
-                                imageUrl: CloudinaryService.thumbUrl(c.imageUrl,
-                                    width: 120),
-                                fit: BoxFit.cover,
-                                placeholder: (_, __) =>
-                                    Container(color: Colors.grey.shade200),
-                                errorWidget: (_, __, ___) =>
-                                    Container(color: Colors.grey.shade200)),
+      // Cap the height so the header clears the status bar (and so it never
+      // pushes off-screen for a long library).
+      constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.88),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final q = query.trim().toLowerCase();
+          final list = q.isEmpty
+              ? candidates
+              : candidates.where((c) {
+                  final hay = ('${c.masterName} '
+                          '${c.aliases.entries.map((a) => '${_brandName(a.key)} ${a.value}').join(' ')}')
+                      .toLowerCase();
+                  return hay.contains(q);
+                }).toList();
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Drag handle.
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 8, bottom: 2),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Fold a duplicate into "${keep.masterName}"',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15)),
+                      const SizedBox(height: 2),
+                      Text(
+                          'Pick the same tile listed twice. Its brand names, DNA '
+                          'and photo move here; the duplicate is removed. Stock '
+                          'is unchanged.',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600)),
+                      const SizedBox(height: 10),
+                      TextField(
+                        onChanged: (v) => setSheet(() => query = v),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          hintText: 'Search by design or brand name',
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
                       ),
-                    ),
-                    title: Text(c.masterName,
-                        style: const TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.w600)),
-                    subtitle: c.aliases.isEmpty
-                        ? null
-                        : Text(
-                            c.aliases.entries
-                                .map((a) => '${_brandName(a.key)}: ${a.value}')
-                                .join('  ·  '),
-                            style: const TextStyle(fontSize: 11),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis),
-                    trailing: const Icon(Icons.call_merge, color: _navy),
-                    onTap: () => Navigator.pop(ctx, c),
-                  );
-                },
-              ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 12),
+                Flexible(
+                  child: list.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(28),
+                          child: Text('No match for "$query".',
+                              style: TextStyle(color: Colors.grey.shade600)),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                          itemCount: list.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 2),
+                          itemBuilder: (_, i) {
+                            final c = list[i];
+                            return InkWell(
+                              onTap: () => Navigator.pop(ctx, c),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 7),
+                                child: Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.center,
+                                  children: [
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: SizedBox(
+                                        width: 44,
+                                        height: 44,
+                                        child: c.imageUrl.isEmpty
+                                            ? Container(
+                                                color: Colors.grey.shade100,
+                                                child: Icon(
+                                                    Icons.image_outlined,
+                                                    size: 20,
+                                                    color:
+                                                        Colors.grey.shade400))
+                                            : CachedNetworkImage(
+                                                imageUrl:
+                                                    CloudinaryService.thumbUrl(
+                                                        c.imageUrl,
+                                                        width: 120),
+                                                fit: BoxFit.cover,
+                                                placeholder: (_, __) =>
+                                                    Container(
+                                                        color: Colors
+                                                            .grey.shade200),
+                                                errorWidget: (_, __, ___) =>
+                                                    Container(
+                                                        color: Colors
+                                                            .grey.shade200)),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(c.masterName,
+                                              style: const TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight:
+                                                      FontWeight.w600)),
+                                          if (c.aliases.isNotEmpty) ...[
+                                            const SizedBox(height: 5),
+                                            Wrap(
+                                              spacing: 6,
+                                              runSpacing: 4,
+                                              children: c.aliases.entries
+                                                  .map((a) => _brandNamePill(
+                                                      a.key, a.value))
+                                                  .toList(),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Icon(Icons.call_merge,
+                                        color: _navy),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
     if (chosen == null || !mounted) return;
@@ -577,41 +690,9 @@ class _State extends State<MyDesignLibraryScreen> {
                     Wrap(
                       spacing: 6,
                       runSpacing: 4,
-                      children: e.aliases.entries.map((a) {
-                        return Container(
-                          clipBehavior: Clip.antiAlias,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                                color: _navy.withValues(alpha: 0.20)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Solid segment = the BRAND name.
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 3),
-                                color: _navy,
-                                child: Text(_brandName(a.key),
-                                    style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white)),
-                              ),
-                              // Light segment = that brand's design name.
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 3),
-                                color: _navy.withValues(alpha: 0.06),
-                                child: Text(a.value,
-                                    style: const TextStyle(
-                                        fontSize: 11, color: _navy)),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
+                      children: e.aliases.entries
+                          .map((a) => _brandNamePill(a.key, a.value))
+                          .toList(),
                     ),
                   ],
                   if ((_dnaTags[e.id] ?? const []).isNotEmpty) ...[
