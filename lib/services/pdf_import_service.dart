@@ -344,7 +344,10 @@ Future<Map<String, dynamic>> _parsePdfTask(Map<String, dynamic> args) async {
 
   // Rotate any photo whose orientation disagrees with the tile's real shape
   // (derived from the filename size, e.g. 600x1200 → portrait).
-  final orientedImages = _orientImages(imagesByDesign, tileW, tileH);
+  // Orient, then guarantee each native-res photo fits Cloudinary's 1 MB limit.
+  final orientedImages = _orientImages(imagesByDesign, tileW, tileH)
+      .map(_capUnderUploadLimit)
+      .toList();
 
   return {
     'size':           size,
@@ -556,6 +559,45 @@ List<Uint8List?> _extractImageSlotsFromBytes(Uint8List bytes) {
   }
 
   return slots;
+}
+
+// ── Upload-size cap ─────────────────────────────────────────────────────────
+//
+// Cloudinary (free tier) rejects any upload over 1 MB. The native-resolution PDF
+// photo paths — raw embedded DCTDecode JPEGs, Flate rasters, and vertically
+// stitched strips — keep full resolution and can exceed that. So before a photo
+// leaves the extractor we re-encode any oversize one down to fit: cap the longest
+// edge, then step quality, then (last resort) shrink dimensions. Already-small
+// photos (the common case) are returned byte-for-byte untouched, so this is cheap.
+const _maxUploadBytes = 980 * 1024; // ~0.96 MB — margin under Cloudinary's 1 MB
+
+Uint8List? _capUnderUploadLimit(Uint8List? jpeg) {
+  if (jpeg == null || jpeg.length <= _maxUploadBytes) return jpeg;
+  final decoded = img.decodeJpg(jpeg);
+  if (decoded == null) return jpeg; // can't re-encode what we can't decode
+  var im = decoded;
+  // Bound the re-encode cost (and keep good zoom detail) by capping the longest
+  // edge at 2500px before the quality loop — generous vs the bulk path's 1600.
+  final longest = im.width > im.height ? im.width : im.height;
+  if (longest > 2500) {
+    im = im.width >= im.height
+        ? img.copyResize(im, width: 2500)
+        : img.copyResize(im, height: 2500);
+  }
+  var quality = 85;
+  var out = img.encodeJpg(im, quality: quality);
+  while (out.length > _maxUploadBytes && quality > 45) {
+    quality -= 8;
+    out = img.encodeJpg(im, quality: quality);
+  }
+  while (out.length > _maxUploadBytes) {
+    final w = (im.width * 0.85).round();
+    final h = (im.height * 0.85).round();
+    if (w < 600) break; // never loop forever / never go uselessly tiny
+    im = img.copyResize(im, width: w, height: h);
+    out = img.encodeJpg(im, quality: quality);
+  }
+  return out;
 }
 
 // ── Orientation correction ─────────────────────────────────────────────────────

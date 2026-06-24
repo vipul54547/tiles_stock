@@ -26,6 +26,13 @@ class AdminBulkImageImportScreen extends StatefulWidget {
 const _navy = Color(0xFF1B4F72);
 const _imgExts = {'.jpg', '.jpeg', '.png', '.webp'};
 
+// How many designs are processed+uploaded concurrently during commit. The old
+// commit loop ran one image fully (decode→upload→DB) before starting the next,
+// so CPU sat idle during the network round-trips and vice-versa. A small pool
+// overlaps decode (across cores) with uploads, cutting commit time ~4x. Kept
+// modest so a weak uplink / low-core machine isn't overwhelmed.
+const _kCommitConcurrency = 4;
+
 // Common inch tile-size folder names → admin mm size. Best-effort pre-fill; the
 // admin confirms/overrides each in the Sizes step.
 const _inchToMm = {
@@ -67,22 +74,46 @@ class _SizePack {
 
 enum _Phase { pick, map, preview, committing, done }
 
-// EXIF-bake → manual rotate → downscale to ~2000px → JPEG q85. Top-level + sync
-// so it can run inside Isolate.run (off the UI thread). Reads the file itself so
-// only the path (sendable) crosses the isolate boundary.
+// Cloudinary's per-image upload cap (free tier) is 1 MB. We keep a safety margin
+// below it so the file is never rejected mid-import.
+const _maxUploadBytes = 980 * 1024; // ~0.96 MB
+
+// EXIF-bake → manual rotate → downscale to ~1600px → JPEG q80, then GUARANTEE the
+// result fits under Cloudinary's 1 MB limit (step quality down, then dimensions,
+// for the rare ultra-detailed tile that's still too big). Top-level + sync so it
+// can run inside Isolate.run (off the UI thread). Reads the file itself so only
+// the path (sendable) crosses the isolate boundary. Bulk-import only — the PDF
+// importer keeps its own (q85/native) encoding.
 Uint8List _processImageSync(String path, int rotation) {
   final raw = File(path).readAsBytesSync();
-  var im = img.decodeImage(raw);
-  if (im == null) throw 'unsupported/corrupt image';
-  im = img.bakeOrientation(im);
+  final decoded = img.decodeImage(raw);
+  if (decoded == null) throw 'unsupported/corrupt image';
+  var im = img.bakeOrientation(decoded);
   if (rotation != 0) im = img.copyRotate(im, angle: rotation);
   final longest = im.width > im.height ? im.width : im.height;
-  if (longest > 2000) {
+  if (longest > 1600) {
     im = im.width >= im.height
-        ? img.copyResize(im, width: 2000)
-        : img.copyResize(im, height: 2000);
+        ? img.copyResize(im, width: 1600)
+        : img.copyResize(im, height: 1600);
   }
-  return Uint8List.fromList(img.encodeJpg(im, quality: 85));
+  // Start at q80; if a detailed tile encodes over the cap, drop quality, then
+  // (last resort) shrink dimensions, until it fits. Re-encoding is cheap next to
+  // the one-time decode above, so this stays fast for the common (already-fits)
+  // case where the loop bodies never run.
+  var quality = 80;
+  var out = img.encodeJpg(im, quality: quality);
+  while (out.length > _maxUploadBytes && quality > 45) {
+    quality -= 8;
+    out = img.encodeJpg(im, quality: quality);
+  }
+  while (out.length > _maxUploadBytes) {
+    final w = (im.width * 0.85).round();
+    final h = (im.height * 0.85).round();
+    if (w < 600) break; // never loop forever / never go uselessly tiny
+    im = img.copyResize(im, width: w, height: h);
+    out = img.encodeJpg(im, quality: quality);
+  }
+  return Uint8List.fromList(out);
 }
 
 class _State extends State<AdminBulkImageImportScreen> {
@@ -330,41 +361,62 @@ class _State extends State<AdminBulkImageImportScreen> {
       _done = 0; _failed = 0; _total = todo.length;
     });
     final seq = _stockist!.id;
-    for (final d in todo) {
-      try {
-        final pack = _sizePacks[d.sizeFolder]!;
-        final bytes = await _processImage(d);
-        final res = await CloudinaryService.uploadImageBytes(bytes,
-            filename: '${d.name}.jpg');
-        if (!res.ok) throw res.error ?? 'upload failed';
-        // Per-design values win; the size-pack default is the fallback.
-        final surface = (d.surface ?? '').isNotEmpty
-            ? d.surface!
-            : (d.surfaceFolder.isEmpty
-                ? 'None'
-                : (_surfaceMap[d.surfaceFolder] ?? 'None'));
-        final weightStr = d.weight.trim().isNotEmpty ? d.weight : pack.weight;
-        final weight = double.tryParse(weightStr.trim()) ?? 0;
-        await _data.adminLibraryUpsert(
-          seq: seq,
-          size: pack.adminSize!,
-          masterName: d.name,
-          brandId: _brandId!,
-          imageUrl: res.url!,
-          surface: surface,
-          tileType: (d.tileType ?? '').isNotEmpty ? d.tileType : pack.tileType,
-          pieces: d.pieces ?? pack.pieces,
-          weight: weight,
-        );
-        d.error = null;
-        _done++;
-      } catch (e) {
-        d.error = '$e';
-        _failed++;
+
+    // Worker pool: _kCommitConcurrency workers pull the next design off a shared
+    // cursor and run its full decode→upload→DB pipeline. Dart runs one isolate
+    // single-threaded, so `cursor++` between workers is race-free (no await sits
+    // between the read and the increment). This overlaps CPU-bound image work
+    // with network-bound uploads instead of doing them strictly one-at-a-time.
+    var cursor = 0;
+    Future<void> runWorker() async {
+      while (true) {
+        if (cursor >= todo.length) break;
+        final d = todo[cursor++];
+        await _commitOne(d, seq);
+        if (mounted) setState(() {});
       }
-      if (mounted) setState(() {});
     }
+
+    await Future.wait(
+      List.generate(_kCommitConcurrency, (_) => runWorker()),
+    );
     if (mounted) setState(() => _phase = _Phase.done);
+  }
+
+  // Process + upload + upsert a single design. Updates _done/_failed and stamps
+  // d.error on failure (surfaced on the Done screen). Never throws.
+  Future<void> _commitOne(_ImgDesign d, String seq) async {
+    try {
+      final pack = _sizePacks[d.sizeFolder]!;
+      final bytes = await _processImage(d);
+      final res = await CloudinaryService.uploadImageBytes(bytes,
+          filename: '${d.name}.jpg');
+      if (!res.ok) throw res.error ?? 'upload failed';
+      // Per-design values win; the size-pack default is the fallback.
+      final surface = (d.surface ?? '').isNotEmpty
+          ? d.surface!
+          : (d.surfaceFolder.isEmpty
+              ? 'None'
+              : (_surfaceMap[d.surfaceFolder] ?? 'None'));
+      final weightStr = d.weight.trim().isNotEmpty ? d.weight : pack.weight;
+      final weight = double.tryParse(weightStr.trim()) ?? 0;
+      await _data.adminLibraryUpsert(
+        seq: seq,
+        size: pack.adminSize!,
+        masterName: d.name,
+        brandId: _brandId!,
+        imageUrl: res.url!,
+        surface: surface,
+        tileType: (d.tileType ?? '').isNotEmpty ? d.tileType : pack.tileType,
+        pieces: d.pieces ?? pack.pieces,
+        weight: weight,
+      );
+      d.error = null;
+      _done++;
+    } catch (e) {
+      d.error = '$e';
+      _failed++;
+    }
   }
 
   // Run the heavy decode/resize/encode in a BACKGROUND ISOLATE so the UI never
