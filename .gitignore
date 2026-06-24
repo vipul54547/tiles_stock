@@ -46,3 +46,6 @@ app.*.map.json
 
 # Local Netlify folder
 .netlify
+
+# Scratch device screenshots (e.g. _device.png, _device_small.png)
+_*.png
