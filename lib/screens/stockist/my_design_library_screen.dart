@@ -156,6 +156,308 @@ class _State extends State<MyDesignLibraryScreen> {
     if (saved == true) _load();
   }
 
+  // "+ Add design" entry. For M the tile's identity spans brands (one box, many
+  // brand-names), so we lead with a BRAND-FIRST guided step: the human enters
+  // through their brand, then SEES the existing boxes (across all brands, with
+  // photos) before a blank form can spawn a duplicate. T/W are silos — brand IS
+  // the identity — so they go straight to the editor. (project_addflow_redesign)
+  Future<void> _addDesign() async {
+    if (_brands.isEmpty) {
+      _snack('Add a brand first — designs live under a brand.', error: true);
+      return;
+    }
+    if (currentStockistBusinessType != 'M') {
+      await _openEditor();
+      return;
+    }
+    await _showBrandFirstSheet();
+  }
+
+  // Brand-first guided add (M): pick the brand context, type the tile's name,
+  // and match it VISUALLY against every existing box (cross-brand). The human
+  // either links their brand's name onto an existing tile, or declares it new.
+  Future<void> _showBrandFirstSheet() async {
+    // Resolve the brand context up front. One brand auto-selects; otherwise the
+    // sheet opens on a brand picker (the human's lens onto the box).
+    String? brandId = _brands.length == 1 ? _brands.first.id : null;
+    final searchCtrl = TextEditingController();
+
+    final result = await showModalBottomSheet<_BrandFirstResult>(
+      context: context,
+      isScrollControlled: true,
+      constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.9),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          final brand = brandId == null
+              ? null
+              : _brands.firstWhere((b) => b.id == brandId,
+                  orElse: () => _brands.first);
+          final q = searchCtrl.text.trim().toLowerCase();
+          // Candidate boxes: name OR any brand-alias contains the query, so the
+          // human finds the tile even when it's filed under ANOTHER brand's name.
+          final candidates = q.isEmpty
+              ? const <LibraryEntry>[]
+              : (_entries.where((e) {
+                  final hay =
+                      '${e.masterName} ${e.aliases.values.join(' ')}'.toLowerCase();
+                  return hay.contains(q);
+                }).toList()
+                ..sort((a, b) => a.masterName
+                    .toLowerCase()
+                    .compareTo(b.masterName.toLowerCase())));
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 8, bottom: 6),
+                    decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                  // STEP 1 — brand context (only when more than one brand).
+                  if (brand == null) ...[
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 6),
+                      child: Text('Which brand are you adding for?',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                    ),
+                    Flexible(
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final b in _brands)
+                            ListTile(
+                              leading: const Icon(Icons.sell_outlined,
+                                  color: _navy),
+                              title: Text(b.name),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => setSheet(() => brandId = b.id),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ] else ...[
+                    // STEP 2 — identity search within the chosen brand context.
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text('Add a design for ${brand.name}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 16)),
+                          ),
+                          if (_brands.length > 1)
+                            TextButton(
+                              onPressed: () => setSheet(() => brandId = null),
+                              child: const Text('Change'),
+                            ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                      child: Text(
+                          'Type the name. If this tile is already yours under '
+                          'another brand, pick it below — don\'t make a duplicate.',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600)),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: TextField(
+                        controller: searchCtrl,
+                        autofocus: true,
+                        textCapitalization: TextCapitalization.words,
+                        onChanged: (_) => setSheet(() {}),
+                        decoration: InputDecoration(
+                          hintText: 'Tile name in ${brand.name}',
+                          prefixIcon: const Icon(Icons.search),
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    if (q.isNotEmpty)
+                      Flexible(
+                        child: ListView(
+                          shrinkWrap: true,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          children: [
+                            if (candidates.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: Text(
+                                    'No existing tile matches "${searchCtrl.text.trim()}".',
+                                    style: TextStyle(
+                                        color: Colors.grey.shade600)),
+                              )
+                            else
+                              for (final c in candidates)
+                                _candidateCard(c, brand.id, () {
+                                  Navigator.pop(
+                                      ctx,
+                                      _BrandFirstResult.link(c, brand.id,
+                                          searchCtrl.text.trim()));
+                                }),
+                          ],
+                        ),
+                      ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => Navigator.pop(
+                              ctx,
+                              _BrandFirstResult.create(
+                                  brand.id, searchCtrl.text.trim())),
+                          icon: const Icon(Icons.add),
+                          label: Text(q.isEmpty
+                              ? 'Create a new tile'
+                              : 'None of these — create new tile'),
+                          style: OutlinedButton.styleFrom(
+                              foregroundColor: _navy,
+                              side: const BorderSide(color: _navy),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    searchCtrl.dispose();
+    if (result == null || !mounted) return;
+    if (result.isLink) {
+      await _linkBrandNameToBox(result.box!, result.brandId, result.name);
+    } else {
+      // New tile: open the editor pre-filled with the typed name + brand alias.
+      final saved = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => _LibraryEditorScreen(
+            brands: _brands,
+            sizes: _sizes,
+            all: _entries,
+            existing: null,
+            prefillName: result.name,
+            prefillBrandId: result.brandId,
+          ),
+        ),
+      );
+      if (saved == true) _load();
+    }
+  }
+
+  // One existing-box row in the brand-first search: photo + master name + size/
+  // surface + the brand-name pills it already carries, with an "Add my name"
+  // affordance so the human links instead of duplicating.
+  Widget _candidateCard(LibraryEntry e, String brandId, VoidCallback onLink) {
+    final already = (e.aliases[brandId] ?? '').trim().isNotEmpty;
+    final surface = e.surfaceType.trim();
+    final sub = [
+      e.size.replaceAll(' mm', ''),
+      if (surface.isNotEmpty && surface.toLowerCase() != 'none') surface,
+    ].join(' · ');
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: ListTile(
+        leading: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: e.imageUrl.isEmpty
+              ? Container(
+                  width: 48,
+                  height: 48,
+                  color: Colors.grey.shade200,
+                  child: Icon(Icons.image_outlined,
+                      color: Colors.grey.shade400, size: 22))
+              : CachedNetworkImage(
+                  imageUrl: CloudinaryService.thumbUrl(e.imageUrl, width: 120),
+                  width: 48,
+                  height: 48,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) =>
+                      Container(width: 48, height: 48, color: Colors.grey.shade200),
+                  errorWidget: (_, __, ___) => Container(
+                      width: 48, height: 48, color: Colors.grey.shade200),
+                ),
+        ),
+        title: Text(e.masterName,
+            maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(sub, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+            if (e.aliases.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final a in e.aliases.entries)
+                    _brandNamePill(a.key, a.value),
+                ],
+              ),
+            ],
+          ],
+        ),
+        trailing: already
+            ? Tooltip(
+                message: 'This brand already names it "${e.aliases[brandId]}"',
+                child: Icon(Icons.check_circle, color: Colors.green.shade600))
+            : TextButton(onPressed: onLink, child: const Text('This one')),
+        onTap: already ? null : onLink,
+      ),
+    );
+  }
+
+  // Link the typed brand-name onto an EXISTING box (brand-agnostic for M): merge
+  // the name into the box's aliases, keep everything else. No duplicate master.
+  Future<void> _linkBrandNameToBox(
+      LibraryEntry box, String brandId, String name) async {
+    try {
+      await _data.upsertLibraryMaster(
+        id: box.id,
+        size: box.size,
+        masterName: box.masterName,
+        imageUrl: box.imageUrl,
+        brandId: null, // M boxes are brand-agnostic
+        aliases: {...box.aliases, brandId: name},
+        surfaceType: box.surfaceType,
+        stockType: box.stockType,
+        tileType: box.tileType,
+        piecesPerBox: box.piecesPerBox,
+        boxWeightKg: box.boxWeightKg,
+        thicknessMm: box.thicknessMm,
+        colour: box.colour,
+        finishLabel: box.finishLabel,
+      );
+      _snack('Added "$name" to "${box.masterName}".');
+      await _load();
+    } catch (e) {
+      _snack('$e', error: true);
+    }
+  }
+
   Future<void> _confirmDelete(LibraryEntry e) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -417,7 +719,7 @@ class _State extends State<MyDesignLibraryScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openEditor(),
+        onPressed: _addDesign,
         backgroundColor: _navy,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
@@ -761,6 +1063,21 @@ class _State extends State<MyDesignLibraryScreen> {
   }
 }
 
+/// Outcome of the brand-first guided add sheet: either LINK the typed name onto
+/// an existing box, or CREATE a new tile (open the editor pre-filled).
+class _BrandFirstResult {
+  final bool isLink;
+  final LibraryEntry? box; // set when isLink
+  final String brandId;
+  final String name;
+  const _BrandFirstResult._(this.isLink, this.box, this.brandId, this.name);
+  factory _BrandFirstResult.link(
+          LibraryEntry box, String brandId, String name) =>
+      _BrandFirstResult._(true, box, brandId, name);
+  factory _BrandFirstResult.create(String brandId, String name) =>
+      _BrandFirstResult._(false, null, brandId, name);
+}
+
 /// Full-page editor for one master design: image, size, master name, and the
 /// design name under each brand. The only place these are editable.
 class _LibraryEditorScreen extends StatefulWidget {
@@ -768,11 +1085,17 @@ class _LibraryEditorScreen extends StatefulWidget {
   final List<String> sizes;
   final List<LibraryEntry> all; // for live duplicate detection
   final LibraryEntry? existing;
+  // Brand-first guided add: a new tile arrives pre-filled with the typed name
+  // (master + that brand's alias) so the human doesn't re-type. (null = blank.)
+  final String? prefillName;
+  final String? prefillBrandId;
   const _LibraryEditorScreen(
       {required this.brands,
       required this.sizes,
       required this.all,
-      this.existing});
+      this.existing,
+      this.prefillName,
+      this.prefillBrandId});
   @override
   State<_LibraryEditorScreen> createState() => _EditorState();
 }
@@ -860,8 +1183,19 @@ class _EditorState extends State<_LibraryEditorScreen> {
       if (e.boxWeightKg > 0) _weightCtrl.text = _trimNum(e.boxWeightKg);
       _colourCtrl.text = e.colour;
       _finishCtrl.text = e.finishLabel ?? '';
-    } else if (widget.sizes.isNotEmpty) {
-      _size = widget.sizes.first;
+    } else {
+      if (widget.sizes.isNotEmpty) _size = widget.sizes.first;
+      // Brand-first guided add pre-fills the typed name as the master + the
+      // chosen brand's alias, so the human lands on a half-done form, not blank.
+      final pre = widget.prefillName?.trim() ?? '';
+      if (pre.isNotEmpty) {
+        _master.text = pre;
+        _masterTouched = true;
+        final bid = widget.prefillBrandId;
+        if (bid != null && _aliasCtrls.containsKey(bid)) {
+          _aliasCtrls[bid]!.text = pre;
+        }
+      }
     }
     _master.addListener(() {
       if (_master.text != (widget.existing?.masterName ?? '')) _masterTouched = true;
