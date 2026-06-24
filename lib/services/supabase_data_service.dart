@@ -623,6 +623,8 @@ class SupabaseDataService {
     required String size,
     required String masterName,
     Map<String, String> aliases = const {},
+    // M box identity = master + surface; 'None' is a wildcard the server absorbs.
+    String surface = 'None',
   }) async {
     final aliasJson = aliases.entries
         .where((e) => e.value.trim().isNotEmpty)
@@ -633,6 +635,7 @@ class SupabaseDataService {
         'p_size': size,
         'p_master_name': masterName,
         'p_aliases': aliasJson,
+        'p_surface': surface.trim().isEmpty ? 'None' : surface.trim(),
       });
       return (res ?? '').toString();
     } catch (e) {
