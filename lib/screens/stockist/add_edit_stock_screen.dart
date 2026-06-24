@@ -206,28 +206,6 @@ class _State extends State<AddEditStockScreen> {
     });
   }
 
-  Future<void> _openMasterPicker() async {
-    final picked = await showModalBottomSheet<LibraryEntry>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => _MasterPickerSheet(
-        masters: _masters,
-        brandId: _designBrandId,
-        nameForBrand: _nameForBrand,
-      ),
-    );
-    if (!mounted) return;
-    if (picked == null) return;
-    if (identical(picked, _addToLibrarySentinel)) {
-      await context.push('/stockist/library');
-      await _loadMasters();
-      return;
-    }
-    _selectMaster(picked);
-  }
-
   // ── Change image (edit mode) ───────────────────────────────────────────────
   Future<void> _openImageEditor() async {
     final newUrl = await Navigator.of(context).push<String>(
@@ -572,38 +550,18 @@ class _State extends State<AddEditStockScreen> {
   // ── Master picker (add mode) ───────────────────────────────────────────────
   Widget _buildMasterPicker() {
     if (_selectedMaster == null) {
-      return InkWell(
-        onTap: _openMasterPicker,
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFF1B4F72), width: 1.5),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.collections_bookmark_outlined,
-                  color: Color(0xFF1B4F72)),
-              SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Choose design from your Library',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1B4F72))),
-                    SizedBox(height: 2),
-                    Text('Its name, size, photo and details come from the Library',
-                        style: TextStyle(fontSize: 11.5, color: Colors.grey)),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right, color: Color(0xFF1B4F72)),
-            ],
-          ),
-        ),
+      // Entry point = type the design's name. Matching library designs surface
+      // live (so an existing tile is reused, not duplicated); "create new" only
+      // shows when nothing matches.
+      return _InlineMasterSearch(
+        masters: _masters,
+        nameForBrand: _nameForBrand,
+        onPick: _selectMaster,
+        onCreateNew: () async {
+          await context.push('/stockist/library');
+          if (!mounted) return;
+          await _loadMasters();
+        },
       );
     }
     return Column(
@@ -612,7 +570,7 @@ class _State extends State<AddEditStockScreen> {
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
-              onPressed: _openMasterPicker,
+              onPressed: () => setState(() => _selectedMaster = null),
               child: const Text('Change design')),
         ),
       ],
@@ -969,126 +927,182 @@ class _State extends State<AddEditStockScreen> {
   }
 }
 
-// Sentinel returned by the picker sheet to mean "go add a new master".
-const LibraryEntry _addToLibrarySentinel =
-    LibraryEntry(id: '__add__', size: '', masterName: '');
-
-// Bottom sheet to pick a Library master (with search) when adding stock.
-class _MasterPickerSheet extends StatefulWidget {
+// Inline "search-or-create" entry used when ADDING stock (no master picked
+// yet): type the design name -> matching library designs surface live (so an
+// existing tile is reused, not duplicated); "create new" only shows when
+// nothing matches. Replaces the old modal "Choose design from your Library".
+class _InlineMasterSearch extends StatefulWidget {
   final List<LibraryEntry> masters;
-  final String? brandId;
   final String Function(LibraryEntry) nameForBrand;
-  const _MasterPickerSheet(
-      {required this.masters, required this.brandId, required this.nameForBrand});
+  final void Function(LibraryEntry) onPick;
+  final Future<void> Function() onCreateNew;
+  const _InlineMasterSearch({
+    required this.masters,
+    required this.nameForBrand,
+    required this.onPick,
+    required this.onCreateNew,
+  });
   @override
-  State<_MasterPickerSheet> createState() => _MasterPickerSheetState();
+  State<_InlineMasterSearch> createState() => _InlineMasterSearchState();
 }
 
-class _MasterPickerSheetState extends State<_MasterPickerSheet> {
+class _InlineMasterSearchState extends State<_InlineMasterSearch> {
+  static const _navy = Color(0xFF1B4F72);
+  final _ctrl = TextEditingController();
   String _q = '';
 
   @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final typed = _ctrl.text.trim();
     final q = _q.trim().toLowerCase();
-    final list = widget.masters.where((m) {
-      if (q.isEmpty) return true;
-      final hay = '${m.masterName} ${m.aliases.values.join(' ')} ${m.size}'
-          .toLowerCase();
-      return hay.contains(q);
-    }).toList();
-    return Padding(
-      padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.4,
-        maxChildSize: 0.92,
-        expand: false,
-        builder: (_, scroll) => Column(
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-              child: TextField(
-                autofocus: false,
-                onChanged: (v) => setState(() => _q = v),
-                decoration: InputDecoration(
-                  hintText: 'Search your library…',
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  isDense: true,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.add, color: Color(0xFF1B4F72)),
-              title: const Text('Add a new design to your Library',
-                  style: TextStyle(
-                      color: Color(0xFF1B4F72), fontWeight: FontWeight.w600)),
-              onTap: () => Navigator.pop(context, _addToLibrarySentinel),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: widget.masters.isEmpty
-                  ? const Center(
-                      child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text(
-                          'Your Design Library is empty.\nAdd a design there '
-                          'first, then add its stock here.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey)),
-                    ))
-                  : ListView.separated(
-                      controller: scroll,
-                      itemCount: list.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final m = list[i];
-                        final name = widget.nameForBrand(m);
-                        return ListTile(
-                          leading: ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: m.imageUrl.isEmpty
-                                  ? Container(
-                                      color: Colors.grey.shade100,
-                                      child: Icon(Icons.image_outlined,
-                                          size: 18,
-                                          color: Colors.grey.shade400))
-                                  : CachedNetworkImage(
-                                      imageUrl: CloudinaryService.thumbUrl(
-                                          m.imageUrl,
-                                          width: 120),
-                                      fit: BoxFit.cover,
-                                      placeholder: (_, __) => Container(
-                                          color: Colors.grey.shade200),
-                                      errorWidget: (_, __, ___) => Container(
-                                          color: Colors.grey.shade200)),
-                            ),
-                          ),
-                          title: Text(name,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text(m.size.replaceAll(' mm', ''),
-                              style: const TextStyle(fontSize: 12)),
-                          onTap: () => Navigator.pop(context, m),
-                        );
-                      },
-                    ),
-            ),
-          ],
+    final results = q.isEmpty
+        ? const <LibraryEntry>[]
+        : widget.masters.where((m) {
+            final hay =
+                '${m.masterName} ${m.aliases.values.join(' ')} ${m.size}'
+                    .toLowerCase();
+            return hay.contains(q);
+          }).toList();
+    final exact = q.isNotEmpty &&
+        widget.masters.any((m) =>
+            m.masterName.trim().toLowerCase() == q ||
+            m.aliases.values.any((v) => v.trim().toLowerCase() == q));
+    final shown = results.take(8).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text("What's this design called?",
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 2),
+        Text(
+            "Type the name on the box. Any brand's name works - if it's already "
+            "in your Library, we'll find it.",
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _ctrl,
+          onChanged: (v) => setState(() => _q = v),
+          decoration: InputDecoration(
+            isDense: true,
+            prefixIcon: const Icon(Icons.search, size: 20),
+            hintText: 'Design name',
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          ),
         ),
-      ),
+        const SizedBox(height: 12),
+        if (q.isEmpty)
+          _createTile('Add a brand-new design')
+        else ...[
+          if (shown.isNotEmpty) ...[
+            Text('Already in your Library',
+                style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade600)),
+            const SizedBox(height: 2),
+            ...shown.map(_resultTile),
+            if (results.length > shown.length)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                    '+${results.length - shown.length} more - keep typing to '
+                    'narrow',
+                    style:
+                        TextStyle(fontSize: 11.5, color: Colors.grey.shade500)),
+              ),
+            const SizedBox(height: 10),
+          ] else
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('No match in your Library.',
+                  style:
+                      TextStyle(fontSize: 12.5, color: Colors.grey.shade600)),
+            ),
+          if (!exact)
+            _createTile(typed.isEmpty
+                ? 'Add a brand-new design'
+                : 'Create new design "$typed"'),
+        ],
+      ],
     );
   }
+
+  Widget _resultTile(LibraryEntry m) => InkWell(
+        onTap: () => widget.onPick(m),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: m.imageUrl.isEmpty
+                      ? Container(
+                          color: Colors.grey.shade100,
+                          child: Icon(Icons.image_outlined,
+                              size: 18, color: Colors.grey.shade400))
+                      : CachedNetworkImage(
+                          imageUrl: CloudinaryService.thumbUrl(m.imageUrl,
+                              width: 120),
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) =>
+                              Container(color: Colors.grey.shade200),
+                          errorWidget: (_, __, ___) =>
+                              Container(color: Colors.grey.shade200)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.nameForBrand(m),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 14)),
+                    Text(m.size.replaceAll(' mm', ''),
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.add_circle_outline, color: _navy),
+            ],
+          ),
+        ),
+      );
+
+  Widget _createTile(String label) => InkWell(
+        onTap: () => widget.onCreateNew(),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _navy, width: 1.4),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.add, color: _navy),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, color: _navy)),
+              ),
+              const Icon(Icons.chevron_right, color: _navy),
+            ],
+          ),
+        ),
+      );
 }
