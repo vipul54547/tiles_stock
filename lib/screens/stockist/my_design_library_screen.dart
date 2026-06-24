@@ -458,6 +458,19 @@ class _State extends State<MyDesignLibraryScreen> {
     }
   }
 
+  // Open the duplicate-review screen with the current groups; reload on return
+  // (a merge changed the library).
+  Future<void> _openDuplicatesReview() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _DuplicatesReviewScreen(
+            groups: _duplicateGroups, brands: _brands),
+      ),
+    );
+    if (changed == true) _load();
+  }
+
   Future<void> _confirmDelete(LibraryEntry e) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -495,6 +508,28 @@ class _State extends State<MyDesignLibraryScreen> {
   // enforces same-size). Used to show/hide the per-tile merge action.
   List<LibraryEntry> _sameSizeSiblings(LibraryEntry keep) =>
       _entries.where((o) => o.id != keep.id && o.size == keep.size).toList();
+
+  static String _normSurface(String s) {
+    final t = s.trim().toLowerCase();
+    return t.isEmpty ? 'none' : t;
+  }
+
+  // Likely-duplicate groups: 2+ M boxes sharing the SAME identity key
+  // (master name + size + surface), brand-agnostic. These are the pre-#7-fix
+  // leftovers (one tile that became several brand-owned masters). We never
+  // auto-merge (images may genuinely differ) — they're surfaced for the human
+  // to confirm + fold via the Merge tool. (project_addflow_redesign_ddpi #4)
+  List<List<LibraryEntry>> get _duplicateGroups {
+    final groups = <String, List<LibraryEntry>>{};
+    for (final e in _entries) {
+      final key = '${e.masterName.trim().toLowerCase()}|${e.size}|'
+          '${_normSurface(e.surfaceType)}';
+      (groups[key] ??= []).add(e);
+    }
+    final out = groups.values.where((g) => g.length > 1).toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+    return out;
+  }
 
   // Merge: pick a same-size duplicate to FOLD INTO [keep]. The dropped master's
   // brand names, DNA and (if [keep] has none) photo move onto [keep]; the drop is
@@ -701,6 +736,17 @@ class _State extends State<MyDesignLibraryScreen> {
       appBar: AppBar(
         title: const Text('My Design Library'),
         actions: [
+          // M only: surface likely-duplicate masters (pre-#7 leftovers) for the
+          // human to review + merge. Badge = how many groups are waiting.
+          if (currentStockistBusinessType == 'M' && _duplicateGroups.isNotEmpty)
+            IconButton(
+              tooltip: 'Find duplicates',
+              icon: Badge.count(
+                count: _duplicateGroups.length,
+                child: const Icon(Icons.content_copy_outlined),
+              ),
+              onPressed: _openDuplicatesReview,
+            ),
           IconButton(
             icon: const Icon(Icons.spellcheck),
             tooltip: 'My Words (DNA terms)',
@@ -1727,6 +1773,320 @@ class _EditorState extends State<_LibraryEditorScreen> {
           isDense: true,
           border: const OutlineInputBorder(),
           prefixIcon: const Icon(Icons.sell_outlined, size: 18),
+        ),
+      ),
+    );
+  }
+}
+
+/// Reviews likely-duplicate master groups (same name+size+surface, brand-
+/// agnostic) and lets the human fold each group into ONE box. Never auto-merges
+/// — images may genuinely differ, so the human picks which to keep after seeing
+/// them side by side. Pops `true` if any merge happened. (#4 cleanup tool)
+class _DuplicatesReviewScreen extends StatefulWidget {
+  final List<List<LibraryEntry>> groups;
+  final List<Brand> brands;
+  const _DuplicatesReviewScreen({required this.groups, required this.brands});
+  @override
+  State<_DuplicatesReviewScreen> createState() => _DuplicatesReviewState();
+}
+
+class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
+  final _data = SupabaseDataService();
+  // Working copy of each group (entries can drop out as they're merged).
+  late List<List<LibraryEntry>> _groups;
+  final Set<String> _dismissed = {}; // group keys the human marked "different"
+  final Map<String, String> _keepId = {}; // group key -> chosen keep entry id
+  String? _busyKey;
+  bool _changed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _groups = [
+      for (final g in widget.groups) List<LibraryEntry>.from(g)
+    ];
+    for (final g in _groups) {
+      _keepId[_key(g)] = _pickDefaultKeep(g).id;
+    }
+  }
+
+  // A stable key for a group (its shared identity).
+  String _key(List<LibraryEntry> g) {
+    final e = g.first;
+    return '${e.masterName.trim().toLowerCase()}|${e.size}|'
+        '${e.surfaceType.trim().toLowerCase()}';
+  }
+
+  // Default keep = the richest row: has an image, then most brand names.
+  LibraryEntry _pickDefaultKeep(List<LibraryEntry> g) {
+    final sorted = List<LibraryEntry>.from(g)
+      ..sort((a, b) {
+        final ai = a.imageUrl.isNotEmpty ? 1 : 0;
+        final bi = b.imageUrl.isNotEmpty ? 1 : 0;
+        if (ai != bi) return bi - ai;
+        return b.aliases.length.compareTo(a.aliases.length);
+      });
+    return sorted.first;
+  }
+
+  String _brandName(String id) => widget.brands
+      .firstWhere((b) => b.id == id, orElse: () => const Brand(id: '', name: '?'))
+      .name;
+
+  void _snack(String m, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(m), backgroundColor: error ? Colors.red : null));
+  }
+
+  Future<void> _mergeGroup(List<LibraryEntry> g) async {
+    final key = _key(g);
+    final keepId = _keepId[key];
+    if (keepId == null) return;
+    final keep = g.firstWhere((e) => e.id == keepId, orElse: () => g.first);
+    final drops = g.where((e) => e.id != keep.id).toList();
+    if (drops.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Merge ${drops.length + 1} into one?'),
+        content: Text(
+            'Keep "${keep.masterName}" (${keep.size}) and fold the other '
+            '${drops.length} into it. Their brand names and DNA move onto the '
+            'kept tile; stock counts are untouched. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _navy),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Merge')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _busyKey = key);
+    try {
+      for (final d in drops) {
+        await _data.mergeLibraryMasters(keepId: keep.id, dropId: d.id);
+      }
+      _changed = true;
+      setState(() {
+        _groups.removeWhere((x) => _key(x) == key);
+        _busyKey = null;
+      });
+      _snack('Merged into "${keep.masterName}".');
+    } catch (e) {
+      setState(() => _busyKey = null);
+      _snack('$e', error: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visible =
+        _groups.where((g) => !_dismissed.contains(_key(g))).toList();
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) Navigator.pop(context, _changed);
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF5F5F5),
+        appBar: AppBar(title: const Text('Find duplicates')),
+        body: visible.isEmpty
+            ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle_outline,
+                          size: 48, color: Colors.green.shade400),
+                      const SizedBox(height: 12),
+                      Text(
+                          _changed
+                              ? 'All done — nothing left to review.'
+                              : 'No duplicates to review.',
+                          style: const TextStyle(fontSize: 15)),
+                    ],
+                  ),
+                ),
+              )
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
+                    child: Text(
+                        'These tiles share a name, size and surface. Pick the one '
+                        'to KEEP and merge the rest — or mark them as genuinely '
+                        'different to leave them alone.',
+                        style: TextStyle(
+                            fontSize: 12.5, color: Colors.grey.shade700)),
+                  ),
+                  for (final g in visible) _groupCard(g),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _groupCard(List<LibraryEntry> g) {
+    final key = _key(g);
+    final e0 = g.first;
+    final surf = e0.surfaceType.trim();
+    final busy = _busyKey == key;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                      '${e0.masterName} · ${e0.size.replaceAll(' mm', '')}'
+                      '${surf.isNotEmpty && surf.toLowerCase() != 'none' ? ' · $surf' : ''}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.orange.shade200)),
+                  child: Text('${g.length} copies',
+                      style: TextStyle(
+                          fontSize: 11, color: Colors.orange.shade900)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text('Tap a tile to keep it.',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+            const SizedBox(height: 8),
+            for (final e in g) _entryRow(key, e),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => setState(() => _dismissed.add(key)),
+                  child: const Text('They are different'),
+                ),
+                const Spacer(),
+                FilledButton.icon(
+                  onPressed: busy ? null : () => _mergeGroup(g),
+                  style: FilledButton.styleFrom(backgroundColor: _navy),
+                  icon: busy
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.call_merge, size: 18),
+                  label: Text('Merge ${g.length} → 1'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _entryRow(String key, LibraryEntry e) {
+    final isKeep = _keepId[key] == e.id;
+    return InkWell(
+      onTap: () => setState(() => _keepId[key] = e.id),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: isKeep ? _navy.withValues(alpha: 0.06) : null,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+              color: isKeep ? _navy : Colors.grey.shade200,
+              width: isKeep ? 1.5 : 1),
+        ),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: e.imageUrl.isEmpty
+                  ? Container(
+                      width: 54,
+                      height: 54,
+                      color: Colors.grey.shade200,
+                      child: Icon(Icons.image_outlined,
+                          color: Colors.grey.shade400, size: 22))
+                  : CachedNetworkImage(
+                      imageUrl:
+                          CloudinaryService.thumbUrl(e.imageUrl, width: 140),
+                      width: 54,
+                      height: 54,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                          width: 54, height: 54, color: Colors.grey.shade200),
+                      errorWidget: (_, __, ___) => Container(
+                          width: 54, height: 54, color: Colors.grey.shade200),
+                    ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (e.aliases.isEmpty)
+                    Text('(no brand names)',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500))
+                  else
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: [
+                        for (final a in e.aliases.entries)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: _navy.withValues(alpha: 0.06),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: Text('${_brandName(a.key)}: ${a.value}',
+                                style:
+                                    const TextStyle(fontSize: 10, color: _navy)),
+                          ),
+                      ],
+                    ),
+                  if (e.imageUrl.isEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text('no photo',
+                        style: TextStyle(
+                            fontSize: 10, color: Colors.grey.shade500)),
+                  ],
+                ],
+              ),
+            ),
+            if (isKeep)
+              const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Icon(Icons.check_circle, color: _navy, size: 22),
+              )
+            else
+              Icon(Icons.radio_button_unchecked,
+                  color: Colors.grey.shade400, size: 22),
+          ],
         ),
       ),
     );
