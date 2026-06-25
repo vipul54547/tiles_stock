@@ -221,7 +221,10 @@ class _State extends State<StockistDashboardScreen> {
   List<StockCatalog> get _filterLists {
     var cs = _catalogs.where((c) => c.isActive);
     if (_brandFilter != 'all') {
-      cs = cs.where((c) => c.brandId == _brandFilter);
+      // Brand-free lists (v2) belong to no brand, so show them under EVERY brand
+      // on the stockist's own dashboard (they're never hidden by a brand pick).
+      cs = cs.where(
+          (c) => c.brandId == _brandFilter || (c.brandId ?? '').isEmpty);
     }
     return cs.toList()..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
   }
