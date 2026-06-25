@@ -19,6 +19,7 @@ import '../../models/choice_state.dart';
 import '../../models/dna.dart';
 import 'dna_editor_sheet.dart';
 import 'stock_control_screen.dart';
+import 'stock_lists_screen.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/account_actions.dart';
 
@@ -188,10 +189,18 @@ class _State extends State<StockistDashboardScreen> {
     });
   }
 
-  // A design's brand = its identity master's brand (carried on the holding now,
-  // not derived from a single list). Null when unknown. (stocklist-output)
-  String? _designBrandId(TileDesign d) =>
-      (d.brandId != null && d.brandId!.isNotEmpty) ? d.brandId : null;
+  // Library masters by id, for alias-aware brand lookups (M boxes are
+  // brand-agnostic — they belong to a brand via their per-brand aliases).
+  Map<String, LibraryEntry> get _libById =>
+      {for (final e in _library) e.id: e};
+
+  // Whether a design is sold under [brandId]: directly (T/W master brand) or via
+  // its master's brand aliases (M brand-agnostic boxes). (project_fstock_model)
+  bool _designInBrand(TileDesign d, String brandId) {
+    if (d.brandId == brandId) return true;
+    final lib = _libById[d.libraryId];
+    return lib != null && lib.aliases.containsKey(brandId);
+  }
 
   // Stock-list helpers. The active lists in the current brand view drive the
   // dashboard's "filter by list" row; the name map labels each design's card.
@@ -222,7 +231,10 @@ class _State extends State<StockistDashboardScreen> {
   // T/W with a specific brand selected → only that brand's slice matters.
   bool get _isLibraryEmpty {
     if (_brandFilter == 'all') return _library.isEmpty;
-    return _library.every((e) => e.brandId != _brandFilter);
+    // M masters are brand-agnostic (brand_id null) — count a master under a brand
+    // if it carries that brand's alias. (project_fstock_model)
+    return _library.every((e) =>
+        e.brandId != _brandFilter && !e.aliases.containsKey(_brandFilter));
   }
 
 
@@ -234,7 +246,7 @@ class _State extends State<StockistDashboardScreen> {
   List<TileDesign> get _inStockDesigns {
     var list = _designs.where((d) => d.boxQuantity > 0);
     if (_brandFilter != 'all') {
-      list = list.where((d) => _designBrandId(d) == _brandFilter);
+      list = list.where((d) => _designInBrand(d, _brandFilter));
     }
     return list.toList();
   }
@@ -1332,14 +1344,10 @@ class _State extends State<StockistDashboardScreen> {
           _actionBtn('Add', Icons.add, const Color(0xFF2E7D32),
               empty ? _showLibraryActivation : _showAddIntentSheet),
           const SizedBox(width: 6),
-          // Stock Control — set C_Quantity (what dealers see = F_Stock).
+          // Control hub — Make Stock List (curate what shows) or Control Stock
+          // (set C_Quantity = F_Stock dealers see).
           _actionBtn('Control', Icons.tune, const Color(0xFF00838F),
-              empty ? null : () async {
-                final changed = await Navigator.of(context).push<bool>(
-                    MaterialPageRoute(
-                        builder: (_) => const StockControlScreen()));
-                if (changed == true) _load();
-              }),
+              empty ? null : _showControlSheet),
           const SizedBox(width: 6),
           _actionBtn('Records', Icons.receipt_long_outlined,
               const Color(0xFF6A1B9A), empty ? null : () async {
@@ -1347,6 +1355,58 @@ class _State extends State<StockistDashboardScreen> {
                 _load();
               }),
         ],
+      ),
+    );
+  }
+
+  // Control hub: pick "Make Stock List" (curate which designs show) or "Control
+  // Stock" (set how many boxes show = F_Stock). (project_fstock_model)
+  void _showControlSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Control',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.collections_bookmark_outlined,
+                  color: Color(0xFF1B4F72)),
+              title: const Text('Make Stock List'),
+              subtitle: const Text('Curate which designs appear in a list'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await Navigator.of(context).push<bool>(MaterialPageRoute(
+                    builder: (_) => const StockListsScreen()));
+                _load();
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.tune, color: Color(0xFF00838F)),
+              title: const Text('Control Stock'),
+              subtitle: const Text('Set how many boxes dealers see (F_Stock)'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final changed = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                        builder: (_) => const StockControlScreen()));
+                if (changed == true) _load();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }

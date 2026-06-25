@@ -427,6 +427,28 @@ class SupabaseDataService {
     }
   }
 
+  /// Create a brand-free stock list ([id] null) or rename/edit an existing one.
+  /// Returns the list id. Per-stockist limit enforced server-side. (stocklists v2)
+  Future<String> saveStockList(
+      {String? id, required String name, String description = ''}) async {
+    final res = await supabase.rpc('stock_list_save', params: {
+      'p_id': id,
+      'p_name': name,
+      'p_description': description,
+    });
+    return (res ?? '').toString();
+  }
+
+  /// Replace a list's membership with [libraryIds] (the master/library ids of the
+  /// chosen designs). Returns the resulting member count. (stocklists v2)
+  Future<int> setListDesigns(String catalogId, List<String> libraryIds) async {
+    final res = await supabase.rpc('set_list_designs', params: {
+      'p_catalog_id': catalogId,
+      'p_library_ids': libraryIds,
+    });
+    return (res as num?)?.toInt() ?? 0;
+  }
+
   // ── brands (multi-brand) ────────────────────────────────────────────────────
 
   /// The calling stockist's brands (with catalogue counts).
