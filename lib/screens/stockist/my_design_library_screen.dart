@@ -296,15 +296,14 @@ class _State extends State<MyDesignLibraryScreen> {
   }
 
   // Likely-duplicate groups: 2+ M boxes sharing the SAME identity key
-  // (master name + size + surface), brand-agnostic. These are the pre-#7-fix
-  // leftovers (one tile that became several brand-owned masters). We never
-  // auto-merge (images may genuinely differ) — they're surfaced for the human
-  // to confirm + fold via the Merge tool. (project_addflow_redesign_ddpi #4)
+  // (master name + size), brand-agnostic. Surface is intentionally excluded:
+  // the same tile often arrives from different suppliers with different surface
+  // labels, creating two masters that should be one. The human confirms via
+  // the Merge tool. (project_addflow_redesign_ddpi #4)
   List<List<LibraryEntry>> get _duplicateGroups {
     final groups = <String, List<LibraryEntry>>{};
     for (final e in _entries) {
-      final key = '${e.masterName.trim().toLowerCase()}|${e.size}|'
-          '${_normSurface(e.surfaceType)}';
+      final key = '${e.masterName.trim().toLowerCase()}|${e.size}';
       (groups[key] ??= []).add(e);
     }
     final out = groups.values.where((g) => g.length > 1).toList()
@@ -811,6 +810,11 @@ class _State extends State<MyDesignLibraryScreen> {
                   Text(e.size.replaceAll(' mm', ''),
                       style:
                           TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  if (e.surfaceType.isNotEmpty &&
+                      e.surfaceType.toLowerCase() != 'none')
+                    Text(e.surfaceType,
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500)),
                   // Per-brand chips show what each brand calls this tile — shown
                   // for every design (1+ brands) so the brand→name mapping is
                   // always visible. Two-tone pill: solid navy = the BRAND, light =
@@ -1849,6 +1853,9 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
   final Map<String, String> _keepId = {}; // group key -> chosen keep entry id
   String? _busyKey;
   bool _changed = false;
+  bool _mergingAll = false;
+  final _searchCtrl = TextEditingController();
+  String _search = '';
 
   @override
   void initState() {
@@ -1859,13 +1866,13 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
     for (final g in _groups) {
       _keepId[_key(g)] = _pickDefaultKeep(g).id;
     }
+    _searchCtrl.addListener(() => setState(() => _search = _searchCtrl.text.trim().toLowerCase()));
   }
 
-  // A stable key for a group (its shared identity).
+  // A stable key for a group (its shared identity — name+size, no surface).
   String _key(List<LibraryEntry> g) {
     final e = g.first;
-    return '${e.masterName.trim().toLowerCase()}|${e.size}|'
-        '${e.surfaceType.trim().toLowerCase()}';
+    return '${e.masterName.trim().toLowerCase()}|${e.size}';
   }
 
   // Default keep = the richest row: has an image, then most brand names.
@@ -1935,9 +1942,64 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
   }
 
   @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _mergeAll(List<List<LibraryEntry>> groups) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text('Merge all ${groups.length} group${groups.length == 1 ? '' : 's'}?'),
+        content: const Text(
+            'Each group will be merged into its selected tile. Brand names, '
+            'DNA and photos move across. Stock counts are untouched. '
+            'This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _navy),
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Merge All')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _mergingAll = true);
+    final merged = <String>[];
+    try {
+      for (final g in groups) {
+        final key = _key(g);
+        final keepId = _keepId[key];
+        if (keepId == null) continue;
+        final keep = g.firstWhere((e) => e.id == keepId, orElse: () => g.first);
+        for (final d in g.where((e) => e.id != keep.id)) {
+          await _data.mergeLibraryMasters(keepId: keep.id, dropId: d.id);
+        }
+        merged.add(key);
+        _changed = true;
+      }
+      setState(() {
+        _groups.removeWhere((x) => merged.contains(_key(x)));
+        _mergingAll = false;
+      });
+      _snack('Merged ${merged.length} group${merged.length == 1 ? '' : 's'}.');
+    } catch (e) {
+      setState(() => _mergingAll = false);
+      _snack('$e', error: true);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final visible =
-        _groups.where((g) => !_dismissed.contains(_key(g))).toList();
+    final visible = _groups
+        .where((g) => !_dismissed.contains(_key(g)))
+        .where((g) => _search.isEmpty ||
+            g.first.masterName.toLowerCase().contains(_search))
+        .toList();
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -1945,41 +2007,93 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F5F5),
-        appBar: AppBar(title: const Text('Find duplicates')),
-        body: visible.isEmpty
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_outline,
-                          size: 48, color: Colors.green.shade400),
-                      const SizedBox(height: 12),
-                      Text(
-                          _changed
-                              ? 'All done — nothing left to review.'
-                              : 'No duplicates to review.',
-                          style: const TextStyle(fontSize: 15)),
-                    ],
-                  ),
-                ),
-              )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 10),
-                    child: Text(
-                        'These tiles share a name, size and surface. Pick the one '
-                        'to KEEP and merge the rest — or mark them as genuinely '
-                        'different to leave them alone.',
-                        style: TextStyle(
-                            fontSize: 12.5, color: Colors.grey.shade700)),
-                  ),
-                  for (final g in visible) _groupCard(g),
-                ],
+        appBar: AppBar(
+          title: const Text('Find duplicates'),
+          actions: [
+            if (visible.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _mergingAll
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: _navy))
+                    : TextButton(
+                        onPressed: _busyKey != null
+                            ? null
+                            : () => _mergeAll(visible),
+                        child: const Text('Merge All',
+                            style: TextStyle(color: _navy)),
+                      ),
               ),
+          ],
+        ),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Search by design name…',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  suffixIcon: _search.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 18),
+                          onPressed: () => _searchCtrl.clear(),
+                        )
+                      : null,
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none),
+                ),
+              ),
+            ),
+            Expanded(
+              child: visible.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle_outline,
+                                size: 48, color: Colors.green.shade400),
+                            const SizedBox(height: 12),
+                            Text(
+                                _search.isNotEmpty
+                                    ? 'No matches for "$_search".'
+                                    : _changed
+                                        ? 'All done — nothing left to review.'
+                                        : 'No duplicates to review.',
+                                style: const TextStyle(fontSize: 15)),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
+                          child: Text(
+                              'These tiles share a name and size. Pick the one '
+                              'to KEEP and merge the rest — or mark them as genuinely '
+                              'different to leave them alone.',
+                              style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: Colors.grey.shade700)),
+                        ),
+                        for (final g in visible) _groupCard(g),
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1987,7 +2101,6 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
   Widget _groupCard(List<LibraryEntry> g) {
     final key = _key(g);
     final e0 = g.first;
-    final surf = e0.surfaceType.trim();
     final busy = _busyKey == key;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2000,8 +2113,7 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
               children: [
                 Expanded(
                   child: Text(
-                      '${e0.masterName} · ${e0.size.replaceAll(' mm', '')}'
-                      '${surf.isNotEmpty && surf.toLowerCase() != 'none' ? ' · $surf' : ''}',
+                      '${e0.masterName} · ${e0.size.replaceAll(' mm', '')}',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 14)),
                 ),
@@ -2122,6 +2234,13 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
                   if (e.imageUrl.isEmpty) ...[
                     const SizedBox(height: 2),
                     Text('no photo',
+                        style: TextStyle(
+                            fontSize: 10, color: Colors.grey.shade500)),
+                  ],
+                  if (e.surfaceType.isNotEmpty &&
+                      e.surfaceType.toLowerCase() != 'none') ...[
+                    const SizedBox(height: 2),
+                    Text(e.surfaceType,
                         style: TextStyle(
                             fontSize: 10, color: Colors.grey.shade500)),
                   ],
