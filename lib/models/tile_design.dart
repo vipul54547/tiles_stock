@@ -13,6 +13,13 @@ class TileDesign {
   final String name;
   final String size;
   final int boxQuantity;
+  /// C_Quantity — boxes the stockist withholds (hidden from dealers). 0 = none.
+  /// (project_fstock_model)
+  final int controlQuantity;
+  /// F_Stock — boxes shown to dealers = max(0, P − H − C). H (bookings) is 0 in
+  /// Phase 1, so f_stock = max(0, box_quantity − control_quantity). Stockist
+  /// screens show P + C + F; dealer screens already receive F as their quantity.
+  final int fStock;
   final String surfaceType;
   /// Original finish text from the PDF when it isn't one of [kFinishes]
   /// (e.g. "Punch Ghr", "Lustra"). Null for standard finishes. Shown as a badge.
@@ -40,6 +47,12 @@ class TileDesign {
   /// The design's brand = its identity master's brand. Drives the dashboard's
   /// brand filter without going through a list. Empty/null when unknown.
   final String? brandId;
+  /// The identity master (stockist_library) this holding points to. Used to group
+  /// M holdings by master + look up its brand aliases. Empty when unknown.
+  final String libraryId;
+  /// The brand-agnostic master design name (CLOUD ONYX). For M, holdings of the
+  /// same design share this → the Stock Control page groups by it. (fstock model)
+  final String masterDesignName;
   /// The brand this design is sold under (parent of the catalog). Shown on the
   /// card in place of the seller's company name. Empty for legacy/brandless
   /// rows, and masked (empty) for anonymous public listings — callers fall back
@@ -60,6 +73,8 @@ class TileDesign {
     required this.name,
     required this.size,
     required this.boxQuantity,
+    this.controlQuantity = 0,
+    int? fStock,
     required this.surfaceType,
     this.finishLabel,
     required this.piecesPerBox,
@@ -73,19 +88,27 @@ class TileDesign {
     this.catalogId,
     this.catalogIds = const [],
     this.brandId,
+    this.libraryId = '',
+    this.masterDesignName = '',
     this.brandName = '',
     required this.updatedAt,
     required this.quality,
     required this.stockType,
     DateTime? createdAt,
     this.stockistPriority = 0,
-  }) : createdAt = createdAt ?? updatedAt;
+  })  : createdAt = createdAt ?? updatedAt,
+        fStock = fStock ??
+            (boxQuantity - controlQuantity < 0
+                ? 0
+                : boxQuantity - controlQuantity);
 
   factory TileDesign.fromJson(Map<String, dynamic> json) => TileDesign(
         id: json['id'],
         name: json['name'],
         size: json['size'],
         boxQuantity: json['box_quantity'],
+        controlQuantity: (json['control_quantity'] as num?)?.toInt() ?? 0,
+        fStock: (json['f_stock'] as num?)?.toInt(),
         surfaceType: json['surface_type'],
         finishLabel: json['finish_label'],
         piecesPerBox: json['pieces_per_box'],
@@ -112,13 +135,15 @@ class TileDesign {
   /// library when my_stock() doesn't return image_url.
   TileDesign withFaceImage(String url) => TileDesign(
         id: id, name: name, size: size, boxQuantity: boxQuantity,
+        controlQuantity: controlQuantity, fStock: fStock,
         surfaceType: surfaceType, finishLabel: finishLabel,
         piecesPerBox: piecesPerBox, boxWeightKg: boxWeightKg,
         thicknessMm: thicknessMm, colour: colour, tileType: tileType,
         faceImageUrls: [url],
         stockistId: stockistId, stockistName: stockistName,
         catalogId: catalogId, catalogIds: catalogIds,
-        brandId: brandId, brandName: brandName,
+        brandId: brandId, libraryId: libraryId,
+        masterDesignName: masterDesignName, brandName: brandName,
         updatedAt: updatedAt, quality: quality, stockType: stockType,
         createdAt: createdAt, stockistPriority: stockistPriority,
       );

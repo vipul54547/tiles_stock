@@ -191,6 +191,8 @@ class SupabaseDataService {
       name:         d['name'] ?? d['master_design_name'] ?? '',
       size:         d['size'] ?? '',
       boxQuantity:  d['box_quantity'] ?? 0,
+      controlQuantity: (d['control_quantity'] as num?)?.toInt() ?? 0,
+      fStock:       (d['f_stock'] as num?)?.toInt(),
       surfaceType:  (d['surface_type'] ?? 'None').toString(),
       finishLabel:  d['finish_label'] as String?,
       piecesPerBox: (d['pieces_per_box'] ?? 0) as int,
@@ -203,6 +205,8 @@ class SupabaseDataService {
       catalogIds:   (d['catalog_ids'] as List?)?.map((e) => e.toString()).toList()
                       ?? const [],
       brandId:      d['brand_id']?.toString(),
+      libraryId:    (d['library_id'] ?? '').toString(),
+      masterDesignName: (d['master_design_name'] ?? '').toString(),
       updatedAt:    DateTime.parse(d['updated_at']),
       quality:      quality,
       stockType:    effectiveStockType((d['stock_type'] ?? 'Uncertain').toString(), quality),
@@ -211,6 +215,19 @@ class SupabaseDataService {
           : null,
       stockistPriority: ((d['stockist_priority'] ?? 0) as num).toDouble(),
     );
+  }
+
+  /// Save C_Quantity (control / hold-back) for one or more holdings. [items] =
+  /// list of {id, control_quantity}. Returns the number of rows updated. Owner
+  /// enforced server-side. F_Stock is recomputed from this. (project_fstock_model)
+  Future<int> setControlQuantities(
+      List<({String id, int controlQuantity})> items) async {
+    final payload = items
+        .map((e) => {'id': e.id, 'control_quantity': e.controlQuantity})
+        .toList();
+    final res = await supabase
+        .rpc('set_control_quantities', params: {'p_items': payload});
+    return (res as num?)?.toInt() ?? 0;
   }
 
   Future<List<TileDesign>> searchDesigns({

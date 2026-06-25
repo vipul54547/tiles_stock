@@ -16,6 +16,10 @@ class TileCard extends StatelessWidget {
   /// Quality badge on the card. Stockists hide it (they have a quality filter,
   /// and it crowds the box count); buyers keep it.
   final bool showQuality;
+  /// Stockist's own dashboard: show the P · C · H · F figures instead of a single
+  /// "boxes" count. Buyers keep the single count (which is already F_Stock).
+  /// (project_fstock_model)
+  final bool showControlFigures;
 
   const TileCard({
     super.key,
@@ -25,7 +29,34 @@ class TileCard extends StatelessWidget {
     this.isChosen = false,
     this.onChoiceTap,
     this.showQuality = true,
+    this.showControlFigures = false,
   });
+
+  // P (physical) · C (held back) · H (booked) · F (shown to dealers), colour-coded.
+  // H is 0 until the booking system exists (Phase 2). (project_fstock_model)
+  Widget _controlFigures() {
+    Widget fig(String label, int value, Color color) => Text.rich(
+          TextSpan(children: [
+            TextSpan(
+                text: '$label ',
+                style: TextStyle(
+                    fontSize: 9, color: color.withValues(alpha: 0.75))),
+            TextSpan(
+                text: '$value',
+                style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.bold, color: color)),
+          ]),
+        );
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        fig('P', design.boxQuantity, Colors.grey.shade600),
+        fig('C', design.controlQuantity, const Color(0xFFEF6C00)),
+        fig('H', 0, const Color(0xFF1565C0)),
+        fig('F', design.fStock, const Color(0xFF2E7D32)),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -136,12 +167,23 @@ class TileCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 5),
                   // Boxes count  +  stockist ID
+                  if (showControlFigures) _controlFigures(),
+                  if (showControlFigures) const SizedBox(height: 3),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('${design.boxQuantity} boxes',
-                          style: const TextStyle(
-                              color: Color(0xFF1B4F72),
+                      Text(
+                          showControlFigures
+                              ? (design.fStock == 0 && design.controlQuantity > 0
+                                  ? 'Hidden'
+                                  : '${design.fStock} shown')
+                              : '${design.boxQuantity} boxes',
+                          style: TextStyle(
+                              color: showControlFigures &&
+                                      design.fStock == 0 &&
+                                      design.controlQuantity > 0
+                                  ? const Color(0xFFEF6C00)
+                                  : const Color(0xFF1B4F72),
                               fontWeight: FontWeight.w600,
                               fontSize: 11)),
                       // Stockist ID is hidden from guests.

@@ -18,6 +18,7 @@ import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
 import '../../models/dna.dart';
 import 'dna_editor_sheet.dart';
+import 'stock_control_screen.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/account_actions.dart';
 
@@ -851,6 +852,7 @@ class _State extends State<StockistDashboardScreen> {
           TileCard(
             design: d,
             showQuality: false, // stockist has a quality filter; chip is redundant
+            showControlFigures: true, // stockist sees P · C · H · F (fstock model)
             onTap: _selectMode
                 ? () {}
                 : () => context.push('/stockist/stock/edit/${d.id}'),
@@ -1329,6 +1331,15 @@ class _State extends State<StockistDashboardScreen> {
           const SizedBox(width: 6),
           _actionBtn('Add', Icons.add, const Color(0xFF2E7D32),
               empty ? _showLibraryActivation : _showAddIntentSheet),
+          const SizedBox(width: 6),
+          // Stock Control — set C_Quantity (what dealers see = F_Stock).
+          _actionBtn('Control', Icons.tune, const Color(0xFF00838F),
+              empty ? null : () async {
+                final changed = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                        builder: (_) => const StockControlScreen()));
+                if (changed == true) _load();
+              }),
           const SizedBox(width: 6),
           _actionBtn('Records', Icons.receipt_long_outlined,
               const Color(0xFF6A1B9A), empty ? null : () async {
