@@ -40,7 +40,10 @@ import '../../widgets/typewriter_text.dart';
 // mode + guarded confirm) → pick → edit (names/sizes) → ask (quality / surface /
 // tile type / pieces / weight) → stock (quantities) → review (Save / Cancel) →
 // done. Cancel/back before Save writes NOTHING.
-enum _Phase { mode, pick, reveal, sizeAsk, mistakes, edit, dedupe, ask, stock, review, done }
+// Flow: pick → (skipped) → reveal → sizeAsk → mistakes → edit → dedupe → ask
+// (IDENTITY only — builds the library) → stockGate ("also add stock now?") →
+// No: save library only · Yes: mode → quality → stock(quantities) → review → done.
+enum _Phase { mode, pick, skipped, reveal, sizeAsk, mistakes, edit, dedupe, ask, stockGate, quality, stock, review, done }
 
 // Step-1 (library building): rows that share a name + size but carry DIFFERENT
 // photos. By default they're ONE library design (the stockist picks which photo
@@ -177,8 +180,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   final _pdfService = PdfImportService();
   final _dataSvc = SupabaseDataService();
 
-  _Phase _phase = _Phase.mode;
-  UploadMode? _mode; // chosen in the mode phase, confirmed via guarded dialog
+  // Entry is the file picker — a PDF always builds the library; the stock-mode
+  // question is deferred to the stock branch (after the library is built).
+  _Phase _phase = _Phase.pick;
+  UploadMode? _mode; // chosen in the stock branch, confirmed via guarded dialog
   bool _busy = false;
   String _busyStep = '';
   String _filename = '';
@@ -198,6 +203,11 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // Brand context. Upload fills P_Stock for this brand; no stock list is targeted.
   String? _brandId;
   String _brandName = '';
+  // Manufacturer + whether we're uploading to the default brand. M on a NON-default
+  // brand uses the "create-only" rule: a PDF can only ADD new designs to that brand;
+  // designs that already exist under another brand are skipped (link via Excel).
+  bool _isM = false;
+  bool _isDefaultBrand = true;
 
   // Master sizes the admin allows (for the size dropdowns).
   List<String> _sizes = kAllowedSizes;
@@ -234,6 +244,14 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // aliases). Step-2 skips the set-once identity questions when the batch adds no
   // brand-new design (existing designs already carry tile type / pieces / weight).
   final Set<String> _libKeys = {};
+
+  // name|size keys this stockist already has under the SELECTED brand (re-uploads
+  // of these are fine). Drives the M non-default-brand "create-only" skip rule.
+  final Set<String> _libThisBrandKeys = {};
+  // Parsed designs skipped because they exist only under ANOTHER brand (M
+  // non-default-brand uploads). Shown to the stockist so they know what to link
+  // via Excel mapping. (name, size) pairs.
+  final List<({String name, String size})> _skippedOtherBrand = [];
 
   // name|size|quality|surface keys of this stockist's existing P_Stock holdings.
   // When EVERY row in the PDF matches one, it's a pure restock → skip straight to
@@ -423,7 +441,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                 orElse: () => brands.first));
         _brandId = brand.id;
         _brandName = brand.name;
+        _isDefaultBrand = brand.isDefault;
       }
+      _isM = currentStockistBusinessType == 'M';
       if (_sizes.isNotEmpty) _docSize = _sizes.first;
       // Existing library identities (name+size, master + aliases) — drives the
       // Step-2 "ask only when something is new" shortcut.
@@ -436,6 +456,19 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             for (final a in e.aliases.values) _libKey(a, e.size),
           ]
         ]);
+      // Names already present under the SELECTED brand (re-uploads are fine). For M
+      // on a non-default brand we keep only NEW designs and these own-brand ones;
+      // designs that exist only under ANOTHER brand can't be matched safely from a
+      // PDF (no reference name) → skipped, link them via Excel mapping instead.
+      _libThisBrandKeys.clear();
+      if (_brandId != null) {
+        for (final e in lib) {
+          final a = e.aliases[_brandId];
+          if (a != null && a.trim().isNotEmpty) {
+            _libThisBrandKeys.add(_libKey(a, e.size));
+          }
+        }
+      }
       // Existing P_Stock holdings (name+size+quality+surface) — drives the pure
       // restock shortcut (skip straight to quantities).
       final holdings = await _dataSvc.getDesignsByStockist(currentStockistUUID);
@@ -521,10 +554,35 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             quality: canonQuality(d.qualityRaw ?? parsed.quality),
           )));
 
+    // M on a non-default brand: keep only NEW or own-brand designs; designs that
+    // exist only under another brand are skipped (review page → link via Excel).
+    _applyBrandScopeFilter();
+
     _endProcessing();
     if (!mounted) return;
     _batchId = const Uuid().v4(); // one idempotency key per parsed PDF
-    _startReveal();
+    if (_skippedOtherBrand.isNotEmpty) {
+      setState(() => _phase = _Phase.skipped);
+    } else {
+      _startReveal();
+    }
+  }
+
+  // M only, non-default brand: classify parsed rows. New or own-brand → keep;
+  // exists only under another brand → skip + collect for the review page. A PDF
+  // has no reference name, so matching to another brand can't be done safely.
+  void _applyBrandScopeFilter() {
+    _skippedOtherBrand.clear();
+    if (!_isM || _isDefaultBrand) return;
+    for (final r in _rows) {
+      final key = _libKey(r.name, r.size);
+      final underThisBrand = _libThisBrandKeys.contains(key);
+      final existsSomewhere = _libKeys.contains(key);
+      if (existsSomewhere && !underThisBrand) {
+        r.include = false;
+        _skippedOtherBrand.add((name: r.name, size: r.size));
+      }
+    }
   }
 
   // ── Live design reveal (non-interactive) ─────────────────────────────────────
@@ -554,10 +612,13 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   void _afterReveal() {
     _revealTimer?.cancel();
     if (_allHoldingsMatch) {
+      // Pure restock: every design already exists as a holding, so there is no
+      // library to build — go straight to the stock branch (mode → quantities).
+      // Quality is auto "both" (per-row from the PDF); the quality page is skipped.
       _restock = true;
       _qualityMode = _QualityMode.both;
       _surfacePresent = true;
-      setState(() => _phase = _Phase.stock);
+      setState(() => _phase = _Phase.mode);
       return;
     }
     setState(() {
@@ -671,7 +732,16 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // library-only — Step 2 asks packing per size so it can add stock too.
   void _proceedAfterEdit() {
     setState(() {
-      _askStep = _AskStep.quality; // restart the wizard at the first question
+      // Identity wizard (LIBRARY build). Quality is no longer asked here — it
+      // moved to the stock branch. Start at the first identity question.
+      if (!_hasNewDesigns) {
+        _askStep = _AskStep.surfaceInPdf;
+      } else if (_isMultiSize) {
+        _ensureSizePacking();
+        _askStep = _AskStep.sizePacking;
+      } else {
+        _askStep = _AskStep.tileSame;
+      }
       _phase = _Phase.ask;
     });
   }
@@ -782,11 +852,12 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   void _askBack() {
     switch (_askStep) {
       case _AskStep.quality:
-        setState(() => _phase = _Phase.edit);
+        // Quality now lives in the stock branch — Back returns to the mode page.
+        setState(() => _phase = _Phase.mode);
       case _AskStep.sizePacking:
-        setState(() => _askStep = _AskStep.quality);
+        setState(() => _phase = _Phase.edit);
       case _AskStep.tileSame:
-        setState(() => _askStep = _AskStep.quality);
+        setState(() => _phase = _Phase.edit);
       case _AskStep.tilePick:
       case _AskStep.tileBlocked:
         setState(() => _askStep = _AskStep.tileSame);
@@ -795,10 +866,13 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       case _AskStep.weight:
         setState(() => _askStep = _AskStep.pieces);
       case _AskStep.surfaceInPdf:
-        // Walk back into the identity block only when it was shown.
-        setState(() => _askStep = !_hasNewDesigns
-            ? _AskStep.quality
-            : (_isMultiSize ? _AskStep.sizePacking : _AskStep.weight));
+        // First identity step when there are no new designs → back to the list.
+        if (!_hasNewDesigns) {
+          setState(() => _phase = _Phase.edit);
+        } else {
+          setState(() => _askStep =
+              _isMultiSize ? _AskStep.sizePacking : _AskStep.weight);
+        }
       case _AskStep.surfaceChoice:
         setState(() => _askStep = _AskStep.surfaceInPdf);
     }
@@ -909,7 +983,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       final ok = await _mapSurfacesStep();
       if (!ok) return;
     }
-    setState(() => _phase = _Phase.stock);
+    // Identity (library) is fully resolved. Ask whether to also add stock now.
+    setState(() => _phase = _Phase.stockGate);
   }
 
   // Map each distinct scraped surface to one of the admin finishes (like the Excel
@@ -1045,6 +1120,33 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   Future<void> _save({bool libraryOnly = false}) async {
     final kept = _kept;
     if (kept.isEmpty) return;
+
+    // Guardrail: the stockist chose to add stock, but every quantity is blank/0.
+    // Don't silently save as library-only — make it an explicit choice. (This is
+    // the case that earlier looked like "stock didn't save".)
+    if (!libraryOnly && kept.every((r) => r.qty <= 0)) {
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('No quantities entered'),
+          content: const Text(
+              'You chose to add stock, but no box quantities are filled in. '
+              'Go back to enter quantities, or save these designs to your '
+              'Library only?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, 'back'),
+                child: const Text('Go back')),
+            FilledButton(
+                onPressed: () => Navigator.pop(c, 'libonly'),
+                child: const Text('Save library only')),
+          ],
+        ),
+      );
+      if (choice != 'libonly') return; // 'back' or dismissed → stay on the page
+      libraryOnly = true;
+    }
+
     _beginProcessing('Saving…');
 
     // 1) Upload any PDF photos to Cloudinary first. These are idempotent
@@ -1279,6 +1381,8 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         return _modeBody();
       case _Phase.pick:
         return _pickBody();
+      case _Phase.skipped:
+        return _skippedBody();
       case _Phase.reveal:
         return _revealBody();
       case _Phase.sizeAsk:
@@ -1291,6 +1395,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         return _dedupeBody();
       case _Phase.ask:
         return _askBody();
+      case _Phase.stockGate:
+        return _stockGateBody();
+      case _Phase.quality:
+        return _qualityBody();
       case _Phase.stock:
         return _stockBody();
       case _Phase.review:
@@ -1332,8 +1440,121 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     if (!ok || !mounted) return;
     setState(() {
       _mode = m;
-      _phase = _Phase.pick;
+      // Normal: mode → quality → quantities. Pure restock: quality is auto-set
+      // ("both"), so skip straight to quantities.
+      _phase = _restock ? _Phase.stock : _Phase.quality;
     });
+  }
+
+  // After the library is built: offer to also record stock now, or save designs
+  // only. The library is built either way (on save). "Yes" → stock branch.
+  Widget _stockGateBody() {
+    final n = _kept.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _contextChip(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+          child: _askHeading('Also add stock now?'),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: _askHelp(
+              'Your library is ready — $n design${n == 1 ? '' : 's'} will be saved '
+              'with their photos and details. You can record how many boxes you '
+              'have now, or do it later.'),
+        ),
+        Card(
+          margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+          child: ListTile(
+            leading: const Icon(Icons.inventory_2_outlined,
+                color: Color(0xFF1B4F72)),
+            title: const Text('Yes — add stock quantities now',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: const Text('Record how many boxes you have',
+                style: TextStyle(fontSize: 12)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy ? null : () => setState(() => _phase = _Phase.mode),
+          ),
+        ),
+        Card(
+          margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: ListTile(
+            leading: const Icon(Icons.collections_bookmark_outlined,
+                color: Color(0xFF2E7D32)),
+            title: const Text('No — just save the designs',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: const Text('Library only; add stock anytime later',
+                style: TextStyle(fontSize: 12)),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _busy ? null : () => _save(libraryOnly: true),
+          ),
+        ),
+        const Spacer(),
+      ],
+    );
+  }
+
+  // Stock branch · quality grade (Premium / Standard / Both). Reached after the
+  // mode page; continues to the per-design quantities.
+  Widget _qualityBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _contextChip(),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            children: [
+              _askHeading('What grade is the stock in this PDF?'),
+              _askHelp(
+                  'Choose Premium or Standard if the whole PDF is one grade. '
+                  'Choose “Both” only if the PDF itself shows a grade next to each '
+                  'design — you can correct each one later.'),
+              const SizedBox(height: 18),
+              _bigChoice('Premium', _qualityMode == _QualityMode.premium,
+                  () => setState(() => _qualityMode = _QualityMode.premium)),
+              _bigChoice('Standard', _qualityMode == _QualityMode.standard,
+                  () => setState(() => _qualityMode = _QualityMode.standard)),
+              _bigChoice('Both — the grade is written in the PDF',
+                  _qualityMode == _QualityMode.both,
+                  () => setState(() => _qualityMode = _QualityMode.both)),
+            ],
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Row(
+              children: [
+                OutlinedButton(
+                  onPressed:
+                      _busy ? null : () => setState(() => _phase = _Phase.mode),
+                  style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 22, vertical: 14)),
+                  child: const Text('Back'),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed:
+                        _busy ? null : () => setState(() => _phase = _Phase.stock),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF1B4F72),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                    child: const Text('Continue to quantities'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _modeBody() {
@@ -1370,6 +1591,21 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             ),
           ),
         const Spacer(),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: OutlinedButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() => _phase = _Phase.stockGate),
+              style: OutlinedButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 22, vertical: 14)),
+              child: const Text('Back'),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1486,6 +1722,77 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           onTap: _goToAsk,
         ),
       ],
+    );
+  }
+
+  // ── M non-default brand · skipped designs review ─────────────────────────────
+  // Designs that already exist under another brand are skipped (a PDF can't match
+  // them safely). List them so the stockist knows to link via Excel mapping, then
+  // continue with the genuinely-new designs (if any).
+  Widget _skippedBody() {
+    final remaining = _kept.length;
+    final n = _skippedOtherBrand.length;
+    return SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Text(
+              '$n design${n == 1 ? '' : 's'} already in your library',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Text(
+              'These already exist under another brand. A PDF has no reference name '
+              'to match them safely, so they are skipped here. To also stock them '
+              'under "$_brandName", link them using Excel mapping.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            ),
+          ),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _skippedOtherBrand.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (_, i) {
+                final s = _skippedOtherBrand[i];
+                return ListTile(
+                  dense: true,
+                  leading: Icon(Icons.link_off,
+                      size: 18, color: Colors.orange.shade700),
+                  title: Text(s.name),
+                  subtitle: Text(s.size.replaceAll(' mm', '')),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Close'),
+                  ),
+                ),
+                if (remaining > 0) ...[
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _startReveal,
+                      child: Text('Continue with $remaining new'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2444,24 +2751,25 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     }
   }
 
-  // Total Step-2 questions: 2 when all designs exist (quality + surface), 3 for a
-  // mixed-size new batch (quality + per-size packing + surface), else 5.
-  int get _askTotal => !_hasNewDesigns ? 2 : (_isMultiSize ? 3 : 5);
+  // Identity questions only (quality moved to the stock branch): 1 when all
+  // designs exist (surface), 2 for a mixed-size new batch (per-size packing +
+  // surface), else 4 (tile type + pieces + weight + surface).
+  int get _askTotal => !_hasNewDesigns ? 1 : (_isMultiSize ? 2 : 4);
 
   int _askPhaseNum(_AskStep s) {
     switch (s) {
       case _AskStep.quality:
-        return 1;
+        return 1; // unused here (quality is its own phase in the stock branch)
       case _AskStep.sizePacking:
-        return 2;
+        return 1;
       case _AskStep.tileSame:
       case _AskStep.tilePick:
       case _AskStep.tileBlocked:
-        return 2;
+        return 1;
       case _AskStep.pieces:
-        return 3;
+        return 2;
       case _AskStep.weight:
-        return 4;
+        return 3;
       case _AskStep.surfaceInPdf:
       case _AskStep.surfaceChoice:
         return _askTotal; // surface is always the last step
@@ -2478,7 +2786,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           child: Row(
             children: [
               Expanded(
-                child: Text('Step 2 · ${_askStepTitle(_askStep)}',
+                child: Text('Design details · ${_askStepTitle(_askStep)}',
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 15)),
               ),
@@ -2783,7 +3091,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         _askStep != _AskStep.surfaceInPdf &&
         _askStep != _AskStep.tileBlocked;
     final nextLabel =
-        _askStep == _AskStep.surfaceChoice ? 'Continue to stock' : 'Next';
+        _askStep == _AskStep.surfaceChoice ? 'Continue' : 'Next';
     return SafeArea(
       top: false,
       child: Padding(

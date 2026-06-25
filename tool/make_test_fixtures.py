@@ -71,7 +71,7 @@ _write(
 # account's main brand is named differently, rename that column to match.
 _write(
     os.path.join(OUT_DIR, "m_combined.xlsx"), "Stock",
-    ["Master Design", "cura ceramic", "BOTTEGA", "CERA TILES", "ENNFACE",
+    ["Master Design", "CURA", "BOTTEGA", "CERA TILES", "ENNFACE",
      "ZZ JUNKCOL", "Size",
      "Premium", "Standard", "Surface", "Tile Type", "Pieces/Box", "Weight (kg)",
      "Colour", "Look"],

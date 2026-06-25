@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
+import '../../services/cloudinary_service.dart';
 import '../../widgets/tile_card.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/powered_by_tiles_stock.dart';
@@ -211,6 +214,14 @@ class _State extends State<StockistDashboardScreen> {
       cs = cs.where((c) => c.brandId == _brandFilter);
     }
     return cs.toList()..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+  }
+
+  // True when the currently visible brand slice of the library has no entries.
+  // M = one pool for all brands → whole library empty.
+  // T/W with a specific brand selected → only that brand's slice matters.
+  bool get _isLibraryEmpty {
+    if (_brandFilter == 'all') return _library.isEmpty;
+    return _library.every((e) => e.brandId != _brandFilter);
   }
 
 
@@ -1225,12 +1236,12 @@ class _State extends State<StockistDashboardScreen> {
                         _load();
                       },
                     ),
-                  // Importers (T/W) get PDF on ANY brand — each brand is its own
-                  // supplier range, so a per-brand supplier PDF is correct.
-                  // Manufacturers keep PDF on the main brand only (other brands
-                  // map onto existing masters via Excel).
-                  if (isImporter || isMainBrand)
-                    ListTile(
+                  // PDF opens for everyone on ANY brand. Importers (T/W): each
+                  // brand is its own supplier range. Manufacturers (M): on the
+                  // default brand it builds the library; on a non-default brand it
+                  // ADDS new designs only (existing ones are skipped in the
+                  // importer → link via Excel mapping).
+                  ListTile(
                       leading: const Icon(Icons.picture_as_pdf,
                           color: Color(0xFF1B4F72)),
                       title: Text(isImporter
@@ -1238,7 +1249,7 @@ class _State extends State<StockistDashboardScreen> {
                           : 'Set up from a PDF'),
                       subtitle: Text(isImporter
                           ? 'Builds your Library + adds stock'
-                          : 'PDF adds your main brand designs + photos'),
+                          : 'PDF adds new designs + photos'),
                       onTap: () async {
                         Navigator.pop(ctx);
                         // Unified PDF flow — every stockist (M and T/W) uses the
@@ -1251,10 +1262,9 @@ class _State extends State<StockistDashboardScreen> {
                       },
                     ),
                 ] else ...[
-                  // Brand is set up — normal stock upload. Importers (T/W) get PDF
-                  // on ANY brand; manufacturers keep PDF on the main brand only.
-                  if (isImporter || isMainBrand)
-                    ListTile(
+                  // Brand is set up — normal stock upload. PDF opens on ANY brand
+                  // for everyone (M non-default brand = add-new-designs only).
+                  ListTile(
                       leading: const Icon(Icons.picture_as_pdf,
                           color: Color(0xFF1B4F72)),
                       title: Text(isImporter
@@ -1299,32 +1309,49 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Row 3: Dispatch · Upload · Add Design · Records (compact buttons).
+  // Row 3: Dispatch · Upload · Add · Records (compact buttons).
+  // When the library slice for the current brand is empty, only Add is active —
+  // the stockist must add at least one design before they can do anything else.
   Widget _buildActionButtonRow() {
+    final empty = _isLibraryEmpty;
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 2),
       child: Row(
         children: [
           _actionBtn('Dispatch', Icons.remove_circle_outline, Colors.red[700]!,
-              () async {
-            await context.push('/stockist/stock/dispatch');
-            _load();
-          }),
+              empty ? null : () async {
+                await context.push('/stockist/stock/dispatch');
+                _load();
+              }),
           const SizedBox(width: 6),
           _actionBtn('Upload', Icons.upload_file, const Color(0xFF1B4F72),
-              _showUploadSourceSheet),
+              empty ? null : _showUploadSourceSheet),
           const SizedBox(width: 6),
           _actionBtn('Add', Icons.add, const Color(0xFF2E7D32),
-              _showAddIntentSheet),
+              empty ? _showLibraryActivation : _showAddIntentSheet),
           const SizedBox(width: 6),
           _actionBtn('Records', Icons.receipt_long_outlined,
-              const Color(0xFF6A1B9A), () async {
-            await context.push('/stockist/dispatches');
-            _load();
-          }),
+              const Color(0xFF6A1B9A), empty ? null : () async {
+                await context.push('/stockist/dispatches');
+                _load();
+              }),
         ],
       ),
     );
+  }
+
+  Future<void> _showLibraryActivation() async {
+    final initialBrandId = _brandFilter != 'all'
+        ? _brandFilter
+        : (_brands.isNotEmpty ? _brands.first.id : null);
+    final result = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      builder: (_) => _LibraryActivationScreen(
+        brands: _brands,
+        initialBrandId: initialBrandId,
+        businessType: currentStockistBusinessType,
+      ),
+    ));
+    if (result == true) _load();
   }
 
   Widget _actionBtn(
@@ -1797,6 +1824,306 @@ class _State extends State<StockistDashboardScreen> {
 }
 
 // Fixed-height pinned sliver header (search bar + count line) that stays at the
+// ── Library activation screen ────────────────────────────────────────────────
+// Shown the very first time a stockist (or T/W for a given brand) has no
+// library entries. Only asks for the three essentials: brand (if >1), name,
+// size, and an optional photo. Pops true on success so the dashboard reloads.
+
+class _LibraryActivationScreen extends StatefulWidget {
+  final List<Brand> brands;
+  final String? initialBrandId;
+  final String businessType; // 'M' | 'T' | 'W'
+  const _LibraryActivationScreen({
+    required this.brands,
+    required this.businessType,
+    this.initialBrandId,
+  });
+  @override
+  State<_LibraryActivationScreen> createState() =>
+      _LibraryActivationScreenState();
+}
+
+class _LibraryActivationScreenState extends State<_LibraryActivationScreen> {
+  static const _navy = Color(0xFF1B4F72);
+
+  final _data = SupabaseDataService();
+  final _picker = ImagePicker();
+  final _nameCtrl = TextEditingController();
+  // M only: optional brand-specific alias name (defaults to masterName if blank)
+  final _aliasCtrl = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  String? _brandId;
+  String _size = '';
+  String _imageUrl = '';
+  bool _uploading = false;
+  bool _saving = false;
+  List<String> _sizes = [];
+
+  bool get _isM => widget.businessType == 'M';
+
+  String get _activeBrandName {
+    if (_brandId == null) return '';
+    return widget.brands
+        .firstWhere((b) => b.id == _brandId,
+            orElse: () => const Brand(id: '', name: ''))
+        .name;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _brandId = widget.initialBrandId;
+    _data.getActiveSizeNames().then((s) {
+      if (mounted) setState(() => _sizes = s);
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _aliasCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Camera'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+    final x =
+        await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 88);
+    if (x == null) return;
+    setState(() => _uploading = true);
+    final url = await CloudinaryService.uploadImage(x.path);
+    if (!mounted) return;
+    setState(() {
+      _uploading = false;
+      _imageUrl = url ?? '';
+    });
+  }
+
+  Future<void> _save() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_size.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Please select a size.')));
+      return;
+    }
+    setState(() => _saving = true);
+    final master = _nameCtrl.text.trim();
+    try {
+      if (_isM) {
+        // M: brand-agnostic master (brandId=null); alias under the selected brand
+        // is the brand-specific name, falling back to masterName if blank.
+        final aliasName = _aliasCtrl.text.trim().isEmpty
+            ? master
+            : _aliasCtrl.text.trim();
+        await _data.upsertLibraryMaster(
+          size: _size,
+          masterName: master,
+          imageUrl: _imageUrl,
+          brandId: null,
+          aliases: _brandId != null ? {_brandId!: aliasName} : {},
+        );
+      } else {
+        // T/W: master is brand-bound; alias = same as master name.
+        await _data.upsertLibraryMaster(
+          size: _size,
+          masterName: master,
+          imageUrl: _imageUrl,
+          brandId: _brandId,
+          aliases: _brandId != null ? {_brandId!: master} : {},
+        );
+      }
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final multiBrand = widget.brands.length > 1;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F5F5),
+      appBar: AppBar(
+        title: const Text('Add first design'),
+        backgroundColor: _navy,
+        foregroundColor: Colors.white,
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+          children: [
+            // Guidance text
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _navy.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'Add your first design to activate your library. '
+                'After this, all other options unlock.',
+                style: TextStyle(fontSize: 13.5),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Brand picker — only when multiple brands exist
+            if (multiBrand) ...[
+              DropdownButtonFormField<String>(
+                initialValue: _brandId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                    labelText: 'Brand', border: OutlineInputBorder()),
+                items: widget.brands
+                    .map((b) =>
+                        DropdownMenuItem(value: b.id, child: Text(b.name)))
+                    .toList(),
+                onChanged: (v) => _brandId = v,
+                validator: (v) =>
+                    v == null || v.isEmpty ? 'Select a brand' : null,
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Master design name
+            TextFormField(
+              controller: _nameCtrl,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                  labelText: 'Master design name',
+                  border: OutlineInputBorder()),
+              validator: (v) =>
+                  v == null || v.trim().isEmpty ? 'Enter a design name' : null,
+            ),
+            const SizedBox(height: 16),
+
+            // M only: brand-specific alias name (optional — falls back to master)
+            if (_isM) ...[
+              TextFormField(
+                controller: _aliasCtrl,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  labelText: _activeBrandName.isEmpty
+                      ? 'Name under brand (optional)'
+                      : 'Name under $_activeBrandName (optional)',
+                  hintText: 'Leave blank to use master name',
+                  border: const OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Size
+            DropdownButtonFormField<String>(
+              initialValue: _size.isEmpty ? null : _size,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  labelText: 'Size', border: OutlineInputBorder()),
+              items: _sizes
+                  .map((s) => DropdownMenuItem(
+                      value: s, child: Text(s.replaceAll(' mm', ''))))
+                  .toList(),
+              onChanged: (v) => _size = v ?? '',
+              validator: (v) =>
+                  v == null || v.isEmpty ? 'Select a size' : null,
+            ),
+            const SizedBox(height: 24),
+
+            // Image
+            Center(
+              child: GestureDetector(
+                onTap: _uploading ? null : _pickImage,
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: _uploading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _imageUrl.isEmpty
+                          ? Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.add_a_photo_outlined,
+                                    color: Colors.grey.shade400, size: 30),
+                                const SizedBox(height: 6),
+                                Text('Add photo (optional)',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade500)),
+                              ],
+                            )
+                          : CachedNetworkImage(
+                              imageUrl: CloudinaryService.thumbUrl(
+                                  _imageUrl, width: 400),
+                              fit: BoxFit.cover),
+                ),
+              ),
+            ),
+            if (_imageUrl.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Center(
+                child: TextButton.icon(
+                  onPressed: _uploading ? null : _pickImage,
+                  icon: const Icon(Icons.refresh, size: 16),
+                  label: const Text('Change photo'),
+                ),
+              ),
+            ],
+            const SizedBox(height: 32),
+
+            // Save
+            FilledButton(
+              onPressed: (_saving || _uploading) ? null : _save,
+              style: FilledButton.styleFrom(
+                  backgroundColor: _navy,
+                  minimumSize: const Size.fromHeight(48)),
+              child: _saving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('Save & activate library',
+                      style: TextStyle(fontSize: 15)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 // top while rows 1 & 2 scroll away beneath the app bar.
 class _PinnedHeaderDelegate extends SliverPersistentHeaderDelegate {
   final Widget child;

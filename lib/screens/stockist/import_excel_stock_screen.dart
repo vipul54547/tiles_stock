@@ -139,10 +139,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   List<LibraryEntry> _library = []; // this stockist's own master designs
   final Set<String> _libKeys = {};  // name|size of existing library designs (+aliases)
   // Quantity mode: false = Add only (top-up); true = Update & keep (set to file).
+  // Chosen on the Review screen (with the stock decision), not up-front.
   bool _overwrite = false;
-  // The quantity mode is chosen up-front (a dedicated step) BEFORE picking a
-  // file, so it never reappears as a toggle on the Review screen.
-  bool _modeChosen = false;
   String? _defaultBrandId;
   bool _parsed = false;
   bool _importing = false;
@@ -1413,7 +1411,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   void _reset() => setState(() {
         _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = '';
         _libImages = {}; _combined = false; _batchId = ''; _dnaDetected = [];
-        _wideQty = false; _modeChosen = false; // back to the quantity-mode step
+        _wideQty = false;
       });
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -1434,79 +1432,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : !_modeChosen
-              ? _buildModeStep()
-              : _parsed
-                  ? _buildReview()
-                  : _buildIntro(),
-    );
-  }
-
-  // Step 1 (before any file): choose how the file's box numbers are applied.
-  // Picking one advances to the Browse/import page; the choice is shown read-only
-  // on Review, never again as a second toggle.
-  Widget _buildModeStep() {
-    Widget card(String title, String sub, IconData icon, bool overwrite) =>
-        InkWell(
-          onTap: () => setState(() {
-            _overwrite = overwrite;
-            _modeChosen = true;
-          }),
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            margin: const EdgeInsets.only(bottom: 14),
-            decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFF1B4F72), width: 1.5),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(children: [
-              Icon(icon, color: const Color(0xFF1B4F72), size: 30),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1B4F72))),
-                    const SizedBox(height: 3),
-                    Text(sub,
-                        style: const TextStyle(
-                            fontSize: 12.5, color: Colors.black54)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Color(0xFF1B4F72)),
-            ]),
-          ),
-        );
-
-    return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(
-          20, 24, 20, 20 + MediaQuery.viewPaddingOf(context).bottom),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('How should the box numbers be applied?',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          const Text(
-              'Pick once before choosing your file. You can change it later '
-              'with Reset.',
-              style: TextStyle(fontSize: 12.5, color: Colors.black54)),
-          const SizedBox(height: 20),
-          card('Add only',
-              "Top-up — add the file's boxes to what you already have",
-              Icons.add_circle_outline, false),
-          card('Update & keep',
-              "Set — replace each design's boxes with the file's number",
-              Icons.sync_alt, true),
-        ],
-      ),
+          : _parsed
+              ? _buildReview()
+              : _buildIntro(),
     );
   }
 
@@ -1545,23 +1473,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            // Chosen quantity mode (read-only) + a way back to the mode step.
-            Row(children: [
-              Icon(_overwrite ? Icons.sync_alt : Icons.add_circle_outline,
-                  size: 18, color: const Color(0xFF1B4F72)),
-              const SizedBox(width: 6),
-              Text('Mode: ${_overwrite ? 'Update & keep' : 'Add only'}',
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF1B4F72))),
-              const Spacer(),
-              TextButton(
-                onPressed: () => setState(() => _modeChosen = false),
-                child: const Text('Change'),
-              ),
-            ]),
-            const SizedBox(height: 8),
             // Primary action — Browse — on top.
             SizedBox(
               width: double.infinity,
@@ -1715,16 +1626,33 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               'Adding to: ${_brandName.isEmpty ? 'your stock' : _brandName} · your stock',
               style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
         ),
-        // Quantity mode was chosen up-front — shown read-only here (no toggle).
+        // Quantity mode is chosen HERE, with the stock decision (not up-front) —
+        // mirrors the PDF flow. Only affects rows that carry a box quantity.
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
           child: Row(children: [
-            Icon(_overwrite ? Icons.sync_alt : Icons.add_circle_outline,
-                size: 15, color: Colors.grey.shade600),
-            const SizedBox(width: 5),
-            Text(
-                'Mode: ${_overwrite ? 'Update & keep (set to file)' : 'Add only (top-up)'}',
+            Text('Box numbers:',
                 style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+            const SizedBox(width: 8),
+            for (final m in const [
+              (label: 'Add only', ov: false),
+              (label: 'Update & keep', ov: true),
+            ])
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(
+                  label: Text(m.label, style: const TextStyle(fontSize: 11.5)),
+                  selected: _overwrite == m.ov,
+                  onSelected: _importing
+                      ? null
+                      : (_) => setState(() => _overwrite = m.ov),
+                  selectedColor: const Color(0xFF1B4F72),
+                  labelStyle: TextStyle(
+                      color: _overwrite == m.ov
+                          ? Colors.white
+                          : const Color(0xFF1B4F72)),
+                ),
+              ),
           ]),
         ),
         if (incomplete > 0)
