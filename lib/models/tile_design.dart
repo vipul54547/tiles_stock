@@ -108,6 +108,21 @@ class TileDesign {
             (json['stockist_priority'] as num?)?.toDouble() ?? 0,
       );
 
+  /// Returns a copy with faceImageUrls replaced — used to fill images from the
+  /// library when my_stock() doesn't return image_url.
+  TileDesign withFaceImage(String url) => TileDesign(
+        id: id, name: name, size: size, boxQuantity: boxQuantity,
+        surfaceType: surfaceType, finishLabel: finishLabel,
+        piecesPerBox: piecesPerBox, boxWeightKg: boxWeightKg,
+        thicknessMm: thicknessMm, colour: colour, tileType: tileType,
+        faceImageUrls: [url],
+        stockistId: stockistId, stockistName: stockistName,
+        catalogId: catalogId, catalogIds: catalogIds,
+        brandId: brandId, brandName: brandName,
+        updatedAt: updatedAt, quality: quality, stockType: stockType,
+        createdAt: createdAt, stockistPriority: stockistPriority,
+      );
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,

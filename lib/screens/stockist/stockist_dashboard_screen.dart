@@ -157,8 +157,19 @@ class _State extends State<StockistDashboardScreen> {
         await _service.designsDnaValues(data.map((d) => d.id).toList());
     if (!mounted) return;
     final dnaFill = _computeDnaFill(data, dnaAttrs, dnaVals);
+    // my_stock() doesn't return image_url — fill missing images from the
+    // library (already loaded above) so dashboard cards show their photos.
+    final libImgMap = {
+      for (final e in library)
+        if (e.imageUrl.isNotEmpty) designImageKey(e.masterName, e.size): e.imageUrl,
+    };
+    final enriched = data.map((d) {
+      if (d.faceImageUrls.isNotEmpty) return d;
+      final img = libImgMap[designImageKey(d.name, d.size)];
+      return (img != null && img.isNotEmpty) ? d.withFaceImage(img) : d;
+    }).toList();
     setState(() {
-      _designs = data;
+      _designs = enriched;
       _inquiries = inquiries;
       _pendingBoxes = pending;
       _catalogs = catalogs;
