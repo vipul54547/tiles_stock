@@ -9,6 +9,60 @@ import '../../widgets/filter_section.dart';
 
 const _navy = Color(0xFF1B4F72);
 
+// Name + description dialog — shown before the picker (new) or via the edit
+// action (existing). Returns null on cancel; name is required.
+Future<({String name, String description})?> editListDetails(
+    BuildContext context,
+    {String name = '', String description = ''}) async {
+  final nameC = TextEditingController(text: name);
+  final descC = TextEditingController(text: description);
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text(name.isEmpty ? 'New stock list' : 'List details'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: nameC,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+                labelText: 'List name', border: OutlineInputBorder()),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: descC,
+            decoration: const InputDecoration(
+                labelText: 'Description (optional)',
+                hintText: 'Remember what is in this list',
+                border: OutlineInputBorder()),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: _navy),
+          onPressed: () {
+            if (nameC.text.trim().isEmpty) return;
+            Navigator.pop(c, true);
+          },
+          child: const Text('Continue'),
+        ),
+      ],
+    ),
+  );
+  final res = ok == true
+      ? (name: nameC.text.trim(), description: descC.text.trim())
+      : null;
+  nameC.dispose();
+  descC.dispose();
+  return res;
+}
+
 // "Make Stock List" — list the stockist's lists (brand-free v2 + any existing),
 // create a new one, or edit one. Editing opens the design picker/builder.
 // (project_fstock_model · stocklists v2)
@@ -53,7 +107,18 @@ class _StockListsScreenState extends State<StockListsScreen> {
     });
   }
 
-  Future<void> _open(StockCatalog? list) async {
+  // New list: ask name + description FIRST, then open the design picker window.
+  Future<void> _newList() async {
+    final d = await editListDetails(context);
+    if (d == null) return;
+    if (!mounted) return;
+    final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => StockListBuilderScreen(
+            createName: d.name, createDescription: d.description)));
+    if (changed == true) _load();
+  }
+
+  Future<void> _open(StockCatalog list) async {
     final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => StockListBuilderScreen(existing: list)));
     if (changed == true) _load();
@@ -69,8 +134,9 @@ class _StockListsScreenState extends State<StockListsScreen> {
         foregroundColor: Colors.white,
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _open(null),
+        onPressed: _newList,
         backgroundColor: _navy,
+        foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
         label: const Text('New list'),
       ),
@@ -114,7 +180,10 @@ class _StockListsScreenState extends State<StockListsScreen> {
 // Operates on LIBRARY MASTERS (membership is by library_id). F shown per design.
 class StockListBuilderScreen extends StatefulWidget {
   final StockCatalog? existing;
-  const StockListBuilderScreen({super.key, this.existing});
+  final String? createName; // when creating: name/description from the dialog
+  final String? createDescription;
+  const StockListBuilderScreen(
+      {super.key, this.existing, this.createName, this.createDescription});
   @override
   State<StockListBuilderScreen> createState() => _StockListBuilderScreenState();
 }
@@ -175,8 +244,9 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
   @override
   void initState() {
     super.initState();
-    _nameCtrl.text = widget.existing?.name ?? '';
-    _descCtrl.text = widget.existing?.description ?? '';
+    _nameCtrl.text = widget.existing?.name ?? widget.createName ?? '';
+    _descCtrl.text =
+        widget.existing?.description ?? widget.createDescription ?? '';
     _searchCtrl.addListener(
         () => setState(() => _search = _searchCtrl.text.trim().toLowerCase()));
     _load();
@@ -486,18 +556,35 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
     }
   }
 
+  Future<void> _editDetails() async {
+    final d = await editListDetails(context,
+        name: _nameCtrl.text, description: _descCtrl.text);
+    if (d == null) return;
+    setState(() {
+      _nameCtrl.text = d.name;
+      _descCtrl.text = d.description;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final inList = _all.where((e) => _selected.contains(e.libId)).toList();
     final available =
         _all.where((e) => !_selected.contains(e.libId) && _matches(e)).toList();
+    final title = _nameCtrl.text.trim().isEmpty
+        ? (_isEdit ? 'Edit list' : 'New list')
+        : _nameCtrl.text.trim();
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: Text(_isEdit ? 'Edit list' : 'New list'),
+        title: Text(title, overflow: TextOverflow.ellipsis),
         backgroundColor: _navy,
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+              tooltip: 'Edit name / description',
+              onPressed: _editDetails,
+              icon: const Icon(Icons.edit_outlined)),
           _saving
               ? const Padding(
                   padding: EdgeInsets.only(right: 16),
@@ -518,30 +605,77 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                // Pinned controls — search + Filters, then count + Select all.
                 Container(
                   color: Colors.white,
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
                   child: Column(
                     children: [
-                      TextField(
-                        controller: _nameCtrl,
-                        decoration: const InputDecoration(
-                            labelText: 'List name',
-                            isDense: true,
-                            border: OutlineInputBorder()),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _searchCtrl,
+                              decoration: InputDecoration(
+                                hintText: 'Search design name…',
+                                prefixIcon: const Icon(Icons.search, size: 20),
+                                suffixIcon: _search.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear, size: 18),
+                                        onPressed: () => _searchCtrl.clear())
+                                    : null,
+                                isDense: true,
+                                filled: true,
+                                fillColor: const Color(0xFFF5F5F5),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide.none),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            onPressed: _openFilterSheet,
+                            icon: const Icon(Icons.tune, size: 18),
+                            label: Text(_activeFilterCount > 0
+                                ? 'Filters ($_activeFilterCount)'
+                                : 'Filters'),
+                            style: OutlinedButton.styleFrom(
+                                foregroundColor: _navy,
+                                side: BorderSide(
+                                    color: _activeFilterCount > 0
+                                        ? _navy
+                                        : Colors.grey.shade400)),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _descCtrl,
-                        decoration: const InputDecoration(
-                            labelText: 'Description (optional)',
-                            hintText: 'Remember what is in this list',
-                            isDense: true,
-                            border: OutlineInputBorder()),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text('In list: ${inList.length}',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, color: _navy)),
+                          const Spacer(),
+                          if (available.isNotEmpty)
+                            TextButton.icon(
+                              onPressed: () => setState(() => _selected
+                                  .addAll(available.map((e) => e.libId))),
+                              icon: const Icon(Icons.done_all, size: 18),
+                              label: Text('Select all (${available.length})'),
+                            ),
+                          if (inList.isNotEmpty)
+                            TextButton(
+                              onPressed: () =>
+                                  setState(() => _selected.clear()),
+                              child: const Text('Clear',
+                                  style: TextStyle(color: Colors.red)),
+                            ),
+                        ],
                       ),
                     ],
                   ),
                 ),
+                const Divider(height: 1),
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
@@ -556,74 +690,12 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
                         ),
                       for (final e in inList) _row(e, inList: true),
                       const SizedBox(height: 8),
-                      // Add section: search + bulk-add + available rows.
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 8, 4, 6),
-                        child: Row(
-                          children: [
-                            const Expanded(
-                              child: Text('Add designs',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13.5,
-                                      color: _navy)),
-                            ),
-                            if (available.isNotEmpty)
-                              TextButton(
-                                onPressed: () => setState(() => _selected
-                                    .addAll(available.map((e) => e.libId))),
-                                child: Text('Add all (${available.length})'),
-                              ),
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _searchCtrl,
-                                decoration: InputDecoration(
-                                  hintText: 'Search design name…',
-                                  prefixIcon: const Icon(Icons.search, size: 20),
-                                  suffixIcon: _search.isNotEmpty
-                                      ? IconButton(
-                                          icon: const Icon(Icons.clear, size: 18),
-                                          onPressed: () => _searchCtrl.clear())
-                                      : null,
-                                  isDense: true,
-                                  filled: true,
-                                  fillColor: Colors.white,
-                                  border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      borderSide: BorderSide.none),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            OutlinedButton.icon(
-                              onPressed: _openFilterSheet,
-                              icon: const Icon(Icons.tune, size: 18),
-                              label: Text(_activeFilterCount > 0
-                                  ? 'Filters ($_activeFilterCount)'
-                                  : 'Filters'),
-                              style: OutlinedButton.styleFrom(
-                                  foregroundColor: _navy,
-                                  side: BorderSide(
-                                      color: _activeFilterCount > 0
-                                          ? _navy
-                                          : Colors.grey.shade400)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 6),
+                      _sectionHeader('Add designs', available.length),
                       if (available.isEmpty)
                         Padding(
                           padding: const EdgeInsets.all(12),
                           child: Text(
-                              _search.isEmpty
+                              _search.isEmpty && _activeFilterCount == 0
                                   ? 'All designs are in this list.'
                                   : 'No matches.',
                               style: const TextStyle(
