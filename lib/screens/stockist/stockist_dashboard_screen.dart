@@ -369,10 +369,7 @@ class _State extends State<StockistDashboardScreen> {
                 IconButton(
                   icon: const Icon(Icons.share_outlined),
                   tooltip: 'Share my stock catalogue',
-                  onPressed: () async {
-                    await context.push('/stockist/catalogs');
-                    _load();
-                  },
+                  onPressed: _showShareSheet,
                 ),
                 const NotificationBell(),
                 IconButton(
@@ -1355,6 +1352,56 @@ class _State extends State<StockistDashboardScreen> {
                 _load();
               }),
         ],
+      ),
+    );
+  }
+
+  // Share hub: "Manage Brand" (brand-grouped lists + brand banner/links) or
+  // "Stock List" (brand-free lists with their own links + banner). (stocklists v2)
+  void _showShareSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Share',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.sell_outlined, color: Color(0xFF1B4F72)),
+              title: const Text('Manage Brand'),
+              subtitle: const Text('Brand lists, links & brand banner'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.push('/stockist/catalogs');
+                _load();
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.collections_bookmark_outlined,
+                  color: Color(0xFF00838F)),
+              title: const Text('Stock List'),
+              subtitle: const Text('Your stock lists — links & banner'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await Navigator.of(context).push<bool>(MaterialPageRoute(
+                    builder: (_) => const StockListsScreen()));
+                _load();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }

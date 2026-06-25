@@ -7,6 +7,8 @@ class StockCatalog {
   final String name;
   /// Optional note the stockist keeps to remember what's in the list. (v2)
   final String description;
+  /// The list's own banner image (brand-free lists). Empty = none. (v2)
+  final String bannerUrl;
   final String visibility; // 'public' | 'private'
   final bool showInMarketplace; // public catalog: appears in the app marketplace
   final String shareToken; // the catalog's own /s/<token> link
@@ -31,6 +33,7 @@ class StockCatalog {
     required this.stockistId,
     required this.name,
     this.description = '',
+    this.bannerUrl = '',
     required this.visibility,
     required this.showInMarketplace,
     required this.shareToken,
@@ -52,6 +55,7 @@ class StockCatalog {
         stockistId: j['stockist_id'] as String,
         name: j['name'] as String,
         description: (j['description'] as String?) ?? '',
+        bannerUrl: (j['banner_url'] as String?) ?? '',
         visibility: (j['visibility'] as String?) ?? 'public',
         showInMarketplace: j['show_in_marketplace'] as bool? ?? true,
         shareToken: (j['share_token'] as String?) ?? '',

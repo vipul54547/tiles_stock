@@ -439,6 +439,12 @@ class SupabaseDataService {
     return (res ?? '').toString();
   }
 
+  /// Set (or clear, with '') a brand-free list's own banner image. (stocklists v2)
+  Future<void> setListBanner(String catalogId, String bannerUrl) async {
+    await supabase.rpc('set_list_banner',
+        params: {'p_catalog_id': catalogId, 'p_banner_url': bannerUrl});
+  }
+
   /// Replace a list's membership with [libraryIds] (the master/library ids of the
   /// chosen designs). Returns the resulting member count. (stocklists v2)
   Future<int> setListDesigns(String catalogId, List<String> libraryIds) async {

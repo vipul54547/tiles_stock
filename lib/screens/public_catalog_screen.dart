@@ -11,6 +11,7 @@ import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 import '../utils/banner_layout.dart' show effectiveCompanyPos;
+import '../widgets/filter_section.dart';
 
 /// Public, login-free catalog opened via a stockist's private share link
 /// (`/s/<token>`). Shows that stockist's in-stock designs with search, filters,
@@ -507,31 +508,33 @@ class _State extends State<PublicCatalogScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
+          // Collapsible facet: header shows how many are chosen; opens on tap.
           Widget section(String title, List<String> opts, Set<String> sel) {
             if (opts.isEmpty) return const SizedBox.shrink();
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 13)),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  children: opts.map((o) {
-                    final on = sel.contains(o);
-                    return FilterChip(
-                      label: Text(o.replaceAll(' mm', '')),
-                      selected: on,
-                      onSelected: (v) =>
-                          setSheet(() => v ? sel.add(o) : sel.remove(o)),
-                    );
-                  }).toList(),
-                ),
-                const SizedBox(height: 14),
-              ],
+            return FilterSection(
+              title: title,
+              summary: filterSummary(sel),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: opts.map((o) {
+                  final on = sel.contains(o);
+                  return FilterChip(
+                    label: Text(o.replaceAll(' mm', '')),
+                    selected: on,
+                    onSelected: (v) =>
+                        setSheet(() => v ? sel.add(o) : sel.remove(o)),
+                  );
+                }).toList(),
+              ),
             );
+          }
+
+          String qtySummary() {
+            final mn = _minQtyCtrl.text.trim();
+            final mx = _maxQtyCtrl.text.trim();
+            if (mn.isEmpty && mx.isEmpty) return 'Any';
+            return '${mn.isEmpty ? '0' : mn}–${mx.isEmpty ? '∞' : mx}';
           }
 
           return SafeArea(
@@ -546,12 +549,27 @@ class _State extends State<PublicCatalogScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Header: title + Apply (top) + Clear all.
                     Row(
                       children: [
                         const Text('Filters',
                             style: TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 16)),
                         const Spacer(),
+                        FilledButton(
+                          onPressed: () {
+                            setState(() {});
+                            Navigator.pop(ctx);
+                          },
+                          style: FilledButton.styleFrom(
+                              backgroundColor: _brand,
+                              foregroundColor: Colors.white,
+                              visualDensity: VisualDensity.compact,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20)),
+                          child: const Text('Apply'),
+                        ),
+                        const SizedBox(width: 6),
                         TextButton(
                           onPressed: () => setSheet(() {
                             _fSizes.clear();
@@ -563,72 +581,59 @@ class _State extends State<PublicCatalogScreen> {
                             _minQtyCtrl.clear();
                             _maxQtyCtrl.clear();
                           }),
-                          child: const Text('Clear all'),
+                          child: const Text('Clear all',
+                              style: TextStyle(color: Colors.red)),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    const Text('Quantity (boxes)',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _minQtyCtrl,
-                            keyboardType: TextInputType.number,
-                            onChanged: (_) => setSheet(() {}),
-                            decoration: InputDecoration(
-                              hintText: 'Min',
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 10),
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8)),
+                    const Divider(height: 16),
+                    // Quantity (collapsible).
+                    FilterSection(
+                      title: 'Quantity (boxes)',
+                      summary: qtySummary(),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _minQtyCtrl,
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setSheet(() {}),
+                              decoration: InputDecoration(
+                                hintText: 'Min',
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8)),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextField(
-                            controller: _maxQtyCtrl,
-                            keyboardType: TextInputType.number,
-                            onChanged: (_) => setSheet(() {}),
-                            decoration: InputDecoration(
-                              hintText: 'Max',
-                              isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 10),
-                              border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(8)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: _maxQtyCtrl,
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setSheet(() {}),
+                              decoration: InputDecoration(
+                                hintText: 'Max',
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8)),
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 14),
                     section('Size', _distinct('size'), _fSizes),
                     section('Finish', _distinct('surface'), _fFinishes),
                     section('Quality', _distinct('quality'), _fQualities),
                     section('Tile Type', _distinct('tile_type'), _fTypes),
                     section('Thickness (approx)', _thicknessBands(), _fThickness),
                     section('Stock Type', _distinct('stock_type'), _fStockTypes),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          setState(() {});
-                          Navigator.pop(ctx);
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _brand,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                        child: const Text('Show results'),
-                      ),
-                    ),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ),

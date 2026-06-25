@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import '../../config/app_config.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/library_entry.dart';
+import '../../models/share_link.dart';
 import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
@@ -74,14 +79,28 @@ class StockListsScreen extends StatefulWidget {
 
 class _StockListsScreenState extends State<StockListsScreen> {
   final _data = SupabaseDataService();
+  final _picker = ImagePicker();
   List<StockCatalog> _lists = [];
   Map<String, int> _counts = {}; // catalogId → member count
+  // Accordion: only one list open at a time (first open by default).
+  String? _openId;
+  final Map<String, List<ShareLink>> _links = {}; // catalogId → its timed links
+  final Map<String, TextEditingController> _daysCtrls = {}; // per-list days box
   bool _loading = true;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _daysCtrls.values) {
+      c.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -98,13 +117,29 @@ class _StockListsScreenState extends State<StockListsScreen> {
     }
     seen.forEach((cid, libs) => counts[cid] = libs.length);
     if (!mounted) return;
+    final active = lists.where((c) => c.isActive && !c.pendingDelete).toList();
     setState(() {
-      _lists = lists
-          .where((c) => c.isActive && !c.pendingDelete)
-          .toList();
+      _lists = active;
       _counts = counts;
+      // Keep the open row if it still exists, else open the first by default.
+      if (_openId == null || !active.any((c) => c.id == _openId)) {
+        _openId = active.isNotEmpty ? active.first.id : null;
+      }
       _loading = false;
     });
+    if (_openId != null) _ensureLinks(_openId!);
+  }
+
+  Future<void> _ensureLinks(String catalogId) async {
+    if (_links.containsKey(catalogId)) return;
+    final links = await _data.getCatalogShareLinks(catalogId);
+    if (!mounted) return;
+    setState(() => _links[catalogId] = links);
+  }
+
+  void _toggle(String catalogId) {
+    setState(() => _openId = _openId == catalogId ? null : catalogId);
+    if (_openId != null) _ensureLinks(_openId!);
   }
 
   // New list: ask name + description FIRST, then open the design picker window.
@@ -122,6 +157,107 @@ class _StockListsScreenState extends State<StockListsScreen> {
     final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => StockListBuilderScreen(existing: list)));
     if (changed == true) _load();
+  }
+
+  String _permLink(StockCatalog c) => '${AppConfig.shareBaseUrl}/s/${c.shareToken}';
+
+  void _copy(String url) {
+    Clipboard.setData(ClipboardData(text: url));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Link copied')));
+  }
+
+  Future<void> _shareWhatsApp(String name, String url) async {
+    final text = '$name: $url\n\nPowered by Tiles Stock';
+    await launchUrl(
+        Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'),
+        mode: LaunchMode.externalApplication);
+  }
+
+  String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  // Create a timed link for [c] from its days box (default 60).
+  Future<void> _genDays(StockCatalog c) async {
+    final ctrl = _daysCtrls[c.id];
+    final days = int.tryParse(ctrl?.text.trim() ?? '');
+    if (days == null || days < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Enter the number of days (1 or more).')));
+      return;
+    }
+    setState(() => _busy = true);
+    final token = await _data.createCatalogShareLinkDays(c.id, days);
+    _links.remove(c.id); // force reload
+    await _ensureLinks(c.id);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Could not create link — try again')));
+    }
+  }
+
+  Future<void> _deleteLink(StockCatalog c, ShareLink l) async {
+    if (l.id == null) return;
+    setState(() => _busy = true);
+    await _data.revokeShareLink(l.id!);
+    _links.remove(c.id);
+    await _ensureLinks(c.id);
+    if (mounted) setState(() => _busy = false);
+  }
+
+  // Per-list banner: pick an image (or remove) → saved on the list, shown on the
+  // share page. (stocklists v2)
+  Future<void> _setBanner(StockCatalog c) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose from gallery'),
+                onTap: () => Navigator.pop(ctx, 'gallery')),
+            ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: const Text('Camera'),
+                onTap: () => Navigator.pop(ctx, 'camera')),
+            if (c.bannerUrl.isNotEmpty)
+              ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.red),
+                  title: const Text('Remove banner'),
+                  onTap: () => Navigator.pop(ctx, 'remove')),
+          ],
+        ),
+      ),
+    );
+    if (action == null) return;
+    if (action == 'remove') {
+      await _data.setListBanner(c.id, '');
+      if (mounted) _load();
+      return;
+    }
+    final x = await _picker.pickImage(
+        source: action == 'camera' ? ImageSource.camera : ImageSource.gallery,
+        maxWidth: 1600,
+        imageQuality: 85);
+    if (x == null) return;
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Uploading banner…')));
+    }
+    final url = await CloudinaryService.uploadImage(x.path);
+    if (url == null || url.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Upload failed — try again')));
+      }
+      return;
+    }
+    await _data.setListBanner(c.id, url);
+    if (mounted) _load();
   }
 
   @override
@@ -148,30 +284,208 @@ class _StockListsScreenState extends State<StockListsScreen> {
                       style: TextStyle(color: Colors.grey.shade600)))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(10, 10, 10, 90),
-                  children: [
-                    for (final c in _lists)
-                      Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        child: ListTile(
-                          title: Text(c.name,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text(
-                              [
-                                '${_counts[c.id] ?? 0} designs',
-                                if (c.description.trim().isNotEmpty)
-                                  c.description.trim(),
-                              ].join(' · '),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () => _open(c),
-                        ),
-                      ),
-                  ],
+                  children: [for (final c in _lists) _listCard(c)],
                 ),
     );
   }
+
+  // Accordion card: header (tap to open/close, only one open) + link panel.
+  Widget _listCard(StockCatalog c) {
+    final open = _openId == c.id;
+    _daysCtrls.putIfAbsent(c.id, () => TextEditingController(text: '60'));
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => _toggle(c.id),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+              child: Row(
+                children: [
+                  Icon(open ? Icons.expand_more : Icons.chevron_right,
+                      color: _navy),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(c.name,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 14.5)),
+                        const SizedBox(height: 2),
+                        Text(
+                            [
+                              '${_counts[c.id] ?? 0} designs',
+                              if (c.bannerUrl.isNotEmpty) 'banner ✓',
+                              if (c.description.trim().isNotEmpty)
+                                c.description.trim(),
+                            ].join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 11.5, color: Colors.grey.shade600)),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                      tooltip: 'Banner',
+                      icon: Icon(Icons.image_outlined,
+                          size: 20,
+                          color: c.bannerUrl.isNotEmpty
+                              ? const Color(0xFF2E7D32)
+                              : Colors.grey.shade600),
+                      onPressed: () => _setBanner(c)),
+                  IconButton(
+                      tooltip: 'Edit designs',
+                      icon: const Icon(Icons.edit_outlined, size: 20),
+                      onPressed: () => _open(c)),
+                ],
+              ),
+            ),
+          ),
+          if (open) _linkPanel(c),
+        ],
+      ),
+    );
+  }
+
+  // The open row's links: permanent (copy + WhatsApp) + create timed (days box)
+  // + live links with created date / days left (copy · WhatsApp · delete).
+  Widget _linkPanel(StockCatalog c) {
+    final perm = _permLink(c);
+    final links = _links[c.id];
+    final live = (links ?? []).where((l) => l.revocable && !l.expired).toList();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 0, 10, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(height: 8),
+          // Permanent link
+          Row(
+            children: [
+              const Icon(Icons.link, size: 16, color: _navy),
+              const SizedBox(width: 5),
+              const Expanded(
+                child: Text('Permanent link',
+                    style: TextStyle(
+                        fontSize: 12.5, fontWeight: FontWeight.w600)),
+              ),
+              _miniBtn(Icons.copy, 'Copy', () => _copy(perm)),
+              _miniBtn(Icons.chat, 'WhatsApp',
+                  () => _shareWhatsApp(c.name, perm),
+                  color: const Color(0xFF25D366)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Create timed link
+          Container(
+            padding: const EdgeInsets.fromLTRB(10, 6, 8, 8),
+            decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200)),
+            child: Row(
+              children: [
+                const Text('Timed link:', style: TextStyle(fontSize: 12.5)),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 54,
+                  child: TextField(
+                    controller: _daysCtrls[c.id],
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    decoration: const InputDecoration(
+                        isDense: true,
+                        filled: true,
+                        fillColor: Colors.white,
+                        contentPadding:
+                            EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                        border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Text('days', style: TextStyle(fontSize: 12)),
+                const Spacer(),
+                ElevatedButton(
+                  onPressed: _busy ? null : () => _genDays(c),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange.shade800,
+                      foregroundColor: Colors.white,
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 14)),
+                  child: const Text('Generate', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+          ),
+          if (links == null)
+            const Padding(
+                padding: EdgeInsets.all(10),
+                child: Center(
+                    child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2))))
+          else
+            for (final l in live) _liveLinkRow(c, l),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveLinkRow(StockCatalog c, ShareLink l) {
+    final url = '${AppConfig.shareBaseUrl}/s/${l.token}';
+    final exp = l.expiresAt;
+    final created = l.createdAt;
+    String status;
+    if (exp == null) {
+      status = 'Never expires';
+    } else {
+      final d = exp.difference(DateTime.now());
+      final left = (d.inHours / 24).ceil();
+      status = left <= 0 ? 'expires today' : '$left days left';
+    }
+    final made = created != null ? 'Made ${_fmtDate(created)} · ' : '';
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.fromLTRB(8, 2, 2, 2),
+      decoration: BoxDecoration(
+          color: const Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(8)),
+      child: Row(
+        children: [
+          const Icon(Icons.schedule, size: 15, color: Color(0xFF2E7D32)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text('$made$status',
+                style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF2E7D32))),
+          ),
+          _miniBtn(Icons.copy, 'Copy', () => _copy(url)),
+          _miniBtn(Icons.chat, 'WhatsApp', () => _shareWhatsApp(c.name, url),
+              color: const Color(0xFF25D366)),
+          _miniBtn(Icons.delete_outline, 'Delete',
+              _busy ? null : () => _deleteLink(c, l),
+              color: Colors.red),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniBtn(IconData icon, String tip, VoidCallback? onTap,
+          {Color color = _navy}) =>
+      IconButton(
+        tooltip: tip,
+        icon: Icon(icon, size: 19, color: onTap == null ? Colors.grey : color),
+        visualDensity: VisualDensity.compact,
+        onPressed: onTap,
+      );
 }
 
 // ── Builder ──────────────────────────────────────────────────────────────────
