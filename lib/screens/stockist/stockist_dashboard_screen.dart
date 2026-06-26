@@ -84,6 +84,13 @@ class _State extends State<StockistDashboardScreen> {
   final Set<String> _selectedTypes = {};
   final Set<String> _selectedThickness = {};
   Set<String> _selectedStockTypes = {};
+
+  // Design DNA "special search" facets — admin canonical attribute/value catalog
+  // (non-free-text) + each design's tagged value ids, so the filter can offer
+  // Punch/Glaze/Look/… chips alongside the structured facets. (project_design_dna_engine)
+  List<DnaAttribute> _dnaAttrs = [];           // catalog, for facet chips
+  Map<String, Set<String>> _dnaValues = {};    // designId → canonical value ids
+  final Set<String> _selectedDna = {};         // selected canonical value ids
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
   String _sortBy = 'default';
@@ -97,9 +104,41 @@ class _State extends State<StockistDashboardScreen> {
       _selectedColours.length +
       _selectedTypes.length +
       _selectedThickness.length +
+      _selectedDna.length +
       (_selectedStockTypes.isNotEmpty ? 1 : 0) +
       (_minQtyCtrl.text.isNotEmpty ? 1 : 0) +
       (_maxQtyCtrl.text.isNotEmpty ? 1 : 0);
+
+  // DNA value ids present in the current in-stock pool (so empty facets hide).
+  Set<String> get _dnaValuesInUse {
+    final inStockIds = _inStockDesigns.map((d) => d.id).toSet();
+    final used = <String>{};
+    for (final entry in _dnaValues.entries) {
+      if (inStockIds.contains(entry.key)) used.addAll(entry.value);
+    }
+    return used;
+  }
+
+  // DNA attributes that have at least one value present in the pool.
+  List<DnaAttribute> get _dnaFacetAttrs {
+    final inUse = _dnaValuesInUse;
+    return _dnaAttrs
+        .where((a) => a.values.any((v) => inUse.contains(v.id)))
+        .toList();
+  }
+
+  // Faceted DNA match: within an attribute picks are OR'd, across attributes
+  // AND'd. Empty selection matches everything. (mirrors the market overview)
+  bool _matchesDna(TileDesign d, Set<String> selected) {
+    if (selected.isEmpty) return true;
+    final vals = _dnaValues[d.id] ?? const <String>{};
+    for (final attr in _dnaAttrs) {
+      final picked =
+          attr.values.map((v) => v.id).where(selected.contains).toSet();
+      if (picked.isNotEmpty && picked.intersection(vals).isEmpty) return false;
+    }
+    return true;
+  }
 
   @override
   void initState() {
@@ -181,6 +220,10 @@ class _State extends State<StockistDashboardScreen> {
       _brands = brands;
       _library = library;
       _dnaFill = dnaFill;
+      // Keep the DNA catalog (non-free-text, facetable) + per-design tagged
+      // values for the "special search" facet chips in the filter sheet.
+      _dnaAttrs = dnaAttrs.where((a) => !a.isFreeText).toList();
+      _dnaValues = dnaVals;
       // Drop a stale brand filter if that brand no longer exists.
       if (_brandFilter != 'all' && !_brands.any((b) => b.id == _brandFilter)) {
         _brandFilter = 'all';
@@ -289,6 +332,9 @@ class _State extends State<StockistDashboardScreen> {
       result = result
           .where((d) => _selectedStockTypes.contains(d.stockType))
           .toList();
+    }
+    if (_selectedDna.isNotEmpty) {
+      result = result.where((d) => _matchesDna(d, _selectedDna)).toList();
     }
     final minQty = int.tryParse(_minQtyCtrl.text);
     final maxQty = int.tryParse(_maxQtyCtrl.text);
@@ -1627,6 +1673,10 @@ class _State extends State<StockistDashboardScreen> {
         .toList()
       ..sort();
     final thicknessBands = availableThicknessBands(inStock);
+    // Design DNA "special search" facets — only attributes with tagged values
+    // present in the in-stock pool are offered.
+    final dnaFacets = _dnaFacetAttrs;
+    final dnaInUse = _dnaValuesInUse;
 
     // Edit a working copy of the chip selections; they're committed when the
     // sheet closes (Apply button, swipe-down, or tap-outside all apply).
@@ -1636,6 +1686,7 @@ class _State extends State<StockistDashboardScreen> {
     var localTypes     = Set<String>.from(_selectedTypes);
     var localThickness = Set<String>.from(_selectedThickness);
     final localStockTypes = {..._selectedStockTypes};
+    final localDna = {..._selectedDna};
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
 
     showModalBottomSheet<bool>(
@@ -1702,6 +1753,9 @@ class _State extends State<StockistDashboardScreen> {
             }
             if (localStockTypes.isNotEmpty) {
               r = r.where((d) => localStockTypes.contains(d.stockType)).toList();
+            }
+            if (localDna.isNotEmpty) {
+              r = r.where((d) => _matchesDna(d, localDna)).toList();
             }
             final mn = int.tryParse(_minQtyCtrl.text);
             final mx = int.tryParse(_maxQtyCtrl.text);
@@ -1771,6 +1825,7 @@ class _State extends State<StockistDashboardScreen> {
                           localTypes.clear();
                           localThickness.clear();
                           localStockTypes.clear();
+                          localDna.clear();
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
                         }),
@@ -1843,6 +1898,35 @@ class _State extends State<StockistDashboardScreen> {
                               .toList(),
                         ),
                       ),
+                      // ── Design DNA "special search" facets ──────────────────
+                      // One section per admin attribute (Punch/Glaze/Look/…),
+                      // showing only values tagged on the in-stock pool.
+                      ...dnaFacets.map((attr) {
+                        final vals = attr.values
+                            .where((v) => dnaInUse.contains(v.id))
+                            .toList();
+                        final picked = vals
+                            .where((v) => localDna.contains(v.id))
+                            .map((v) => v.name)
+                            .toList();
+                        return FilterSection(
+                          title: attr.name,
+                          summary: picked.isEmpty ? 'All' : picked.join(', '),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: vals
+                                .map((v) => chip(
+                                      v.name,
+                                      localDna.contains(v.id),
+                                      () => setSheet(() => localDna.contains(v.id)
+                                          ? localDna.remove(v.id)
+                                          : localDna.add(v.id)),
+                                    ))
+                                .toList(),
+                          ),
+                        );
+                      }),
                     ],
                   ),
                 ),
@@ -1889,6 +1973,9 @@ class _State extends State<StockistDashboardScreen> {
           ..clear()
           ..addAll(localThickness);
         _selectedStockTypes = {...localStockTypes};
+        _selectedDna
+          ..clear()
+          ..addAll(localDna);
       });
     });
   }

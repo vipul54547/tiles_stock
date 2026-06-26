@@ -446,6 +446,29 @@ class SupabaseDataService {
         params: {'p_catalog_id': catalogId, 'p_banner_url': bannerUrl});
   }
 
+  /// Set a list's full banner layout (parity with the brand banner). [source] =
+  /// pool | library | upload; an empty [source] clears it back to the brand
+  /// banner. [bgUrl] = library background or full uploaded banner; [companyLogoUrl]
+  /// = uploaded logo (library path); [companyPos]/[tdPos] = placement keys.
+  /// (project_session_resume #6)
+  Future<void> setListBannerConfig(
+    String catalogId, {
+    required String source,
+    String bgUrl = '',
+    String companyLogoUrl = '',
+    String companyPos = 'none',
+    String tdPos = 'footer',
+  }) async {
+    await supabase.rpc('set_list_banner_config', params: {
+      'p_catalog_id': catalogId,
+      'p_source': source,
+      'p_bg_url': bgUrl,
+      'p_company_logo_url': companyLogoUrl,
+      'p_company_pos': companyPos,
+      'p_td_pos': tdPos,
+    });
+  }
+
   /// Replace a list's membership with [libraryIds] (the master/library ids of the
   /// chosen designs). Returns the resulting member count. (stocklists v2)
   Future<int> setListDesigns(String catalogId, List<String> libraryIds) async {

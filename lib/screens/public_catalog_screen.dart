@@ -54,6 +54,11 @@ class _State extends State<PublicCatalogScreen> {
   final Set<String> _fTypes = {};
   final Set<String> _fThickness = {};
   final Set<String> _fStockTypes = {};
+  // Design DNA "special search": admin facet catalog [{id,name,values:[{id,name}]}]
+  // from the RPC, plus the selected canonical value ids. Each design carries its
+  // tagged value ids in d['dna']. (project_design_dna_engine)
+  List<Map<String, dynamic>> _dnaFacets = [];
+  final Set<String> _fDna = {};
 
   @override
   void initState() {
@@ -88,6 +93,9 @@ class _State extends State<PublicCatalogScreen> {
           ? Map<String, dynamic>.from(data['banner'])
           : {};
       _all = ((data['designs'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      _dnaFacets = ((data['dna_facets'] as List?) ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
       _loading = false;
@@ -126,8 +134,36 @@ class _State extends State<PublicCatalogScreen> {
       _fTypes.length +
       _fThickness.length +
       _fStockTypes.length +
+      _fDna.length +
       (_minQtyCtrl.text.trim().isNotEmpty ? 1 : 0) +
       (_maxQtyCtrl.text.trim().isNotEmpty ? 1 : 0);
+
+  // The DNA value ids tagged on a design (sent by the RPC as a list).
+  Set<String> _dnaOf(Map<String, dynamic> d) =>
+      ((d['dna'] as List?) ?? const []).map((e) => e.toString()).toSet();
+
+  // DNA value ids present across the in-stock pool (so empty facets hide).
+  Set<String> get _dnaInUse {
+    final used = <String>{};
+    for (final d in _all) {
+      used.addAll(_dnaOf(d));
+    }
+    return used;
+  }
+
+  // Faceted DNA match: within an attribute picks OR, across attributes AND.
+  bool _matchesDna(Map<String, dynamic> d) {
+    if (_fDna.isEmpty) return true;
+    final vals = _dnaOf(d);
+    for (final attr in _dnaFacets) {
+      final ids = ((attr['values'] as List?) ?? const [])
+          .map((v) => (v as Map)['id'].toString())
+          .where(_fDna.contains)
+          .toSet();
+      if (ids.isNotEmpty && ids.intersection(vals).isEmpty) return false;
+    }
+    return true;
+  }
 
   // Thickness band for a design, computed from box weight + pieces (sent by the
   // RPC now). Null when there's no weight data, so it just won't show a band.
@@ -178,6 +214,7 @@ class _State extends State<PublicCatalogScreen> {
     if (_fStockTypes.isNotEmpty) {
       r = r.where((d) => _fStockTypes.contains('${d['stock_type']}'));
     }
+    if (_fDna.isNotEmpty) r = r.where(_matchesDna);
     final mn = int.tryParse(_minQtyCtrl.text);
     final mx = int.tryParse(_maxQtyCtrl.text);
     if (mn != null) r = r.where((d) => ((d['boxes'] as num?) ?? 0) >= mn);
@@ -537,6 +574,38 @@ class _State extends State<PublicCatalogScreen> {
             return '${mn.isEmpty ? '0' : mn}–${mx.isEmpty ? '∞' : mx}';
           }
 
+          // Design DNA facet (id-keyed chips). Only values present in the pool
+          // are shown; whole attributes with no tagged values are hidden.
+          final dnaInUse = _dnaInUse;
+          Widget dnaSection(Map<String, dynamic> attr) {
+            final vals = ((attr['values'] as List?) ?? const [])
+                .map((v) => Map<String, dynamic>.from(v as Map))
+                .where((v) => dnaInUse.contains(v['id'].toString()))
+                .toList();
+            if (vals.isEmpty) return const SizedBox.shrink();
+            final picked = vals
+                .where((v) => _fDna.contains(v['id'].toString()))
+                .map((v) => v['name'].toString());
+            return FilterSection(
+              title: (attr['name'] ?? '').toString(),
+              summary: picked.isEmpty ? 'All' : picked.join(', '),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: vals.map((v) {
+                  final id = v['id'].toString();
+                  final on = _fDna.contains(id);
+                  return FilterChip(
+                    label: Text(v['name'].toString()),
+                    selected: on,
+                    onSelected: (sel) =>
+                        setSheet(() => sel ? _fDna.add(id) : _fDna.remove(id)),
+                  );
+                }).toList(),
+              ),
+            );
+          }
+
           return SafeArea(
             child: Padding(
               padding: EdgeInsets.only(
@@ -578,6 +647,7 @@ class _State extends State<PublicCatalogScreen> {
                             _fTypes.clear();
                             _fThickness.clear();
                             _fStockTypes.clear();
+                            _fDna.clear();
                             _minQtyCtrl.clear();
                             _maxQtyCtrl.clear();
                           }),
@@ -633,6 +703,8 @@ class _State extends State<PublicCatalogScreen> {
                     section('Tile Type', _distinct('tile_type'), _fTypes),
                     section('Thickness (approx)', _thicknessBands(), _fThickness),
                     section('Stock Type', _distinct('stock_type'), _fStockTypes),
+                    // Design DNA "special search" facets (Punch/Glaze/Look/…).
+                    ..._dnaFacets.map(dnaSection),
                     const SizedBox(height: 8),
                   ],
                 ),

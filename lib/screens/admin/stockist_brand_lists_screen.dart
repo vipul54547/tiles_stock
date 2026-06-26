@@ -5,10 +5,10 @@ import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../utils/banner_layout.dart';
 
-/// Admin: per-brand stock-list limit for one stockist. Each brand has its own
-/// "how many stock lists" number (default 1); raising it auto-creates the missing
-/// lists in that brand. Reached from the stockist edit form. (project_stockist_library /
-/// per_brand_stock_list_limit)
+/// Admin: per-brand identity for one stockist — rename, banner, and Live/
+/// Correction/Off status. The "how many stock lists" allowance is now set
+/// per-stockist on the stockist edit form, not per-brand. Reached from the
+/// stockist edit form. (project_stockist_library)
 class StockistBrandListsScreen extends StatefulWidget {
   final String seq; // stockist sequential id
   final String stockistName;
@@ -22,8 +22,6 @@ class _State extends State<StockistBrandListsScreen> {
   final _data = SupabaseDataService();
   final _picker = ImagePicker();
   List<Map<String, dynamic>> _brands = [];
-  // brand id -> the limit currently shown in the stepper (edited value).
-  final Map<String, int> _limit = {};
   bool _loading = true;
   bool _saving = false;
 
@@ -54,48 +52,10 @@ class _State extends State<StockistBrandListsScreen> {
     setState(() => _loading = true);
     final brands = await _data.adminStockistBrands(widget.seq);
     if (!mounted) return;
-    _limit.clear();
-    for (final b in brands) {
-      final id = (b['id'] ?? '').toString();
-      // Never below what already exists (we don't delete lists).
-      final count = (b['list_count'] as num?)?.toInt() ?? 0;
-      final lim = (b['stock_list_limit'] as num?)?.toInt() ?? 1;
-      _limit[id] = lim < count ? count : lim;
-    }
     setState(() {
       _brands = brands;
       _loading = false;
     });
-  }
-
-  int _minFor(Map<String, dynamic> b) {
-    final count = (b['list_count'] as num?)?.toInt() ?? 0;
-    return count < 1 ? 1 : count; // can hold/raise, never reduce below existing
-  }
-
-  Future<void> _save() async {
-    setState(() => _saving = true);
-    try {
-      for (final b in _brands) {
-        final id = (b['id'] ?? '').toString();
-        final orig = (b['stock_list_limit'] as num?)?.toInt() ?? 1;
-        final now = _limit[id] ?? orig;
-        if (now != orig) {
-          await _data.setBrandStockListLimit(id, now);
-        }
-      }
-      if (!mounted) return;
-      Navigator.pop(context, true);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Stock-list limits saved.'),
-          backgroundColor: Color(0xFF2E7D32)));
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceAll('PostgrestException:', '').trim()),
-          backgroundColor: Colors.red));
-    }
   }
 
   // + Add brand — dialog pre-filled with the next default name "Brand N".
@@ -184,26 +144,6 @@ class _State extends State<StockistBrandListsScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: _brands.isEmpty
-          ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                child: FilledButton(
-                  onPressed: _saving ? null : _save,
-                  style: FilledButton.styleFrom(
-                      backgroundColor: _navy,
-                      padding: const EdgeInsets.symmetric(vertical: 14)),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Text('Save limits'),
-                ),
-              ),
-            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _brands.isEmpty
@@ -214,10 +154,9 @@ class _State extends State<StockistBrandListsScreen> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
                       child: Text(
-                          'Set how many stock lists each brand can have. The lists '
-                          'are created automatically; the stockist just renames them. '
-                          'You can raise a limit but not reduce below the lists that '
-                          'already exist.',
+                          'Manage each brand\'s name, banner, and visibility. The '
+                          'number of stock lists is set per-stockist on the '
+                          'stockist edit form.',
                           style: TextStyle(
                               fontSize: 12, color: Colors.grey.shade600)),
                     ),
@@ -250,13 +189,7 @@ class _State extends State<StockistBrandListsScreen> {
       );
 
   Widget _brandCard(Map<String, dynamic> b) {
-    final id = (b['id'] ?? '').toString();
     final isDefault = b['is_default'] == true;
-    final names = ((b['list_names'] as List?) ?? const [])
-        .map((e) => e.toString())
-        .toList();
-    final min = _minFor(b);
-    final value = _limit[id] ?? min;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -316,30 +249,6 @@ class _State extends State<StockistBrandListsScreen> {
             _bannerSection(b),
             const SizedBox(height: 10),
             _statusControl(b),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Text('Stock lists',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                const Spacer(),
-                _stepBtn(Icons.remove, value > min,
-                    () => setState(() => _limit[id] = value - 1)),
-                SizedBox(
-                  width: 40,
-                  child: Text('$value',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
-                _stepBtn(Icons.add, true,
-                    () => setState(() => _limit[id] = value + 1)),
-              ],
-            ),
-            if (names.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(names.join(' · '),
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-            ],
           ],
         ),
       ),
@@ -794,21 +703,5 @@ class _State extends State<StockistBrandListsScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg), backgroundColor: error ? Colors.red : null));
-  }
-
-  Widget _stepBtn(IconData icon, bool enabled, VoidCallback onTap) {
-    return InkWell(
-      onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: enabled ? _navy.withValues(alpha: 0.1) : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(icon,
-            size: 20, color: enabled ? _navy : Colors.grey.shade400),
-      ),
-    );
   }
 }

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/app_config.dart';
 import '../../models/stock_catalog.dart';
+import 'list_banner_editor.dart';
 import '../../models/library_entry.dart';
 import '../../models/share_link.dart';
 import '../../models/choice_state.dart';
@@ -79,7 +79,6 @@ class StockListsScreen extends StatefulWidget {
 
 class _StockListsScreenState extends State<StockListsScreen> {
   final _data = SupabaseDataService();
-  final _picker = ImagePicker();
   List<StockCatalog> _lists = [];
   Map<String, int> _counts = {}; // catalogId → member count
   // Accordion: only one list open at a time (first open by default).
@@ -207,57 +206,15 @@ class _StockListsScreenState extends State<StockListsScreen> {
     if (mounted) setState(() => _busy = false);
   }
 
-  // Per-list banner: pick an image (or remove) → saved on the list, shown on the
-  // share page. (stocklists v2)
+  // Per-list banner: open the full layout editor (source / logo·name / position),
+  // shown on the share page. Falls back to the brand banner when unset.
+  // (project_session_resume #6)
   Future<void> _setBanner(StockCatalog c) async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Choose from gallery'),
-                onTap: () => Navigator.pop(ctx, 'gallery')),
-            ListTile(
-                leading: const Icon(Icons.camera_alt_outlined),
-                title: const Text('Camera'),
-                onTap: () => Navigator.pop(ctx, 'camera')),
-            if (c.bannerUrl.isNotEmpty)
-              ListTile(
-                  leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: const Text('Remove banner'),
-                  onTap: () => Navigator.pop(ctx, 'remove')),
-          ],
-        ),
-      ),
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => ListBannerEditorScreen(catalog: c)),
     );
-    if (action == null) return;
-    if (action == 'remove') {
-      await _data.setListBanner(c.id, '');
-      if (mounted) _load();
-      return;
-    }
-    final x = await _picker.pickImage(
-        source: action == 'camera' ? ImageSource.camera : ImageSource.gallery,
-        maxWidth: 1600,
-        imageQuality: 85);
-    if (x == null) return;
-    if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Uploading banner…')));
-    }
-    final url = await CloudinaryService.uploadImage(x.path);
-    if (url == null || url.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Upload failed — try again')));
-      }
-      return;
-    }
-    await _data.setListBanner(c.id, url);
-    if (mounted) _load();
+    if (changed == true && mounted) _load();
   }
 
   @override
@@ -318,7 +275,7 @@ class _StockListsScreenState extends State<StockListsScreen> {
                         Text(
                             [
                               '${_counts[c.id] ?? 0} designs',
-                              if (c.bannerUrl.isNotEmpty) 'banner ✓',
+                              if (c.hasOwnBanner) 'banner ✓',
                               if (c.description.trim().isNotEmpty)
                                 c.description.trim(),
                             ].join(' · '),
@@ -333,7 +290,7 @@ class _StockListsScreenState extends State<StockListsScreen> {
                       tooltip: 'Banner',
                       icon: Icon(Icons.image_outlined,
                           size: 20,
-                          color: c.bannerUrl.isNotEmpty
+                          color: c.hasOwnBanner
                               ? const Color(0xFF2E7D32)
                               : Colors.grey.shade600),
                       onPressed: () => _setBanner(c)),

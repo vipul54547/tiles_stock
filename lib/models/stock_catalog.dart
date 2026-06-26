@@ -7,8 +7,15 @@ class StockCatalog {
   final String name;
   /// Optional note the stockist keeps to remember what's in the list. (v2)
   final String description;
-  /// The list's own banner image (brand-free lists). Empty = none. (v2)
+  /// The list's own banner image (legacy single-image path). Empty = none. (v2)
   final String bannerUrl;
+  /// Per-list banner layout (parity with the brand banner). Empty bannerSource
+  /// → the list falls back to the brand banner. (project_session_resume #6)
+  final String bannerSource;   // '' | 'pool' | 'library' | 'upload'
+  final String bannerBgUrl;    // library background or full uploaded banner
+  final String companyLogoUrl; // optional brand logo (library path)
+  final String companyPos;     // 9-cell placement key, or 'none'
+  final String tdPos;          // TilesDesign mark placement key
   final String visibility; // 'public' | 'private'
   final bool showInMarketplace; // public catalog: appears in the app marketplace
   final String shareToken; // the catalog's own /s/<token> link
@@ -34,6 +41,11 @@ class StockCatalog {
     required this.name,
     this.description = '',
     this.bannerUrl = '',
+    this.bannerSource = '',
+    this.bannerBgUrl = '',
+    this.companyLogoUrl = '',
+    this.companyPos = 'none',
+    this.tdPos = 'footer',
     required this.visibility,
     required this.showInMarketplace,
     required this.shareToken,
@@ -47,6 +59,9 @@ class StockCatalog {
 
   bool get isPrivate => visibility == 'private';
 
+  /// True when this list carries its own banner (rich layout or legacy image).
+  bool get hasOwnBanner => bannerSource.isNotEmpty || bannerUrl.isNotEmpty;
+
   /// Deletion countdown running.
   bool get pendingDelete => deleteScheduledAt != null;
 
@@ -56,6 +71,11 @@ class StockCatalog {
         name: j['name'] as String,
         description: (j['description'] as String?) ?? '',
         bannerUrl: (j['banner_url'] as String?) ?? '',
+        bannerSource: (j['banner_source'] as String?) ?? '',
+        bannerBgUrl: (j['banner_bg_url'] as String?) ?? '',
+        companyLogoUrl: (j['company_logo_url'] as String?) ?? '',
+        companyPos: (j['company_pos'] as String?) ?? 'none',
+        tdPos: (j['td_pos'] as String?) ?? 'footer',
         visibility: (j['visibility'] as String?) ?? 'public',
         showInMarketplace: j['show_in_marketplace'] as bool? ?? true,
         shareToken: (j['share_token'] as String?) ?? '',
