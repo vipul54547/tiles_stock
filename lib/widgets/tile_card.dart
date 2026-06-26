@@ -52,7 +52,7 @@ class TileCard extends StatelessWidget {
       children: [
         fig('P', design.boxQuantity, Colors.grey.shade600),
         fig('C', design.controlQuantity, const Color(0xFFEF6C00)),
-        fig('H', 0, const Color(0xFF1565C0)),
+        fig('H', design.heldQuantity, const Color(0xFF1565C0)),
         fig('F', design.fStock, const Color(0xFF2E7D32)),
       ],
     );

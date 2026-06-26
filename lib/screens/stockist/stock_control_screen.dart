@@ -166,7 +166,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
   }
 
   int _fOf(TileDesign d) {
-    final f = d.boxQuantity - _controlOf(d); // H = 0 in Phase 1
+    final f = d.boxQuantity - _controlOf(d) - d.heldQuantity; // F = max(0, P−C−H)
     return f < 0 ? 0 : f;
   }
 
@@ -601,7 +601,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
                     children: [
                       _fig('P', p, Colors.grey.shade600),
                       const SizedBox(width: 10),
-                      _fig('H', 0, const Color(0xFF1565C0)),
+                      _fig('H', d.heldQuantity, const Color(0xFF1565C0)),
                       const SizedBox(width: 10),
                       _fig('F', f, const Color(0xFF2E7D32)),
                       if (f == 0 && _controlOf(d) > 0) ...[

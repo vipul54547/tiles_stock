@@ -16,9 +16,12 @@ class TileDesign {
   /// C_Quantity — boxes the stockist withholds (hidden from dealers). 0 = none.
   /// (project_fstock_model)
   final int controlQuantity;
-  /// F_Stock — boxes shown to dealers = max(0, P − H − C). H (bookings) is 0 in
-  /// Phase 1, so f_stock = max(0, box_quantity − control_quantity). Stockist
-  /// screens show P + C + F; dealer screens already receive F as their quantity.
+  /// H_Quantity — boxes COMMITTED to confirmed/accepted orders within their
+  /// guarantee window. Computed server-side (held_of). 0 when nothing booked.
+  /// (project_fstock_model · Phase 2)
+  final int heldQuantity;
+  /// F_Stock — boxes shown to dealers = max(0, P − C − H). Stockist screens show
+  /// P + C + H + F; dealer screens already receive F as their quantity.
   final int fStock;
   final String surfaceType;
   /// Original finish text from the PDF when it isn't one of [kFinishes]
@@ -74,6 +77,7 @@ class TileDesign {
     required this.size,
     required this.boxQuantity,
     this.controlQuantity = 0,
+    this.heldQuantity = 0,
     int? fStock,
     required this.surfaceType,
     this.finishLabel,
@@ -98,9 +102,9 @@ class TileDesign {
     this.stockistPriority = 0,
   })  : createdAt = createdAt ?? updatedAt,
         fStock = fStock ??
-            (boxQuantity - controlQuantity < 0
+            (boxQuantity - controlQuantity - heldQuantity < 0
                 ? 0
-                : boxQuantity - controlQuantity);
+                : boxQuantity - controlQuantity - heldQuantity);
 
   factory TileDesign.fromJson(Map<String, dynamic> json) => TileDesign(
         id: json['id'],
@@ -108,6 +112,7 @@ class TileDesign {
         size: json['size'],
         boxQuantity: json['box_quantity'],
         controlQuantity: (json['control_quantity'] as num?)?.toInt() ?? 0,
+        heldQuantity: (json['held_quantity'] as num?)?.toInt() ?? 0,
         fStock: (json['f_stock'] as num?)?.toInt(),
         surfaceType: json['surface_type'],
         finishLabel: json['finish_label'],
@@ -135,7 +140,7 @@ class TileDesign {
   /// library when my_stock() doesn't return image_url.
   TileDesign withFaceImage(String url) => TileDesign(
         id: id, name: name, size: size, boxQuantity: boxQuantity,
-        controlQuantity: controlQuantity, fStock: fStock,
+        controlQuantity: controlQuantity, heldQuantity: heldQuantity, fStock: fStock,
         surfaceType: surfaceType, finishLabel: finishLabel,
         piecesPerBox: piecesPerBox, boxWeightKg: boxWeightKg,
         thicknessMm: thicknessMm, colour: colour, tileType: tileType,

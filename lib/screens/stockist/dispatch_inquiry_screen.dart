@@ -37,6 +37,7 @@ class _Line {
   final int ordered;            // buyer-requested boxes (reference)
   final int dispatchedAlready;  // already dispatched on earlier rounds
   int available;                // current system stock
+  final int held;               // total boxes committed (H) across all orders
   final TextEditingController ctrl;
   _Line({
     required this.designId,
@@ -47,10 +48,13 @@ class _Line {
     required this.ordered,
     required this.dispatchedAlready,
     required this.available,
+    this.held = 0,
     required this.ctrl,
   });
   int get remaining => (ordered - dispatchedAlready).clamp(0, 1 << 30);
   int get dispatchNow => int.tryParse(ctrl.text.trim()) ?? 0;
+  // Boxes committed to OTHER orders (H minus this order's own outstanding).
+  int get otherHeld => (held - remaining).clamp(0, 1 << 30);
 }
 
 class _State extends State<DispatchInquiryScreen> {
@@ -118,6 +122,7 @@ class _State extends State<DispatchInquiryScreen> {
           ordered: ordered,
           dispatchedAlready: dispatched,
           available: (l['available'] as num?)?.toInt() ?? 0,
+          held: (l['held'] as num?)?.toInt() ?? 0,
           ctrl: TextEditingController(text: remaining > 0 ? '$remaining' : ''),
         ));
       }
@@ -225,6 +230,35 @@ class _State extends State<DispatchInquiryScreen> {
               'dispatch more boxes than you have in stock. This is allowed — the '
               'system stock for those will be set to 0. Continue?\n\n'
               '${over.map((l) => '• ${l.name}: ${l.dispatchNow} > ${l.available}').join('\n')}'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Dispatch anyway')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+
+    // Booking warning (warn-but-allow): dispatching this much would leave fewer
+    // physical boxes than are committed to OTHER buyers' confirmed orders.
+    final breaks = _lines
+        .where((l) => l.otherHeld > 0 && (l.available - l.dispatchNow) < l.otherHeld)
+        .toList();
+    if (breaks.isNotEmpty) {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Affects reserved orders?'),
+          content: Text(
+              '${breaks.length} design${breaks.length == 1 ? '' : 's'} '
+              'would be left short of boxes already committed to other buyers. '
+              'You can still dispatch — those commitments may need rebalancing.\n\n'
+              '${breaks.map((l) => '• ${l.name}: ${(l.available - l.dispatchNow).clamp(0, 1 << 30)} left vs ${l.otherHeld} booked').join('\n')}'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(context, false),
@@ -597,6 +631,8 @@ class _State extends State<DispatchInquiryScreen> {
                       _meta('Done ${l.dispatchedAlready}', const Color(0xFFE65100)),
                     _meta('Stock ${l.available}',
                         over ? Colors.red.shade700 : Colors.green.shade700),
+                    if (l.otherHeld > 0)
+                      _meta('Booked ${l.otherHeld}', const Color(0xFF1565C0)),
                   ]),
                   if (over)
                     Padding(

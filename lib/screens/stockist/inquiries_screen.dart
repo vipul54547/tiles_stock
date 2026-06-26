@@ -616,6 +616,10 @@ class _State extends State<InquiriesScreen> {
                 ],
               ),
             ],
+            if (_reservationLine(o) != null) ...[
+              const SizedBox(height: 6),
+              _reservationLine(o)!,
+            ],
             const SizedBox(height: 8),
             _actions(o),
           ],
@@ -623,6 +627,35 @@ class _State extends State<InquiriesScreen> {
       ),
     );
   }
+
+  // A small reservation/acceptance status line for a confirmed (locked) order.
+  Widget? _reservationLine(InquiryOrder o) {
+    if (o.isAccepted) {
+      return _resChip(Icons.handshake_outlined, 'Accepted by buyer',
+          const Color(0xFF2E7D32));
+    }
+    if (o.reservationActive) {
+      return _resChip(Icons.timer_outlined,
+          'Reserved · ${o.daysLeft} day${o.daysLeft == 1 ? '' : 's'} left',
+          const Color(0xFF1565C0));
+    }
+    if (o.reservationExpired) {
+      return _resChip(Icons.timer_off_outlined,
+          'Reservation expired — buyer didn\'t accept', const Color(0xFFE65100));
+    }
+    return null;
+  }
+
+  Widget _resChip(IconData icon, String label, Color color) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 5),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11.5, fontWeight: FontWeight.w600, color: color)),
+        ],
+      );
 
   Widget _actions(InquiryOrder o) {
     final btns = <Widget>[
@@ -677,13 +710,108 @@ class _State extends State<InquiriesScreen> {
   }
 
   Future<void> _confirmOrder(InquiryOrder o) async {
-    final ok = await _confirm('Confirm ${o.token}?',
-        'Call the buyer and agree the order first. Confirming locks it — the '
-        'buyer can no longer change it and it becomes ready for dispatch.\n\n'
-        'Please confirm only after you are sure: cancelling or rejecting an order '
-        'after confirming it can lower your profile score.');
-    if (!ok) return;
-    await _run(() => _data.lockInquiry(o.id), '${o.token} confirmed.');
+    final days = await _askGuaranteeDays(o);
+    if (days == null) return; // cancelled
+    await _run(() => _data.lockInquiry(o.id, days: days),
+        days > 0
+            ? '${o.token} confirmed — reserved for $days day${days == 1 ? '' : 's'}.'
+            : '${o.token} confirmed.');
+  }
+
+  /// Confirm dialog that also captures the guarantee window (N days the boxes are
+  /// reserved for this buyer). Returns the chosen days (0 = no reservation), or
+  /// null if cancelled. (project_fstock_model · Phase 2)
+  Future<int?> _askGuaranteeDays(InquiryOrder o) async {
+    int days = 7; // sensible default
+    final ctrl = TextEditingController(text: '7');
+    const presets = [3, 7, 15, 30];
+    return showDialog<int>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) {
+          void setDays(int d) {
+            setD(() {
+              days = d;
+              ctrl.text = d == 0 ? '' : '$d';
+            });
+          }
+
+          return AlertDialog(
+            title: Text('Confirm ${o.token}?'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Confirming locks the order — the buyer can no longer change it. '
+                  'It becomes ready for dispatch.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                const Text('Reserve the boxes for the buyer for:',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    for (final p in presets)
+                      ChoiceChip(
+                        label: Text('$p d'),
+                        selected: days == p,
+                        onSelected: (_) => setDays(p),
+                      ),
+                    ChoiceChip(
+                      label: const Text('None'),
+                      selected: days == 0,
+                      onSelected: (_) => setDays(0),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 70,
+                      child: TextField(
+                        controller: ctrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            isDense: true, border: OutlineInputBorder()),
+                        onChanged: (v) =>
+                            setD(() => days = int.tryParse(v.trim()) ?? 0),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('days', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  days > 0
+                      ? 'These boxes are held off the buyer-facing stock for '
+                          '$days day${days == 1 ? '' : 's'}. The buyer can Accept to '
+                          'keep them locked; otherwise they auto-release.'
+                      : 'No time reservation — boxes are only held once the buyer Accepts.',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, days < 0 ? 0 : days),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    foregroundColor: Colors.white),
+                child: const Text('Confirm'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _reopen(InquiryOrder o) async {

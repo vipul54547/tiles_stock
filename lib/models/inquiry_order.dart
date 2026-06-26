@@ -16,6 +16,14 @@ class InquiryOrder {
   final DateTime? confirmedAt;
   final DateTime? lockedAt;
 
+  // H_Quantity booking (Phase 2). When the stockist confirms (locks) an order it
+  // becomes an OFFER: boxes reserved until [guaranteeUntil]. The buyer ACCEPTs to
+  // turn the time-limited reservation into a both-side lock ([acceptedAt]); if no
+  // one accepts before [guaranteeUntil], the reservation auto-releases.
+  final DateTime? guaranteeUntil;
+  final DateTime? acceptedAt;
+  final int? guaranteeDays;
+
   // Buyer-side (from my_orders): who the order is with.
   final String stockistId;
   final String stockistKey;   // sequential id or masked public code
@@ -46,6 +54,9 @@ class InquiryOrder {
     required this.updatedAt,
     this.confirmedAt,
     this.lockedAt,
+    this.guaranteeUntil,
+    this.acceptedAt,
+    this.guaranteeDays,
     this.stockistId = '',
     this.stockistKey = '',
     this.stockistName = '',
@@ -74,6 +85,9 @@ class InquiryOrder {
         updatedAt:    _dt(j['updated_at']),
         confirmedAt:  _dtn(j['confirmed_at']),
         lockedAt:     _dtn(j['locked_at']),
+        guaranteeUntil: _dtn(j['guarantee_until']),
+        acceptedAt:     _dtn(j['accepted_at']),
+        guaranteeDays:  (j['guarantee_days'] as num?)?.toInt(),
         stockistId:   (j['stockist_id'] ?? '').toString(),
         stockistKey:  (j['stockist_key'] ?? '').toString(),
         stockistName: (j['stockist_name'] ?? '').toString(),
@@ -98,6 +112,26 @@ class InquiryOrder {
   /// Comma-joined design names (for search + a compact card preview).
   String get designNames =>
       designs.map((d) => (d['name'] ?? '').toString()).where((s) => s.isNotEmpty).join(', ');
+
+  /// The buyer has accepted the stockist's offer (both-side lock).
+  bool get isAccepted => acceptedAt != null;
+
+  /// A still-running guarantee window the buyer can act on.
+  bool get reservationActive =>
+      isLocked && !isAccepted && guaranteeUntil != null &&
+      guaranteeUntil!.isAfter(DateTime.now());
+
+  /// The offer lapsed: locked, never accepted, window passed.
+  bool get reservationExpired =>
+      isLocked && !isAccepted && guaranteeUntil != null &&
+      !guaranteeUntil!.isAfter(DateTime.now());
+
+  /// Whole days left in the guarantee window (0 once it has passed).
+  int get daysLeft {
+    if (guaranteeUntil == null) return 0;
+    final diff = guaranteeUntil!.difference(DateTime.now());
+    return diff.isNegative ? 0 : diff.inHours ~/ 24 + (diff.inHours % 24 == 0 ? 0 : 1);
+  }
 
   bool get isDraft       => status == 'draft';
   bool get isSent        => status == 'sent';

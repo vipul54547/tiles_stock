@@ -192,6 +192,7 @@ class SupabaseDataService {
       size:         d['size'] ?? '',
       boxQuantity:  d['box_quantity'] ?? 0,
       controlQuantity: (d['control_quantity'] as num?)?.toInt() ?? 0,
+      heldQuantity: (d['held_quantity'] as num?)?.toInt() ?? 0,
       fStock:       (d['f_stock'] as num?)?.toInt(),
       surfaceType:  (d['surface_type'] ?? 'None').toString(),
       finishLabel:  d['finish_label'] as String?,
@@ -1916,10 +1917,23 @@ class SupabaseDataService {
   }
 
   /// Stockist confirms an order (locks it): freezes the buyer out and snapshots
-  /// the lines. (Shown to the stockist as "Confirm Order".)
-  Future<void> lockInquiry(String id) async {
+  /// the lines. [days] = guarantee window — boxes are reserved (counted as H) for
+  /// that many days, during which the buyer can Accept to lock them permanently.
+  /// 0/null = no time reservation (held only once the buyer accepts).
+  /// (Shown to the stockist as "Confirm Order".)
+  Future<void> lockInquiry(String id, {int? days}) async {
     try {
-      await supabase.rpc('lock_inquiry', params: {'p_id': id});
+      await supabase.rpc('lock_inquiry', params: {'p_id': id, 'p_days': days});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Buyer accepts a stockist's confirmed offer (both-side lock): the reserved
+  /// boxes stay held past the guarantee window. (project_fstock_model · Phase 2)
+  Future<void> acceptOrder(String id) async {
+    try {
+      await supabase.rpc('accept_inquiry', params: {'p_id': id});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }

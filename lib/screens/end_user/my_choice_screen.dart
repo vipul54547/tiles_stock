@@ -60,6 +60,22 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     });
   }
 
+  // Buyer accepts the supplier's confirmed offer (both-side lock).
+  Future<void> _acceptOrder(InquiryOrder o) async {
+    try {
+      await _service.acceptOrder(o.id);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${o.token} accepted.'),
+          backgroundColor: const Color(0xFF2E7D32)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
+  }
+
   // The order (token) for a stockist group. Designs are grouped by the stockist
   // display key (sequential id / masked code), which is the order's stockist_key.
   InquiryOrder? _orderFor(String stockistDisplayId) {
@@ -570,6 +586,63 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                     fontSize: 10.5,
                     fontStyle: FontStyle.italic,
                     color: Colors.grey.shade600),
+              ),
+            ),
+          // H_Quantity offer: while reserved, let the buyer Accept to lock the
+          // boxes; show the outcome once accepted / expired. (fstock model · P2)
+          if (o.isAccepted)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.handshake_outlined,
+                    size: 14, color: Color(0xFF2E7D32)),
+                const SizedBox(width: 5),
+                Text('You accepted this order',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.green.shade700)),
+              ]),
+            )
+          else if (o.reservationActive)
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Boxes reserved for you — ${o.daysLeft} day'
+                    '${o.daysLeft == 1 ? '' : 's'} left to accept.',
+                    style: const TextStyle(
+                        fontSize: 11, color: Color(0xFF1565C0)),
+                  ),
+                  const SizedBox(height: 4),
+                  SizedBox(
+                    height: 30,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _acceptOrder(o),
+                      icon: const Icon(Icons.check, size: 15),
+                      label: const Text('Accept order',
+                          style: TextStyle(fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2E7D32),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (o.reservationExpired)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'The reservation window has passed — contact the supplier to '
+                'reconfirm availability.',
+                style: TextStyle(fontSize: 10.5, color: Colors.orange.shade800),
               ),
             ),
           // Once the supplier starts shipping, let the buyer see what went out.
