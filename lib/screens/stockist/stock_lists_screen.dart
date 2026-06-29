@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/app_config.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/brand.dart';
 import 'list_banner_editor.dart';
 import '../../models/library_entry.dart';
 import '../../models/share_link.dart';
@@ -80,6 +81,7 @@ class StockListsScreen extends StatefulWidget {
 class _StockListsScreenState extends State<StockListsScreen> {
   final _data = SupabaseDataService();
   List<StockCatalog> _lists = [];
+  List<Brand> _brands = []; // for the Brands manager (rename / hide / delete)
   Map<String, int> _counts = {}; // catalogId → member count
   // Accordion: only one list open at a time (first open by default).
   String? _openId;
@@ -105,6 +107,7 @@ class _StockListsScreenState extends State<StockListsScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final lists = await _data.getCatalogs(currentStockistUUID);
+    final brands = await _data.getMyBrands();
     final designs = await _data.getDesignsByStockist(currentStockistUUID);
     // member count = unique library masters whose membership includes the list.
     final counts = <String, int>{};
@@ -119,6 +122,7 @@ class _StockListsScreenState extends State<StockListsScreen> {
     final active = lists.where((c) => c.isActive && !c.pendingDelete).toList();
     setState(() {
       _lists = active;
+      _brands = brands;
       _counts = counts;
       // Keep the open row if it still exists, else open the first by default.
       if (_openId == null || !active.any((c) => c.id == _openId)) {
@@ -217,6 +221,417 @@ class _StockListsScreenState extends State<StockListsScreen> {
     if (changed == true && mounted) _load();
   }
 
+  // ── Share all ──────────────────────────────────────────────────────────────
+  // Bundle every stock list into one WhatsApp message. First asks Permanent or
+  // Custom-days — Custom mints a fresh timed link (same validity) per list.
+  // Lists are brand-free now, so this covers all of them in one go.
+  Future<void> _shareAll() async {
+    if (_lists.isEmpty) return;
+    final daysCtrl = TextEditingController(text: '60');
+    bool permanent = true;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('Share all lists'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Sends the link of all ${_lists.length} list'
+                  '${_lists.length == 1 ? '' : 's'} in one message.',
+                  style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('Permanent'),
+                    selected: permanent,
+                    onSelected: (_) => setS(() => permanent = true),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('Custom days'),
+                    selected: !permanent,
+                    onSelected: (_) => setS(() => permanent = false),
+                  ),
+                ],
+              ),
+              if (!permanent)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 60,
+                        child: TextField(
+                          controller: daysCtrl,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          decoration: const InputDecoration(
+                              isDense: true, border: OutlineInputBorder()),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text('days'),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: _navy),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Share')),
+          ],
+        ),
+      ),
+    );
+    if (go != true) {
+      daysCtrl.dispose();
+      return;
+    }
+
+    final entries = <String>[];
+    if (permanent) {
+      for (final c in _lists) {
+        entries.add('${c.name}: ${_permLink(c)}');
+      }
+      daysCtrl.dispose();
+    } else {
+      final days = int.tryParse(daysCtrl.text.trim());
+      daysCtrl.dispose();
+      if (days == null || days < 1) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Enter the number of days (1 or more).')));
+        }
+        return;
+      }
+      setState(() => _busy = true);
+      for (final c in _lists) {
+        final token = await _data.createCatalogShareLinkDays(c.id, days);
+        if (token != null) {
+          entries.add('${c.name}: ${AppConfig.shareBaseUrl}/s/$token');
+        }
+        _links.remove(c.id); // force reload of that list's links
+      }
+      if (_openId != null) await _ensureLinks(_openId!);
+      if (mounted) setState(() => _busy = false);
+    }
+    if (entries.isEmpty) return;
+    // Header: the masked trade name when anonymous, else the real company name.
+    final header = currentStockistIsAnonymous &&
+            currentStockistDisplayName.isNotEmpty
+        ? currentStockistDisplayName
+        : '';
+    final body = entries.join('\n');
+    final text =
+        '${header.isEmpty ? '' : '$header\n'}$body\n\nPowered by Tiles Stock';
+    await launchUrl(
+        Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'),
+        mode: LaunchMode.externalApplication);
+  }
+
+  // ── Brands manager ──────────────────────────────────────────────────────────
+  // Stockist-side brand controls: rename (all brands), and for non-default
+  // brands hide-from-buyers + 24h soft-delete (with a cancel within the window).
+  // Brands are created by the admin; lists are brand-free, so this is identity
+  // + visibility only. (project_multi_brand · brand banner retired)
+  String _deleteCountdown(DateTime scheduledAt) {
+    final left =
+        scheduledAt.add(const Duration(hours: 24)).difference(DateTime.now());
+    if (left.isNegative) return 'deleting now…';
+    final h = left.inHours;
+    final m = left.inMinutes % 60;
+    return h > 0 ? '${h}h ${m}m left' : '${m}m left';
+  }
+
+  Future<void> _runBrand(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+      final brands = await _data.getMyBrands();
+      if (mounted) setState(() => _brands = brands);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _renameBrand(Brand b) async {
+    final ctrl = TextEditingController(text: b.name);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename brand'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+              hintText: 'Brand name (e.g. Bianco Tera)',
+              border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    final name = ctrl.text.trim();
+    ctrl.dispose();
+    if (ok != true || name.isEmpty || name == b.name) return;
+    await _runBrand(() => _data.renameBrand(b.id, name));
+  }
+
+  Future<void> _confirmScheduleBrandDelete(Brand b) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this brand?'),
+        content: Text(
+            'Deleting "${b.name}" removes the brand and its stock lists. This '
+            'CANNOT be undone.\n\nFor safety it happens after a 24-hour wait — '
+            'you can stop it any time within that window.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Start 24h deletion')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _runBrand(() => _data.scheduleBrandDelete(b.id));
+  }
+
+  Future<void> _openBrandManager() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => StatefulBuilder(
+        // _runBrand updates _brands in the parent; setSheet rebuilds this sheet.
+        builder: (ctx, setSheet) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.55,
+          maxChildSize: 0.9,
+          builder: (_, scroll) => Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
+                child: Row(
+                  children: [
+                    Icon(Icons.sell, color: _navy),
+                    SizedBox(width: 8),
+                    Text('Brands',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 17)),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                      'Rename a brand, or hide / delete an extra brand. New '
+                      'brands are enabled by the admin.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54)),
+                ),
+              ),
+              Divider(height: 1, color: Colors.grey.shade200),
+              Expanded(
+                child: ListView(
+                  controller: scroll,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 20),
+                  children: [
+                    for (final b in _brands)
+                      _brandManagerCard(b, () => setSheet(() {}))
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _brandManagerCard(Brand b, VoidCallback refresh) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.sell, size: 18, color: _navy),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(b.name,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: _navy)),
+                ),
+                if (b.isDefault)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text('default',
+                        style: TextStyle(fontSize: 11, color: Colors.black54)),
+                  ),
+                IconButton(
+                  tooltip: 'Rename brand',
+                  icon: const Icon(Icons.edit_outlined, size: 19, color: _navy),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(),
+                  padding: const EdgeInsets.all(6),
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          await _renameBrand(b);
+                          refresh();
+                        },
+                ),
+              ],
+            ),
+            // Non-default brands: hide-from-buyers + 24h soft-delete.
+            if (!b.isDefault) ...[
+              const Divider(height: 14),
+              Row(
+                children: [
+                  Icon(
+                      b.hiddenByStockist
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                      size: 18,
+                      color: _navy),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                        b.hiddenByStockist
+                            ? 'Hidden from buyers'
+                            : 'Visible to buyers',
+                        style: const TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                  Switch(
+                    value: !b.hiddenByStockist,
+                    onChanged: _busy
+                        ? null
+                        : (_) async {
+                            await _runBrand(() => _data.setBrandHidden(
+                                b.id, !b.hiddenByStockist));
+                            refresh();
+                          },
+                  ),
+                ],
+              ),
+              if (b.hiddenByStockist && !b.pendingDelete)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () async {
+                            await _confirmScheduleBrandDelete(b);
+                            refresh();
+                          },
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: const Text('Delete brand'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  ),
+                ),
+              if (b.pendingDelete)
+                Container(
+                  margin: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEBEE),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.timer_outlined,
+                              size: 16, color: Colors.red),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                                'Scheduled for deletion · ${_deleteCountdown(b.deleteScheduledAt!)}',
+                                style: const TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.red)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                          'Last chance — stop now to keep this brand and all '
+                          'its lists. After the timer it cannot be recovered.',
+                          style:
+                              TextStyle(fontSize: 11, color: Colors.black54)),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton.icon(
+                          onPressed: _busy
+                              ? null
+                              : () async {
+                                  await _runBrand(
+                                      () => _data.cancelBrandDelete(b.id));
+                                  refresh();
+                                },
+                          icon: const Icon(Icons.undo, size: 16),
+                          label: const Text('Keep brand'),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: _navy,
+                              visualDensity: VisualDensity.compact),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -225,6 +640,20 @@ class _StockListsScreenState extends State<StockListsScreen> {
         title: const Text('Stock lists'),
         backgroundColor: _navy,
         foregroundColor: Colors.white,
+        actions: [
+          if (_lists.isNotEmpty)
+            IconButton(
+              tooltip: 'Share all lists',
+              icon: const Icon(Icons.share),
+              onPressed: _busy ? null : _shareAll,
+            ),
+          if (_brands.isNotEmpty)
+            IconButton(
+              tooltip: 'Brands',
+              icon: const Icon(Icons.sell_outlined),
+              onPressed: _busy ? null : _openBrandManager,
+            ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _newList,

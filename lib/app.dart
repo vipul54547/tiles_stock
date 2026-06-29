@@ -58,7 +58,6 @@ import 'screens/end_user/my_choice_screen.dart';
 import 'screens/end_user/dispatch_history_screen.dart';
 import 'screens/stockist/upload_stock_screen.dart';
 import 'screens/stockist/import_supplier_pdf_screen.dart';
-import 'screens/stockist/manage_catalogs_screen.dart';
 import 'screens/stockist/my_design_library_screen.dart';
 import 'screens/stockist/import_mapping_excel_screen.dart';
 import 'screens/stockist/import_excel_stock_screen.dart';
@@ -230,10 +229,6 @@ final GoRouter _router = GoRouter(
       path: '/stockist/stock/import-supplier-pdf',
       builder: (_, state) =>
           ImportSupplierPdfScreen(initialBrandId: state.extra as String?),
-    ),
-    GoRoute(
-      path: '/stockist/catalogs',
-      builder: (_, __) => const ManageCatalogsScreen(),
     ),
     GoRoute(
       path: '/stockist/library',

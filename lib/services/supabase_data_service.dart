@@ -777,13 +777,6 @@ class SupabaseDataService {
     }
   }
 
-  /// Admin: set one brand's stock-list limit; the brand auto-fills its lists up
-  /// to the new number (never deletes).
-  Future<void> setBrandStockListLimit(String brandId, int limit) async {
-    await supabase.rpc('admin_set_brand_stock_list_limit',
-        params: {'p_brand_id': brandId, 'p_limit': limit});
-  }
-
   /// Admin: set a brand's moderation status — 'live' (all see), 'correction'
   /// (stockist sees to fix, buyers don't) or 'off' (hidden; non-default only).
   Future<void> setBrandStatus(String brandId, String status) async {
@@ -883,33 +876,8 @@ class SupabaseDataService {
     }
   }
 
-  /// Admin: set a brand's banner overlay config. [source] = pool | library |
-  /// upload; [bgUrl] = library background or full uploaded banner; [companyLogoUrl]
-  /// = uploaded brand logo (library path); [companyPos]/[tdPos] = placement keys.
-  Future<void> setBrandBannerConfig(
-    String brandId, {
-    required String source,
-    String bgUrl = '',
-    String companyLogoUrl = '',
-    String companyPos = 'none',
-    String tdPos = 'footer',
-  }) async {
-    try {
-      await supabase.rpc('admin_set_brand_banner_config', params: {
-        'p_brand_id': brandId,
-        'p_source': source,
-        'p_bg_url': bgUrl,
-        'p_company_logo_url': companyLogoUrl,
-        'p_company_pos': companyPos,
-        'p_td_pos': tdPos,
-      });
-    } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
-    }
-  }
-
   /// Stockist creates a stock list under a brand (server enforces the admin-set
-  /// stock_list_limit per brand). Returns the new list id. Throws the server
+  /// stockist-wide stock_list_limit). Returns the new list id. Throws the server
   /// message on failure.
   Future<String> createStockList(String brandId, String name) async {
     try {
@@ -986,32 +954,6 @@ class SupabaseDataService {
   Future<void> deleteBanner(String id) async {
     await supabase.from('banners').delete().eq('id', id);
   }
-
-  /// Admin: a stockist's brands with each brand's assigned banner + settings.
-  /// Returns {stockist_name, brands:[{brand_id,name,is_default,use_pool_banner,
-  /// website_url,banner_url}]} or null if the stockist isn't found.
-  Future<Map<String, dynamic>?> adminStockistBannerSlots(String seq) async {
-    try {
-      final res =
-          await supabase.rpc('admin_stockist_banner_slots', params: {'p_seq': seq});
-      if (res == null) return null;
-      return Map<String, dynamic>.from(res as Map);
-    } catch (e, st) {
-      debugPrint('adminStockistBannerSlots($seq) failed: $e\n$st');
-      return null;
-    }
-  }
-
-  Future<void> adminSetBrandBanner(String brandId, String imageUrl) =>
-      supabase.rpc('admin_set_brand_banner',
-          params: {'p_brand_id': brandId, 'p_image_url': imageUrl});
-
-  Future<void> adminClearBrandBanner(String brandId) =>
-      supabase.rpc('admin_clear_brand_banner', params: {'p_brand_id': brandId});
-
-  Future<void> adminSetBrandUsePool(String brandId, bool use) =>
-      supabase.rpc('admin_set_brand_use_pool',
-          params: {'p_brand_id': brandId, 'p_use': use});
 
   Future<void> adminSetBrandWebsite(String brandId, String url) =>
       supabase.rpc('admin_set_brand_website',
