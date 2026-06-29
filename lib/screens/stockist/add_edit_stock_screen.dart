@@ -277,6 +277,10 @@ class _State extends State<AddEditStockScreen> {
       _snack('Pick a design from your Library first.', Colors.red);
       return;
     }
+    if (!isEdit && _catalogId == null) {
+      _snack('Create a stock list first — go to Manage Lists.', Colors.red);
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _saving = true);
@@ -408,7 +412,7 @@ class _State extends State<AddEditStockScreen> {
                       // List picker only when adding — it chooses which list the
                       // new design is published into. Membership of an existing
                       // design is managed on the list, not here.
-                      if (!isEdit && _catalogs.length > 1) _buildCatalogPicker(),
+                      if (!isEdit && _catalogs.isNotEmpty) _buildCatalogPicker(),
                       _buildQualityPicker(),
                       const SizedBox(height: 16),
                       _buildQtyField(),

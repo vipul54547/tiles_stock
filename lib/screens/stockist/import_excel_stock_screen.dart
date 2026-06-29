@@ -1617,15 +1617,51 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
     return Column(
       children: [
-        // Destination = the chosen brand's stock (P_Stock). Lists are curated
-        // separately, so there's no list picker here.
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          alignment: Alignment.centerLeft,
-          child: Text(
-              'Adding to: ${_brandName.isEmpty ? 'your stock' : _brandName} · your stock',
-              style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
-        ),
+        // Destination brand — static label for single-brand stockists, dropdown
+        // for multi-brand so they can confirm/correct before importing.
+        if (_brands.length <= 1)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            alignment: Alignment.centerLeft,
+            child: Text(
+                'Adding to: ${_brandName.isEmpty ? 'your stock' : _brandName}',
+                style: const TextStyle(fontSize: 12, color: Color(0xFF1B4F72))),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                const Text('Brand:', style: TextStyle(fontSize: 12)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButton<String>(
+                    value: _brandId,
+                    isExpanded: true,
+                    isDense: true,
+                    underline: const SizedBox.shrink(),
+                    items: _brands
+                        .map((b) => DropdownMenuItem(
+                            value: b.id,
+                            child: Text(b.name,
+                                style: const TextStyle(fontSize: 13))))
+                        .toList(),
+                    onChanged: _importing
+                        ? null
+                        : (v) {
+                            if (v == null) return;
+                            final b =
+                                _brands.firstWhere((br) => br.id == v);
+                            setState(() {
+                              _brandId = b.id;
+                              _brandName = b.name;
+                            });
+                          },
+                  ),
+                ),
+              ],
+            ),
+          ),
         // Quantity mode is chosen HERE, with the stock decision (not up-front) —
         // mirrors the PDF flow. Only affects rows that carry a box quantity.
         Padding(
