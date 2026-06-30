@@ -411,8 +411,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     for (final e in _library) {
       if (e.imageUrl.isEmpty) continue;
       final names = <String>{e.masterName};
-      final alias = brand == null ? null : e.aliases[brand];
-      if (alias != null && alias.isNotEmpty) names.add(alias);
+      if (_perRowBrand) {
+        // Per-row brand (Option 2/3): include all brand aliases so any brand's
+        // design name can resolve to the existing library image.
+        names.addAll(e.aliases.values.where((v) => v.isNotEmpty));
+      } else {
+        final alias = brand == null ? null : e.aliases[brand];
+        if (alias != null && alias.isNotEmpty) names.add(alias);
+      }
       for (final n in names) {
         out[designImageKey(n, e.size)] = e.imageUrl;
       }
