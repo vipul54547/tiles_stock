@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -14,6 +16,7 @@ import '../../models/library_entry.dart';
 import '../../models/dna.dart';
 import '../../utils/finishes.dart';
 import '../../utils/tile_sizes.dart';
+import '../../utils/business_types.dart';
 import '../../utils/tile_types.dart';
 import '../../models/choice_state.dart';
 
@@ -110,6 +113,9 @@ class _XlsRow {
   // Auto-detected Design DNA on this row: attributeId -> raw value words (a
   // column whose header matched a DNA attribute name). Resolved on import.
   Map<String, List<String>> dna = {};
+  // Per-row brand id for Option 2/3 stock-direct formats (brand determined
+  // from column header or Brand col value, not from a global app selection).
+  String? rowBrandId;
 
   _XlsRow({
     required this.rowNum,
@@ -163,6 +169,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   List<DnaAttribute> _dnaAttrs = []; // DNA catalog (for auto-detecting columns)
   List<String> _dnaDetected = []; // names of DNA columns found in this sheet
   bool _wideQty = false; // sheet had wide Premium/Standard columns (row → 2 holdings)
+  bool _perRowBrand = false; // Option 2/3 stock direct: brand per row, no global selection
   // attributeId -> set of already-resolvable words (lowercased): canonical value
   // names + this stockist's learned aliases. A detected DNA word NOT in this set
   // needs the Map-DNA step (else dna_resolve would silently drop it).
@@ -177,13 +184,97 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   @override
   void initState() {
     super.initState();
-    _brandId = widget.initialBrandId; // chosen at the Upload tap
+    _brandId = widget.initialBrandId;
+    _loadConfig().then((_) { if (mounted) setState(() {}); });
   }
 
   void _snack(String m, [Color? c]) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(m), backgroundColor: c));
 
   // ── Pick & parse ───────────────────────────────────────────────────────────
+
+  // T/W multi-brand: download Option 2 (brand cols) or Option 3 (Brand value col).
+  Future<void> _downloadTWTemplate({required bool option2}) async {
+    setState(() => _downloading = true);
+    try {
+      await _loadConfig();
+      final List<int> bytes;
+      final String label;
+      if (option2) {
+        bytes = ExcelTemplateService.buildTWOption2Template(
+          sizes: _sizes, finishes: _finishes,
+          tileTypes: kTileTypes, brands: _brands,
+        );
+        label = 'brand_cols';
+      } else {
+        bytes = ExcelTemplateService.buildTWOption3Template(
+          sizes: _sizes, finishes: _finishes,
+          tileTypes: kTileTypes, brands: _brands,
+        );
+        label = 'brand_value';
+      }
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save stock template',
+        fileName: 'tiles_stock_${label}_template.xlsx',
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx'],
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (!mounted) return;
+      if (path != null) {
+        if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+          await File(path).writeAsBytes(bytes);
+        }
+        _snack('Template saved. Fill it, then upload it here.', Colors.green);
+      }
+    } catch (e) {
+      if (mounted) _snack('Could not create template — $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
+
+  // M multi-brand: download Option 2 (brand cols) or Option 3 (Master+Brand+Name).
+  Future<void> _downloadMTemplate({required bool option2}) async {
+    setState(() => _downloading = true);
+    try {
+      await _loadConfig();
+      final List<int> bytes;
+      final String label;
+      if (option2) {
+        bytes = ExcelTemplateService.buildStockTemplate(
+          multiBrand: true,
+          sizes: _sizes, finishes: _finishes,
+          tileTypes: kTileTypes, dnaAttrs: _dnaAttrs, brands: _brands,
+        );
+        label = 'brand_cols';
+      } else {
+        bytes = ExcelTemplateService.buildMOption3Template(
+          sizes: _sizes, finishes: _finishes,
+          tileTypes: kTileTypes, brands: _brands,
+        );
+        label = 'brand_value';
+      }
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save stock template',
+        fileName: 'tiles_stock_m_${label}_template.xlsx',
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx'],
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (!mounted) return;
+      if (path != null) {
+        if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+          await File(path).writeAsBytes(bytes);
+        }
+        _snack('Template saved. Fill it, then upload it here.', Colors.green);
+      }
+    } catch (e) {
+      if (mounted) _snack('Could not create template — $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
 
   // Build the blank template (.xlsx with dropdowns) and let the stockist save it.
   // Skin = M (wide brand columns + Premium/Standard) when they run >1 brand, else
@@ -212,6 +303,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       );
       if (!mounted) return;
       if (path != null) {
+        if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+          await File(path).writeAsBytes(bytes);
+        }
         _snack('Template saved. Fill it, then upload it here.', Colors.green);
       }
     } catch (e) {
@@ -389,6 +483,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       await _parseEntryFormat(sheet, header);
       return;
     }
+    // Option 3-M (M multi-brand stock direct): Master Design + Brand value col + Design Name.
+    if (_isMOption3Format(header)) {
+      await _parseMOption3Format(sheet, header);
+      return;
+    }
+    // Option 3-TW (T/W multi-brand stock direct): Brand value col + Design Name.
+    if (_isOption3Format(header)) {
+      await _parseOption3Format(sheet, header);
+      return;
+    }
 
     // A header that exactly matches a (value-list) Design DNA attribute name
     // belongs to DNA, not to a generic synonym field — e.g. "Colour" is the DNA
@@ -520,17 +624,37 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final chosenName =
           chosenBrandCol != null ? cellAt(row, chosenBrandCol!) : '';
       final nameVal = cell(row, 'name');
-      // Stock design name = chosen brand's name, else master, else generic name.
-      final stockName = chosenName.isNotEmpty
-          ? chosenName
-          : (masterVal.isNotEmpty ? masterVal : nameVal);
-      // Library master name = master col, else chosen brand's name, else the
-      // first brand name present, else the generic name.
-      final masterName = masterVal.isNotEmpty
-          ? masterVal
-          : (chosenName.isNotEmpty
-              ? chosenName
-              : (brandNames.isNotEmpty ? brandNames.values.first : nameVal));
+
+      // Option 2 (stock direct): brand cols present → brand is per-row, not
+      // global. M uses master col as name (brand-agnostic library key); T/W
+      // uses the one filled brand col value. Library mapping is separate.
+      final bool isAuthor = isAuthorType(currentStockistBusinessType);
+      final String stockName;
+      final String masterName;
+      final bool mapOnly;
+      String? perRowBrandId;
+      if (hasBrandCols) {
+        final filledList = brandNames.entries.toList();
+        stockName = isAuthor
+            ? (masterVal.isNotEmpty ? masterVal : nameVal)
+            : (filledList.isNotEmpty
+                ? filledList.first.value
+                : (masterVal.isNotEmpty ? masterVal : nameVal));
+        masterName = masterVal.isNotEmpty ? masterVal : stockName;
+        mapOnly = false;
+        perRowBrandId = filledList.length == 1 ? filledList.first.key : null;
+      } else {
+        stockName = chosenName.isNotEmpty
+            ? chosenName
+            : (masterVal.isNotEmpty ? masterVal : nameVal);
+        masterName = masterVal.isNotEmpty
+            ? masterVal
+            : (chosenName.isNotEmpty
+                ? chosenName
+                : (brandNames.isNotEmpty ? brandNames.values.first : nameVal));
+        mapOnly = hasBrandCols && chosenName.isEmpty && brandNames.isNotEmpty;
+        perRowBrandId = null;
+      }
 
       // Shared fields, parsed once per sheet row (a wide-mode row may fan out
       // into a Premium + a Standard holding that share all of these).
@@ -540,9 +664,6 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final colour = cell(row, 'colour');
       final pieces = _toInt(cell(row, 'pieces'));
       final weight = _toDouble(cell(row, 'weight'));
-      // No name under the chosen brand but other brands named → map only (can't
-      // make stock for a brand this tile isn't sold under).
-      final mapOnly = hasBrandCols && chosenName.isEmpty && brandNames.isNotEmpty;
       // Auto-detected DNA: split each cell on comma/slash so multi-value
       // attributes (e.g. Colour) carry several words; blanks dropped.
       final dna = <String, List<String>>{};
@@ -592,13 +713,21 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           pieces: pieces,
           weight: weight,
         );
-        xls.brandNames = brandNames;
+        // Stock direct: don't show combined-mapping chips; brand tracked via rowBrandId
+        xls.brandNames = hasBrandCols ? {} : brandNames;
         xls.masterName = masterName;
+        xls.mapOnly = mapOnly;
+        xls.rowBrandId = perRowBrandId;
+        // Option 2 validation: exactly 1 brand col must be filled per row
+        if (hasBrandCols && brandNames.length != 1) {
+          xls.error = brandNames.isEmpty
+              ? 'No brand column filled — fill exactly one brand column'
+              : 'Only 1 brand column per row (${brandNames.length} filled)';
+        }
         // Each sub-row gets its own DNA copy (the Map-DNA step mutates per row).
         xls.dna = {
           for (final e in dna.entries) e.key: List<String>.from(e.value)
         };
-        xls.mapOnly = mapOnly;
         parsed.add(xls);
       }
     }
@@ -607,7 +736,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       setState(() => _blockError = 'No data rows found (only a header?).');
       return;
     }
-    _combined = hasBrandCols;
+    _combined = false; // stock direct: library mapping is separate
+    _perRowBrand = hasBrandCols;
     _wideQty = wideQty;
 
     _validateAndResolve(parsed);
@@ -755,6 +885,266 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     _wideQty = true; // grades came from wide PRE/STD columns
     _validateAndResolve(parsed);
     final ok = await _mapFinishesStep(parsed); // Category (GLOSSY…) → admin finish
+    if (!ok) return;
+    final okDna = await _mapDnaStep(parsed);
+    if (!okDna) return;
+    _computeActions(parsed);
+    setState(() {
+      _rows = parsed; _parsed = true; _done = 0; _libImages = _ownLibImages();
+    });
+  }
+
+  // ── Option 3 (T/W multi-brand stock direct) ─────────────────────────────────
+  // Brand value col + Design Name col. Brand col value matched to known brands
+  // per row. No master-design concept for T/W — design name IS the master.
+
+  // M Option 3: Master Design col + Brand value col + Design Name col.
+  bool _isMOption3Format(List<String> header) {
+    if (_isEntryFormat(header)) return false;
+    if (header.any((h) => _brands.any((b) => _normHeader(b.name) == h))) return false;
+    final hasMasterCol = header.any((h) => _masterHeaders.contains(h));
+    final hasBrandCol  = header.any((h) => _brandColHeaders.contains(h));
+    final hasNameCol   = header.any((h) => _headerSynonyms['name']!.contains(h));
+    return hasMasterCol && hasBrandCol && hasNameCol;
+  }
+
+  // T/W Option 3: Brand value col + Design Name col (no Master Design col).
+  bool _isOption3Format(List<String> header) {
+    if (_isEntryFormat(header)) return false;
+    if (header.any((h) => _brands.any((b) => _normHeader(b.name) == h))) return false;
+    if (header.any((h) => _masterHeaders.contains(h))) return false; // M Option 3 handles this
+    final hasBrandCol = header.any((h) => _brandColHeaders.contains(h));
+    final hasNameCol  = header.any((h) => _headerSynonyms['name']!.contains(h));
+    return hasBrandCol && hasNameCol;
+  }
+
+  Future<void> _parseOption3Format(Sheet sheet, List<String> header) async {
+    final brandCol = header.indexWhere((h) => _brandColHeaders.contains(h));
+    final nameCol = header.indexWhere((h) =>
+        _headerSynonyms['name']!.contains(h) || _masterHeaders.contains(h));
+    final sizeCol = header.indexWhere((h) => _headerSynonyms['size']!.contains(h));
+    final qualCol = header.indexWhere((h) => _headerSynonyms['quality']!.contains(h));
+    final qtyCol  = header.indexWhere((h) => _headerSynonyms['qty']!.contains(h));
+    final surfCol = header.indexWhere((h) => _headerSynonyms['surface']!.contains(h));
+    final ttCol   = header.indexWhere((h) => _headerSynonyms['tiletype']!.contains(h));
+    final pcCol   = header.indexWhere((h) => _headerSynonyms['pieces']!.contains(h));
+    final wtCol   = header.indexWhere((h) => _headerSynonyms['weight']!.contains(h));
+    final premCol = header.indexWhere((h) => _premiumQtyHeaders.contains(h));
+    final stdCol  = header.indexWhere((h) => _standardQtyHeaders.contains(h));
+    final wideQty = premCol >= 0 || stdCol >= 0;
+
+    if (sizeCol < 0) {
+      setState(() => _blockError = 'Missing required column: Size.');
+      return;
+    }
+    if (!wideQty && (qualCol < 0 || qtyCol < 0)) {
+      setState(() => _blockError =
+          'Missing required columns: Quality and Box Quantity (or Premium/Standard).');
+      return;
+    }
+
+    String cellAt(List<Data?> row, int i) {
+      if (i < 0 || i >= row.length) return '';
+      return row[i]?.value?.toString().trim() ?? '';
+    }
+
+    // Brand name → brand_id lookup (case-insensitive)
+    final brandLookup = <String, String>{
+      for (final b in _brands) _normHeader(b.name): b.id,
+    };
+
+    final parsed = <_XlsRow>[];
+    for (var r = 1; r < sheet.rows.length; r++) {
+      final row = sheet.rows[r];
+      final blank = row.every((c) =>
+          c == null || c.value == null || c.value.toString().trim().isEmpty);
+      if (blank) continue;
+
+      final brandVal = cellAt(row, brandCol);
+      final brandId  = brandLookup[_normHeader(brandVal)];
+      final stockName = cellAt(row, nameCol);
+      final sizeRaw   = cellAt(row, sizeCol);
+      final surfRaw   = surfCol >= 0 ? cellAt(row, surfCol) : '';
+      final tileType  = ttCol >= 0  ? cellAt(row, ttCol)  : '';
+      final pieces    = pcCol >= 0  ? _toInt(cellAt(row, pcCol))    : null;
+      final weight    = wtCol >= 0  ? _toDouble(cellAt(row, wtCol)) : null;
+
+      final parts = <({String quality, int qty})>[];
+      if (wideQty) {
+        if (premCol >= 0) {
+          final v = cellAt(row, premCol);
+          if (v.isNotEmpty) parts.add((quality: 'Premium', qty: _toInt(v) ?? -1));
+        }
+        if (stdCol >= 0) {
+          final v = cellAt(row, stdCol);
+          if (v.isNotEmpty) parts.add((quality: 'Standard', qty: _toInt(v) ?? -1));
+        }
+      } else {
+        parts.add((
+          quality: cellAt(row, qualCol),
+          qty: _toInt(cellAt(row, qtyCol)) ?? -1,
+        ));
+      }
+
+      for (final part in parts) {
+        final xls = _XlsRow(
+          rowNum: r + 1,
+          name: stockName,
+          sizeRaw: sizeRaw,
+          qualityRaw: part.quality,
+          surfaceRaw: surfRaw,
+          tileType: tileType,
+          colour: '',
+          qty: part.qty,
+          pieces: pieces,
+          weight: weight,
+        );
+        xls.masterName = stockName;
+        xls.mapOnly = false;
+        xls.rowBrandId = brandId;
+        if (stockName.isEmpty) {
+          xls.error = 'Missing design name';
+        } else if (brandVal.isEmpty) {
+          xls.error = 'No brand value — fill the Brand column';
+        } else if (brandId == null) {
+          xls.error = "Unknown brand '$brandVal' — not in your brand list";
+        }
+        parsed.add(xls);
+      }
+    }
+
+    if (parsed.isEmpty) {
+      setState(() => _blockError = 'No data rows found (only a header?).');
+      return;
+    }
+
+    _combined = false;
+    _perRowBrand = true;
+    _wideQty = wideQty;
+
+    _validateAndResolve(parsed);
+    final ok = await _mapFinishesStep(parsed);
+    if (!ok) return;
+    final okDna = await _mapDnaStep(parsed);
+    if (!okDna) return;
+    _computeActions(parsed);
+    setState(() {
+      _rows = parsed; _parsed = true; _done = 0; _libImages = _ownLibImages();
+    });
+  }
+
+  // ── M Option 3 (M multi-brand stock direct) ────────────────────────────────
+  // Master Design col (library key) + Brand value col + Design Name col.
+
+  Future<void> _parseMOption3Format(Sheet sheet, List<String> header) async {
+    final masterColIdx = header.indexWhere((h) => _masterHeaders.contains(h));
+    final brandColIdx  = header.indexWhere((h) => _brandColHeaders.contains(h));
+    final nameColIdx   = header.indexWhere((h) => _headerSynonyms['name']!.contains(h));
+    final sizeCol      = header.indexWhere((h) => _headerSynonyms['size']!.contains(h));
+    final qualCol      = header.indexWhere((h) => _headerSynonyms['quality']!.contains(h));
+    final qtyCol       = header.indexWhere((h) => _headerSynonyms['qty']!.contains(h));
+    final surfCol      = header.indexWhere((h) => _headerSynonyms['surface']!.contains(h));
+    final ttCol        = header.indexWhere((h) => _headerSynonyms['tiletype']!.contains(h));
+    final pcCol        = header.indexWhere((h) => _headerSynonyms['pieces']!.contains(h));
+    final wtCol        = header.indexWhere((h) => _headerSynonyms['weight']!.contains(h));
+    final premCol      = header.indexWhere((h) => _premiumQtyHeaders.contains(h));
+    final stdCol       = header.indexWhere((h) => _standardQtyHeaders.contains(h));
+    final wideQty      = premCol >= 0 || stdCol >= 0;
+
+    if (sizeCol < 0) {
+      setState(() => _blockError = 'Missing required column: Size.');
+      return;
+    }
+    if (!wideQty && (qualCol < 0 || qtyCol < 0)) {
+      setState(() => _blockError =
+          'Missing required columns: Quality and Box Quantity (or Premium/Standard).');
+      return;
+    }
+
+    String cellAt(List<Data?> row, int i) {
+      if (i < 0 || i >= row.length) return '';
+      return row[i]?.value?.toString().trim() ?? '';
+    }
+
+    final brandLookup = <String, String>{
+      for (final b in _brands) _normHeader(b.name): b.id,
+    };
+
+    final parsed = <_XlsRow>[];
+    for (var r = 1; r < sheet.rows.length; r++) {
+      final row = sheet.rows[r];
+      final blank = row.every((c) =>
+          c == null || c.value == null || c.value.toString().trim().isEmpty);
+      if (blank) continue;
+
+      final masterDesign = masterColIdx >= 0 ? cellAt(row, masterColIdx) : '';
+      final brandVal     = cellAt(row, brandColIdx);
+      final brandId      = brandLookup[_normHeader(brandVal)];
+      final designName   = nameColIdx >= 0 ? cellAt(row, nameColIdx) : '';
+      final sizeRaw      = cellAt(row, sizeCol);
+      final surfRaw      = surfCol >= 0 ? cellAt(row, surfCol) : '';
+      final tileType     = ttCol >= 0 ? cellAt(row, ttCol) : '';
+      final pieces       = pcCol >= 0 ? _toInt(cellAt(row, pcCol)) : null;
+      final weight       = wtCol >= 0 ? _toDouble(cellAt(row, wtCol)) : null;
+
+      // Library key = Master Design name; fall back to Design Name if blank.
+      final stockName = masterDesign.isNotEmpty ? masterDesign : designName;
+
+      final parts = <({String quality, int qty})>[];
+      if (wideQty) {
+        if (premCol >= 0) {
+          final v = cellAt(row, premCol);
+          if (v.isNotEmpty) parts.add((quality: 'Premium', qty: _toInt(v) ?? -1));
+        }
+        if (stdCol >= 0) {
+          final v = cellAt(row, stdCol);
+          if (v.isNotEmpty) parts.add((quality: 'Standard', qty: _toInt(v) ?? -1));
+        }
+      } else {
+        parts.add((
+          quality: cellAt(row, qualCol),
+          qty: _toInt(cellAt(row, qtyCol)) ?? -1,
+        ));
+      }
+
+      for (final part in parts) {
+        final xls = _XlsRow(
+          rowNum: r + 1,
+          name: stockName,
+          sizeRaw: sizeRaw,
+          qualityRaw: part.quality,
+          surfaceRaw: surfRaw,
+          tileType: tileType,
+          colour: '',
+          qty: part.qty,
+          pieces: pieces,
+          weight: weight,
+        );
+        xls.masterName = stockName;
+        xls.mapOnly = false;
+        xls.rowBrandId = brandId;
+        if (stockName.isEmpty) {
+          xls.error = 'Missing master design name';
+        } else if (brandVal.isEmpty) {
+          xls.error = 'No brand value — fill the Brand column';
+        } else if (brandId == null) {
+          xls.error = "Unknown brand '$brandVal' — not in your brand list";
+        }
+        parsed.add(xls);
+      }
+    }
+
+    if (parsed.isEmpty) {
+      setState(() => _blockError = 'No data rows found (only a header?).');
+      return;
+    }
+
+    _combined = false;
+    _perRowBrand = true;
+    _wideQty = wideQty;
+
+    _validateAndResolve(parsed);
+    final ok = await _mapFinishesStep(parsed);
     if (!ok) return;
     final okDna = await _mapDnaStep(parsed);
     if (!okDna) return;
@@ -1356,6 +1746,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       }
       // A plain row WITH DNA keeps skip_master off so a master exists to tag it.
       if (hasDna) row['dna'] = r.dna;
+      // T/W stock direct (Option 2/3): per-row brand in aliases for
+      // brand-scoped library lookup. Not mapping — just how T/W lib works.
+      if (_perRowBrand &&
+          isImporterType(currentStockistBusinessType) &&
+          r.rowBrandId != null &&
+          row['aliases'] == null) {
+        row['aliases'] = [{'brand_id': r.rowBrandId, 'name': r.name.trim()}];
+      }
       rows.add(row);
 
       if (libUrl != null) imagesFromLibrary++;
@@ -1411,7 +1809,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   void _reset() => setState(() {
         _rows = []; _parsed = false; _blockError = ''; _done = 0; _filename = '';
         _libImages = {}; _combined = false; _batchId = ''; _dnaDetected = [];
-        _wideQty = false;
+        _wideQty = false; _perRowBrand = false;
       });
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -1509,36 +1907,82 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             const SizedBox(height: 8),
             _colTable(),
             const SizedBox(height: 22),
-            // Template download — rarely used — kept at the bottom, secondary.
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: OutlinedButton.icon(
-                onPressed: _downloading ? null : _downloadTemplate,
-                icon: _downloading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Color(0xFF1B4F72)))
-                    : const Icon(Icons.download_rounded),
-                label: Text(
-                    _downloading ? 'Preparing…' : 'Download blank template',
-                    style: const TextStyle(fontSize: 14.5)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF1B4F72),
-                  side: const BorderSide(color: Color(0xFF1B4F72), width: 1.5),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
+            // Template download — multi-brand gets two options; single-brand gets one.
+            if (_brands.length > 1) ...[
+              const Text('Download blank template',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _downloading ? null : () => isImporterType(currentStockistBusinessType)
+                        ? _downloadTWTemplate(option2: true)
+                        : _downloadMTemplate(option2: true),
+                    icon: const Icon(Icons.view_column_outlined, size: 18),
+                    label: const Text('Brand columns', style: TextStyle(fontSize: 13)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF6A1B9A),
+                      side: const BorderSide(color: Color(0xFF6A1B9A), width: 1.5),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _downloading ? null : () => isImporterType(currentStockistBusinessType)
+                        ? _downloadTWTemplate(option2: false)
+                        : _downloadMTemplate(option2: false),
+                    icon: const Icon(Icons.label_outline, size: 18),
+                    label: const Text('Brand + Name col', style: TextStyle(fontSize: 13)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF6A1B9A),
+                      side: const BorderSide(color: Color(0xFF6A1B9A), width: 1.5),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                isImporterType(currentStockistBusinessType)
+                    ? 'Brand columns — all brands as headers, fill one per row.\nBrand + Name col — write brand name in a cell per row.'
+                    : 'Brand columns — Master Design + brand headers, fill one brand per row.\nBrand + Name col — Master Design + Brand value cell + Design Name per row.',
+                style: const TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+            ] else ...[
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: OutlinedButton.icon(
+                  onPressed: _downloading ? null : _downloadTemplate,
+                  icon: _downloading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Color(0xFF1B4F72)))
+                      : const Icon(Icons.download_rounded),
+                  label: Text(
+                      _downloading ? 'Preparing…' : 'Download blank template',
+                      style: const TextStyle(fontSize: 14.5)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF1B4F72),
+                    side: const BorderSide(color: Color(0xFF1B4F72), width: 1.5),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Pre-filled headers with dropdowns for size, quality, surface, '
-              'tile type and DNA — pick values instead of typing.',
-              style: TextStyle(fontSize: 11, color: Colors.black54),
-            ),
+              const SizedBox(height: 6),
+              const Text(
+                'Pre-filled headers with dropdowns for size, quality, surface, '
+                'tile type and DNA — pick values instead of typing.',
+                style: TextStyle(fontSize: 11, color: Colors.black54),
+              ),
+            ],
           ],
         ),
       );
@@ -1617,9 +2061,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
     return Column(
       children: [
-        // Destination brand — static label for single-brand stockists, dropdown
-        // for multi-brand so they can confirm/correct before importing.
-        if (_brands.length <= 1)
+        // Destination brand — hidden for stock direct (brand per row), static
+        // label for single-brand, dropdown for multi-brand legacy combined.
+        if (_perRowBrand)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            alignment: Alignment.centerLeft,
+            child: const Text('Brand detected per row from column',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6A1B9A))),
+          )
+        else if (_brands.length <= 1)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             alignment: Alignment.centerLeft,
