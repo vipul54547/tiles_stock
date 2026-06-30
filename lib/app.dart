@@ -183,8 +183,15 @@ final GoRouter _router = GoRouter(
 
         path: '/stockist/stock/add',
 
-        builder: (_, state) =>
-            AddEditStockScreen(initialCatalogId: state.extra as String?)),
+        builder: (_, state) {
+          final e = state.extra;
+          if (e is Map) {
+            return AddEditStockScreen(
+                initialCatalogId: e['catalogId'] as String?,
+                initialBrandId: e['brandId'] as String?);
+          }
+          return AddEditStockScreen(initialCatalogId: e as String?);
+        }),
 
     GoRoute(
 

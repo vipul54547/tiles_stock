@@ -274,6 +274,8 @@ class SupabaseDataService {
     required String quality,
     required int    boxQuantity,
     String? catalogId,
+    String? brandId,
+    String? surface,
   }) async {
     try {
       final res = await supabase.rpc('stock_add_holding', params: {
@@ -281,6 +283,8 @@ class SupabaseDataService {
         'p_quality':    quality,
         'p_qty':        boxQuantity,
         'p_catalog_id': catalogId,
+        if (surface != null) 'p_surface': surface,
+        'p_brand_id':   brandId,
       });
       return res?.toString();
     } catch (e, st) {

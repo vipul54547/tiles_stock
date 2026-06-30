@@ -20,6 +20,10 @@ class TileCard extends StatelessWidget {
   /// "boxes" count. Buyers keep the single count (which is already F_Stock).
   /// (project_fstock_model)
   final bool showControlFigures;
+  /// Overrides the title shown on the card. Used when the dashboard is filtered
+  /// to a single brand so an M box shows THAT brand's name (its alias) instead of
+  /// the brand-agnostic master name. Null → falls back to [design.name].
+  final String? displayName;
 
   const TileCard({
     super.key,
@@ -30,6 +34,7 @@ class TileCard extends StatelessWidget {
     this.onChoiceTap,
     this.showQuality = true,
     this.showControlFigures = false,
+    this.displayName,
   });
 
   // P (physical) · C (held back) · H (booked) · F (shown to dealers), colour-coded.
@@ -139,8 +144,10 @@ class TileCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Design name
-                  Text(design.name,
+                  // Design name (brand-specific alias when supplied, else master)
+                  Text(displayName != null && displayName!.isNotEmpty
+                          ? displayName!
+                          : design.name,
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 13),
                       maxLines: 1,

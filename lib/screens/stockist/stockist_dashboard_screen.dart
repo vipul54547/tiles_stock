@@ -245,6 +245,133 @@ class _State extends State<StockistDashboardScreen> {
     return lib != null && lib.aliases.containsKey(brandId);
   }
 
+  // Card title for the current view: when filtered to ONE brand, show THAT brand's
+  // name for the design (its alias, e.g. ANUJ's "601001") instead of the
+  // brand-agnostic master name; else the master name. (M multi-brand)
+  String _designDisplayName(TileDesign d) {
+    if (_brandFilter == 'all') return d.name;
+    final alias = _libById[d.libraryId]?.aliases[_brandFilter];
+    return (alias != null && alias.isNotEmpty) ? alias : d.name;
+  }
+
+  // Search must also match a design's brand-alias names (e.g. ANUJ "601001"),
+  // not only the master name. (project_per_brand_stock)
+  bool _aliasMatches(TileDesign d, String q) {
+    final lib = _libById[d.libraryId];
+    if (lib == null) return false;
+    return lib.aliases.values.any((v) => v.toLowerCase().contains(q));
+  }
+
+  bool get _isM => currentStockistBusinessType == 'M';
+
+  String _brandNm(String? id) {
+    if (id == null) return '';
+    final m = _brands.where((b) => b.id == id).toList();
+    return m.isEmpty ? '' : m.first.name;
+  }
+
+  // Group holdings by their master (library) for the "All Brands" view, preserving
+  // the incoming (already-sorted) order.
+  List<List<TileDesign>> _groupByMaster(List<TileDesign> list) {
+    final map = <String, List<TileDesign>>{};
+    final order = <String>[];
+    for (final d in list) {
+      final k = d.libraryId.isNotEmpty ? d.libraryId : d.id;
+      final bucket = map[k];
+      if (bucket == null) {
+        map[k] = [d];
+        order.add(k);
+      } else {
+        bucket.add(d);
+      }
+    }
+    return [for (final k in order) map[k]!];
+  }
+
+  // "All Brands" card: one per master, showing the master name + a per-brand box
+  // breakdown. Each brand row taps through to edit that brand's holding.
+  // (project_per_brand_stock)
+  Widget _masterGroupTile(List<TileDesign> group) {
+    final first = group.first;
+    final ratio = aspectRatioFromSize(first.size);
+    final img = first.faceImageUrls.isNotEmpty ? first.faceImageUrls.first : '';
+    // Total boxes across all this master's brands (the stockist's full P_Stock).
+    final totalP = group.fold<int>(0, (s, d) => s + d.boxQuantity);
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AspectRatio(
+            aspectRatio: ratio,
+            child: TileImage(url: img, tileAspectRatio: ratio, thumbWidth: 600),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(first.name, // master name
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13)),
+                Text(
+                    '${first.size.replaceAll(' mm', '')}'
+                    '  ·  $totalP boxes',
+                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
+                const SizedBox(height: 6),
+                // Per-brand breakdown — separate boxes per brand.
+                ...group.map((d) => InkWell(
+                      onTap: () => context
+                          .push('/stockist/stock/edit/${d.id}')
+                          .then((_) => _load()),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                  _brandNm(d.brandId).isNotEmpty
+                                      ? _brandNm(d.brandId)
+                                      : (_brandNm(_libById[d.libraryId]?.brandId)
+                                              .isNotEmpty
+                                          ? _brandNm(
+                                              _libById[d.libraryId]?.brandId)
+                                          : '—'),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF1B4F72))),
+                            ),
+                            Text('P ${d.boxQuantity}',
+                                style: TextStyle(
+                                    fontSize: 10.5, color: Colors.grey.shade600)),
+                            const SizedBox(width: 8),
+                            Text('F ${d.fStock}',
+                                style: const TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF2E7D32))),
+                          ],
+                        ),
+                      ),
+                    )),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // Stock-list helpers. The active lists in the current brand view drive the
   // dashboard's "filter by list" row; the name map labels each design's card.
   Map<String, String> get _catalogName =>
@@ -347,8 +474,10 @@ class _State extends State<StockistDashboardScreen> {
 
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result =
-          result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
+      result = result
+          .where((d) =>
+              d.matchesSearch(q, smart: smartSearch) || _aliasMatches(d, q))
+          .toList();
     }
 
     switch (_sortBy) {
@@ -802,13 +931,28 @@ class _State extends State<StockistDashboardScreen> {
           SliverPadding(
             padding: EdgeInsets.fromLTRB(
                 12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
-            sliver: SliverMasonryGrid.count(
-              crossAxisCount: 2,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childCount: designs.length,
-              itemBuilder: (_, i) => _designTile(designs[i]),
-            ),
+            sliver: Builder(builder: (_) {
+              // "All Brands" → one card per master with a per-brand box breakdown
+              // (stock is per-brand). A specific brand → normal per-holding cards
+              // showing that brand's alias name. (project_per_brand_stock)
+              if (_brandFilter == 'all' && _isM) {
+                final groups = _groupByMaster(designs);
+                return SliverMasonryGrid.count(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childCount: groups.length,
+                  itemBuilder: (_, i) => _masterGroupTile(groups[i]),
+                );
+              }
+              return SliverMasonryGrid.count(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childCount: designs.length,
+                itemBuilder: (_, i) => _designTile(designs[i]),
+              );
+            }),
           ),
       ],
     );
@@ -913,6 +1057,7 @@ class _State extends State<StockistDashboardScreen> {
         children: [
           TileCard(
             design: d,
+            displayName: _designDisplayName(d),
             showQuality: false, // stockist has a quality filter; chip is redundant
             showControlFigures: true, // stockist sees P · C · H · F (fstock model)
             onTap: _selectMode
@@ -1029,8 +1174,10 @@ class _State extends State<StockistDashboardScreen> {
               onTap: () async {
                 Navigator.pop(ctx);
                 final lists = _filterLists;
-                await context.push('/stockist/stock/add',
-                    extra: lists.isEmpty ? null : lists.first.id);
+                await context.push('/stockist/stock/add', extra: {
+                  'catalogId': lists.isEmpty ? null : lists.first.id,
+                  'brandId': _brandFilter == 'all' ? null : _brandFilter,
+                });
                 _load();
               },
             ),

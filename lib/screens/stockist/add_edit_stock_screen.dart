@@ -24,7 +24,11 @@ class AddEditStockScreen extends StatefulWidget {
   /// In add mode, the stock list to default to (its brand). Lets the dashboard
   /// open Add already pointed at the brand the stockist was viewing.
   final String? initialCatalogId;
-  const AddEditStockScreen({super.key, this.designId, this.initialCatalogId});
+  /// In add mode (M), the brand to stock these boxes under — defaults to the brand
+  /// the dashboard was filtered to. Stock is per-brand. (project_per_brand_stock)
+  final String? initialBrandId;
+  const AddEditStockScreen(
+      {super.key, this.designId, this.initialCatalogId, this.initialBrandId});
   @override
   State<AddEditStockScreen> createState() => _State();
 }
@@ -64,6 +68,10 @@ class _State extends State<AddEditStockScreen> {
   List<StockCatalog> _catalogs = [];
   String? _catalogId;
   String? _defaultBrandId;
+  // M only: the brand these boxes are stocked under (stock is per-brand). Drives
+  // the alias name shown + the holding's brand. (project_per_brand_stock)
+  String? _selectedBrandId;
+  bool get _isM => currentStockistBusinessType == 'M';
   List<Brand> _brands = [];
 
   String _brandNameOf(StockCatalog c) {
@@ -79,8 +87,10 @@ class _State extends State<AddEditStockScreen> {
   bool _saving      = false;
   bool _dirty       = false;
 
-  // The brand this design belongs to (its list's brand, else default).
+  // The brand this design belongs to. M: the explicitly-picked brand (stock is
+  // per-brand). Else the list's brand, else the default brand.
   String? get _designBrandId {
+    if (_selectedBrandId != null) return _selectedBrandId;
     for (final c in _catalogs) {
       if (c.id == _catalogId) return c.brandId ?? _defaultBrandId;
     }
@@ -117,6 +127,14 @@ class _State extends State<AddEditStockScreen> {
     setState(() {
       _brands = brands;
       _defaultBrandId = def.isEmpty ? null : def.first.id;
+      // M: stock is per-brand → default the brand picker to the dashboard's brand,
+      // else the default brand. (Non-M: brand comes from the master.)
+      if (_isM && !isEdit) {
+        _selectedBrandId ??= widget.initialBrandId ??
+            (brands.any((b) => b.id == widget.initialBrandId)
+                ? widget.initialBrandId
+                : _defaultBrandId);
+      }
       _catalogs = cats.where((c) => c.isActive).toList();
       if (!isEdit) {
         final initial = widget.initialCatalogId;
@@ -306,6 +324,8 @@ class _State extends State<AddEditStockScreen> {
         quality:      _quality,
         boxQuantity:  int.tryParse(_qtyCtrl.text) ?? 0,
         catalogId:    _catalogId, // publishes the design into this list (membership)
+        brandId:      _isM ? _designBrandId : null, // M: stock is per-brand
+        surface:      master.surfaceType,
       );
       ok = id != null;
     }
@@ -415,6 +435,9 @@ class _State extends State<AddEditStockScreen> {
                     isEdit ? _buildIdentityCard() : _buildMasterPicker(),
                     if (isEdit || _selectedMaster != null) ...[
                       const SizedBox(height: 16),
+                      // M: pick the brand these boxes are (stock is per-brand).
+                      if (!isEdit && _isM && _brands.length > 1)
+                        _buildBrandPicker(),
                       // List picker only when adding — it chooses which list the
                       // new design is published into. Membership of an existing
                       // design is managed on the list, not here.
@@ -639,6 +662,47 @@ class _State extends State<AddEditStockScreen> {
               onChanged: (v) => setState(() {
                 _catalogId = v ?? _catalogId;
                 // The list's brand may change the design's name (alias).
+                if (_selectedMaster != null) {
+                  _designName = _nameForBrand(_selectedMaster!);
+                }
+                _dirty = true;
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Brand picker (M add mode) ──────────────────────────────────────────────
+  // Stock is per-brand for M: the same tile under ANUJ vs KHAKHI is separate
+  // boxes. Picking the brand here sets the holding's brand + the alias name shown.
+  Widget _buildBrandPicker() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Brand (which boxes are these?)',
+              style: TextStyle(fontSize: 13, color: Colors.grey)),
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade400),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: DropdownButton<String>(
+              value: _selectedBrandId,
+              isExpanded: true,
+              underline: const SizedBox.shrink(),
+              items: _brands
+                  .map((b) => DropdownMenuItem(
+                      value: b.id, child: Text(b.name)))
+                  .toList(),
+              onChanged: (v) => setState(() {
+                _selectedBrandId = v ?? _selectedBrandId;
+                // The brand changes the design's name (alias).
                 if (_selectedMaster != null) {
                   _designName = _nameForBrand(_selectedMaster!);
                 }
