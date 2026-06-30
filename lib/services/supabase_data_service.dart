@@ -351,6 +351,22 @@ class SupabaseDataService {
 
   // ── stock catalogs (Father & Child) ────────────────────────────────────────
 
+  /// A login-free web enquiry with selected designs becomes a real saved order
+  /// (source='web', no buyer account). Returns `{token, connection_code}` for the
+  /// WhatsApp message, or null if it couldn't be created (e.g. no valid lines).
+  /// (project_dispatch_order_redesign · Phase B)
+  Future<Map<String, dynamic>?> createWebOrder(
+      String token, List<Map<String, dynamic>> lines) async {
+    try {
+      final res = await supabase.rpc('create_web_order',
+          params: {'p_token': token, 'p_lines': lines});
+      return res == null ? null : Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('createWebOrder failed: $e\n$st');
+      return null;
+    }
+  }
+
   /// Log an anonymous enquiry made through a share link (login-free web
   /// catalog). Best-effort — silently ignores failures.
   Future<void> logLinkInquiry(String token, List<String> designIds) async {
@@ -1937,6 +1953,7 @@ class SupabaseDataService {
     String transporter = '',
     String note = '',
     DateTime? date,
+    bool reduceStock = true,
   }) async {
     try {
       final res = await supabase.rpc('dispatch_inquiry', params: {
@@ -1947,7 +1964,34 @@ class SupabaseDataService {
         'p_transporter': transporter,
         'p_note': note,
         'p_date': (date ?? DateTime.now()).toIso8601String().substring(0, 10),
+        'p_reduce_stock': reduceStock,
       });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist sets/clears the free-text customer hint on one of their orders
+  /// (who the order is for — no customer profile). (project_dispatch_order_redesign)
+  Future<void> setInquiryHint(String inquiryId, String hint) async {
+    try {
+      await supabase.rpc('set_inquiry_hint',
+          params: {'p_id': inquiryId, 'p_hint': hint});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Stockist creates their own order for a (possibly non-app) customer:
+  /// [hint] = customer name/note, [lines] = `[{design_id, quantity}]` from
+  /// their F_Stock. Returns `{id, token, connection_code}`.
+  /// (project_dispatch_order_redesign)
+  Future<Map<String, dynamic>> createStockistOrder(
+      String hint, List<Map<String, dynamic>> lines) async {
+    try {
+      final res = await supabase.rpc('create_stockist_order',
+          params: {'p_hint': hint, 'p_lines': lines});
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();

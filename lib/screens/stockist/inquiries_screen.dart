@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/inquiry_order.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import 'stockist_add_order_screen.dart';
 
 /// The stockist's single inquiry hub — every buyer order as a **token**, with
 /// filters (status / date / buyer / design) + search, lifecycle actions
@@ -131,6 +133,8 @@ class _State extends State<InquiriesScreen> {
       list = list
           .where((o) =>
               o.token.toLowerCase().contains(q) ||
+              o.connectionCode.toLowerCase().contains(q) ||
+              o.customerHint.toLowerCase().contains(q) ||
               o.company.toLowerCase().contains(q) ||
               o.contact.toLowerCase().contains(q) ||
               o.phone.contains(q) ||
@@ -167,6 +171,13 @@ class _State extends State<InquiriesScreen> {
             onPressed: _load,
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addOrder,
+        backgroundColor: _navy,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Add Order'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -255,7 +266,7 @@ class _State extends State<InquiriesScreen> {
               controller: _searchCtrl,
               onChanged: (v) => setState(() => _q = v),
               decoration: InputDecoration(
-                hintText: 'Search token, buyer, design, phone…',
+                hintText: 'Search code, token, buyer, design, phone…',
                 prefixIcon: const Icon(Icons.search, size: 20),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 10),
@@ -566,10 +577,36 @@ class _State extends State<InquiriesScreen> {
                         color: _navy)),
               ],
             ),
+            // Connection code (shared in WhatsApp) — tap to copy.
+            if (o.connectionCode.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () {
+                  Clipboard.setData(ClipboardData(text: o.connectionCode));
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Copied ${o.connectionCode}'),
+                      duration: const Duration(seconds: 1)));
+                },
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.tag, size: 12, color: Colors.grey.shade500),
+                  const SizedBox(width: 2),
+                  Text(o.connectionCode,
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                          color: Colors.grey.shade700)),
+                  const SizedBox(width: 4),
+                  Icon(Icons.copy, size: 11, color: Colors.grey.shade400),
+                ]),
+              ),
+            ],
             const SizedBox(height: 6),
             Text(o.company.isEmpty ? 'Buyer' : o.company,
                 style: const TextStyle(
                     fontWeight: FontWeight.w600, fontSize: 13)),
+            // Editable customer hint — who the order is for (no profile stored).
+            _hintRow(o),
             if (sub.isNotEmpty)
               Text(sub,
                   style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
@@ -628,6 +665,70 @@ class _State extends State<InquiriesScreen> {
     );
   }
 
+  // Editable customer-name hint — the stockist writes who this order is for
+  // (no customer profile is stored). Tap to add/edit.
+  Widget _hintRow(InquiryOrder o) {
+    final has = o.customerHint.trim().isNotEmpty;
+    return GestureDetector(
+      onTap: () => _editHint(o),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Row(
+          children: [
+            Icon(has ? Icons.person_outline : Icons.person_add_alt_1_outlined,
+                size: 13,
+                color: has ? const Color(0xFF6A1B9A) : Colors.grey.shade500),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                has ? o.customerHint : 'Add customer name / hint',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontStyle: has ? FontStyle.normal : FontStyle.italic,
+                  fontWeight: has ? FontWeight.w600 : FontWeight.normal,
+                  color: has ? const Color(0xFF6A1B9A) : Colors.grey.shade500,
+                ),
+              ),
+            ),
+            Icon(Icons.edit, size: 11, color: Colors.grey.shade400),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editHint(InquiryOrder o) async {
+    final ctrl = TextEditingController(text: o.customerHint);
+    final hint = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Customer name / hint'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          maxLength: 80,
+          decoration: const InputDecoration(
+            hintText: 'e.g. Ramesh (walk-in), site at Bopal…',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (hint == null) return; // cancelled
+    await _run(() => _data.setInquiryHint(o.id, hint.trim()), 'Saved.');
+  }
+
   // A small reservation/acceptance status line for a confirmed (locked) order.
   Widget? _reservationLine(InquiryOrder o) {
     if (o.isAccepted) {
@@ -635,9 +736,11 @@ class _State extends State<InquiriesScreen> {
           const Color(0xFF2E7D32));
     }
     if (o.reservationActive) {
-      return _resChip(Icons.timer_outlined,
-          'Reserved · ${o.daysLeft} day${o.daysLeft == 1 ? '' : 's'} left',
-          const Color(0xFF1565C0));
+      final n = o.guaranteeDays ?? 0;
+      final label = n > 0
+          ? 'Reserved ${n}d · ${o.daysLeft} day${o.daysLeft == 1 ? '' : 's'} left'
+          : 'Reserved · ${o.daysLeft} day${o.daysLeft == 1 ? '' : 's'} left';
+      return _resChip(Icons.timer_outlined, label, const Color(0xFF1565C0));
     }
     if (o.reservationExpired) {
       return _resChip(Icons.timer_off_outlined,
@@ -660,7 +763,9 @@ class _State extends State<InquiriesScreen> {
   Widget _actions(InquiryOrder o) {
     final btns = <Widget>[
       _actionChip('Items', Icons.list_alt_outlined, _navy, () => _showItems(o)),
-      if (o.phone.isNotEmpty)
+      // App/known-buyer orders send to their number; stockist-created orders
+      // have no number but still offer WhatsApp (opens the chooser).
+      if (o.phone.isNotEmpty || o.source == 'stockist')
         _actionChip('WhatsApp', Icons.chat, const Color(0xFF25D366),
             () => _whatsapp(o)),
       if (o.status == 'draft' || o.status == 'sent')
@@ -699,13 +804,34 @@ class _State extends State<InquiriesScreen> {
         ),
       );
 
+  // Create a stockist-own order (Phase E), then offer to send it on WhatsApp.
+  Future<void> _addOrder() async {
+    final res = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(builder: (_) => const StockistAddOrderScreen()),
+    );
+    if (!mounted) return;
+    await _load();
+    if (res == null) return;
+    // Find the freshly created order in the reloaded list to offer WhatsApp.
+    final id = (res['id'] ?? '').toString();
+    final created = _orders.where((o) => o.id == id);
+    if (created.isNotEmpty) _whatsapp(created.first);
+  }
+
   // ── Actions ───────────────────────────────────────────────────────────────
   Future<void> _whatsapp(InquiryOrder o) async {
     final digits = '${o.countryCode}${o.phone}'.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.isEmpty) return;
-    final msg = 'Hello ${o.company}, regarding your order ${o.token} '
+    final who = o.customerHint.isNotEmpty
+        ? o.customerHint
+        : (o.company.isNotEmpty ? o.company : 'there');
+    final code = o.connectionCode.isNotEmpty ? ' [${o.connectionCode}]' : '';
+    final msg = 'Hello $who, regarding your order ${o.token}$code '
         '(${o.totalBoxes} boxes).';
-    final uri = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(msg)}');
+    // App/known-buyer order → send straight to their number; a stockist-created
+    // order has no stored number, so open the WhatsApp chooser to pick one.
+    final uri = digits.isEmpty
+        ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')
+        : Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(msg)}');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 

@@ -291,6 +291,18 @@ class _State extends State<PublicCatalogScreen> {
     final sid = (_stockist['id'] ?? '').toString();
     final who = sid.isNotEmpty ? '$name ($sid)' : name;
 
+    // Turn a selection into a real saved order so the stockist can manage it;
+    // the returned connection code goes into the message as the shared handle.
+    Map<String, dynamic>? order;
+    if (_selected.isNotEmpty) {
+      order = await _svc.createWebOrder(
+        widget.token,
+        _selected.entries
+            .map((e) => {'design_id': e.key, 'quantity': e.value})
+            .toList(),
+      );
+    }
+
     final lines = <String>[];
     if (_selected.isEmpty) {
       lines.add('Hello $who, I saw your stock catalogue and would like to enquire '
@@ -298,6 +310,11 @@ class _State extends State<PublicCatalogScreen> {
     } else {
       lines.add('Hello $who, I would like to enquire about these designs '
           'from your stock catalogue:');
+      if (order != null) {
+        final ot = (order['token'] ?? '').toString();
+        final code = (order['connection_code'] ?? '').toString();
+        lines.add('Order: $ot${code.isNotEmpty ? '  [$code]' : ''}');
+      }
       lines.add('');
       var n = 1;
       for (final d in _all) {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -64,6 +65,12 @@ class _State extends State<DispatchInquiryScreen> {
   bool _loading = true;
   bool _saving = false;
   bool _dirty = false;
+
+  // Dispatch mode (asked every dispatch): true = reduce from system stock
+  // (P_Stock −= dispatched); false = release the holding only, leaving P_Stock
+  // for the stockist to manage in their own software.
+  // (project_dispatch_order_redesign · Phase D)
+  bool _reduceStock = true;
 
   // Dispatch-note metadata (sent to the buyer in the WhatsApp report).
   final _invoiceCtrl = TextEditingController();
@@ -219,6 +226,9 @@ class _State extends State<DispatchInquiryScreen> {
   }
 
   Future<void> _submit() async {
+    // Over-stock + booking warnings only matter when we actually reduce system
+    // stock; in "release holding only" mode P_Stock is left untouched.
+    if (_reduceStock) {
     final over = _lines.where((l) => l.dispatchNow > l.available).toList();
     if (over.isNotEmpty) {
       final ok = await showDialog<bool>(
@@ -271,6 +281,11 @@ class _State extends State<DispatchInquiryScreen> {
       );
       if (ok != true) return;
     }
+    } // end _reduceStock warnings
+
+    // Final mode confirmation — a 3-second blinking notice of exactly what this
+    // dispatch does to stock, so the wrong mode can't be picked by reflex.
+    if (!await _confirmMode()) return;
 
     final payload = _lines
         .map((l) => {'design_id': l.designId, 'dispatch': l.dispatchNow})
@@ -287,6 +302,7 @@ class _State extends State<DispatchInquiryScreen> {
         transporter: _transporterCtrl.text.trim(),
         note: _noteCtrl.text.trim(),
         date: _date,
+        reduceStock: _reduceStock,
       );
       if (!mounted) return;
       _dirty = false;
@@ -309,6 +325,108 @@ class _State extends State<DispatchInquiryScreen> {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
     }
+  }
+
+  // Final mode confirmation. Shows a 3-second countdown with the consequence in
+  // BLINKING text ("Quantity is reduced from Stock" / "Release quantity from
+  // Holding") so the stockist can't dispatch the wrong way by reflex. Confirm is
+  // disabled until the countdown ends. Returns true to proceed.
+  Future<bool> _confirmMode() async {
+    final reduce = _reduceStock;
+    final msg = reduce
+        ? 'Quantity is reduced from Stock'
+        : 'Release quantity from Holding';
+    final detail = reduce
+        ? 'Your system stock will drop by the dispatched boxes.'
+        : 'Your system stock is NOT changed — only the held boxes are released. '
+            'Update your own stock count afterwards.';
+    final color = reduce ? const Color(0xFFC62828) : const Color(0xFF1565C0);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        int countdown = 3;
+        bool visible = true;
+        Timer? blink;
+        Timer? tick;
+        return StatefulBuilder(
+          builder: (ctx, setD) {
+            blink ??= Timer.periodic(const Duration(milliseconds: 450), (_) {
+              setD(() => visible = !visible);
+            });
+            tick ??= Timer.periodic(const Duration(seconds: 1), (t) {
+              if (countdown <= 1) {
+                t.cancel();
+                setD(() => countdown = 0);
+              } else {
+                setD(() => countdown--);
+              }
+            });
+            void cleanup() {
+              blink?.cancel();
+              tick?.cancel();
+            }
+
+            return AlertDialog(
+              title: const Text('Confirm dispatch'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedOpacity(
+                    opacity: visible ? 1 : 0.15,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: color),
+                      ),
+                      child: Text(
+                        msg,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: color),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(detail,
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade700)),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    cleanup();
+                    Navigator.pop(ctx, false);
+                  },
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: countdown > 0
+                      ? null
+                      : () {
+                          cleanup();
+                          Navigator.pop(ctx, true);
+                        },
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: color, foregroundColor: Colors.white),
+                  child: Text(countdown > 0 ? 'Confirm ($countdown)' : 'Confirm'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    return ok == true;
   }
 
   // Builds the WhatsApp dispatch-report text (no rates, by design).
@@ -464,6 +582,8 @@ class _State extends State<DispatchInquiryScreen> {
                     child: ListView(
                       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
                       children: [
+                        _modeSelector(),
+                        const SizedBox(height: 12),
                         _metaSection(),
                         const SizedBox(height: 12),
                         if (_lines.isEmpty)
@@ -490,6 +610,54 @@ class _State extends State<DispatchInquiryScreen> {
                 ],
               ),
             ),
+    );
+  }
+
+  // How this dispatch affects stock — asked every time. Reduce from Stock (we
+  // manage stock) vs Release Holding only (stockist manages stock elsewhere).
+  Widget _modeSelector() {
+    final color = _reduceStock ? const Color(0xFFC62828) : const Color(0xFF1565C0);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('How does this dispatch affect your stock?',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 8),
+            SegmentedButton<bool>(
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                textStyle:
+                    WidgetStateProperty.all(const TextStyle(fontSize: 11.5)),
+              ),
+              segments: const [
+                ButtonSegment(
+                    value: true,
+                    label: Text('Reduce from Stock'),
+                    icon: Icon(Icons.inventory_2_outlined, size: 15)),
+                ButtonSegment(
+                    value: false,
+                    label: Text('Release Holding only'),
+                    icon: Icon(Icons.lock_open_outlined, size: 15)),
+              ],
+              selected: {_reduceStock},
+              onSelectionChanged: (s) => setState(() => _reduceStock = s.first),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _reduceStock
+                  ? 'Your system stock drops by the dispatched boxes.'
+                  : 'Your system stock is NOT changed — only the held boxes are '
+                      'released. Update your own count afterwards.',
+              style: TextStyle(fontSize: 11, color: color),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

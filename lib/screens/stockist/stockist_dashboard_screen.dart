@@ -1383,10 +1383,7 @@ class _State extends State<StockistDashboardScreen> {
       child: Row(
         children: [
           _actionBtn('Dispatch', Icons.remove_circle_outline, Colors.red[700]!,
-              empty ? null : () async {
-                await context.push('/stockist/stock/dispatch');
-                _load();
-              }),
+              empty ? null : _showDispatchSheet),
           const SizedBox(width: 6),
           _actionBtn('Upload', Icons.upload_file, const Color(0xFF1B4F72),
               empty ? null : _showUploadSourceSheet),
@@ -1412,6 +1409,56 @@ class _State extends State<StockistDashboardScreen> {
                 _load();
               }),
         ],
+      ),
+    );
+  }
+
+  // Dispatch hub: dispatch against a confirmed order (the orders hub) or a quick
+  // walk-in dispatch (a customer with no app/web order). (project_dispatch_order_redesign)
+  void _showDispatchSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Dispatch',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined,
+                  color: Color(0xFF00695C)),
+              title: const Text('Dispatch an order'),
+              subtitle:
+                  const Text('Confirmed / dispatching orders, with reserved stock'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.push('/stockist/inquiries');
+                _load();
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.directions_walk, color: Color(0xFFC62828)),
+              title: const Text('Quick walk-in dispatch'),
+              subtitle: const Text('A customer with no order — pick design + qty'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await context.push('/stockist/stock/dispatch');
+                _load();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }

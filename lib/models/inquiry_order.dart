@@ -10,6 +10,13 @@
 class InquiryOrder {
   final String id;
   final String token;
+  /// Per-inquiry connection code (C-<unique><DDMM>) shared in WhatsApp so the
+  /// stockist can match an order to its conversation. (project_dispatch_order_redesign)
+  final String connectionCode;
+  /// Free-text label the stockist writes for who the order is for (no profile).
+  final String customerHint;
+  /// Where the order came from: app | web | walkin | stockist.
+  final String source;
   final String status;
   final DateTime createdAt;   // "Generated"
   final DateTime updatedAt;   // "Modified"
@@ -49,6 +56,9 @@ class InquiryOrder {
   InquiryOrder({
     required this.id,
     required this.token,
+    this.connectionCode = '',
+    this.customerHint = '',
+    this.source = 'app',
     required this.status,
     required this.createdAt,
     required this.updatedAt,
@@ -80,6 +90,9 @@ class InquiryOrder {
   factory InquiryOrder.fromJson(Map<String, dynamic> j) => InquiryOrder(
         id:           (j['id'] ?? '').toString(),
         token:        (j['token'] ?? '').toString(),
+        connectionCode: (j['connection_code'] ?? '').toString(),
+        customerHint:   (j['customer_hint'] ?? '').toString(),
+        source:         (j['source'] ?? 'app').toString(),
         status:       (j['status'] ?? 'draft').toString(),
         createdAt:    _dt(j['created_at']),
         updatedAt:    _dt(j['updated_at']),
