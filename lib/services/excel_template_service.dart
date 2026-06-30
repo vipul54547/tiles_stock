@@ -456,6 +456,91 @@ class ExcelTemplateService {
     }
   }
 
+  /// M stockist name-mapping template: Master Design + one col per brand + Size.
+  /// Used by ImportMappingExcelScreen to seed the bulk name-mapping import.
+  static List<int> buildMappingTemplate({
+    required List<String> sizes,
+    required List<Brand> brands,
+    int dataRows = 200,
+  }) {
+    final wb = Workbook();
+    try {
+      final stock = wb.worksheets[0];
+      stock.name = 'Mapping';
+      final lists = wb.worksheets.addWithName('Lists');
+
+      final listCols = <String, List<String>>{'Size': sizes};
+      final localRange = <String, String>{};
+      var lc = 1;
+      listCols.forEach((header, values) {
+        lists.getRangeByIndex(1, lc).setText(header);
+        for (var i = 0; i < values.length; i++) {
+          lists.getRangeByIndex(i + 2, lc).setText(values[i]);
+        }
+        final letter = _colLetter(lc);
+        final last = values.isEmpty ? 2 : values.length + 1;
+        localRange[header] = '${letter}2:$letter$last';
+        lc++;
+      });
+
+      const masterColor = '#1B4F72';
+      const brandColor  = '#6A1B9A';
+      const sizeColor   = '#6C7A89';
+
+      final headers     = <String>[];
+      final validateWith= <String?>[];
+      final headerColor = <String>[];
+      void col(String h, String? listH, String color) {
+        headers.add(h); validateWith.add(listH); headerColor.add(color);
+      }
+
+      col('Master Design', null, masterColor);
+      for (final b in brands) { col(b.name, null, brandColor); }
+      col('Size', 'Size', sizeColor);
+
+      for (var i = 0; i < headers.length; i++) {
+        final cell = stock.getRangeByIndex(1, i + 1);
+        cell.setText(headers[i]);
+        cell.cellStyle
+          ..bold = true
+          ..fontColor = '#FFFFFF'
+          ..backColor = headerColor[i]
+          ..hAlign = HAlignType.center;
+      }
+
+      final lastRow = dataRows + 1;
+      for (var i = 0; i < validateWith.length; i++) {
+        final lh = validateWith[i];
+        if (lh == null) continue;
+        final letter = _colLetter(i + 1);
+        final target = stock.getRangeByName('${letter}2:$letter$lastRow');
+        target.dataValidation
+          ..allowType = ExcelDataValidationType.user
+          ..dataRange = lists.getRangeByName(localRange[lh]!)
+          ..errorBoxText = 'Pick a value from the list.'
+          ..showErrorBox = true;
+      }
+
+      for (var i = 1; i <= headers.length; i++) { stock.autoFitColumn(i); }
+      stock.getRangeByName('A2').freezePanes();
+
+      final legendCol = lc + 1;
+      lists.getRangeByIndex(1, legendCol).setText('Colour guide');
+      lists.getRangeByIndex(1, legendCol).cellStyle.bold = true;
+      lists.getRangeByIndex(2, legendCol)
+          .setText('Navy = Master Design (brand-agnostic library key)');
+      lists.getRangeByIndex(3, legendCol)
+          .setText('Purple = this tile\'s name under each brand (fill all that apply)');
+      lists.getRangeByIndex(4, legendCol)
+          .setText('Grey = Size (pick from dropdown)');
+      lists.autoFitColumn(legendCol);
+
+      return wb.saveAsStream();
+    } finally {
+      wb.dispose();
+    }
+  }
+
   // 1 -> A, 26 -> Z, 27 -> AA …
   static String _colLetter(int col) {
     var c = col;

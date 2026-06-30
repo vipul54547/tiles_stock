@@ -1,7 +1,11 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' hide Border, BorderStyle;
 import '../../services/supabase_data_service.dart';
+import '../../services/excel_template_service.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
 import '../../models/tile_size.dart';
@@ -82,6 +86,7 @@ class _State extends State<ImportMappingExcelScreen> {
   bool _parsed = false;
   bool _loading = false;
   bool _importing = false;
+  bool _downloading = false;
   int _done = 0;
   String _blockError = '';
 
@@ -116,6 +121,37 @@ class _State extends State<ImportMappingExcelScreen> {
 
   String _norm(String h) =>
       h.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  // ── Template download ───────────────────────────────────────────────────────
+
+  Future<void> _downloadTemplate() async {
+    if (_brands.isEmpty) { _snack('Brands not loaded yet — wait a moment.'); return; }
+    setState(() => _downloading = true);
+    try {
+      final bytes = ExcelTemplateService.buildMappingTemplate(
+        sizes: _sizes,
+        brands: _brands,
+      );
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save mapping template',
+        fileName: 'tiles_name_mapping_template.xlsx',
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx'],
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (!mounted) return;
+      if (path != null) {
+        if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+          await File(path).writeAsBytes(bytes);
+        }
+        _snack('Template saved. Fill brand names, then upload it here.', Colors.green);
+      }
+    } catch (e) {
+      if (mounted) _snack('Could not create template — $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
+  }
 
   // ── Pick & parse ───────────────────────────────────────────────────────────
 
@@ -545,6 +581,33 @@ class _State extends State<ImportMappingExcelScreen> {
               ),
             ],
             const SizedBox(height: 22),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                onPressed: _downloading ? null : _downloadTemplate,
+                icon: _downloading
+                    ? const SizedBox(
+                        width: 16, height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: _navy))
+                    : const Icon(Icons.download_rounded),
+                label: Text(
+                    _downloading ? 'Preparing…' : 'Download blank template',
+                    style: const TextStyle(fontSize: 14.5)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _navy,
+                  side: const BorderSide(color: _navy, width: 1.5),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Pre-filled headers: Master Design + one column per brand + Size dropdown.',
+              style: TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+            const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
               height: 52,
