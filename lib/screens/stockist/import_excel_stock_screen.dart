@@ -1752,13 +1752,18 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       }
       // A plain row WITH DNA keeps skip_master off so a master exists to tag it.
       if (hasDna) row['dna'] = r.dna;
-      // T/W stock direct (Option 2/3): per-row brand in aliases for
-      // brand-scoped library lookup. Not mapping — just how T/W lib works.
-      if (_perRowBrand &&
-          isImporterType(currentStockistBusinessType) &&
-          r.rowBrandId != null &&
-          row['aliases'] == null) {
-        row['aliases'] = [{'brand_id': r.rowBrandId, 'name': r.name.trim()}];
+      // Stock-direct (Option 2/3): the row's filled brand column sets the HOLDING's
+      // brand — for BOTH M (per-brand stock) and T/W. Passed as a per-row brand_id
+      // so the holding lands under that brand, not the global upload brand.
+      // (project_per_brand_stock)
+      if (_perRowBrand && r.rowBrandId != null) {
+        row['brand_id'] = r.rowBrandId;
+        // T/W: also record the brand's design name (brand silo lib lookup). M keeps
+        // its existing alias from the library — don't overwrite it here.
+        if (isImporterType(currentStockistBusinessType) &&
+            row['aliases'] == null) {
+          row['aliases'] = [{'brand_id': r.rowBrandId, 'name': r.name.trim()}];
+        }
       }
       rows.add(row);
 
@@ -2157,6 +2162,32 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 '$incomplete new design${incomplete == 1 ? '' : 's'} need Tile Type, '
                 'Pieces and Box Weight. Fill them below (or untick the row) to import.',
                 style: TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
+          ),
+        // Prominent skipped-rows warning: invalid rows are excluded from the import,
+        // so a wrong row (e.g. two brand columns filled) can't slip past unnoticed.
+        if (skipped > 0)
+          Container(
+            width: double.infinity,
+            color: const Color(0xFFFFEBEE),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 18, color: Color(0xFFC62828)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                      '$skipped row${skipped == 1 ? '' : 's'} will be SKIPPED (invalid) and '
+                      'will NOT import. Scroll down — the red rows show why '
+                      '(e.g. more than one brand column filled in a row).',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          color: Colors.red.shade900,
+                          fontWeight: FontWeight.w500)),
+                ),
+              ],
+            ),
           ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
