@@ -762,6 +762,14 @@ class _State extends State<MyDesignLibraryScreen> {
       );
 
   Widget _tile(LibraryEntry e) {
+    // When the library is filtered to a SINGLE brand, the stockist is viewing it
+    // "as that brand", so the title shows THAT brand's name for the tile (e.g.
+    // ANUJ's "601001") instead of the master name. Only designs carrying that
+    // brand's alias are shown when filtered, so the alias is always present here.
+    final singleBrand = _fBrands.length == 1 ? _fBrands.first : null;
+    final brandAlias = singleBrand == null ? null : e.aliases[singleBrand];
+    final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
+    final titleName = showBrandName ? brandAlias : e.masterName;
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -805,11 +813,13 @@ class _State extends State<MyDesignLibraryScreen> {
                   Row(
                     children: [
                       Flexible(
-                        child: Text(e.masterName,
+                        child: Text(titleName,
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 14)),
                       ),
-                      if (currentStockistBusinessType == 'M') ...[
+                      // "Master" tag only when showing the master name (M, and not
+                      // currently renamed to a single brand's alias).
+                      if (currentStockistBusinessType == 'M' && !showBrandName) ...[
                         const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
