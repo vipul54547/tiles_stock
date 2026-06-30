@@ -809,20 +809,22 @@ class _State extends State<MyDesignLibraryScreen> {
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 14)),
                       ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(4),
+                      if (currentStockistBusinessType == 'M') ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text('Master',
+                              style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade600)),
                         ),
-                        child: Text('Master',
-                            style: TextStyle(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.grey.shade600)),
-                      ),
+                      ],
                     ],
                   ),
                   Text(e.size.replaceAll(' mm', ''),
@@ -893,7 +895,9 @@ class _State extends State<MyDesignLibraryScreen> {
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.call_merge, size: 20, color: _navy),
-                    tooltip: 'Merge a duplicate into this',
+                    tooltip: currentStockistBusinessType == 'M'
+                        ? 'Merge a duplicate into this'
+                        : 'Merge a duplicate design into this one',
                     onPressed: () => _openMergeSheet(e),
                   ),
                 IconButton(
@@ -1647,7 +1651,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
               controller: _master,
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
-                labelText: 'Master design name',
+                labelText: currentStockistBusinessType == 'M' ? 'Master design name' : 'Design name',
                 // M: a match isn't an error — saving will add the brand name to
                 // the existing tile, so we hint (not red-error). T/W: hard clash.
                 helperText: (_isDuplicate && currentStockistBusinessType == 'M')

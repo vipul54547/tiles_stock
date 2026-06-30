@@ -551,6 +551,23 @@ class _State extends State<ImportMappingExcelScreen> {
               ),
             ),
             const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: OutlinedButton.icon(
+                onPressed: _pickAndParse,
+                icon: const Icon(Icons.folder_open_rounded),
+                label: const Text('Browse & Pick Excel (.xlsx)',
+                    style: TextStyle(fontSize: 15)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _navy,
+                  side: const BorderSide(color: _navy, width: 1.5),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
             const Text('Columns',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             const SizedBox(height: 8),
@@ -606,23 +623,6 @@ class _State extends State<ImportMappingExcelScreen> {
             const Text(
               'Pre-filled headers: Master Design + one column per brand + Size dropdown.',
               style: TextStyle(fontSize: 11, color: Colors.black54),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: OutlinedButton.icon(
-                onPressed: _pickAndParse,
-                icon: const Icon(Icons.folder_open_rounded),
-                label: const Text('Browse & Pick Excel (.xlsx)',
-                    style: TextStyle(fontSize: 15)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: _navy,
-                  side: const BorderSide(color: _navy, width: 1.5),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
             ),
           ],
         ),
