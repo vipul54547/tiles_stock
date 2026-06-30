@@ -237,12 +237,17 @@ class _State extends State<StockistDashboardScreen> {
   Map<String, LibraryEntry> get _libById =>
       {for (final e in _library) e.id: e};
 
-  // Whether a design is sold under [brandId]: directly (T/W master brand) or via
-  // its master's brand aliases (M brand-agnostic boxes). (project_fstock_model)
+  // Whether a HOLDING belongs to [brandId]. Stock is per-brand now, so a holding
+  // shows only under its OWN brand — NOT under every brand whose name the master
+  // carries (that would show FAMOUS boxes under ANUJ). Legacy holdings with no
+  // brand on the row fall back to the master's brand/aliases. (project_per_brand_stock)
   bool _designInBrand(TileDesign d, String brandId) {
-    if (d.brandId == brandId) return true;
+    if (d.brandId != null && d.brandId!.isNotEmpty) {
+      return d.brandId == brandId;
+    }
     final lib = _libById[d.libraryId];
-    return lib != null && lib.aliases.containsKey(brandId);
+    return lib != null &&
+        (lib.brandId == brandId || lib.aliases.containsKey(brandId));
   }
 
   // Card title for the current view: when filtered to ONE brand, show THAT brand's
