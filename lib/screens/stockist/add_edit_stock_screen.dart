@@ -36,6 +36,7 @@ class _State extends State<AddEditStockScreen> {
   bool get isEdit => widget.designId != null;
 
   final _qtyCtrl = TextEditingController();
+  final _controlCtrl = TextEditingController();
 
   // Identity (read-only here — sourced from the Library master).
   String _designName = '';
@@ -136,6 +137,7 @@ class _State extends State<AddEditStockScreen> {
   @override
   void dispose() {
     _qtyCtrl.dispose();
+    _controlCtrl.dispose();
     super.dispose();
   }
 
@@ -175,8 +177,9 @@ class _State extends State<AddEditStockScreen> {
     _weight        = d.boxWeightKg;
     _thickness     = d.thicknessMm;
     _stockTypeBase = d.stockType; // already effective at the row's quality
-    _qtyCtrl.text  = d.boxQuantity.toString();
-    _quality       = _qualities.contains(d.quality) ? d.quality : _qualities.first;
+    _qtyCtrl.text     = d.boxQuantity.toString();
+    _controlCtrl.text = d.controlQuantity.toString();
+    _quality          = _qualities.contains(d.quality) ? d.quality : _qualities.first;
     if (d.catalogId != null && _catalogs.any((c) => c.id == d.catalogId)) {
       _catalogId = d.catalogId;
     }
@@ -292,6 +295,9 @@ class _State extends State<AddEditStockScreen> {
       ok = await _service.updateDesign(widget.designId!, {'quality': _quality});
       if (ok) {
         await _service.setDesignLists(widget.designId!, _memberIds.toList());
+        final cQty = int.tryParse(_controlCtrl.text.trim()) ?? 0;
+        await _service.setControlQuantities(
+            [(id: widget.designId!, controlQuantity: cQty)]);
       }
     } else {
       final master = _selectedMaster!;
@@ -417,6 +423,8 @@ class _State extends State<AddEditStockScreen> {
                       const SizedBox(height: 16),
                       _buildQtyField(),
                       if (isEdit) ...[
+                        const SizedBox(height: 16),
+                        _buildControlQtyField(),
                         const SizedBox(height: 20),
                         _buildListsSection(),
                       ],
@@ -808,6 +816,28 @@ class _State extends State<AddEditStockScreen> {
         child: Text(_qtyCtrl.text.isEmpty ? '0' : _qtyCtrl.text,
             style: const TextStyle(fontSize: 16)),
       ),
+    );
+  }
+
+  Widget _buildControlQtyField() {
+    final pQty = int.tryParse(_qtyCtrl.text) ?? 0;
+    final cQty = int.tryParse(_controlCtrl.text) ?? 0;
+    final fQty = (pQty - cQty).clamp(0, pQty);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _controlCtrl,
+          keyboardType: TextInputType.number,
+          onChanged: (_) => setState(() => _dirty = true),
+          decoration: InputDecoration(
+            labelText: 'Hide from dealers (boxes)',
+            helperText: 'Dealers will see $fQty box${fQty == 1 ? '' : 'es'} (F = P − this)',
+            border: const OutlineInputBorder(),
+            suffixIcon: const Icon(Icons.visibility_off_outlined),
+          ),
+        ),
+      ],
     );
   }
 

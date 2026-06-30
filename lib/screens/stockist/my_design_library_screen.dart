@@ -516,6 +516,24 @@ class _State extends State<MyDesignLibraryScreen> {
       appBar: AppBar(
         title: const Text('My Design Library'),
         actions: [
+          // M only: PDF import builds the library (design identity + photos, no stock).
+          if (currentStockistBusinessType == 'M')
+            IconButton(
+              icon: const Icon(Icons.picture_as_pdf),
+              tooltip: 'Import PDF (add designs)',
+              onPressed: () async {
+                final brands = _brands;
+                final defaultBrand = brands.isEmpty
+                    ? null
+                    : brands.firstWhere((b) => b.isDefault,
+                        orElse: () => brands.first);
+                if (defaultBrand == null) return;
+                final done = await context.push<bool>(
+                    '/stockist/stock/import-supplier-pdf',
+                    extra: defaultBrand.id);
+                if (done == true) _load();
+              },
+            ),
           // M only: surface likely-duplicate masters (pre-#7 leftovers) for the
           // human to review + merge. Badge = how many groups are waiting.
           if (currentStockistBusinessType == 'M' && _duplicateGroups.isNotEmpty)

@@ -1002,59 +1002,6 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Is this brand set up in the Design Library yet? (Has at least one master
-  // carrying this brand's name; the default brand's masters always count.)
-  bool _brandHasLibrary(Brand b) =>
-      _library.any((e) => e.aliases.containsKey(b.id)) ||
-      (b.isDefault && _library.isNotEmpty);
-
-  // Does this brand already have stock? A design belongs to the brand via its
-  // identity master (brandId), or is published in one of the brand's lists.
-  bool _brandHasStock(Brand b) {
-    final listIds = _listsForBrand(b).map((c) => c.id).toSet();
-    return _designs.any((d) =>
-        d.brandId == b.id || d.catalogIds.any(listIds.contains));
-  }
-
-  // A brand-new brand: no Library designs AND no stock yet. Per the flow, the
-  // stockist must set up its designs (Mapping) before uploading stock into it.
-  bool _brandNeedsSetup(Brand b) => !_brandHasLibrary(b) && !_brandHasStock(b);
-
-  // A brand's active stock lists. Strict brand match — same rule as _filterLists,
-  // so the upload sheet and the dashboard list filter can never disagree. Every
-  // catalog now carries a brand_id (DB NOT NULL); the old null-brand fallback used
-  // to sweep legacy brandless leftovers onto the default brand, which surfaced a
-  // phantom extra list here that the dashboard didn't show.
-  List<StockCatalog> _listsForBrand(Brand b) =>
-      _catalogs
-          .where((c) => c.isActive && c.brandId == b.id)
-          .toList()
-        ..sort((x, y) => x.sortOrder.compareTo(y.sortOrder));
-
-  // One "Adding to" line: a fixed-width label + the value, so Brand / List align.
-  Widget _destLine(String label, String value) => Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 46,
-            child: Text(label,
-                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
-          ),
-          Expanded(
-            child: Text(value,
-                style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1B4F72))),
-          ),
-        ],
-      );
-
-  // Upload is BRAND-ONLY: you pick the BRAND, then the source. The import fills
-  // P_Stock for that brand (quantity + quality + surface); it does NOT target a
-  // stock list — designs are curated into output lists separately afterwards. The
-  // brand is passed to the importer. PDF is offered only for the main brand
-  // (others import via Excel, decision #5).
   // "+ Add" splits the two real intents BEFORE anything else, so the stockist
   // never lands on a screen that conflates them: STOCK = how many boxes (qty);
   // DESIGN = the tile's identity (name, brands, photo) in the Library.
@@ -1108,272 +1055,85 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  void _showUploadSourceSheet() {
-    final brands = List<Brand>.from(_brands);
-    if (brands.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No brand to upload into yet.')));
-      return;
-    }
-    Brand? brandOf(String? id) {
-      for (final b in brands) {
-        if (b.id == id) return b;
-      }
-      return null;
-    }
-
-    // Progressive disclosure: pick BRAND first (only when the stockist runs more
-    // than one), then only THAT brand's stock list — so a list belonging to
-    // another brand is never on screen to mis-tap. Single brand / single list
-    // auto-resolve. Seed from the brand currently being viewed, if any.
-    String? selBrandId =
-        brands.any((b) => b.id == _brandFilter) ? _brandFilter : null;
-
-    // Quiet, non-blocking upsell: once a stockist SEES Brand/List as named
-    // things, they realise they can ask for more — admin grants (and can charge).
-    Future<void> contactAdmin() => showDialog<void>(
-          context: context,
-          builder: (c) => AlertDialog(
-            title: const Text('Add a brand or stock list'),
-            content: const Text(
-                'More brands and stock lists are set up by your admin. Please '
-                'contact your admin to add another one.'),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(c), child: const Text('OK')),
-            ],
-          ),
-        );
-
+  void _showStockMgmtSheet() {
     showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) {
-          // Resolve the current step. 1 brand auto-selects; >1 forces a pick.
-          // Upload fills P_Stock for the brand — there is no stock-list pick.
-          final brand =
-              brandOf(selBrandId) ?? (brands.length == 1 ? brands.first : null);
-          final mustPickBrand = brand == null;
-          final ready = brand != null;
-          final isMainBrand = brand?.isDefault ?? false;
-          final needsSetup = brand != null && _brandNeedsSetup(brand);
-          // Trader / Wholesaler: ingests an arbitrary EXTERNAL supplier PDF via
-          // the mapping-assisted importer (which self-builds the Library), not
-          // the structured manufacturer PDF flow. See project_actor_types.
-          final isImporter = currentStockistIsImporter;
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // STEP 1 — choose brand (only when >1 brand and none chosen yet).
-                if (mustPickBrand) ...[
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 16, 16, 6),
-                    child: Text('Upload to which brand?',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 15)),
-                  ),
-                  for (final b in brands)
-                    ListTile(
-                      leading: const Icon(Icons.sell_outlined,
-                          color: Color(0xFF1B4F72)),
-                      title: Text(b.name),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => setS(() => selBrandId = b.id),
-                    ),
-                ],
-                // STEP 2 — destination resolved (brand): show it, then the source.
-                if (ready) ...[
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE3F2FD),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Adding to your stock',
-                            style: TextStyle(
-                                fontSize: 11.5, color: Colors.grey.shade700)),
-                        const SizedBox(height: 5),
-                        _destLine('Brand', brand.name),
-                        const SizedBox(height: 4),
-                        Text(
-                            'Goes into your stock (P_Stock). Choose which stock '
-                            'lists show it afterwards.',
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.grey.shade600)),
-                        if (brands.length > 1) ...[
-                          const SizedBox(height: 8),
-                          InkWell(
-                            onTap: () => setS(() => selBrandId = null),
-                            child: const Text('Change brand',
-                                style: TextStyle(
-                                    fontSize: 12.5,
-                                    color: Color(0xFF1B4F72),
-                                    fontWeight: FontWeight.w600)),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  // Quiet, once-only upsell nudge — informs, never blocks.
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
-                    child: InkWell(
-                      onTap: contactAdmin,
-                      child: Text(
-                          'Need another brand or stock list? Contact admin ›',
-                          style: TextStyle(
-                              fontSize: 11.5, color: Colors.grey.shade600)),
-                    ),
-                  ),
-                  const Divider(height: 16),
-                  // Source — gated by whether the brand is set up yet.
-                  if (needsSetup) ...[
-                  // Brand-new brand: its designs aren't in the Library, so stock
-                  // has nothing to attach to. Start by mapping the designs in.
-                  Container(
-                    margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF8E1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFFFE082)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_outline,
-                            size: 16, color: Colors.orange.shade800),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            isImporter
-                                ? 'This brand has no designs yet. Import your '
-                                    'supplier’s PDF — it builds your Library and '
-                                    'adds stock in one go.'
-                                : 'This brand has no designs yet. Set up its '
-                                    'designs in your Library first, then upload '
-                                    'stock.',
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.orange.shade900),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Manual activation: add a single design by hand, pre-pointed
-                  // at this brand (via its seeded stock list), so an empty brand
-                  // can be activated without an Excel/PDF file.
-                  ListTile(
-                    leading: const Icon(Icons.add_circle_outline,
-                        color: Color(0xFF2E7D32)),
-                    title: const Text('Add a design manually'),
-                    subtitle: const Text(
-                        'Create one design under this brand to activate it'),
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      final lists = _listsForBrand(brand);
-                      await context.push('/stockist/stock/add',
-                          extra: lists.isEmpty ? null : lists.first.id);
-                      _load();
-                    },
-                  ),
-                  // Manufacturers map cross-brand design names in via Excel;
-                  // importers don't (their design name IS the master), so they
-                  // skip this and import the supplier PDF directly.
-                  if (!isImporter)
-                    ListTile(
-                      leading: const Icon(Icons.account_tree_outlined,
-                          color: Color(0xFF1B4F72)),
-                      title: const Text('Set up designs — Mapping (Excel)'),
-                      subtitle: const Text(
-                          "Add this brand's designs & names to your Library"),
-                      onTap: () async {
-                        Navigator.pop(ctx);
-                        await context.push('/stockist/library/import-mapping');
-                        _load();
-                      },
-                    ),
-                  // PDF opens for everyone on ANY brand. Importers (T/W): each
-                  // brand is its own supplier range. Manufacturers (M): on the
-                  // default brand it builds the library; on a non-default brand it
-                  // ADDS new designs only (existing ones are skipped in the
-                  // importer → link via Excel mapping).
-                  ListTile(
-                      leading: const Icon(Icons.picture_as_pdf,
-                          color: Color(0xFF1B4F72)),
-                      title: Text(isImporter
-                          ? 'Import supplier PDF'
-                          : 'Set up from a PDF'),
-                      subtitle: Text(isImporter
-                          ? 'Builds your Library + adds stock'
-                          : 'PDF adds new designs + photos'),
-                      onTap: () async {
-                        Navigator.pop(ctx);
-                        // Unified PDF flow — every stockist (M and T/W) uses the
-                        // upgraded importer (modes + gated Step 2). The old
-                        // manufacturer screen is retired from routing.
-                        await context.push(
-                            '/stockist/stock/import-supplier-pdf',
-                            extra: brand.id);
-                        _load();
-                      },
-                    ),
-                ] else ...[
-                  // Brand is set up — normal stock upload. PDF opens on ANY brand
-                  // for everyone (M non-default brand = add-new-designs only).
-                  ListTile(
-                      leading: const Icon(Icons.picture_as_pdf,
-                          color: Color(0xFF1B4F72)),
-                      title: Text(isImporter
-                          ? 'Import supplier PDF'
-                          : 'Upload PDF stock report'),
-                      subtitle: Text(isImporter
-                          ? 'Builds your Library + adds stock'
-                          : 'Parses designs + tile photos'),
-                      onTap: () async {
-                        Navigator.pop(ctx);
-                        // Unified PDF flow — every stockist (M and T/W) uses the
-                        // upgraded importer (modes + gated Step 2). The old
-                        // manufacturer screen is retired from routing.
-                        await context.push(
-                            '/stockist/stock/import-supplier-pdf',
-                            extra: brand.id);
-                        _load();
-                      },
-                    ),
-                  ListTile(
-                    leading: const Icon(Icons.table_view_rounded,
-                        color: Color(0xFF2E7D32)),
-                    title: const Text('Import Excel stock list'),
-                    subtitle: Text(isMainBrand
-                        ? 'Design, size, quality, boxes — photos reused'
-                        : 'Other brands upload by Excel'),
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      await context.push('/stockist/stock/import-excel',
-                          extra: brand.id);
-                      _load();
-                    },
-                  ),
-                ],
-                ], // end if (ready)
-                const SizedBox(height: 8),
-              ],
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text('Stock Management',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
-          );
-        },
+            // T/W: supplier PDF is their primary stock source (library + stock together).
+            if (currentStockistIsImporter) ...[
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf,
+                    color: Color(0xFF1B4F72), size: 28),
+                title: const Text('Import Supplier PDF',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Builds your library and adds stock'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final brand = _brands.isEmpty
+                      ? null
+                      : (_brands.any((b) => b.id == _brandFilter)
+                          ? _brands.firstWhere((b) => b.id == _brandFilter)
+                          : _brands.first);
+                  if (brand == null) return;
+                  await context.push('/stockist/stock/import-supplier-pdf',
+                      extra: brand.id);
+                  _load();
+                },
+              ),
+              const Divider(height: 1),
+            ],
+            ListTile(
+              leading: const Icon(Icons.table_view_rounded,
+                  color: Color(0xFF2E7D32), size: 28),
+              title: const Text('Import Stock',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+              subtitle: const Text(
+                  'Add or update quantities from an Excel file'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final brandId = _brands.any((b) => b.id == _brandFilter)
+                    ? _brandFilter
+                    : null;
+                await context.push('/stockist/stock/import-excel',
+                    extra: brandId);
+                _load();
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.tune,
+                  color: Color(0xFF00838F), size: 28),
+              title: const Text('Control Stock',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+              subtitle: const Text(
+                  'Block quantity you don\'t want to show to dealers'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final changed = await Navigator.of(context).push<bool>(
+                    MaterialPageRoute(
+                        builder: (_) => const StockControlScreen()));
+                if (changed == true) _load();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
 
-  // Row 3: Dispatch · Upload · Add · Records (compact buttons).
+  // Row 3: Dispatch · Stock Mgmt · Add · Records (compact buttons).
   // When the library slice for the current brand is empty, only Add is active —
   // the stockist must add at least one design before they can do anything else.
   Widget _buildActionButtonRow() {
@@ -1385,23 +1145,11 @@ class _State extends State<StockistDashboardScreen> {
           _actionBtn('Dispatch', Icons.remove_circle_outline, Colors.red[700]!,
               empty ? null : _showDispatchSheet),
           const SizedBox(width: 6),
-          _actionBtn('Upload', Icons.upload_file, const Color(0xFF1B4F72),
-              empty ? null : _showUploadSourceSheet),
+          _actionBtn('Stock Mgmt', Icons.inventory_2_outlined, const Color(0xFF1B4F72),
+              empty ? null : _showStockMgmtSheet),
           const SizedBox(width: 6),
           _actionBtn('Add', Icons.add, const Color(0xFF2E7D32),
               empty ? _showLibraryActivation : _showAddIntentSheet),
-          const SizedBox(width: 6),
-          // Control Stock — set C_Quantity (= F_Stock dealers see). Curating
-          // which designs appear in a list lives under Share → Stock lists.
-          _actionBtn('Control', Icons.tune, const Color(0xFF00838F),
-              empty
-                  ? null
-                  : () async {
-                      final changed = await Navigator.of(context).push<bool>(
-                          MaterialPageRoute(
-                              builder: (_) => const StockControlScreen()));
-                      if (changed == true) _load();
-                    }),
           const SizedBox(width: 6),
           _actionBtn('Records', Icons.receipt_long_outlined,
               const Color(0xFF6A1B9A), empty ? null : () async {

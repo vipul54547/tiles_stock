@@ -983,8 +983,13 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       final ok = await _mapSurfacesStep();
       if (!ok) return;
     }
-    // Identity (library) is fully resolved. Ask whether to also add stock now.
-    setState(() => _phase = _Phase.stockGate);
+    // M: PDF is library-only — skip the stock gate and save immediately.
+    // T/W: ask whether to also add stock now.
+    if (_isM) {
+      _save(libraryOnly: true);
+    } else {
+      setState(() => _phase = _Phase.stockGate);
+    }
   }
 
   // Map each distinct scraped surface to one of the admin finishes (like the Excel
