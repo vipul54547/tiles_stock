@@ -14,6 +14,8 @@ import '../../services/cloudinary_service.dart';
 import '../../widgets/filter_section.dart';
 
 const _navy = Color(0xFF1B4F72);
+const _blue = Color(0xFF1565C0);   // permanent list
+const _orange = Color(0xFFE65100); // temporary list
 
 // Name + description dialog — shown before the picker (new) or via the edit
 // action (existing). Returns null on cancel; name is required.
@@ -145,21 +147,115 @@ class _StockListsScreenState extends State<StockListsScreen> {
     if (_openId != null) _ensureLinks(_openId!);
   }
 
-  // New list: ask name + description FIRST, then open the design picker window.
+  // Type picker: permanent (blue) or temporary (orange).
+  Future<String?> _pickListType() => showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Choose list type'),
+          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _typeCard(
+                ctx, 'permanent', _blue, Icons.auto_awesome,
+                'Permanent',
+                'Condition-based · auto-updates when new stock arrives',
+              ),
+              const SizedBox(height: 10),
+              _typeCard(
+                ctx, 'temporary', _orange, Icons.touch_app_outlined,
+                'Temporary',
+                'Pick specific designs manually · fixed selection',
+              ),
+              const SizedBox(height: 4),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+          ],
+        ),
+      );
+
+  Widget _typeCard(BuildContext ctx, String type, Color color, IconData icon,
+      String title, String subtitle) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => Navigator.pop(ctx, type),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          border: Border.all(color: color, width: 1.5),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: color,
+                          fontSize: 14)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: Colors.black54)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right, color: color.withValues(alpha: 0.6)),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _newList() async {
-    final d = await editListDetails(context);
-    if (d == null) return;
-    if (!mounted) return;
-    final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
-        builder: (_) => StockListBuilderScreen(
-            createName: d.name, createDescription: d.description)));
-    if (changed == true) _load();
+    final type = await _pickListType();
+    if (type == null || !mounted) return;
+    if (type == 'permanent') {
+      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+          builder: (_) => PermanentListEditorScreen(brands: _brands)));
+      if (changed == true) _load();
+    } else {
+      final d = await editListDetails(context);
+      if (d == null || !mounted) return;
+      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+          builder: (_) => StockListBuilderScreen(
+              createName: d.name, createDescription: d.description)));
+      if (changed == true) _load();
+    }
   }
 
   Future<void> _open(StockCatalog list) async {
-    final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
-        builder: (_) => StockListBuilderScreen(existing: list)));
-    if (changed == true) _load();
+    if (list.isPermanent) {
+      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+          builder: (_) =>
+              PermanentListEditorScreen(existing: list, brands: _brands)));
+      if (changed == true) _load();
+    } else {
+      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+          builder: (_) => StockListBuilderScreen(existing: list)));
+      if (changed == true) _load();
+    }
+  }
+
+  String _conditionSummary(StockCatalog c) {
+    final parts = <String>[];
+    if (c.filterBrandId != null) {
+      final match = _brands.where((b) => b.id == c.filterBrandId);
+      if (match.isNotEmpty) parts.add(match.first.name);
+    }
+    if (c.filterQuality != null) parts.add(c.filterQuality!);
+    if (c.filterSurface != null) parts.add(c.filterSurface!);
+    if (c.filterSize != null) parts.add(c.filterSize!.replaceAll(' mm', ''));
+    return parts.isEmpty ? 'All designs' : parts.join(' · ');
   }
 
   String _permLink(StockCatalog c) => '${AppConfig.shareBaseUrl}/s/${c.shareToken}';
@@ -675,64 +771,117 @@ class _StockListsScreenState extends State<StockListsScreen> {
     );
   }
 
-  // Accordion card: header (tap to open/close, only one open) + link panel.
+  // Accordion card: colored left border by type + header + link panel.
   Widget _listCard(StockCatalog c) {
     final open = _openId == c.id;
+    final typeColor = c.isPermanent ? _blue : _orange;
     _daysCtrls.putIfAbsent(c.id, () => TextEditingController(text: '60'));
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: () => _toggle(c.id),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
-              child: Row(
+      clipBehavior: Clip.hardEdge,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Colored left border
+            Container(width: 4, color: typeColor),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(open ? Icons.expand_more : Icons.chevron_right,
-                      color: _navy),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(c.name,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 14.5)),
-                        const SizedBox(height: 2),
-                        Text(
-                            [
-                              '${_counts[c.id] ?? 0} designs',
-                              if (c.hasOwnBanner) 'banner ✓',
-                              if (c.description.trim().isNotEmpty)
-                                c.description.trim(),
-                            ].join(' · '),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 11.5, color: Colors.grey.shade600)),
-                      ],
+                  InkWell(
+                    onTap: () => _toggle(c.id),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
+                      child: Row(
+                        children: [
+                          Icon(open ? Icons.expand_more : Icons.chevron_right,
+                              color: _navy),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(c.name,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 14.5)),
+                                    ),
+                                    Container(
+                                      margin: const EdgeInsets.only(left: 6),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 7, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: typeColor.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                            color: typeColor.withValues(alpha: 0.4),
+                                            width: 0.8),
+                                      ),
+                                      child: Text(
+                                        c.isPermanent ? 'PERMANENT' : 'TEMPORARY',
+                                        style: TextStyle(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: typeColor,
+                                            letterSpacing: 0.3),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  c.isPermanent
+                                      ? [
+                                          _conditionSummary(c),
+                                          if (c.hasOwnBanner) 'banner ✓',
+                                        ].join(' · ')
+                                      : [
+                                          '${_counts[c.id] ?? 0} designs',
+                                          if (c.hasOwnBanner) 'banner ✓',
+                                          if (c.description.trim().isNotEmpty)
+                                            c.description.trim(),
+                                        ].join(' · '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                              tooltip: 'Banner',
+                              icon: Icon(Icons.image_outlined,
+                                  size: 20,
+                                  color: c.hasOwnBanner
+                                      ? const Color(0xFF2E7D32)
+                                      : Colors.grey.shade600),
+                              onPressed: () => _setBanner(c)),
+                          IconButton(
+                              tooltip: c.isPermanent
+                                  ? 'Edit conditions'
+                                  : 'Edit designs',
+                              icon: Icon(
+                                  c.isPermanent
+                                      ? Icons.tune
+                                      : Icons.edit_outlined,
+                                  size: 20),
+                              onPressed: () => _open(c)),
+                        ],
+                      ),
                     ),
                   ),
-                  IconButton(
-                      tooltip: 'Banner',
-                      icon: Icon(Icons.image_outlined,
-                          size: 20,
-                          color: c.hasOwnBanner
-                              ? const Color(0xFF2E7D32)
-                              : Colors.grey.shade600),
-                      onPressed: () => _setBanner(c)),
-                  IconButton(
-                      tooltip: 'Edit designs',
-                      icon: const Icon(Icons.edit_outlined, size: 20),
-                      onPressed: () => _open(c)),
+                  if (open) _linkPanel(c),
                 ],
               ),
             ),
-          ),
-          if (open) _linkPanel(c),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1245,7 +1394,8 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
       final id = await _data.saveStockList(
           id: widget.existing?.id,
           name: name,
-          description: _descCtrl.text.trim());
+          description: _descCtrl.text.trim(),
+          listType: 'temporary');
       await _data.setListDesigns(id, _selected.toList());
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -1477,6 +1627,275 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
                   ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ── Permanent list editor ─────────────────────────────────────────────────────
+// Create or edit a permanent (condition-based) stock list.
+// Conditions: brand · quality · surface · size — all optional (null = no filter).
+class PermanentListEditorScreen extends StatefulWidget {
+  final StockCatalog? existing;
+  final List<Brand> brands;
+  const PermanentListEditorScreen(
+      {super.key, this.existing, required this.brands});
+  @override
+  State<PermanentListEditorScreen> createState() =>
+      _PermanentListEditorScreenState();
+}
+
+class _PermanentListEditorScreenState
+    extends State<PermanentListEditorScreen> {
+  final _data = SupabaseDataService();
+  final _nameCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+
+  String? _filterBrandId;
+  String? _filterQuality;
+  String? _filterSurface;
+  String? _filterSize;
+  List<String> _sizes = [];
+  bool _loadingSizes = true;
+  bool _saving = false;
+
+  static const _qualities = ['Standard', 'Premium'];
+  static const _surfaces = [
+    'Glossy', 'Matt', 'Rustic', 'P.Glossy', 'Sugar', 'Carving'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl.text = widget.existing?.name ?? '';
+    _descCtrl.text = widget.existing?.description ?? '';
+    _filterBrandId = widget.existing?.filterBrandId;
+    _filterQuality = widget.existing?.filterQuality;
+    _filterSurface = widget.existing?.filterSurface;
+    _filterSize = widget.existing?.filterSize;
+    _loadSizes();
+  }
+
+  Future<void> _loadSizes() async {
+    final designs = await _data.getDesignsByStockist(currentStockistUUID);
+    final sizes = designs.map((d) => d.size).toSet().toList()..sort();
+    if (!mounted) return;
+    setState(() {
+      _sizes = sizes;
+      _loadingSizes = false;
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Give the list a name.')));
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await _data.saveStockList(
+        id: widget.existing?.id,
+        name: name,
+        description: _descCtrl.text.trim(),
+        listType: 'permanent',
+        filterBrandId: _filterBrandId,
+        filterQuality: _filterQuality,
+        filterSurface: _filterSurface,
+        filterSize: _filterSize,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not save — $e')));
+    }
+  }
+
+  Widget _chipGroup<T>(
+    String title,
+    List<T> options,
+    T? selected,
+    String Function(T) label,
+    void Function(T?) onSelect,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            ChoiceChip(
+              label: Text('All',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: selected == null ? _blue : Colors.black87)),
+              selected: selected == null,
+              onSelected: (_) => setState(() => onSelect(null)),
+              selectedColor: _blue.withValues(alpha: 0.15),
+              checkmarkColor: _blue,
+              visualDensity: VisualDensity.compact,
+            ),
+            for (final o in options)
+              ChoiceChip(
+                label: Text(label(o),
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: selected == o ? _blue : Colors.black87)),
+                selected: selected == o,
+                onSelected: (_) => setState(() => onSelect(o)),
+                selectedColor: _blue.withValues(alpha: 0.15),
+                checkmarkColor: _blue,
+                visualDensity: VisualDensity.compact,
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = widget.existing != null;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F5F5),
+      appBar: AppBar(
+        title: Text(isEdit ? 'Edit conditions' : 'New permanent list'),
+        backgroundColor: _blue,
+        foregroundColor: Colors.white,
+        actions: [
+          _saving
+              ? const Padding(
+                  padding: EdgeInsets.only(right: 16),
+                  child: Center(
+                      child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))))
+              : TextButton(
+                  onPressed: _save,
+                  child: const Text('Save',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold))),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(14),
+        children: [
+          // Name + description
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _nameCtrl,
+                    autofocus: !isEdit,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                        labelText: 'List name',
+                        border: OutlineInputBorder()),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _descCtrl,
+                    decoration: const InputDecoration(
+                        labelText: 'Description (optional)',
+                        border: OutlineInputBorder()),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(4, 4, 4, 6),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome, size: 15, color: _blue),
+                SizedBox(width: 6),
+                Text('Auto-filter conditions',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+                SizedBox(width: 8),
+                Text('leave as "All" to show everything',
+                    style: TextStyle(fontSize: 11, color: Colors.black45)),
+              ],
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (widget.brands.isNotEmpty) ...[
+                    _chipGroup<Brand>(
+                      'Brand',
+                      widget.brands,
+                      widget.brands.where((b) => b.id == _filterBrandId).isNotEmpty
+                          ? widget.brands.firstWhere((b) => b.id == _filterBrandId)
+                          : null,
+                      (b) => b.name,
+                      (b) => _filterBrandId = b?.id,
+                    ),
+                    const Divider(height: 22),
+                  ],
+                  _chipGroup<String>(
+                    'Quality',
+                    _qualities,
+                    _filterQuality,
+                    (q) => q,
+                    (q) => _filterQuality = q,
+                  ),
+                  const Divider(height: 22),
+                  _chipGroup<String>(
+                    'Surface',
+                    _surfaces,
+                    _filterSurface,
+                    (s) => s,
+                    (s) => _filterSurface = s,
+                  ),
+                  const Divider(height: 22),
+                  if (_loadingSizes)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(
+                          child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2))),
+                    )
+                  else
+                    _chipGroup<String>(
+                      'Size',
+                      _sizes,
+                      _filterSize,
+                      (s) => s.replaceAll(' mm', ''),
+                      (s) => _filterSize = s,
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 80),
+        ],
       ),
     );
   }

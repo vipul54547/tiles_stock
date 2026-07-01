@@ -450,12 +450,25 @@ class SupabaseDataService {
 
   /// Create a brand-free stock list ([id] null) or rename/edit an existing one.
   /// Returns the list id. Per-stockist limit enforced server-side. (stocklists v2)
-  Future<String> saveStockList(
-      {String? id, required String name, String description = ''}) async {
+  Future<String> saveStockList({
+    String? id,
+    required String name,
+    String description = '',
+    String listType = 'permanent',
+    String? filterBrandId,
+    String? filterQuality,
+    String? filterSurface,
+    String? filterSize,
+  }) async {
     final res = await supabase.rpc('stock_list_save', params: {
       'p_id': id,
       'p_name': name,
       'p_description': description,
+      'p_list_type': listType,
+      'p_filter_brand_id': filterBrandId,
+      'p_filter_quality': filterQuality,
+      'p_filter_surface': filterSurface,
+      'p_filter_size': filterSize,
     });
     return (res ?? '').toString();
   }

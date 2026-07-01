@@ -35,6 +35,14 @@ class StockCatalog {
   /// When non-null, scheduled for hard deletion 24h after this time (cancellable).
   final DateTime? deleteScheduledAt;
 
+  /// 'permanent' = condition-based auto-updating list.
+  /// 'temporary' = manually picked designs via catalog_designs.
+  final String listType;
+  final String? filterBrandId;
+  final String? filterQuality;
+  final String? filterSurface;
+  final String? filterSize;
+
   const StockCatalog({
     required this.id,
     required this.stockistId,
@@ -55,9 +63,16 @@ class StockCatalog {
     this.isAnonymous = false,
     this.hiddenByStockist = false,
     this.deleteScheduledAt,
+    this.listType = 'permanent',
+    this.filterBrandId,
+    this.filterQuality,
+    this.filterSurface,
+    this.filterSize,
   });
 
   bool get isPrivate => visibility == 'private';
+  bool get isPermanent => listType == 'permanent';
+  bool get isTemporary => listType == 'temporary';
 
   /// True when this list carries its own banner (rich layout or legacy image).
   bool get hasOwnBanner => bannerSource.isNotEmpty || bannerUrl.isNotEmpty;
@@ -87,5 +102,10 @@ class StockCatalog {
         deleteScheduledAt: j['delete_scheduled_at'] == null
             ? null
             : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
+        listType: (j['list_type'] as String?) ?? 'permanent',
+        filterBrandId: j['filter_brand_id'] as String?,
+        filterQuality: j['filter_quality'] as String?,
+        filterSurface: j['filter_surface'] as String?,
+        filterSize: j['filter_size'] as String?,
       );
 }
