@@ -613,7 +613,13 @@ class _State extends State<StockistDashboardScreen> {
       return Padding(
         padding: const EdgeInsets.only(right: 6),
         child: GestureDetector(
-          onTap: () => setState(() => _brandFilter = value),
+          // Brand & stock-list filters are mutually exclusive: picking a brand
+          // clears any list selection (and vice-versa), so "All brands" / "All
+          // lists" always give a clean way to drop the other filter.
+          onTap: () => setState(() {
+            _brandFilter = value;
+            _catalogFilter = 'all';
+          }),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
@@ -666,7 +672,12 @@ class _State extends State<StockistDashboardScreen> {
       return Padding(
         padding: const EdgeInsets.only(right: 6),
         child: GestureDetector(
-          onTap: () => setState(() => _catalogFilter = value),
+          // Selecting a list clears the brand filter (mutually exclusive) so the
+          // list shows across all brands without a stale brand narrowing it.
+          onTap: () => setState(() {
+            _catalogFilter = value;
+            _brandFilter = 'all';
+          }),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
