@@ -248,9 +248,12 @@ class _StockListsScreenState extends State<StockListsScreen> {
 
   String _conditionSummary(StockCatalog c) {
     final parts = <String>[];
-    if (c.filterBrandId != null) {
-      final match = _brands.where((b) => b.id == c.filterBrandId);
-      if (match.isNotEmpty) parts.add(match.first.name);
+    if (c.filterBrandIds.isNotEmpty) {
+      final names = c.filterBrandIds
+          .map((id) => _brands.where((b) => b.id == id))
+          .where((m) => m.isNotEmpty)
+          .map((m) => m.first.name);
+      if (names.isNotEmpty) parts.add(names.join('/'));
     }
     if (c.filterQualities.isNotEmpty) parts.add(c.filterQualities.join('/'));
     if (c.filterSurfaces.isNotEmpty) parts.add(c.filterSurfaces.join('/'));
@@ -1663,7 +1666,7 @@ class _PermanentListEditorScreenState
   final _boxMinCtrl = TextEditingController();
   final _boxMaxCtrl = TextEditingController();
 
-  String? _filterBrandId;
+  final Set<String> _filterBrandIds = {};
   final Set<String> _filterQualities = {};
   final Set<String> _filterSurfaces = {};
   final Set<String> _filterSizes = {};
@@ -1685,8 +1688,8 @@ class _PermanentListEditorScreenState
     final ex = widget.existing;
     _nameCtrl.text = ex?.name ?? '';
     _descCtrl.text = ex?.description ?? '';
-    _filterBrandId = ex?.filterBrandId;
     if (ex != null) {
+      _filterBrandIds.addAll(ex.filterBrandIds);
       _filterQualities.addAll(ex.filterQualities);
       _filterSurfaces.addAll(ex.filterSurfaces);
       _filterSizes.addAll(ex.filterSizes);
@@ -1731,7 +1734,7 @@ class _PermanentListEditorScreenState
         name: name,
         description: _descCtrl.text.trim(),
         listType: 'permanent',
-        filterBrandId: _filterBrandId,
+        filterBrandIds: _filterBrandIds.toList(),
         filterQualities: _filterQualities.toList(),
         filterSurfaces: _filterSurfaces.toList(),
         filterSizes: _filterSizes.toList(),
@@ -1747,42 +1750,6 @@ class _PermanentListEditorScreenState
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Could not save — $e')));
     }
-  }
-
-  // Brand: single-select ChoiceChip (no "All" chip; nothing selected = all brands).
-  Widget _singleChipGroup<T>(
-    String title,
-    List<T> options,
-    T? selected,
-    String Function(T) label,
-    void Function(T?) onSelect,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 6,
-          children: options
-              .map((o) => ChoiceChip(
-                    label: Text(label(o),
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: selected == o ? _blue : Colors.black87)),
-                    selected: selected == o,
-                    onSelected: (v) =>
-                        setState(() => onSelect(v ? o : null)),
-                    selectedColor: _blue.withValues(alpha: 0.15),
-                    checkmarkColor: _blue,
-                    visualDensity: VisualDensity.compact,
-                  ))
-              .toList(),
-        ),
-      ],
-    );
   }
 
   // Multi-select FilterChip (no "All" chip; empty = show all).
@@ -1940,17 +1907,12 @@ class _PermanentListEditorScreenState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (widget.brands.isNotEmpty) ...[
-                    _singleChipGroup<Brand>(
+                    _multiChipGroup(
                       'Brand',
-                      widget.brands,
-                      widget.brands
-                              .where((b) => b.id == _filterBrandId)
-                              .isNotEmpty
-                          ? widget.brands
-                              .firstWhere((b) => b.id == _filterBrandId)
-                          : null,
-                      (b) => b.name,
-                      (b) => _filterBrandId = b?.id,
+                      widget.brands.map((b) => b.id).toList(),
+                      _filterBrandIds,
+                      (id) =>
+                          widget.brands.firstWhere((b) => b.id == id).name,
                     ),
                     const Divider(height: 22),
                   ],

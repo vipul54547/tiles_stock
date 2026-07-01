@@ -38,9 +38,9 @@ class StockCatalog {
   /// 'permanent' = condition-based auto-updating list.
   /// 'temporary' = manually picked designs via catalog_designs.
   final String listType;
-  final String? filterBrandId;
 
   /// Multi-select filters — empty list = no filter (show all).
+  final List<String> filterBrandIds;
   final List<String> filterQualities;
   final List<String> filterSurfaces;
   final List<String> filterSizes;
@@ -72,7 +72,7 @@ class StockCatalog {
     this.hiddenByStockist = false,
     this.deleteScheduledAt,
     this.listType = 'permanent',
-    this.filterBrandId,
+    this.filterBrandIds = const [],
     this.filterQualities = const [],
     this.filterSurfaces = const [],
     this.filterSizes = const [],
@@ -115,7 +115,7 @@ class StockCatalog {
             ? null
             : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
         listType: (j['list_type'] as String?) ?? 'permanent',
-        filterBrandId: j['filter_brand_id'] as String?,
+        filterBrandIds:    (j['filter_brand_ids']   as List?)?.cast<String>() ?? const [],
         filterQualities:   (j['filter_qualities']   as List?)?.cast<String>() ?? const [],
         filterSurfaces:    (j['filter_surfaces']    as List?)?.cast<String>() ?? const [],
         filterSizes:       (j['filter_sizes']        as List?)?.cast<String>() ?? const [],
