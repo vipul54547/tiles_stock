@@ -613,13 +613,9 @@ class _State extends State<StockistDashboardScreen> {
       return Padding(
         padding: const EdgeInsets.only(right: 6),
         child: GestureDetector(
-          // Brand & stock-list filters are mutually exclusive: picking a brand
-          // clears any list selection (and vice-versa), so "All brands" / "All
-          // lists" always give a clean way to drop the other filter.
-          onTap: () => setState(() {
-            _brandFilter = value;
-            _catalogFilter = 'all';
-          }),
+          // Brand & stock-list filters are independent — each stays as set and
+          // both apply together (AND). Clear just one via its own "All" chip.
+          onTap: () => setState(() => _brandFilter = value),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
@@ -672,12 +668,7 @@ class _State extends State<StockistDashboardScreen> {
       return Padding(
         padding: const EdgeInsets.only(right: 6),
         child: GestureDetector(
-          // Selecting a list clears the brand filter (mutually exclusive) so the
-          // list shows across all brands without a stale brand narrowing it.
-          onTap: () => setState(() {
-            _catalogFilter = value;
-            _brandFilter = 'all';
-          }),
+          onTap: () => setState(() => _catalogFilter = value),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
@@ -913,7 +904,11 @@ class _State extends State<StockistDashboardScreen> {
             children: [
               if (_pendingBoxes > 0) _buildPendingBanner(),
               if (_brands.length > 1) _buildBrandFilterRow(),
-              if (_filterLists.length > 1) _buildCatalogFilterRow(),
+              // Show the list row when there's more than one list to choose, OR
+              // whenever a list is currently selected — so "All lists" is always
+              // reachable to clear it (even if a brand pick narrowed the list set).
+              if (_filterLists.length > 1 || _catalogFilter != 'all')
+                _buildCatalogFilterRow(),
               _buildChipRow(),
               _buildActionButtonRow(),
             ],
