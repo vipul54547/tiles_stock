@@ -456,9 +456,13 @@ class SupabaseDataService {
     String description = '',
     String listType = 'permanent',
     String? filterBrandId,
-    String? filterQuality,
-    String? filterSurface,
-    String? filterSize,
+    List<String> filterQualities = const [],
+    List<String> filterSurfaces = const [],
+    List<String> filterSizes = const [],
+    List<String> filterTileTypes = const [],
+    List<String> filterStockTypes = const [],
+    int? filterBoxMin,
+    int? filterBoxMax,
   }) async {
     final res = await supabase.rpc('stock_list_save', params: {
       'p_id': id,
@@ -466,9 +470,13 @@ class SupabaseDataService {
       'p_description': description,
       'p_list_type': listType,
       'p_filter_brand_id': filterBrandId,
-      'p_filter_quality': filterQuality,
-      'p_filter_surface': filterSurface,
-      'p_filter_size': filterSize,
+      'p_filter_qualities':   filterQualities,
+      'p_filter_surfaces':    filterSurfaces,
+      'p_filter_sizes':       filterSizes,
+      'p_filter_tile_types':  filterTileTypes,
+      'p_filter_stock_types': filterStockTypes,
+      'p_filter_box_min':     filterBoxMin,
+      'p_filter_box_max':     filterBoxMax,
     });
     return (res ?? '').toString();
   }

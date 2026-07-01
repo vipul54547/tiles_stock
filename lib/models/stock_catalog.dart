@@ -39,9 +39,17 @@ class StockCatalog {
   /// 'temporary' = manually picked designs via catalog_designs.
   final String listType;
   final String? filterBrandId;
-  final String? filterQuality;
-  final String? filterSurface;
-  final String? filterSize;
+
+  /// Multi-select filters — empty list = no filter (show all).
+  final List<String> filterQualities;
+  final List<String> filterSurfaces;
+  final List<String> filterSizes;
+  final List<String> filterTileTypes;
+  final List<String> filterStockTypes;
+
+  /// F-stock box range filter — null = no bound.
+  final int? filterBoxMin;
+  final int? filterBoxMax;
 
   const StockCatalog({
     required this.id,
@@ -65,9 +73,13 @@ class StockCatalog {
     this.deleteScheduledAt,
     this.listType = 'permanent',
     this.filterBrandId,
-    this.filterQuality,
-    this.filterSurface,
-    this.filterSize,
+    this.filterQualities = const [],
+    this.filterSurfaces = const [],
+    this.filterSizes = const [],
+    this.filterTileTypes = const [],
+    this.filterStockTypes = const [],
+    this.filterBoxMin,
+    this.filterBoxMax,
   });
 
   bool get isPrivate => visibility == 'private';
@@ -104,8 +116,12 @@ class StockCatalog {
             : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
         listType: (j['list_type'] as String?) ?? 'permanent',
         filterBrandId: j['filter_brand_id'] as String?,
-        filterQuality: j['filter_quality'] as String?,
-        filterSurface: j['filter_surface'] as String?,
-        filterSize: j['filter_size'] as String?,
+        filterQualities:   (j['filter_qualities']   as List?)?.cast<String>() ?? const [],
+        filterSurfaces:    (j['filter_surfaces']    as List?)?.cast<String>() ?? const [],
+        filterSizes:       (j['filter_sizes']        as List?)?.cast<String>() ?? const [],
+        filterTileTypes:   (j['filter_tile_types']  as List?)?.cast<String>() ?? const [],
+        filterStockTypes:  (j['filter_stock_types'] as List?)?.cast<String>() ?? const [],
+        filterBoxMin: j['filter_box_min'] as int?,
+        filterBoxMax: j['filter_box_max'] as int?,
       );
 }

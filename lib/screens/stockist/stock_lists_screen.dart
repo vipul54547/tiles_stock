@@ -252,9 +252,18 @@ class _StockListsScreenState extends State<StockListsScreen> {
       final match = _brands.where((b) => b.id == c.filterBrandId);
       if (match.isNotEmpty) parts.add(match.first.name);
     }
-    if (c.filterQuality != null) parts.add(c.filterQuality!);
-    if (c.filterSurface != null) parts.add(c.filterSurface!);
-    if (c.filterSize != null) parts.add(c.filterSize!.replaceAll(' mm', ''));
+    if (c.filterQualities.isNotEmpty) parts.add(c.filterQualities.join('/'));
+    if (c.filterSurfaces.isNotEmpty) parts.add(c.filterSurfaces.join('/'));
+    if (c.filterTileTypes.isNotEmpty) parts.add(c.filterTileTypes.join('/'));
+    if (c.filterStockTypes.isNotEmpty) parts.add(c.filterStockTypes.join('/'));
+    if (c.filterSizes.isNotEmpty) {
+      parts.add(c.filterSizes.map((s) => s.replaceAll(' mm', '')).join('/'));
+    }
+    if (c.filterBoxMin != null || c.filterBoxMax != null) {
+      final mn = c.filterBoxMin?.toString() ?? '0';
+      final mx = c.filterBoxMax?.toString() ?? '∞';
+      parts.add('Boxes $mn–$mx');
+    }
     return parts.isEmpty ? 'All designs' : parts.join(' · ');
   }
 
@@ -1634,7 +1643,8 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
 
 // ── Permanent list editor ─────────────────────────────────────────────────────
 // Create or edit a permanent (condition-based) stock list.
-// Conditions: brand · quality · surface · size — all optional (null = no filter).
+// Conditions: brand (single) · quality/surface/tile_type/stock_type/size (multi) · box range.
+// Empty selection = no filter (show everything for that dimension).
 class PermanentListEditorScreen extends StatefulWidget {
   final StockCatalog? existing;
   final List<Brand> brands;
@@ -1650,29 +1660,41 @@ class _PermanentListEditorScreenState
   final _data = SupabaseDataService();
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+  final _boxMinCtrl = TextEditingController();
+  final _boxMaxCtrl = TextEditingController();
 
   String? _filterBrandId;
-  String? _filterQuality;
-  String? _filterSurface;
-  String? _filterSize;
+  final Set<String> _filterQualities = {};
+  final Set<String> _filterSurfaces = {};
+  final Set<String> _filterSizes = {};
+  final Set<String> _filterTileTypes = {};
+  final Set<String> _filterStockTypes = {};
+
   List<String> _sizes = [];
   bool _loadingSizes = true;
   bool _saving = false;
 
   static const _qualities = ['Standard', 'Premium'];
-  static const _surfaces = [
-    'Glossy', 'Matt', 'Rustic', 'P.Glossy', 'Sugar', 'Carving'
-  ];
+  static const _surfaces = ['Glossy', 'Matt', 'Rustic', 'P.Glossy', 'Sugar', 'Carving'];
+  static const _tileTypes = ['Ceramic', 'PGVT & GVT', 'Porcelain'];
+  static const _stockTypeOptions = ['Uncertain', 'One Time'];
 
   @override
   void initState() {
     super.initState();
-    _nameCtrl.text = widget.existing?.name ?? '';
-    _descCtrl.text = widget.existing?.description ?? '';
-    _filterBrandId = widget.existing?.filterBrandId;
-    _filterQuality = widget.existing?.filterQuality;
-    _filterSurface = widget.existing?.filterSurface;
-    _filterSize = widget.existing?.filterSize;
+    final ex = widget.existing;
+    _nameCtrl.text = ex?.name ?? '';
+    _descCtrl.text = ex?.description ?? '';
+    _filterBrandId = ex?.filterBrandId;
+    if (ex != null) {
+      _filterQualities.addAll(ex.filterQualities);
+      _filterSurfaces.addAll(ex.filterSurfaces);
+      _filterSizes.addAll(ex.filterSizes);
+      _filterTileTypes.addAll(ex.filterTileTypes);
+      _filterStockTypes.addAll(ex.filterStockTypes);
+      if (ex.filterBoxMin != null) _boxMinCtrl.text = ex.filterBoxMin.toString();
+      if (ex.filterBoxMax != null) _boxMaxCtrl.text = ex.filterBoxMax.toString();
+    }
     _loadSizes();
   }
 
@@ -1690,6 +1712,8 @@ class _PermanentListEditorScreenState
   void dispose() {
     _nameCtrl.dispose();
     _descCtrl.dispose();
+    _boxMinCtrl.dispose();
+    _boxMaxCtrl.dispose();
     super.dispose();
   }
 
@@ -1708,9 +1732,13 @@ class _PermanentListEditorScreenState
         description: _descCtrl.text.trim(),
         listType: 'permanent',
         filterBrandId: _filterBrandId,
-        filterQuality: _filterQuality,
-        filterSurface: _filterSurface,
-        filterSize: _filterSize,
+        filterQualities: _filterQualities.toList(),
+        filterSurfaces: _filterSurfaces.toList(),
+        filterSizes: _filterSizes.toList(),
+        filterTileTypes: _filterTileTypes.toList(),
+        filterStockTypes: _filterStockTypes.toList(),
+        filterBoxMin: int.tryParse(_boxMinCtrl.text.trim()),
+        filterBoxMax: int.tryParse(_boxMaxCtrl.text.trim()),
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -1721,7 +1749,8 @@ class _PermanentListEditorScreenState
     }
   }
 
-  Widget _chipGroup<T>(
+  // Brand: single-select ChoiceChip (no "All" chip; nothing selected = all brands).
+  Widget _singleChipGroup<T>(
     String title,
     List<T> options,
     T? selected,
@@ -1737,30 +1766,96 @@ class _PermanentListEditorScreenState
         Wrap(
           spacing: 8,
           runSpacing: 6,
+          children: options
+              .map((o) => ChoiceChip(
+                    label: Text(label(o),
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: selected == o ? _blue : Colors.black87)),
+                    selected: selected == o,
+                    onSelected: (v) =>
+                        setState(() => onSelect(v ? o : null)),
+                    selectedColor: _blue.withValues(alpha: 0.15),
+                    checkmarkColor: _blue,
+                    visualDensity: VisualDensity.compact,
+                  ))
+              .toList(),
+        ),
+      ],
+    );
+  }
+
+  // Multi-select FilterChip (no "All" chip; empty = show all).
+  Widget _multiChipGroup(
+    String title,
+    List<String> options,
+    Set<String> selected,
+    String Function(String) label,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: options
+              .map((o) => FilterChip(
+                    label: Text(label(o),
+                        style: TextStyle(
+                            fontSize: 12,
+                            color:
+                                selected.contains(o) ? _blue : Colors.black87)),
+                    selected: selected.contains(o),
+                    onSelected: (v) => setState(
+                        () => v ? selected.add(o) : selected.remove(o)),
+                    selectedColor: _blue.withValues(alpha: 0.15),
+                    checkmarkColor: _blue,
+                    visualDensity: VisualDensity.compact,
+                  ))
+              .toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _boxRangeRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Box range (F stock)',
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+        const SizedBox(height: 8),
+        Row(
           children: [
-            ChoiceChip(
-              label: Text('All',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: selected == null ? _blue : Colors.black87)),
-              selected: selected == null,
-              onSelected: (_) => setState(() => onSelect(null)),
-              selectedColor: _blue.withValues(alpha: 0.15),
-              checkmarkColor: _blue,
-              visualDensity: VisualDensity.compact,
-            ),
-            for (final o in options)
-              ChoiceChip(
-                label: Text(label(o),
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: selected == o ? _blue : Colors.black87)),
-                selected: selected == o,
-                onSelected: (_) => setState(() => onSelect(o)),
-                selectedColor: _blue.withValues(alpha: 0.15),
-                checkmarkColor: _blue,
-                visualDensity: VisualDensity.compact,
+            Expanded(
+              child: TextField(
+                controller: _boxMinCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Min boxes',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
               ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Text('–', style: TextStyle(fontSize: 18)),
+            ),
+            Expanded(
+              child: TextField(
+                controller: _boxMaxCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Max boxes',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+            ),
           ],
         ),
       ],
@@ -1830,10 +1925,10 @@ class _PermanentListEditorScreenState
                 Icon(Icons.auto_awesome, size: 15, color: _blue),
                 SizedBox(width: 6),
                 Text('Auto-filter conditions',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13.5)),
                 SizedBox(width: 8),
-                Text('leave as "All" to show everything',
+                Text('leave empty to include everything',
                     style: TextStyle(fontSize: 11, color: Colors.black45)),
               ],
             ),
@@ -1845,32 +1940,31 @@ class _PermanentListEditorScreenState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (widget.brands.isNotEmpty) ...[
-                    _chipGroup<Brand>(
+                    _singleChipGroup<Brand>(
                       'Brand',
                       widget.brands,
-                      widget.brands.where((b) => b.id == _filterBrandId).isNotEmpty
-                          ? widget.brands.firstWhere((b) => b.id == _filterBrandId)
+                      widget.brands
+                              .where((b) => b.id == _filterBrandId)
+                              .isNotEmpty
+                          ? widget.brands
+                              .firstWhere((b) => b.id == _filterBrandId)
                           : null,
                       (b) => b.name,
                       (b) => _filterBrandId = b?.id,
                     ),
                     const Divider(height: 22),
                   ],
-                  _chipGroup<String>(
-                    'Quality',
-                    _qualities,
-                    _filterQuality,
-                    (q) => q,
-                    (q) => _filterQuality = q,
-                  ),
+                  _multiChipGroup('Quality', _qualities, _filterQualities,
+                      (q) => q),
                   const Divider(height: 22),
-                  _chipGroup<String>(
-                    'Surface',
-                    _surfaces,
-                    _filterSurface,
-                    (s) => s,
-                    (s) => _filterSurface = s,
-                  ),
+                  _multiChipGroup('Surface', _surfaces, _filterSurfaces,
+                      (s) => s),
+                  const Divider(height: 22),
+                  _multiChipGroup('Tile type', _tileTypes, _filterTileTypes,
+                      (t) => t),
+                  const Divider(height: 22),
+                  _multiChipGroup('Stock type', _stockTypeOptions,
+                      _filterStockTypes, (t) => t),
                   const Divider(height: 22),
                   if (_loadingSizes)
                     const Padding(
@@ -1883,13 +1977,10 @@ class _PermanentListEditorScreenState
                                   strokeWidth: 2))),
                     )
                   else
-                    _chipGroup<String>(
-                      'Size',
-                      _sizes,
-                      _filterSize,
-                      (s) => s.replaceAll(' mm', ''),
-                      (s) => _filterSize = s,
-                    ),
+                    _multiChipGroup('Size', _sizes, _filterSizes,
+                        (s) => s.replaceAll(' mm', '')),
+                  const Divider(height: 22),
+                  _boxRangeRow(),
                 ],
               ),
             ),
