@@ -743,6 +743,7 @@ class _State extends State<PublicCatalogScreen> {
                         FilterSection(
                           title: 'Quantity (boxes)',
                           summary: qtySummary(),
+                          initiallyExpanded: true,
                           child: Row(
                             children: [
                               Expanded(
