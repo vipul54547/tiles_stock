@@ -123,6 +123,40 @@ class _State extends State<StockistsOverviewScreen> {
   List<DnaAttribute> _dnaAttrs = []; // catalog (non-free-text), for facet chips
   Map<String, Set<String>> _dnaValues = {}; // designId → canonical value ids
   final Set<String> _selectedDna = {}; // selected canonical value ids
+  // Which card's DNA-tag ▾ is currently expanded (only one at a time).
+  String? _expandedDnaDesignId;
+
+  // This design's DNA tags grouped by attribute name, for the card's
+  // expandable ▾ section. Reuses the already-loaded facet catalog/values.
+  Map<String, List<String>> _dnaTagsFor(String designId) {
+    final vals = _dnaValues[designId];
+    if (vals == null || vals.isEmpty) return const {};
+    final out = <String, List<String>>{};
+    for (final attr in _dnaAttrs) {
+      for (final v in attr.values) {
+        if (v.name.toLowerCase() != 'none' && vals.contains(v.id)) {
+          (out[attr.name] ??= []).add(v.name);
+        }
+      }
+    }
+    return out;
+  }
+
+  // Search match against a design's DNA tags (canonical name only — a buyer
+  // browses across many stockists, so there's no single "own wording" to
+  // resolve per design). [terms] is the (optionally smart-expanded) set of
+  // words typed in the search bar.
+  bool _dnaSearchMatches(TileDesign d, Set<String> terms) {
+    final vals = _dnaValues[d.id];
+    if (vals == null || vals.isEmpty) return false;
+    for (final attr in _dnaAttrs) {
+      for (final v in attr.values) {
+        if (v.name.toLowerCase() == 'none' || !vals.contains(v.id)) continue;
+        if (terms.any((t) => v.name.toLowerCase().contains(t))) return true;
+      }
+    }
+    return false;
+  }
 
   // value ids actually present in the current pool (so empty facets are hidden).
   Set<String> get _dnaValuesInUse =>
@@ -613,7 +647,12 @@ class _State extends State<StockistsOverviewScreen> {
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       if (_searchByDesign) {
-        result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
+        final terms = smartSearch ? expandSearchTerms(q) : {q};
+        result = result
+            .where((d) =>
+                d.matchesSearch(q, smart: smartSearch) ||
+                _dnaSearchMatches(d, terms))
+            .toList();
       } else {
         final matchingIds = _marketData
             .where((sd) =>
@@ -767,7 +806,12 @@ class _State extends State<StockistsOverviewScreen> {
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
               if (_searchByDesign) {
-                r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
+                final terms = smartSearch ? expandSearchTerms(q) : {q};
+                r = r
+                    .where((d) =>
+                        d.matchesSearch(q, smart: smartSearch) ||
+                        _dnaSearchMatches(d, terms))
+                    .toList();
               } else {
                 final ids = _marketData
                     .where((sd) =>
@@ -1600,6 +1644,21 @@ class _State extends State<StockistsOverviewScreen> {
                             '/stockist/${filteredDesigns[i].stockistId}/portfolio',
                             extra: filteredDesigns[i].id,
                           ),
+                          dnaTagsByAttribute:
+                              _dnaTagsFor(filteredDesigns[i].id),
+                          isDnaExpanded:
+                              _expandedDnaDesignId == filteredDesigns[i].id,
+                          onToggleDnaExpand: () => setState(() =>
+                              _expandedDnaDesignId =
+                                  _expandedDnaDesignId == filteredDesigns[i].id
+                                      ? null
+                                      : filteredDesigns[i].id),
+                          onCollapseDnaIfExpanded: () {
+                            if (_expandedDnaDesignId ==
+                                filteredDesigns[i].id) {
+                              setState(() => _expandedDnaDesignId = null);
+                            }
+                          },
                         ),
                       )
                 : filteredStockists.isEmpty

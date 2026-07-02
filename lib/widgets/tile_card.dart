@@ -4,6 +4,7 @@ import '../models/tile_design.dart';
 import '../utils/tile_sizes.dart';
 import '../services/supabase_auth_service.dart';
 import '../services/cloudinary_service.dart';
+import 'dna_tag_expander.dart';
 
 export '../utils/tile_sizes.dart' show aspectRatioFromSize, kAllowedSizes;
 
@@ -25,6 +26,14 @@ class TileCard extends StatelessWidget {
   /// the brand-agnostic master name. Null → falls back to [design.name].
   final String? displayName;
 
+  /// This design's DNA tags grouped by attribute name (e.g. {"Series":
+  /// ["Monochrome"]}), for the expandable ▾ tag section. Null/empty → no
+  /// arrow shown at all.
+  final Map<String, List<String>>? dnaTagsByAttribute;
+  final bool isDnaExpanded;
+  final VoidCallback? onToggleDnaExpand;
+  final VoidCallback? onCollapseDnaIfExpanded;
+
   const TileCard({
     super.key,
     required this.design,
@@ -35,6 +44,10 @@ class TileCard extends StatelessWidget {
     this.showQuality = true,
     this.showControlFigures = false,
     this.displayName,
+    this.dnaTagsByAttribute,
+    this.isDnaExpanded = false,
+    this.onToggleDnaExpand,
+    this.onCollapseDnaIfExpanded,
   });
 
   // P (physical) · C (held back) · H (booked) · F (shown to dealers), colour-coded.
@@ -178,21 +191,42 @@ class TileCard extends StatelessWidget {
                   if (showControlFigures) const SizedBox(height: 3),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                          showControlFigures
-                              ? (design.fStock == 0 && design.controlQuantity > 0
-                                  ? 'Hidden'
-                                  : '${design.fStock} shown')
-                              : '${design.boxQuantity} boxes',
-                          style: TextStyle(
-                              color: showControlFigures &&
-                                      design.fStock == 0 &&
-                                      design.controlQuantity > 0
-                                  ? const Color(0xFFEF6C00)
-                                  : const Color(0xFF1B4F72),
-                              fontWeight: FontWeight.w600,
-                              fontSize: 11)),
+                      // Boxes/F_Stock count, with the DNA tag ▾ arrow (and its
+                      // expanded chips, when open) directly beneath it — the
+                      // card's bottom-left, only shown when tags exist.
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                                showControlFigures
+                                    ? (design.fStock == 0 &&
+                                            design.controlQuantity > 0
+                                        ? 'Hidden'
+                                        : '${design.fStock} shown')
+                                    : '${design.boxQuantity} boxes',
+                                style: TextStyle(
+                                    color: showControlFigures &&
+                                            design.fStock == 0 &&
+                                            design.controlQuantity > 0
+                                        ? const Color(0xFFEF6C00)
+                                        : const Color(0xFF1B4F72),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 11)),
+                            if (dnaTagsByAttribute != null &&
+                                dnaTagsByAttribute!.isNotEmpty)
+                              DnaTagExpander(
+                                tagsByAttribute: dnaTagsByAttribute!,
+                                isExpanded: isDnaExpanded,
+                                onToggleExpand: onToggleDnaExpand ?? () {},
+                                onCollapseIfExpanded:
+                                    onCollapseDnaIfExpanded ?? () {},
+                              ),
+                          ],
+                        ),
+                      ),
                       // Stockist ID is hidden from guests.
                       if (isGuest)
                         const SizedBox.shrink()

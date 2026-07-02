@@ -12,6 +12,7 @@ import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 import '../utils/banner_layout.dart' show effectiveCompanyPos;
 import '../widgets/filter_section.dart';
+import '../widgets/dna_tag_expander.dart';
 
 /// Public, login-free catalog opened via a stockist's private share link
 /// (`/s/<token>`). Shows that stockist's in-stock designs with search, filters,
@@ -59,6 +60,8 @@ class _State extends State<PublicCatalogScreen> {
   // tagged value ids in d['dna']. (project_design_dna_engine)
   List<Map<String, dynamic>> _dnaFacets = [];
   final Set<String> _fDna = {};
+  // Which card's DNA-tag ▾ is currently expanded (only one at a time).
+  String? _expandedDnaDesignId;
 
   @override
   void initState() {
@@ -142,6 +145,26 @@ class _State extends State<PublicCatalogScreen> {
   Set<String> _dnaOf(Map<String, dynamic> d) =>
       ((d['dna'] as List?) ?? const []).map((e) => e.toString()).toSet();
 
+  // This design's DNA tags grouped by attribute name, for the card's
+  // expandable ▾ section. Built from the already-loaded facet catalog.
+  Map<String, List<String>> _dnaTagsFor(Map<String, dynamic> d) {
+    final vals = _dnaOf(d);
+    if (vals.isEmpty) return const {};
+    final out = <String, List<String>>{};
+    for (final attr in _dnaFacets) {
+      final name = (attr['name'] ?? '').toString();
+      for (final v in ((attr['values'] as List?) ?? const [])) {
+        final map = v as Map;
+        final vName = (map['name'] ?? '').toString();
+        if (vName.toLowerCase() == 'none') continue;
+        if (vals.contains(map['id'].toString())) {
+          (out[name] ??= []).add(vName);
+        }
+      }
+    }
+    return out;
+  }
+
   // DNA value ids present across the in-stock pool (so empty facets hide).
   Set<String> get _dnaInUse {
     final used = <String>{};
@@ -192,8 +215,9 @@ class _State extends State<PublicCatalogScreen> {
     if (q.isNotEmpty) {
       final terms = _smart ? expandSearchTerms(q) : {q};
       r = r.where((d) {
+        final dnaWords = _dnaTagsFor(d).values.expand((x) => x).join(' ');
         final hay =
-            '${d['name'] ?? ''} ${d['surface'] ?? ''} ${d['finish'] ?? ''}'
+            '${d['name'] ?? ''} ${d['surface'] ?? ''} ${d['finish'] ?? ''} $dnaWords'
                 .toLowerCase();
         return terms.any((t) => hay.contains(t));
       });
@@ -1335,6 +1359,18 @@ class _State extends State<PublicCatalogScreen> {
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF2E7D32))),
+                  DnaTagExpander(
+                    tagsByAttribute: _dnaTagsFor(d),
+                    isExpanded: _expandedDnaDesignId == id,
+                    onToggleExpand: () => setState(() =>
+                        _expandedDnaDesignId =
+                            _expandedDnaDesignId == id ? null : id),
+                    onCollapseIfExpanded: () {
+                      if (_expandedDnaDesignId == id) {
+                        setState(() => _expandedDnaDesignId = null);
+                      }
+                    },
+                  ),
                 ],
               ),
             ),

@@ -11,6 +11,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/tile_card.dart';
+import '../../widgets/dna_tag_expander.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/powered_by_tiles_stock.dart';
 import '../../widgets/notification_bell.dart';
@@ -91,6 +92,11 @@ class _State extends State<StockistDashboardScreen> {
   List<DnaAttribute> _dnaAttrs = [];           // catalog, for facet chips
   Map<String, Set<String>> _dnaValues = {};    // designId → canonical value ids
   final Set<String> _selectedDna = {};         // selected canonical value ids
+  // Which card's DNA-tag ▾ is currently expanded (only one at a time).
+  String? _expandedDnaDesignId;
+  // This stockist's own words per canonical DNA value ("My Words"), used to
+  // label tags in this stockist's own wording and to widen search matching.
+  Map<String, List<String>> _myWords = {};
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
   String _sortBy = 'default';
@@ -199,6 +205,9 @@ class _State extends State<StockistDashboardScreen> {
     final dnaAttrs = await _service.dnaCatalog();
     final dnaVals =
         await _service.designsDnaValues(data.map((d) => d.id).toList());
+    // This stockist's own alias words per canonical value — widens both the
+    // card-tag label (own wording) and search matching beyond the admin name.
+    final myWords = await _service.dnaMyWords();
     if (!mounted) return;
     final dnaFill = _computeDnaFill(data, dnaAttrs, dnaVals);
     // my_stock() doesn't return image_url — fill missing images from the
@@ -226,6 +235,7 @@ class _State extends State<StockistDashboardScreen> {
       _dnaAttrs =
           dnaAttrs.where((a) => !a.isFreeText || a.showInFacets).toList();
       _dnaValues = dnaVals;
+      _myWords = myWords;
       // Drop a stale brand filter if that brand no longer exists.
       if (_brandFilter != 'all' && !_brands.any((b) => b.id == _brandFilter)) {
         _brandFilter = 'all';
@@ -371,6 +381,20 @@ class _State extends State<StockistDashboardScreen> {
                         ),
                       ),
                     )),
+                // DNA tags are set once on the shared master, so every brand's
+                // holding here carries the same tags — look them up via any one
+                // holding (first.id) and key the shared expand-state the same way.
+                DnaTagExpander(
+                  tagsByAttribute: _dnaTagsFor(first.id),
+                  isExpanded: _expandedDnaDesignId == first.id,
+                  onToggleExpand: () => setState(() => _expandedDnaDesignId =
+                      _expandedDnaDesignId == first.id ? null : first.id),
+                  onCollapseIfExpanded: () {
+                    if (_expandedDnaDesignId == first.id) {
+                      setState(() => _expandedDnaDesignId = null);
+                    }
+                  },
+                ),
               ],
             ),
           ),
@@ -481,9 +505,12 @@ class _State extends State<StockistDashboardScreen> {
 
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
+      final terms = smartSearch ? expandSearchTerms(q) : {q};
       result = result
           .where((d) =>
-              d.matchesSearch(q, smart: smartSearch) || _aliasMatches(d, q))
+              d.matchesSearch(q, smart: smartSearch) ||
+              _aliasMatches(d, q) ||
+              _dnaSearchMatches(d, terms))
           .toList();
     }
 
@@ -1045,6 +1072,48 @@ class _State extends State<StockistDashboardScreen> {
     if (mounted) _load();
   }
 
+  // The label shown for a value: this stockist's own word for it (My Words)
+  // if set, else the admin's canonical name — same convention as dna_editor_sheet.
+  String _dnaLabel(DnaValue v) {
+    final words = _myWords[v.id];
+    return (words != null && words.isNotEmpty) ? words.first : v.name;
+  }
+
+  // This design's DNA tags grouped by attribute name, for the card's
+  // expandable ▾ section. Reuses the already-loaded facet catalog/values —
+  // no extra fetch. (project_design_dna_engine)
+  Map<String, List<String>> _dnaTagsFor(String designId) {
+    final vals = _dnaValues[designId];
+    if (vals == null || vals.isEmpty) return const {};
+    final out = <String, List<String>>{};
+    for (final attr in _dnaAttrs) {
+      for (final v in attr.values) {
+        if (v.name.toLowerCase() != 'none' && vals.contains(v.id)) {
+          (out[attr.name] ??= []).add(_dnaLabel(v));
+        }
+      }
+    }
+    return out;
+  }
+
+  // Search match against a design's DNA tags: the canonical name AND this
+  // stockist's own alias words for each tagged value. [terms] is the
+  // (optionally smart-expanded) set of words typed in the search bar.
+  bool _dnaSearchMatches(TileDesign d, Set<String> terms) {
+    final vals = _dnaValues[d.id];
+    if (vals == null || vals.isEmpty) return false;
+    for (final attr in _dnaAttrs) {
+      for (final v in attr.values) {
+        if (v.name.toLowerCase() == 'none' || !vals.contains(v.id)) continue;
+        final words = <String>{v.name.toLowerCase()};
+        final mine = _myWords[v.id];
+        if (mine != null) words.addAll(mine.map((w) => w.toLowerCase()));
+        if (terms.any((t) => words.any((w) => w.contains(t)))) return true;
+      }
+    }
+    return false;
+  }
+
   Widget _designTile(TileDesign d) {
     final outOfStock = d.boxQuantity == 0;
     final lowStock = !outOfStock && d.boxQuantity < _lowStockThreshold;
@@ -1076,13 +1145,29 @@ class _State extends State<StockistDashboardScreen> {
             onTap: _selectMode
                 ? () {}
                 : () => context.push('/stockist/stock/edit/${d.id}'),
+            dnaTagsByAttribute: _dnaTagsFor(d.id),
+            isDnaExpanded: _expandedDnaDesignId == d.id,
+            onToggleDnaExpand: () => setState(() => _expandedDnaDesignId =
+                _expandedDnaDesignId == d.id ? null : d.id),
+            onCollapseDnaIfExpanded: () {
+              if (_expandedDnaDesignId == d.id) {
+                setState(() => _expandedDnaDesignId = null);
+              }
+            },
           ),
           // Stock-list badge — which list this design belongs to (shown only
           // when the brand has more than one list, so it carries information).
-          if (_filterLists.length > 1 && _designListName(d) != null)
+          // Top-right (not bottom-left): that corner is now the DNA tag ▾
+          // arrow's territory, which grows taller when expanded — an
+          // absolutely-positioned bottom-left badge would sit on top of it.
+          // Select-mode's checkmark also lives top-right, but the two never
+          // show at once.
+          if (!_selectMode &&
+              _filterLists.length > 1 &&
+              _designListName(d) != null)
             Positioned(
-              bottom: 6,
-              left: 6,
+              top: 6,
+              right: 6,
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -1606,7 +1691,12 @@ class _State extends State<StockistDashboardScreen> {
             }
             if (_searchQuery.isNotEmpty) {
               final q = _searchQuery.toLowerCase();
-              r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
+              final terms = smartSearch ? expandSearchTerms(q) : {q};
+              r = r
+                  .where((d) =>
+                      d.matchesSearch(q, smart: smartSearch) ||
+                      _dnaSearchMatches(d, terms))
+                  .toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
             if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
