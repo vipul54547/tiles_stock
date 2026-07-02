@@ -47,6 +47,16 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
     });
   }
 
+  // Jump to a family member (given its library master id). Only in-stock
+  // members are in _designs; out-of-stock ones aren't tappable (shown for
+  // info only), so a no-match is a safe no-op.
+  void _openLibrary(String libraryId) {
+    final idx = _designs.indexWhere((d) => d.libraryId == libraryId);
+    if (idx >= 0 && idx != _currentIndex) {
+      setState(() => _currentIndex = idx);
+    }
+  }
+
   void _openFullImage(TileDesign design, List<String> urls, double ar) {
     Navigator.of(context).push(MaterialPageRoute(
       fullscreenDialog: true,
@@ -329,6 +339,13 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                       designId: design.id,
                       service: _service),
 
+                  // ── Family (concept) — sibling variants + their stock ──
+                  _FamilySection(
+                      key: ValueKey('fam_${design.id}'),
+                      designId: design.id,
+                      service: _service,
+                      onOpenLibrary: _openLibrary),
+
                   const SizedBox(height: 24),
 
                   // Guests can't reach the stockist (ID, contact, portfolio).
@@ -503,6 +520,154 @@ class _DnaSection extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ── Family (concept) section ────────────────────────────────────────────────
+// Tiles sold as a coordinated set (1801-A / 1801-B, 1305 Light / Dark / HL).
+// Shows every sibling variant with its live stock — including out-of-stock
+// members (greyed) so the buyer can see the whole concept and decide. Hidden
+// when the design has no siblings.
+class _FamilySection extends StatelessWidget {
+  final String designId;
+  final SupabaseDataService service;
+  final void Function(String libraryId) onOpenLibrary;
+  const _FamilySection(
+      {super.key,
+      required this.designId,
+      required this.service,
+      required this.onOpenLibrary});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: service.designFamily(designId),
+      builder: (_, snap) {
+        final members = snap.data ?? const [];
+        if (members.length < 2) return const SizedBox.shrink();
+        const navy = Color(0xFF1B4F72);
+        return Padding(
+          padding: const EdgeInsets.only(top: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 0, 8),
+                child: Text('COMPLETE THE FAMILY · ${members.length} DESIGNS',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                        color: navy)),
+              ),
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: navy.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: navy.withValues(alpha: 0.15)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  children: [
+                    for (var i = 0; i < members.length; i++)
+                      _familyRow(context, members[i], last: i == members.length - 1),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _familyRow(BuildContext context, Map<String, dynamic> m,
+      {required bool last}) {
+    const navy = Color(0xFF1B4F72);
+    final libId = '${m['library_id']}';
+    final name = (m['name'] ?? '').toString();
+    final img = (m['image_url'] ?? '').toString();
+    final size = (m['size'] ?? '').toString();
+    final fStock = (m['f_stock'] as num?)?.toInt() ?? 0;
+    final isCurrent = m['is_current'] == true;
+    final inStock = fStock > 0;
+    final ratio = aspectRatioFromSize(size);
+
+    return InkWell(
+      onTap: inStock && !isCurrent ? () => onOpenLibrary(libId) : null,
+      child: Opacity(
+        opacity: inStock ? 1.0 : 0.55,
+        child: Container(
+          decoration: BoxDecoration(
+            border: last
+                ? null
+                : Border(
+                    bottom: BorderSide(color: navy.withValues(alpha: 0.10))),
+          ),
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 46,
+                height: 46,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: TileImage(
+                      url: img, tileAspectRatio: ratio, thumbWidth: 120),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 13.5)),
+                        ),
+                        if (isCurrent) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                                color: navy.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4)),
+                            child: const Text('This one',
+                                style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: navy)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      inStock ? '$fStock boxes in stock' : 'Out of stock',
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: inStock
+                              ? const Color(0xFF2E7D32)
+                              : const Color(0xFFC62828)),
+                    ),
+                  ],
+                ),
+              ),
+              if (inStock && !isCurrent)
+                const Icon(Icons.chevron_right, size: 18, color: navy),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

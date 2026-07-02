@@ -1400,6 +1400,50 @@ class SupabaseDataService {
     }
   }
 
+  // ── Design "family" (concept grouping) ─────────────────────────────────────
+
+  /// The family (concept) a design belongs to — every sibling variant (same
+  /// stockist + size + name-root), each with live F_stock (0 = out of stock).
+  /// Empty when the design has no siblings. Buyer-facing (anon-safe).
+  Future<List<Map<String, dynamic>>> designFamily(String designId) async {
+    try {
+      final res =
+          await supabase.rpc('design_family', params: {'p_design_id': designId});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('designFamily failed: $e');
+      return [];
+    }
+  }
+
+  /// Stockist's own view of a master's family (incl. just itself, incl.
+  /// out-of-stock members): { 'family_key': String, 'members': [ … ] }.
+  Future<Map<String, dynamic>> myFamilyFor(String libraryId) async {
+    try {
+      final res =
+          await supabase.rpc('my_family_for', params: {'p_library_id': libraryId});
+      return res is Map ? Map<String, dynamic>.from(res) : {};
+    } catch (e) {
+      debugPrint('myFamilyFor failed: $e');
+      return {};
+    }
+  }
+
+  /// Correction: attach a master to a family key (add-to-family), or — by
+  /// passing its own id as the key — pull it out to stand alone (remove).
+  Future<void> familySetOverride(String libraryId, String familyKey) async {
+    await supabase.rpc('family_set_override',
+        params: {'p_library_id': libraryId, 'p_family_key': familyKey});
+  }
+
+  /// Reset a master back to automatic grouping (drop the correction).
+  Future<void> familyClearOverride(String libraryId) async {
+    await supabase
+        .rpc('family_clear_override', params: {'p_library_id': libraryId});
+  }
+
   /// Find-or-create the Library master id for a stock design (so the dashboard
   /// DNA dot can open the editor even for designs not yet in the Library).
   /// Returns null on failure.

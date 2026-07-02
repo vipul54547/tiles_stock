@@ -542,6 +542,9 @@ class _State extends State<PublicCatalogScreen> {
                           '${weight.toStringAsFixed(weight % 1 == 0 ? 0 : 1)} kg'),
                     if (sqft != null) row('Sq.ft / box', sqft.toStringAsFixed(2)),
                     if (band != null) row('Thickness (approx)', band),
+                    // Family (concept) — sibling variants + their stock, incl.
+                    // out-of-stock members greyed, so the buyer sees the whole set.
+                    _PublicFamilyStrip(designId: id, brand: _brand),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
@@ -1440,6 +1443,100 @@ class _State extends State<PublicCatalogScreen> {
         ),
         btn(Icons.add, () => _setQty(id, qty + 1)),
       ],
+    );
+  }
+}
+
+// Family (concept) strip inside the public detail popup. View-only here (the
+// public catalog map has no library_id to navigate by) — shows every sibling
+// variant with its stock, out-of-stock greyed, so the buyer sees the full set.
+class _PublicFamilyStrip extends StatelessWidget {
+  final String designId;
+  final Color brand;
+  const _PublicFamilyStrip({required this.designId, required this.brand});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: SupabaseDataService().designFamily(designId),
+      builder: (_, snap) {
+        final members = snap.data ?? const [];
+        if (members.length < 2) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('COMPLETE THE FAMILY · ${members.length} DESIGNS',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.4,
+                      color: brand)),
+              const SizedBox(height: 8),
+              for (final m in members) _row(m),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _row(Map<String, dynamic> m) {
+    final name = (m['name'] ?? '').toString();
+    final img = (m['image_url'] ?? '').toString();
+    final size = (m['size'] ?? '').toString();
+    final fStock = (m['f_stock'] as num?)?.toInt() ?? 0;
+    final isCurrent = m['is_current'] == true;
+    final inStock = fStock > 0;
+    return Opacity(
+      opacity: inStock ? 1.0 : 0.55,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: TileImage(
+                    url: img,
+                    tileAspectRatio: aspectRatioFromSize(size),
+                    thumbWidth: 120),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 13)),
+                  ),
+                  if (isCurrent) ...[
+                    const SizedBox(width: 6),
+                    Text('(this one)',
+                        style: TextStyle(fontSize: 10.5, color: brand)),
+                  ],
+                ],
+              ),
+            ),
+            Text(
+              inStock ? '$fStock boxes' : 'Out of stock',
+              style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: inStock
+                      ? const Color(0xFF2E7D32)
+                      : const Color(0xFFC62828)),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
