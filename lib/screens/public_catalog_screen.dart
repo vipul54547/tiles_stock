@@ -13,6 +13,7 @@ import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 import '../utils/banner_layout.dart' show effectiveCompanyPos;
 import '../widgets/filter_section.dart';
 import '../widgets/dna_tag_expander.dart';
+import '../widgets/tile_card.dart' show TileImage;
 
 /// Public, login-free catalog opened via a stockist's private share link
 /// (`/s/<token>`). Shows that stockist's in-stock designs with search, filters,
@@ -777,15 +778,14 @@ class _State extends State<PublicCatalogScreen> {
         slivers: [
           // Name bar scrolls away (not pinned) — the brand identity lives on the
           // banner; the buyer gets the full screen for designs while browsing.
+          // No title text: the name already shows once on the banner's
+          // "Welcome to X" line just below — a second copy here was redundant.
           SliverAppBar(
             pinned: false,
             floating: false,
+            toolbarHeight: 40,
             backgroundColor: _brand,
             foregroundColor: Colors.white,
-            title: Text(
-                (_brandInfo['name'] ?? '').toString().isNotEmpty
-                    ? _brandInfo['name'].toString()
-                    : (_stockist['name']?.toString() ?? 'Stock Catalogue')),
           ),
           SliverToBoxAdapter(child: _bannerArea()),
           // Search + filter row stays PINNED so it's always reachable while scrolling.
@@ -912,8 +912,9 @@ class _State extends State<PublicCatalogScreen> {
                     ),
                   ),
                 ),
-              // TilesDesign logo (library/upload). Pool shows it in the trust strip.
-              if (source != 'pool')
+              // TilesDesign logo (library/upload only; pool never shows it).
+              // "None" position means the stockist chose to hide it entirely.
+              if (source != 'pool' && tdPos != 'none')
                 Align(
                   alignment: _alignFor(tdPos),
                   child: Padding(
@@ -925,8 +926,8 @@ class _State extends State<PublicCatalogScreen> {
                         height: tdPos == 'footer' ? h * 0.16 : h * 0.22)),
                   ),
                 ),
-              // Welcome / Powered-by trust strip
-              if (showWelcome) _trustStrip(name, poweredBy: source == 'pool'),
+              // Welcome trust strip
+              if (showWelcome) _trustStrip(name),
             ],
           ),
         );
@@ -956,8 +957,8 @@ class _State extends State<PublicCatalogScreen> {
       );
 
   // System trust strip for generic/anonymous banners: centred "Welcome to
-  // [name]" + right "Powered by TilesDesign", over a dark scrim for readability.
-  Widget _trustStrip(String name, {bool poweredBy = true}) => Align(
+  // [name]", over a dark scrim for readability.
+  Widget _trustStrip(String name) => Align(
         alignment: Alignment.topCenter,
         child: Container(
           width: double.infinity,
@@ -969,33 +970,16 @@ class _State extends State<PublicCatalogScreen> {
               colors: [Color(0xB3000000), Color(0x00000000)],
             ),
           ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 86),
-                child: Text(
-                  name.trim().isEmpty ? 'Welcome' : 'Welcome to $name',
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
-                ),
-              ),
-              if (poweredBy)
-                const Align(
-                  alignment: Alignment.centerRight,
-                  child: Text('Powered by TilesDesign',
-                      style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600)),
-                ),
-            ],
+          child: Text(
+            name.trim().isEmpty ? 'Welcome' : 'Welcome to $name',
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
           ),
         ),
       );
@@ -1057,51 +1041,38 @@ class _State extends State<PublicCatalogScreen> {
     }
   }
 
-  // Footer credit shown at the bottom of every catalog page. On the WEB build we
-  // also show a quiet "download the app" nudge — buyers reaching this page in a
-  // browser (no app) get sent to the right store for their device. Hidden in the
-  // app itself and until at least one store link is configured.
+  // Footer nudge shown at the bottom of every catalog page on the WEB build
+  // only — buyers reaching this page in a browser (no app) get sent to the
+  // right store for their device. Hidden in the app itself and until at
+  // least one store link is configured.
   Widget _poweredBy() {
     final showNudge = kIsWeb && AppConfig.hasAnyStoreLink;
+    if (!showNudge) return const SizedBox.shrink();
     return Padding(
       padding: EdgeInsets.fromLTRB(
           16, 8, 16, 16 + MediaQuery.viewPaddingOf(context).bottom),
-      child: Column(
-        children: [
-          if (showNudge) ...[
-            GestureDetector(
-              onTap: () => launchUrl(Uri.parse(_storeUrl),
-                  mode: LaunchMode.externalApplication),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+      child: GestureDetector(
+        onTap: () => launchUrl(Uri.parse(_storeUrl),
+            mode: LaunchMode.externalApplication),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.smartphone, size: 14, color: _brand),
+            const SizedBox(width: 5),
+            Text.rich(
+              TextSpan(
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 children: [
-                  Icon(Icons.smartphone, size: 14, color: _brand),
-                  const SizedBox(width: 5),
-                  Text.rich(
-                    TextSpan(
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                      children: [
-                        const TextSpan(text: 'Get the app for a better experience — '),
-                        TextSpan(
-                          text: 'Download',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, color: _brand),
-                        ),
-                      ],
-                    ),
+                  const TextSpan(text: 'Get the app for a better experience — '),
+                  TextSpan(
+                    text: 'Download',
+                    style: TextStyle(fontWeight: FontWeight.bold, color: _brand),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 8),
           ],
-          Text('Powered by TilesDesign',
-              style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey.shade500,
-                  letterSpacing: 0.3)),
-        ],
+        ),
       ),
     );
   }
@@ -1261,21 +1232,10 @@ class _State extends State<PublicCatalogScreen> {
               children: [
                 AspectRatio(
                   aspectRatio: ratio,
-                  child: img.isEmpty
-                      ? Container(
-                          color: Colors.grey.shade100,
-                          child: Icon(Icons.image_not_supported,
-                              size: 32, color: Colors.grey.shade400))
-                      : CachedNetworkImage(
-                          // Grid card → lightweight Cloudinary thumbnail.
-                          imageUrl: CloudinaryService.thumbUrl(img, width: 600),
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) =>
-                              Container(color: Colors.grey.shade200),
-                          errorWidget: (_, __, ___) => Container(
-                              color: Colors.grey.shade200,
-                              child: const Icon(Icons.broken_image)),
-                        ),
+                  // Same widget the app uses: detects a portrait tile whose
+                  // source photo was stored in landscape orientation and
+                  // rotates it, instead of just cropping it half-off.
+                  child: TileImage(url: img, tileAspectRatio: ratio, thumbWidth: 600),
                 ),
                 if (finishChip.isNotEmpty)
                   Positioned(

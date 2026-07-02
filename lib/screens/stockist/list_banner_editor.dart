@@ -37,8 +37,8 @@ class _State extends State<ListBannerEditorScreen> {
     'footer': 'Footer',
   };
   static const _tdPosKeys = <String>[
-    'footer', 'top-left', 'top-center', 'top-right', 'middle-left', 'center',
-    'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'
+    'none', 'footer', 'top-left', 'top-center', 'top-right', 'middle-left',
+    'center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'
   ];
 
   // Working copy of the list's banner config (empty source = brand fallback).
@@ -368,22 +368,23 @@ class _State extends State<ListBannerEditorScreen> {
                               fontWeight: FontWeight.bold)),
                 ),
               ),
-            Align(
-              alignment: _alignFor(_tdPos),
-              child: Container(
-                margin: const EdgeInsets.all(4),
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(3),
+            if (_tdPos != 'none')
+              Align(
+                alignment: _alignFor(_tdPos),
+                child: Container(
+                  margin: const EdgeInsets.all(4),
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: const Text('TilesDesign',
+                      style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: _navy)),
                 ),
-                child: const Text('TilesDesign',
-                    style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        color: _navy)),
               ),
-            ),
           ],
         ),
       ),
