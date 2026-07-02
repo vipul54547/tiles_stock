@@ -140,7 +140,12 @@ class _StockControlScreenState extends State<StockControlScreen> {
     return _isM && m.isNotEmpty ? m : d.name.trim();
   }
 
-  // Ordered groups: each group's rows contiguous, groups alphabetical.
+  // Ordered groups: rows within a group stay contiguous (by size/quality/
+  // surface). Groups are ordered to save the stockist scrolling — designs
+  // they've ALREADY controlled come first (so they can review/adjust without
+  // hunting), then by biggest stock (most boxes) first, then alphabetical as a
+  // tiebreak. Uses the SAVED control value (d.controlQuantity), not the live
+  // edited one, so rows don't jump around while typing.
   List<MapEntry<String, List<TileDesign>>> get _groups {
     final map = <String, List<TileDesign>>{};
     for (final d in _filtered) {
@@ -155,8 +160,21 @@ class _StockControlScreenState extends State<StockControlScreen> {
         return a.surfaceType.compareTo(b.surfaceType);
       });
     }
+    bool controlled(List<TileDesign> rows) =>
+        rows.any((d) => d.controlQuantity > 0);
+    int maxBoxes(List<TileDesign> rows) =>
+        rows.fold(0, (m, d) => d.boxQuantity > m ? d.boxQuantity : m);
     final entries = map.entries.toList()
-      ..sort((a, b) => a.key.toLowerCase().compareTo(b.key.toLowerCase()));
+      ..sort((a, b) {
+        // 1) controlled groups first
+        final ca = controlled(a.value), cb = controlled(b.value);
+        if (ca != cb) return ca ? -1 : 1;
+        // 2) most boxes first
+        final box = maxBoxes(b.value).compareTo(maxBoxes(a.value));
+        if (box != 0) return box;
+        // 3) alphabetical tiebreak (stable)
+        return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+      });
     return entries;
   }
 
