@@ -454,7 +454,8 @@ class _State extends State<StockistsOverviewScreen> {
       _claimedCatalogs = claimedCatalogs;
       _allSizes = sizes;
       _allSurfaces = surfaces;
-      _dnaAttrs = dnaAttrs.where((a) => !a.isFreeText).toList();
+      _dnaAttrs =
+          dnaAttrs.where((a) => !a.isFreeText || a.showInFacets).toList();
       _dnaValues = dnaValues;
       _loading = false;
     });

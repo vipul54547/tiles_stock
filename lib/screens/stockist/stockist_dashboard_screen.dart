@@ -220,9 +220,11 @@ class _State extends State<StockistDashboardScreen> {
       _brands = brands;
       _library = library;
       _dnaFill = dnaFill;
-      // Keep the DNA catalog (non-free-text, facetable) + per-design tagged
-      // values for the "special search" facet chips in the filter sheet.
-      _dnaAttrs = dnaAttrs.where((a) => !a.isFreeText).toList();
+      // Keep the DNA catalog (facetable: non-free-text always, free-text only
+      // if opted in via showInFacets, e.g. Series) + per-design tagged values
+      // for the "special search" facet chips in the filter sheet.
+      _dnaAttrs =
+          dnaAttrs.where((a) => !a.isFreeText || a.showInFacets).toList();
       _dnaValues = dnaVals;
       // Drop a stale brand filter if that brand no longer exists.
       if (_brandFilter != 'all' && !_brands.any((b) => b.id == _brandFilter)) {

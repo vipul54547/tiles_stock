@@ -18,8 +18,13 @@ class DnaAttribute {
   /// (e.g. Colour). Others are single-pick.
   final bool isMulti;
 
-  /// Free text (no canonical value list), e.g. Range.
+  /// Free text (no canonical value list), e.g. Series.
   final bool isFreeText;
+
+  /// Whether a free-text attribute participates in facet filters (dashboard,
+  /// buyer views, public catalog). Non-free-text attributes ignore this and
+  /// are always shown.
+  final bool showInFacets;
 
   final int sortOrder;
   final List<DnaValue> values;
@@ -29,6 +34,7 @@ class DnaAttribute {
     required this.name,
     this.isMulti = false,
     this.isFreeText = false,
+    this.showInFacets = false,
     this.sortOrder = 0,
     this.values = const [],
   });
@@ -38,6 +44,7 @@ class DnaAttribute {
         name: (j['name'] ?? '') as String,
         isMulti: j['is_multi'] == true,
         isFreeText: j['is_free_text'] == true,
+        showInFacets: j['show_in_facets'] == true,
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         values: ((j['values'] as List?) ?? const [])
             .map((v) => DnaValue.fromJson(Map<String, dynamic>.from(v as Map)))

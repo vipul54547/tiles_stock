@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import '../../models/dna.dart';
 import '../../services/supabase_data_service.dart';
+import 'manage_my_dna_values_screen.dart';
 
 /// The "+" per-design DNA mapper. Opens a sheet to tag one Library design with
-/// its searchable attributes. Single-pick attributes use a DROPDOWN (None =
-/// default); Colour (multi) uses check-chips. Every option is labelled with the
-/// stockist's OWN word for that value (My Words; falls back to the admin's
-/// canonical name) while the hidden canonical value_id is what gets stored, so
-/// all stockists' wording unifies under one search key. (project_design_dna_engine)
+/// its searchable attributes. Single-pick canonical attributes use a DROPDOWN
+/// (None = default); Colour (multi) uses check-chips. Own-naming single-pick
+/// free-text attributes (Series) use a picker of the stockist's own
+/// previously-created values + "Create new" — no admin mapping. Every
+/// canonical option is labelled with the stockist's OWN word for that value
+/// (My Words; falls back to the admin's canonical name) while the hidden
+/// canonical value_id is what gets stored, so all stockists' wording unifies
+/// under one search key. (project_design_dna_engine)
 Future<void> showDnaEditor(BuildContext context,
     {required String libraryId, required String designName}) {
   return showModalBottomSheet<void>(
@@ -228,6 +232,9 @@ class _DnaEditorState extends State<_DnaEditor> {
   }
 
   Widget _attrSection(DnaAttribute a) {
+    // Own-naming single-pick attributes (e.g. Series): no admin mapping, the
+    // stockist creates + manages their own value list.
+    final isOwnSingle = a.isFreeText && !a.isMulti;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -243,13 +250,115 @@ class _DnaEditorState extends State<_DnaEditor> {
                 Text('(pick any)',
                     style:
                         TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
+              const Spacer(),
+              if (isOwnSingle)
+                InkWell(
+                  onTap: () => _manageOwnValues(a),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.settings_outlined,
+                        size: 16, color: Colors.grey.shade600),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 6),
-          a.isFreeText
-              ? _freeTextEditor(a)
-              : (a.isMulti ? _multiChips(a) : _singleDropdown(a)),
+          isOwnSingle
+              ? _singleFreeTextPicker(a)
+              : (a.isFreeText
+                  ? _freeTextEditor(a)
+                  : (a.isMulti ? _multiChips(a) : _singleDropdown(a))),
         ],
+      ),
+    );
+  }
+
+  Future<void> _manageOwnValues(DnaAttribute a) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ManageMyDnaValuesScreen(
+            attributeId: a.id, attributeName: a.name),
+      ),
+    );
+    if (mounted) _load(); // names/values may have changed
+  }
+
+  // Own-naming single-pick (e.g. Series): tap to open a picker of the
+  // stockist's own previously-created values + "None" + "Create new".
+  Future<void> _setSingleFreeText(DnaAttribute a, String? text) async {
+    setState(() {
+      _freeTexts[a.id] = (text == null || text.isEmpty) ? [] : [text];
+    });
+    await _saveFreeText(a);
+  }
+
+  Future<void> _pickSingleFreeText(DnaAttribute a) async {
+    final current =
+        (_freeTexts[a.id] ?? const <String>[]).isEmpty ? null : _freeTexts[a.id]!.first;
+    final result = await showModalBottomSheet<_FreeTextPick>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => _FreeTextPickSheet(attribute: a, current: current),
+    );
+    if (result == null) return;
+    if (result.createNew) {
+      if (!mounted) return;
+      final ctrl = TextEditingController();
+      final name = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('New ${a.name.toLowerCase()}'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(isDense: true),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+                child: const Text('Add')),
+          ],
+        ),
+      );
+      if (name == null || name.isEmpty) return;
+      await _setSingleFreeText(a, name);
+    } else {
+      await _setSingleFreeText(a, result.name);
+    }
+  }
+
+  Widget _singleFreeTextPicker(DnaAttribute a) {
+    final current =
+        (_freeTexts[a.id] ?? const <String>[]).isEmpty ? null : _freeTexts[a.id]!.first;
+    return InkWell(
+      onTap: () => _pickSingleFreeText(a),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                current ?? '— None —',
+                style: TextStyle(
+                    fontSize: 13.5,
+                    color: current == null ? Colors.black45 : Colors.black87),
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
+          ],
+        ),
       ),
     );
   }
@@ -369,4 +478,67 @@ class _DnaEditorState extends State<_DnaEditor> {
       }).toList(),
     );
   }
+}
+
+class _FreeTextPick {
+  final bool createNew;
+  final String? name;
+  const _FreeTextPick.value(this.name) : createNew = false;
+  const _FreeTextPick.create()
+      : createNew = true,
+        name = null;
+}
+
+// Picker sheet for an own-naming single-pick free-text attribute (Series):
+// "None" + the stockist's own previously-created values + "Create new".
+class _FreeTextPickSheet extends StatelessWidget {
+  static const _navy = Color(0xFF1B4F72);
+  final DnaAttribute attribute;
+  final String? current;
+  const _FreeTextPickSheet({required this.attribute, required this.current});
+
+  @override
+  Widget build(BuildContext context) {
+    final options = attribute.values.where((v) => !_isNone(v)).toList();
+    return SafeArea(
+      child: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(attribute.name,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          ),
+          ListTile(
+            leading: Icon(
+                current == null ? Icons.radio_button_checked : Icons.radio_button_off,
+                color: current == null ? _navy : Colors.grey),
+            title: const Text('— None —'),
+            onTap: () => Navigator.pop(context, const _FreeTextPick.value(null)),
+          ),
+          ...options.map((v) => ListTile(
+                leading: Icon(
+                    current == v.name
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: current == v.name ? _navy : Colors.grey),
+                title: Text(v.name),
+                onTap: () =>
+                    Navigator.pop(context, _FreeTextPick.value(v.name)),
+              )),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.add_circle_outline, color: _navy),
+            title: Text('Create new ${attribute.name.toLowerCase()}…',
+                style: const TextStyle(color: _navy, fontWeight: FontWeight.w600)),
+            onTap: () => Navigator.pop(context, const _FreeTextPick.create()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _isNone(DnaValue v) => v.name.toLowerCase() == 'none';
 }

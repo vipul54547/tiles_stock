@@ -1208,18 +1208,25 @@ class SupabaseDataService {
   }
 
   Future<void> adminDnaAddAttribute(String name,
-      {bool isMulti = false, bool isFreeText = false}) async {
+      {bool isMulti = false,
+      bool isFreeText = false,
+      bool showInFacets = false}) async {
     await supabase.rpc('admin_dna_add_attribute', params: {
       'p_name': name,
       'p_is_multi': isMulti,
       'p_is_free_text': isFreeText,
+      'p_show_in_facets': showInFacets,
     });
   }
 
   Future<void> adminDnaUpdateAttribute(String id,
-      {String? name, bool? isActive}) async {
-    await supabase.rpc('admin_dna_update_attribute',
-        params: {'p_id': id, 'p_name': name, 'p_is_active': isActive});
+      {String? name, bool? isActive, bool? showInFacets}) async {
+    await supabase.rpc('admin_dna_update_attribute', params: {
+      'p_id': id,
+      'p_name': name,
+      'p_is_active': isActive,
+      'p_show_in_facets': showInFacets,
+    });
   }
 
   Future<void> adminDnaDeleteAttribute(String id) async {
@@ -1293,6 +1300,35 @@ class SupabaseDataService {
       'p_attribute_id': attributeId,
       'p_texts': texts,
     });
+  }
+
+  /// Rename one of the calling stockist's own private values (e.g. a Series
+  /// they created). Fails if they don't own it or the name is already used
+  /// by another of their own values on that attribute.
+  Future<void> dnaRenameMyValue(String valueId, String newName) async {
+    await supabase.rpc('dna_rename_my_value',
+        params: {'p_value_id': valueId, 'p_new_name': newName});
+  }
+
+  /// Delete one of the calling stockist's own private values. Cascades:
+  /// every design tagged with it loses that tag.
+  Future<void> dnaDeleteMyValue(String valueId) async {
+    await supabase.rpc('dna_delete_my_value', params: {'p_value_id': valueId});
+  }
+
+  /// The calling stockist's own private values for one attribute, each with
+  /// how many designs currently carry it — for a manage/rename/delete screen.
+  Future<List<Map<String, dynamic>>> dnaMyValuesWithUsage(
+      String attributeId) async {
+    try {
+      final res = await supabase.rpc('dna_my_values_with_usage',
+          params: {'p_attribute_id': attributeId});
+      final list = (res as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (e) {
+      debugPrint('dnaMyValuesWithUsage failed: $e');
+      return [];
+    }
   }
 
   /// A design's current DNA: { attributeId: [ {id,name}, … ] }.
