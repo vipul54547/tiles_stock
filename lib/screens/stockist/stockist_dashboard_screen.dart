@@ -36,14 +36,6 @@ const _qualityMeta = {
   'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
 };
 
-const _sortOptions = [
-  (label: 'Default',          value: 'default'),
-  (label: 'Name A → Z',      value: 'name_asc'),
-  (label: 'Boxes: High → Low', value: 'boxes_high'),
-  (label: 'Boxes: Low → High', value: 'boxes_low'),
-  (label: 'Quality',           value: 'quality'),
-];
-
 const int _lowStockThreshold = 10;
 
 // Design-Stock-Type options for the filter (multi-select; nothing selected =
@@ -99,7 +91,6 @@ class _State extends State<StockistDashboardScreen> {
   Map<String, List<String>> _myWords = {};
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
-  String _sortBy = 'default';
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
@@ -514,16 +505,6 @@ class _State extends State<StockistDashboardScreen> {
           .toList();
     }
 
-    switch (_sortBy) {
-      case 'name_asc':
-        result.sort((a, b) => a.name.compareTo(b.name));
-      case 'boxes_high':
-        result.sort((a, b) => b.boxQuantity.compareTo(a.boxQuantity));
-      case 'boxes_low':
-        result.sort((a, b) => a.boxQuantity.compareTo(b.boxQuantity));
-      case 'quality':
-        result.sort((a, b) => a.quality.compareTo(b.quality));
-    }
     return result;
   }
 
@@ -1575,31 +1556,10 @@ class _State extends State<StockistDashboardScreen> {
                 ),
             ],
           ),
-          const SizedBox(width: 8),
-          _iconBox(Icons.sort_rounded, _sortBy != 'default', _showSortSheet),
         ],
       ),
     );
   }
-
-  Widget _iconBox(IconData icon, bool active, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(9),
-          decoration: BoxDecoration(
-            color: active ? const Color(0xFF1B4F72) : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-                color: active
-                    ? const Color(0xFF1B4F72)
-                    : Colors.grey.shade300),
-          ),
-          child: Icon(icon,
-              size: 20,
-              color: active ? Colors.white : Colors.grey.shade600),
-        ),
-      );
 
   // Full "All Designs" style filter: Size, Finish, Tile Type, Thickness,
   // Colour, Stock Type and a Quantity range, with a live result count. Options
@@ -1932,55 +1892,6 @@ class _State extends State<StockistDashboardScreen> {
           ..addAll(localDna);
       });
     });
-  }
-
-  void _showSortSheet() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: Row(
-              children: [
-                Icon(Icons.sort_rounded, color: Color(0xFF1B4F72)),
-                SizedBox(width: 8),
-                Text('Sort By',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16)),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          ..._sortOptions.map((opt) => ListTile(
-                title: Text(opt.label),
-                trailing: _sortBy == opt.value
-                    ? const Icon(Icons.check_rounded,
-                        color: Color(0xFF1B4F72))
-                    : null,
-                onTap: () {
-                  setState(() => _sortBy = opt.value);
-                  Navigator.pop(context);
-                },
-              )),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
   }
 
 }
