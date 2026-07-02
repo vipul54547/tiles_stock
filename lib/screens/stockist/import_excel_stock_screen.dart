@@ -19,6 +19,7 @@ import '../../utils/tile_sizes.dart';
 import '../../utils/business_types.dart';
 import '../../utils/tile_types.dart';
 import '../../models/choice_state.dart';
+import '../../widgets/upload_mode.dart';
 
 // Bulk stock import from an Excel (.xlsx) list — for stockists who keep a plain
 // spreadsheet (design, size, quality, boxes) instead of a PDF with images.
@@ -41,7 +42,8 @@ class ImportExcelStockScreen extends StatefulWidget {
 // Header synonyms → the logical field. Matched case-insensitively against the
 // sheet's header row, so a stockist's own column wording/order works.
 const Map<String, List<String>> _headerSynonyms = {
-  'name':     ['name', 'design', 'design name', 'designname', 'product', 'item', 'article'],
+  'name':     ['name', 'design', 'design name', 'designname', 'product', 'item', 'article',
+               'desing', 'desing name'], // common typo (n/g swap)
   'size':     ['size', 'tile size', 'dimension', 'dimensions'],
   'quality':  ['quality', 'qality', 'qualty', 'grade', 'grd'],
   'qty':      ['qty', 'quantity', 'box', 'boxes', 'box qty', 'box quantity', 'stock', 'stock qty', 'no of box', 'nos', 'pcs box'],
@@ -57,7 +59,7 @@ const Map<String, List<String>> _headerSynonyms = {
 // Kept master-specific so it never clobbers the generic 'name' column above.
 const List<String> _masterHeaders = [
   'master', 'master name', 'master design', 'master design name',
-  'master_design', 'masterdesign',
+  'master_design', 'masterdesign', 'master design brand',
 ];
 
 // WIDE quantity layout: separate Premium / Standard box-count columns on one row
@@ -144,9 +146,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   Map<String, String> _libImages = {};
   List<LibraryEntry> _library = []; // this stockist's own master designs
   final Set<String> _libKeys = {};  // name|size of existing library designs (+aliases)
-  // Quantity mode: false = Add only (top-up); true = Update & keep (set to file).
-  // Chosen on the Review screen (with the stock decision), not up-front.
-  bool _overwrite = false;
+  // Quantity mode, chosen on the Review screen (with the stock decision), not
+  // up-front. "Fully new" also asks whether to wipe just this brand or all of
+  // them (_wipeAllBrands), since a single Excel batch's rows can span several
+  // brands (M's combined sheets) while p_brand_id is one fallback brand only.
+  UploadMode _mode = UploadMode.add;
+  bool _wipeAllBrands = false;
   String? _defaultBrandId;
   bool _parsed = false;
   bool _importing = false;
@@ -426,8 +431,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     return out;
   }
 
-  String _normHeader(String h) =>
-      h.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  // Underscores/hyphens fold to spaces too — real stockist files use
+  // "Design_Name", "Design-Name", "Design Name" interchangeably.
+  String _normHeader(String h) => h
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[_\-\s]+'), ' ')
+      .trim();
 
   String _sizeKey(String s) => s.toLowerCase().replaceAll(RegExp(r'[^0-9x]'), '');
 
@@ -1784,7 +1794,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         brandId: brandId,
         pdfFilename: _filename,
         rows: rows,
-        mode: _overwrite ? 'replace_keep' : 'add',
+        mode: _mode.api,
+        // Per-row multi-brand file → wipe exactly the brands it covers;
+        // single-brand file → the this-brand / all-brands toggle.
+        wipeAllBrands:
+            _mode == UploadMode.fullyNew && !_perRowBrand && _wipeAllBrands,
+        wipeBrandIds: _mode == UploadMode.fullyNew && _perRowBrand
+            ? _fileBrandIds()
+            : null,
       );
     } catch (e) {
       if (!mounted) return;
@@ -2056,6 +2073,54 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     );
   }
 
+  // Distinct brand ids present in the rows that will actually import — the wipe
+  // scope for a per-row multi-brand file (Option 2/3).
+  List<String> _fileBrandIds() => _rows
+      .where((r) => r.valid && r.include && r.rowBrandId != null)
+      .map((r) => r.rowBrandId!)
+      .toSet()
+      .toList();
+
+  // Human names for those brands, for the confirm dialog / inline note.
+  String _fileBrandLabel() {
+    final ids = _fileBrandIds().toSet();
+    final names = _brands.where((b) => ids.contains(b.id)).map((b) => b.name);
+    return names.isEmpty ? 'the brands in this file' : names.join(', ');
+  }
+
+  // Every mode goes through the same guarded confirm the PDF importer uses
+  // (showUploadModeConfirm). "Fully new" scope depends on the file shape:
+  //  • per-row multi-brand file → wipe exactly the brands the file covers
+  //    (no toggle — a "this brand only" choice is meaningless when the file
+  //    already spans several brands);
+  //  • single-brand file → the this-brand / all-brands toggle below the chips.
+  Future<void> _pickQtyMode(UploadMode m) async {
+    if (m == _mode) return;
+    final String scopeLabel;
+    if (m == UploadMode.fullyNew) {
+      scopeLabel = _perRowBrand
+          ? _fileBrandLabel()
+          : (_wipeAllBrands ? 'ALL your brands' : _brandName);
+    } else {
+      scopeLabel = _brandName;
+    }
+    final ok = await showUploadModeConfirm(context, m, scopeLabel);
+    if (!ok || !mounted) return;
+    setState(() => _mode = m);
+  }
+
+  // Switches the wipe scope for the already-selected single-brand "Fully new".
+  // Each switch is re-confirmed (same guarded dialog) since it changes what's
+  // about to be zeroed. (Only reachable for non-per-row files.)
+  Future<void> _pickWipeScope(bool all) async {
+    if (all == _wipeAllBrands) return;
+    final scopeLabel = all ? 'ALL your brands' : _brandName;
+    final ok =
+        await showUploadModeConfirm(context, UploadMode.fullyNew, scopeLabel);
+    if (!ok || !mounted) return;
+    setState(() => _wipeAllBrands = all);
+  }
+
   Widget _buildReview() {
     final updates = _rows.where((r) => r.valid && r.action == 'update').length;
     final news = _rows.where((r) => r.valid && r.action == 'new').length;
@@ -2128,31 +2193,87 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         // mirrors the PDF flow. Only affects rows that carry a box quantity.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
-          child: Row(children: [
-            Text('Box numbers:',
-                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
-            const SizedBox(width: 8),
-            for (final m in const [
-              (label: 'Add only', ov: false),
-              (label: 'Update & keep', ov: true),
-            ])
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ChoiceChip(
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              Text('Box numbers:',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+              for (final m in UploadMode.values)
+                ChoiceChip(
                   label: Text(m.label, style: const TextStyle(fontSize: 11.5)),
-                  selected: _overwrite == m.ov,
-                  onSelected: _importing
-                      ? null
-                      : (_) => setState(() => _overwrite = m.ov),
+                  selected: _mode == m,
+                  onSelected: _importing ? null : (_) => _pickQtyMode(m),
+                  selectedColor:
+                      m.isDestructive ? Colors.red.shade700 : const Color(0xFF1B4F72),
+                  labelStyle: TextStyle(
+                      color:
+                          _mode == m ? Colors.white : const Color(0xFF1B4F72)),
+                ),
+            ],
+          ),
+        ),
+        // Wipe scope — only while "Fully new" is selected.
+        //  • Per-row multi-brand file: no toggle — the file already covers
+        //    several brands, so it wipes exactly those (shown as a note).
+        //  • Single-brand file: this-brand / all-brands toggle, each switch
+        //    re-runs the guarded confirm since it changes what gets zeroed.
+        if (_mode == UploadMode.fullyNew && _perRowBrand)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    size: 14, color: Colors.red.shade700),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                      'Will refresh stock for the brands in this file '
+                      '(${_fileBrandLabel()}); their designs not in the file '
+                      'drop to 0. Other brands untouched.',
+                      style: TextStyle(
+                          fontSize: 11.5, color: Colors.red.shade700)),
+                ),
+              ],
+            ),
+          )
+        else if (_mode == UploadMode.fullyNew)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    size: 14, color: Colors.red.shade700),
+                Text('Wipe scope:',
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+                ChoiceChip(
+                  label: Text(
+                      _brandName.isEmpty ? 'This brand only' : '$_brandName only',
+                      style: const TextStyle(fontSize: 11.5)),
+                  selected: !_wipeAllBrands,
+                  onSelected:
+                      _importing ? null : (_) => _pickWipeScope(false),
                   selectedColor: const Color(0xFF1B4F72),
                   labelStyle: TextStyle(
-                      color: _overwrite == m.ov
-                          ? Colors.white
-                          : const Color(0xFF1B4F72)),
+                      color: !_wipeAllBrands ? Colors.white : const Color(0xFF1B4F72)),
                 ),
-              ),
-          ]),
-        ),
+                ChoiceChip(
+                  label: const Text('All my brands',
+                      style: TextStyle(fontSize: 11.5)),
+                  selected: _wipeAllBrands,
+                  onSelected: _importing ? null : (_) => _pickWipeScope(true),
+                  selectedColor: Colors.red.shade700,
+                  labelStyle: TextStyle(
+                      color: _wipeAllBrands ? Colors.white : Colors.red.shade700),
+                ),
+              ],
+            ),
+          ),
         if (incomplete > 0)
           Container(
             width: double.infinity,

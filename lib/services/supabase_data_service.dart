@@ -1431,6 +1431,11 @@ class SupabaseDataService {
     required String pdfFilename,
     required List<Map<String, dynamic>> rows,
     String mode = 'add', // 'add' | 'replace_all' (fully new) | 'replace_keep'
+    // Only meaningful with mode 'replace_all'. Precedence: wipeAllBrands (every
+    // brand) > wipeBrandIds (just these — a per-row multi-brand file) > brandId
+    // (single-brand upload).
+    bool wipeAllBrands = false,
+    List<String>? wipeBrandIds,
   }) async {
     try {
       final res = await supabase.rpc('import_stock_batch', params: {
@@ -1440,6 +1445,8 @@ class SupabaseDataService {
         'p_pdf_filename': pdfFilename,
         'p_rows': rows,
         'p_mode': mode,
+        'p_wipe_all_brands': wipeAllBrands,
+        'p_wipe_brand_ids': wipeBrandIds,
       });
       return res is Map
           ? Map<String, dynamic>.from(res)
