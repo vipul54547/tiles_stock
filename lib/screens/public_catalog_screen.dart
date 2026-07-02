@@ -587,6 +587,15 @@ class _State extends State<PublicCatalogScreen> {
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheet) {
+          // Every filter field (_fSizes/_fDna/etc.) IS the real screen state —
+          // setSheet only redraws the sheet itself. setBoth also rebuilds the
+          // screen behind it, so results update live as soon as you tap a chip,
+          // no "Apply" step required.
+          void setBoth(VoidCallback fn) {
+            setSheet(fn);
+            setState(() {});
+          }
+
           // Collapsible facet: header shows how many are chosen; opens on tap.
           Widget section(String title, List<String> opts, Set<String> sel) {
             if (opts.isEmpty) return const SizedBox.shrink();
@@ -602,7 +611,7 @@ class _State extends State<PublicCatalogScreen> {
                     label: Text(o.replaceAll(' mm', '')),
                     selected: on,
                     onSelected: (v) =>
-                        setSheet(() => v ? sel.add(o) : sel.remove(o)),
+                        setBoth(() => v ? sel.add(o) : sel.remove(o)),
                   );
                 }).toList(),
               ),
@@ -619,11 +628,16 @@ class _State extends State<PublicCatalogScreen> {
           // Design DNA facet (id-keyed chips). Only values present in the pool
           // are shown; whole attributes with no tagged values are hidden.
           final dnaInUse = _dnaInUse;
+          List<Map<String, dynamic>> dnaValuesInUse(Map<String, dynamic> attr) =>
+              ((attr['values'] as List?) ?? const [])
+                  .map((v) => Map<String, dynamic>.from(v as Map))
+                  .where((v) => dnaInUse.contains(v['id'].toString()))
+                  .toList();
+
+          // A full collapsible facet for one DNA attribute (used for Series,
+          // which stays as its own top-level row next to Finish).
           Widget dnaSection(Map<String, dynamic> attr) {
-            final vals = ((attr['values'] as List?) ?? const [])
-                .map((v) => Map<String, dynamic>.from(v as Map))
-                .where((v) => dnaInUse.contains(v['id'].toString()))
-                .toList();
+            final vals = dnaValuesInUse(attr);
             if (vals.isEmpty) return const SizedBox.shrink();
             final picked = vals
                 .where((v) => _fDna.contains(v['id'].toString()))
@@ -631,58 +645,68 @@ class _State extends State<PublicCatalogScreen> {
             return FilterSection(
               title: (attr['name'] ?? '').toString(),
               summary: picked.isEmpty ? 'All' : picked.join(', '),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: vals.map((v) {
-                  final id = v['id'].toString();
-                  final on = _fDna.contains(id);
-                  return FilterChip(
-                    label: Text(v['name'].toString()),
-                    selected: on,
-                    onSelected: (sel) =>
-                        setSheet(() => sel ? _fDna.add(id) : _fDna.remove(id)),
-                  );
-                }).toList(),
+              child: _dnaChipWrap(vals, setBoth),
+            );
+          }
+
+          // A plain (non-collapsible) label + chip row, for attributes nested
+          // inside the single "Design DNA" group — avoids collapsible-inside-
+          // collapsible clutter once the group itself is opened.
+          Widget dnaAttributeBlock(Map<String, dynamic> attr) {
+            final vals = dnaValuesInUse(attr);
+            if (vals.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text((attr['name'] ?? '').toString(),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 12.5)),
+                  const SizedBox(height: 6),
+                  _dnaChipWrap(vals, setBoth),
+                ],
               ),
             );
           }
 
-          return SafeArea(
-            child: Padding(
-              padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  top: 16,
-                  bottom: 16 + MediaQuery.of(ctx).viewInsets.bottom),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header: title + Apply (top) + Clear all.
-                    Row(
+          final seriesAttr = _dnaFacets
+              .cast<Map<String, dynamic>?>()
+              .firstWhere((a) => a?['name'] == 'Series', orElse: () => null);
+          final otherDnaFacets =
+              _dnaFacets.where((a) => a['name'] != 'Series').toList();
+          final otherDnaValueIds = otherDnaFacets
+              .expand(dnaValuesInUse)
+              .map((v) => v['id'].toString())
+              .toSet();
+          final otherDnaPickedCount =
+              _fDna.where(otherDnaValueIds.contains).length;
+
+          return DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.75,
+            minChildSize: 0.4,
+            maxChildSize: 0.92,
+            builder: (_, scroll) => SafeArea(
+              child: Column(
+                children: [
+                  const SizedBox(height: 8),
+                  Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2))),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                    child: Row(
                       children: [
                         const Text('Filters',
                             style: TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 16)),
                         const Spacer(),
-                        FilledButton(
-                          onPressed: () {
-                            setState(() {});
-                            Navigator.pop(ctx);
-                          },
-                          style: FilledButton.styleFrom(
-                              backgroundColor: _brand,
-                              foregroundColor: Colors.white,
-                              visualDensity: VisualDensity.compact,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20)),
-                          child: const Text('Apply'),
-                        ),
-                        const SizedBox(width: 6),
                         TextButton(
-                          onPressed: () => setSheet(() {
+                          onPressed: () => setBoth(() {
                             _fSizes.clear();
                             _fFinishes.clear();
                             _fQualities.clear();
@@ -696,65 +720,119 @@ class _State extends State<PublicCatalogScreen> {
                           child: const Text('Clear all',
                               style: TextStyle(color: Colors.red)),
                         ),
+                        const SizedBox(width: 4),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          style: FilledButton.styleFrom(
+                              backgroundColor: _brand,
+                              foregroundColor: Colors.white,
+                              visualDensity: VisualDensity.compact,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 18)),
+                          child: const Text('Done'),
+                        ),
                       ],
                     ),
-                    const Divider(height: 16),
-                    // Quantity (collapsible).
-                    FilterSection(
-                      title: 'Quantity (boxes)',
-                      summary: qtySummary(),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _minQtyCtrl,
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setSheet(() {}),
-                              decoration: InputDecoration(
-                                hintText: 'Min',
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 10),
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8)),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView(
+                      controller: scroll,
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      children: [
+                        FilterSection(
+                          title: 'Quantity (boxes)',
+                          summary: qtySummary(),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _minQtyCtrl,
+                                  keyboardType: TextInputType.number,
+                                  onChanged: (_) => setBoth(() {}),
+                                  decoration: InputDecoration(
+                                    hintText: 'Min',
+                                    isDense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 10),
+                                    border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
                               ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: TextField(
+                                  controller: _maxQtyCtrl,
+                                  keyboardType: TextInputType.number,
+                                  onChanged: (_) => setBoth(() {}),
+                                  decoration: InputDecoration(
+                                    hintText: 'Max',
+                                    isDense: true,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 10),
+                                    border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        section('Size', _distinct('size'), _fSizes),
+                        section('Finish', _distinct('surface'), _fFinishes),
+                        // Series sits next to Finish — it reads like a
+                        // collection/finish choice, not a tagging attribute.
+                        if (seriesAttr != null) dnaSection(seriesAttr),
+                        section('Quality', _distinct('quality'), _fQualities),
+                        section('Tile Type', _distinct('tile_type'), _fTypes),
+                        section('Thickness (approx)', _thicknessBands(),
+                            _fThickness),
+                        section(
+                            'Stock Type', _distinct('stock_type'), _fStockTypes),
+                        // Every other DNA attribute (Punch/Look Type/…) nested
+                        // under one group, so the top-level list stays short.
+                        if (otherDnaFacets.any((a) => dnaValuesInUse(a).isNotEmpty))
+                          FilterSection(
+                            title: 'Design DNA',
+                            summary: otherDnaPickedCount == 0
+                                ? 'All'
+                                : '$otherDnaPickedCount chosen',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children:
+                                  otherDnaFacets.map(dnaAttributeBlock).toList(),
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _maxQtyCtrl,
-                              keyboardType: TextInputType.number,
-                              onChanged: (_) => setSheet(() {}),
-                              decoration: InputDecoration(
-                                hintText: 'Max',
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 10),
-                                border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(8)),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        const SizedBox(height: 8),
+                      ],
                     ),
-                    section('Size', _distinct('size'), _fSizes),
-                    section('Finish', _distinct('surface'), _fFinishes),
-                    section('Quality', _distinct('quality'), _fQualities),
-                    section('Tile Type', _distinct('tile_type'), _fTypes),
-                    section('Thickness (approx)', _thicknessBands(), _fThickness),
-                    section('Stock Type', _distinct('stock_type'), _fStockTypes),
-                    // Design DNA "special search" facets (Punch/Glaze/Look/…).
-                    ..._dnaFacets.map(dnaSection),
-                    const SizedBox(height: 8),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           );
         },
       ),
+    );
+  }
+
+  // Shared chip-wrap renderer for a DNA attribute's in-use values.
+  Widget _dnaChipWrap(
+      List<Map<String, dynamic>> vals, void Function(VoidCallback) setBoth) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      children: vals.map((v) {
+        final id = v['id'].toString();
+        final on = _fDna.contains(id);
+        return FilterChip(
+          label: Text(v['name'].toString()),
+          selected: on,
+          onSelected: (sel) =>
+              setBoth(() => sel ? _fDna.add(id) : _fDna.remove(id)),
+        );
+      }).toList(),
     );
   }
 
@@ -776,17 +854,9 @@ class _State extends State<PublicCatalogScreen> {
       backgroundColor: const Color(0xFFF5F5F5),
       body: CustomScrollView(
         slivers: [
-          // Name bar scrolls away (not pinned) — the brand identity lives on the
-          // banner; the buyer gets the full screen for designs while browsing.
-          // No title text: the name already shows once on the banner's
-          // "Welcome to X" line just below — a second copy here was redundant.
-          SliverAppBar(
-            pinned: false,
-            floating: false,
-            toolbarHeight: 40,
-            backgroundColor: _brand,
-            foregroundColor: Colors.white,
-          ),
+          // No separate name bar: the banner IS the top of the page now. The
+          // name already shows once on its "Welcome to X" line, so a bar above
+          // it with no title/icons of its own was just dead colored space.
           SliverToBoxAdapter(child: _bannerArea()),
           // Search + filter row stays PINNED so it's always reachable while scrolling.
           SliverPersistentHeader(
