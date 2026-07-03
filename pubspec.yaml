@@ -44,6 +44,7 @@ dependencies:
   image: ^4.3.0
   image_picker: ^1.1.2
   pdfx: ^2.6.0   # on-device PDF page rasteriser (pdfium) for the crop fallback
+  font_awesome_flutter: ^11.0.0
 
 
 

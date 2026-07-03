@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/app_config.dart';
@@ -132,9 +133,9 @@ class _StockListsScreenState extends State<StockListsScreen> {
       _lists = active;
       _brands = brands;
       _counts = counts;
-      // Keep the open row if it still exists, else open the first by default.
-      if (_openId == null || !active.any((c) => c.id == _openId)) {
-        _openId = active.isNotEmpty ? active.first.id : null;
+      // All lists start collapsed; keep the open one only if it still exists.
+      if (_openId != null && !active.any((c) => c.id == _openId)) {
+        _openId = null;
       }
       _loading = false;
     });
@@ -250,30 +251,6 @@ class _StockListsScreenState extends State<StockListsScreen> {
           builder: (_) => StockListBuilderScreen(existing: list)));
       if (changed == true) _load();
     }
-  }
-
-  String _conditionSummary(StockCatalog c) {
-    final parts = <String>[];
-    if (c.filterBrandIds.isNotEmpty) {
-      final names = c.filterBrandIds
-          .map((id) => _brands.where((b) => b.id == id))
-          .where((m) => m.isNotEmpty)
-          .map((m) => m.first.name);
-      if (names.isNotEmpty) parts.add(names.join('/'));
-    }
-    if (c.filterQualities.isNotEmpty) parts.add(c.filterQualities.join('/'));
-    if (c.filterSurfaces.isNotEmpty) parts.add(c.filterSurfaces.join('/'));
-    if (c.filterTileTypes.isNotEmpty) parts.add(c.filterTileTypes.join('/'));
-    if (c.filterStockTypes.isNotEmpty) parts.add(c.filterStockTypes.join('/'));
-    if (c.filterSizes.isNotEmpty) {
-      parts.add(c.filterSizes.map((s) => s.replaceAll(' mm', '')).join('/'));
-    }
-    if (c.filterBoxMin != null || c.filterBoxMax != null) {
-      final mn = c.filterBoxMin?.toString() ?? '0';
-      final mx = c.filterBoxMax?.toString() ?? '∞';
-      parts.add('Boxes $mn–$mx');
-    }
-    return parts.isEmpty ? 'All designs' : parts.join(' · ');
   }
 
   String _permLink(StockCatalog c) => '${AppConfig.shareBaseUrl}/s/${c.shareToken}';
@@ -825,187 +802,315 @@ class _StockListsScreenState extends State<StockListsScreen> {
                       style: TextStyle(color: Colors.grey.shade600)))
               : ListView(
                   padding: const EdgeInsets.fromLTRB(10, 10, 10, 90),
-                  children: [for (final c in _lists) _listCard(c)],
+                  children: [
+                    for (var i = 0; i < _lists.length; i++)
+                      _listCard(_lists[i], i)
+                  ],
                 ),
     );
   }
 
-  // Accordion card: colored left border by type + header + link panel.
-  Widget _listCard(StockCatalog c) {
+  // Soft per-card backgrounds so adjacent lists read as separate blocks.
+  static const _cardBgs = [
+    Color(0xFFF2F6FB), // blue
+    Color(0xFFFBF4EF), // peach
+    Color(0xFFF1F8F2), // green
+    Color(0xFFF7F3FA), // lavender
+    Color(0xFFFAF7EE), // cream
+    Color(0xFFEFF7F7), // teal
+  ];
+  // Matching stronger border colours — each list is fully boxed in its own hue.
+  static const _cardBorders = [
+    Color(0xFF7FA8D0), // blue
+    Color(0xFFD9A77E), // peach
+    Color(0xFF8FC199), // green
+    Color(0xFFB79BD1), // lavender
+    Color(0xFFCBBB86), // cream
+    Color(0xFF84BEBE), // teal
+  ];
+
+  // Stock-list card: row1 name + visibility control; row2 type badge + count +
+  // banner/edit; row3 filter chips; then the always-visible permanent link and
+  // (when open) the timed-link generator. All collapsed by default, one open at
+  // a time. (stock-list card redesign)
+  Widget _listCard(StockCatalog c, int index) {
     final open = _openId == c.id;
     final typeColor = c.isPermanent ? _blue : _orange;
+    final typeLabel = c.isPermanent ? 'Filtered' : 'Selected';
     _daysCtrls.putIfAbsent(c.id, () => TextEditingController(text: '60'));
+    final chips = c.isPermanent ? _conditionChips(c) : const <String>[];
+    final perm = _permLink(c);
+
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: 5),
       clipBehavior: Clip.hardEdge,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Colored left border
-            Container(width: 4, color: typeColor),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  InkWell(
-                    onTap: () => _toggle(c.id),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
-                      child: Row(
-                        children: [
-                          Icon(open ? Icons.expand_more : Icons.chevron_right,
+      color: _cardBgs[index % _cardBgs.length],
+      // Full box outline in this list's own colour (the old left type-bar is
+      // dropped — the SELECTED/FILTERED badge already shows the type).
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+            color: _cardBorders[index % _cardBorders.length], width: 1.6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 10, 10),
+        child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Row 1: chevron + full name + visibility control ──
+                    Row(
+                      children: [
+                        InkWell(
+                          onTap: () => _toggle(c.id),
+                          borderRadius: BorderRadius.circular(20),
+                          child: Icon(
+                              open ? Icons.expand_more : Icons.chevron_right,
                               color: _navy),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(c.name,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 14.5)),
-                                    ),
-                                    if (c.hiddenByStockist)
-                                      Container(
-                                        margin:
-                                            const EdgeInsets.only(left: 6),
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 7, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey.shade200,
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                          border: Border.all(
-                                              color: Colors.grey.shade400,
-                                              width: 0.8),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(Icons.visibility_off_outlined,
-                                                size: 11,
-                                                color: Colors.grey.shade700),
-                                            const SizedBox(width: 3),
-                                            Text('HIDDEN',
-                                                style: TextStyle(
-                                                    fontSize: 9.5,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.grey.shade700,
-                                                    letterSpacing: 0.3)),
-                                          ],
-                                        ),
-                                      ),
-                                    Container(
-                                      margin: const EdgeInsets.only(left: 6),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 7, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: typeColor.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                            color: typeColor.withValues(alpha: 0.4),
-                                            width: 0.8),
-                                      ),
-                                      child: Text(
-                                        c.isPermanent ? 'PERMANENT' : 'TEMPORARY',
-                                        style: TextStyle(
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.bold,
-                                            color: typeColor,
-                                            letterSpacing: 0.3),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  c.isPermanent
-                                      ? [
-                                          _conditionSummary(c),
-                                          if (c.hasOwnBanner) 'banner ✓',
-                                        ].join(' · ')
-                                      : [
-                                          '${_counts[c.id] ?? 0} designs',
-                                          if (c.hasOwnBanner) 'banner ✓',
-                                          if (c.description.trim().isNotEmpty)
-                                            c.description.trim(),
-                                        ].join(' · '),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: Colors.grey.shade600),
-                                ),
-                              ],
-                            ),
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => _toggle(c.id),
+                            behavior: HitTestBehavior.opaque,
+                            child: Text(c.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700, fontSize: 15)),
                           ),
-                          IconButton(
-                              tooltip: 'Banner',
-                              icon: Icon(Icons.image_outlined,
-                                  size: 20,
-                                  color: c.hasOwnBanner
-                                      ? const Color(0xFF2E7D32)
-                                      : Colors.grey.shade600),
-                              onPressed: () => _setBanner(c)),
-                          IconButton(
-                              tooltip: c.isPermanent
-                                  ? 'Edit conditions'
-                                  : 'Edit designs',
-                              icon: Icon(
-                                  c.isPermanent
-                                      ? Icons.tune
-                                      : Icons.edit_outlined,
-                                  size: 20),
-                              onPressed: () => _open(c)),
+                        ),
+                        const SizedBox(width: 6),
+                        _visibilityCluster(c),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    // ── Row 2: type badge + count · banner + edit ──
+                    Row(
+                      children: [
+                        _typeBadge(typeColor, typeLabel),
+                        const SizedBox(width: 8),
+                        Text('${_counts[c.id] ?? 0} designs',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey.shade700)),
+                        const Spacer(),
+                        _sqIconBtn(
+                            Icons.image_outlined,
+                            'Banner',
+                            c.hasOwnBanner
+                                ? const Color(0xFF2E7D32)
+                                : Colors.grey.shade600,
+                            () => _setBanner(c)),
+                        _sqIconBtn(
+                            c.isPermanent ? Icons.tune : Icons.edit_outlined,
+                            c.isPermanent ? 'Edit conditions' : 'Edit designs',
+                            _navy,
+                            () => _open(c)),
+                      ],
+                    ),
+                    // ── Row 3: filter chips (Filtered lists) ──
+                    if (chips.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final ch in chips) _filterChip(ch, typeColor)
                         ],
                       ),
-                    ),
-                  ),
-                  if (open) _linkPanel(c),
-                ],
+                    ],
+                    const SizedBox(height: 10),
+                    // ── Surface: permanent link (always visible) ──
+                    _permLinkRow(c, perm),
+                    // ── Collapsible: timed-link generator + live links ──
+                    if (open) _linkPanel(c),
+                  ],
+                ),
               ),
+    );
+  }
+
+  // Row-1 visibility control: green toggle (visible⇄hidden); a Delete button
+  // appears when hidden; both are replaced by "Keep" + countdown once deletion
+  // is scheduled. (stock-list soft-delete)
+  Widget _visibilityCluster(StockCatalog c) {
+    if (c.pendingDelete) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FilledButton.icon(
+            onPressed:
+                _busy ? null : () => _runList(() => _data.cancelListDelete(c.id)),
+            icon: const Icon(Icons.undo, size: 15),
+            label: const Text('Keep'),
+            style: FilledButton.styleFrom(
+                backgroundColor: _navy,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                textStyle: const TextStyle(fontSize: 12)),
+          ),
+          const SizedBox(width: 6),
+          Text(_deleteCountdown(c.deleteScheduledAt!),
+              style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red)),
+        ],
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (c.hiddenByStockist)
+          TextButton.icon(
+            onPressed: _busy ? null : () => _confirmScheduleListDelete(c),
+            icon: const Icon(Icons.delete_outline, size: 16),
+            label: const Text('Delete'),
+            style: TextButton.styleFrom(
+                foregroundColor: Colors.red,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                textStyle:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        Transform.scale(
+          scale: 0.85,
+          child: Switch(
+            value: !c.hiddenByStockist,
+            activeThumbColor: Colors.white,
+            activeTrackColor: const Color(0xFF2E7D32),
+            onChanged: _busy
+                ? null
+                : (_) => _runList(
+                    () => _data.setListHidden(c.id, !c.hiddenByStockist)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _typeBadge(Color color, String label) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.45), width: 0.8),
+        ),
+        child: Text(label.toUpperCase(),
+            style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.bold,
+                color: color,
+                letterSpacing: 0.3)),
+      );
+
+  Widget _sqIconBtn(
+          IconData icon, String tip, Color color, VoidCallback onTap) =>
+      IconButton(
+        tooltip: tip,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(),
+        padding: const EdgeInsets.all(6),
+        icon: Icon(icon, size: 20, color: color),
+        onPressed: onTap,
+      );
+
+  Widget _filterChip(String text, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Text(text,
+            style: const TextStyle(
+                fontSize: 11, color: _navy, fontWeight: FontWeight.w500)),
+      );
+
+  Widget _permLinkRow(StockCatalog c, String perm) => Container(
+        padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: _navy.withValues(alpha: 0.15)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.link, size: 16, color: _navy),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text('Share Permanent link',
+                  style:
+                      TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
             ),
+            _copyBtn(perm),
+            const SizedBox(width: 8),
+            _waBtn(c.name, perm),
           ],
         ),
-      ),
-    );
+      );
+
+  // Shared share controls: a labelled Copy button + the real WhatsApp logo
+  // (white on brand green), used on both the permanent and custom links.
+  Widget _copyBtn(String url) => OutlinedButton.icon(
+        onPressed: () => _copy(url),
+        icon: const Icon(Icons.copy, size: 15),
+        label: const Text('Copy'),
+        style: OutlinedButton.styleFrom(
+            foregroundColor: _navy,
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            minimumSize: const Size(0, 32),
+            textStyle:
+                const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      );
+
+  Widget _waBtn(String name, String url) => InkWell(
+        onTap: () => _shareWhatsApp(name, url),
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.all(7),
+          decoration: const BoxDecoration(
+              color: Color(0xFF25D366), shape: BoxShape.circle),
+          child: const FaIcon(FontAwesomeIcons.whatsapp,
+              size: 16, color: Colors.white),
+        ),
+      );
+
+  // Filter conditions as separate chip labels (Filtered lists). (stock-list card)
+  List<String> _conditionChips(StockCatalog c) {
+    final parts = <String>[];
+    if (c.filterBrandIds.isNotEmpty) {
+      parts.addAll(c.filterBrandIds
+          .map((id) => _brands.where((b) => b.id == id))
+          .where((m) => m.isNotEmpty)
+          .map((m) => m.first.name));
+    }
+    parts.addAll(c.filterQualities);
+    parts.addAll(c.filterSurfaces);
+    parts.addAll(c.filterTileTypes);
+    parts.addAll(c.filterStockTypes);
+    parts.addAll(c.filterSizes.map((s) => s.replaceAll(' mm', '')));
+    if (c.filterBoxMin != null || c.filterBoxMax != null) {
+      parts.add('Boxes ${c.filterBoxMin ?? 0}–${c.filterBoxMax ?? '∞'}');
+    }
+    if (parts.isEmpty) parts.add('All designs');
+    return parts;
   }
 
   // The open row's links: permanent (copy + WhatsApp) + create timed (days box)
   // + live links with created date / days left (copy · WhatsApp · delete).
   Widget _linkPanel(StockCatalog c) {
-    final perm = _permLink(c);
     final links = _links[c.id];
     final live = (links ?? []).where((l) => l.revocable && !l.expired).toList();
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 0, 10, 12),
+      padding: const EdgeInsets.only(top: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Divider(height: 8),
-          // Permanent link
-          Row(
-            children: [
-              const Icon(Icons.link, size: 16, color: _navy),
-              const SizedBox(width: 5),
-              const Expanded(
-                child: Text('Permanent link',
-                    style: TextStyle(
-                        fontSize: 12.5, fontWeight: FontWeight.w600)),
-              ),
-              _miniBtn(Icons.copy, 'Copy', () => _copy(perm)),
-              _miniBtn(Icons.chat, 'WhatsApp',
-                  () => _shareWhatsApp(c.name, perm),
-                  color: const Color(0xFF25D366)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          // Create timed link
+          // Create a timed / custom link
           Container(
             padding: const EdgeInsets.fromLTRB(10, 6, 8, 8),
             decoration: BoxDecoration(
@@ -1056,109 +1161,11 @@ class _StockListsScreenState extends State<StockListsScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2))))
           else
             for (final l in live) _liveLinkRow(c, l),
-          _dangerZone(c),
         ],
       ),
     );
   }
 
-  // Hide-from-buyers + 24h soft-delete for this list. Shown at the bottom of the
-  // expanded panel. Deletion requires the list to be hidden first (server rule).
-  Widget _dangerZone(StockCatalog c) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Divider(height: 18),
-        Row(
-          children: [
-            Icon(
-                c.hiddenByStockist
-                    ? Icons.visibility_off_outlined
-                    : Icons.visibility_outlined,
-                size: 18,
-                color: _navy),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                  c.hiddenByStockist
-                      ? 'Hidden from buyers'
-                      : 'Visible to buyers',
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
-            ),
-            Switch(
-              value: !c.hiddenByStockist,
-              onChanged: _busy || c.pendingDelete
-                  ? null
-                  : (_) => _runList(
-                      () => _data.setListHidden(c.id, !c.hiddenByStockist)),
-            ),
-          ],
-        ),
-        if (!c.hiddenByStockist)
-          Text('Hide this list first to delete it.',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-        if (c.hiddenByStockist && !c.pendingDelete)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: _busy ? null : () => _confirmScheduleListDelete(c),
-              icon: const Icon(Icons.delete_outline, size: 18),
-              label: const Text('Delete list'),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-            ),
-          ),
-        if (c.pendingDelete)
-          Container(
-            margin: const EdgeInsets.only(top: 6),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFEBEE),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.shade200),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.timer_outlined,
-                        size: 16, color: Colors.red),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                          'Scheduled for deletion · ${_deleteCountdown(c.deleteScheduledAt!)}',
-                          style: const TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.red)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                    'Last chance — stop now to keep this list and its links. '
-                    'After the timer it cannot be recovered.',
-                    style: TextStyle(fontSize: 11, color: Colors.black54)),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    onPressed: _busy
-                        ? null
-                        : () => _runList(() => _data.cancelListDelete(c.id)),
-                    icon: const Icon(Icons.undo, size: 16),
-                    label: const Text('Keep list'),
-                    style: FilledButton.styleFrom(
-                        backgroundColor: _navy,
-                        visualDensity: VisualDensity.compact),
-                  ),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
 
   Widget _liveLinkRow(StockCatalog c, ShareLink l) {
     final url = '${AppConfig.shareBaseUrl}/s/${l.token}';
@@ -1190,9 +1197,9 @@ class _StockListsScreenState extends State<StockListsScreen> {
                     fontWeight: FontWeight.w600,
                     color: Color(0xFF2E7D32))),
           ),
-          _miniBtn(Icons.copy, 'Copy', () => _copy(url)),
-          _miniBtn(Icons.chat, 'WhatsApp', () => _shareWhatsApp(c.name, url),
-              color: const Color(0xFF25D366)),
+          _copyBtn(url),
+          const SizedBox(width: 6),
+          _waBtn(c.name, url),
           _miniBtn(Icons.delete_outline, 'Delete',
               _busy ? null : () => _deleteLink(c, l),
               color: Colors.red),
