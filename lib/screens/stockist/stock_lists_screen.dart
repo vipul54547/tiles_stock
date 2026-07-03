@@ -121,7 +121,13 @@ class _StockListsScreenState extends State<StockListsScreen> {
     }
     seen.forEach((cid, libs) => counts[cid] = libs.length);
     if (!mounted) return;
-    final active = lists.where((c) => c.isActive && !c.pendingDelete).toList();
+    // This is the MANAGEMENT screen, so show the stockist ALL their own lists:
+    // active ones, plus hidden ones and pending-delete ones. Otherwise hiding a
+    // list (which deactivates it) makes it vanish here — and with it the unhide
+    // toggle + Delete button + 24h "Keep list" cancel become unreachable.
+    final active = lists
+        .where((c) => c.isActive || c.hiddenByStockist || c.pendingDelete)
+        .toList();
     setState(() {
       _lists = active;
       _brands = brands;
@@ -529,6 +535,47 @@ class _StockListsScreenState extends State<StockListsScreen> {
     await _runBrand(() => _data.scheduleBrandDelete(b.id));
   }
 
+  // ── Stock-list hide + 24h soft-delete (mirrors the brand flow above) ─────────
+  // Runs an action, then reloads the whole screen (lists + counts + links).
+  Future<void> _runList(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmScheduleListDelete(StockCatalog c) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this stock list?'),
+        content: Text(
+            'Deleting "${c.name}" removes the list and its share links. This '
+            'CANNOT be undone.\n\nFor safety it happens after a 24-hour wait — '
+            'you can stop it any time within that window.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Start 24h deletion')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await _runList(() => _data.scheduleListDelete(c.id));
+  }
+
   Future<void> _openBrandManager() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -822,6 +869,36 @@ class _StockListsScreenState extends State<StockListsScreen> {
                                               fontWeight: FontWeight.w600,
                                               fontSize: 14.5)),
                                     ),
+                                    if (c.hiddenByStockist)
+                                      Container(
+                                        margin:
+                                            const EdgeInsets.only(left: 6),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 7, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey.shade200,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          border: Border.all(
+                                              color: Colors.grey.shade400,
+                                              width: 0.8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.visibility_off_outlined,
+                                                size: 11,
+                                                color: Colors.grey.shade700),
+                                            const SizedBox(width: 3),
+                                            Text('HIDDEN',
+                                                style: TextStyle(
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.grey.shade700,
+                                                    letterSpacing: 0.3)),
+                                          ],
+                                        ),
+                                      ),
                                     Container(
                                       margin: const EdgeInsets.only(left: 6),
                                       padding: const EdgeInsets.symmetric(
@@ -979,8 +1056,107 @@ class _StockListsScreenState extends State<StockListsScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2))))
           else
             for (final l in live) _liveLinkRow(c, l),
+          _dangerZone(c),
         ],
       ),
+    );
+  }
+
+  // Hide-from-buyers + 24h soft-delete for this list. Shown at the bottom of the
+  // expanded panel. Deletion requires the list to be hidden first (server rule).
+  Widget _dangerZone(StockCatalog c) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 18),
+        Row(
+          children: [
+            Icon(
+                c.hiddenByStockist
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                size: 18,
+                color: _navy),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                  c.hiddenByStockist
+                      ? 'Hidden from buyers'
+                      : 'Visible to buyers',
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+            Switch(
+              value: !c.hiddenByStockist,
+              onChanged: _busy || c.pendingDelete
+                  ? null
+                  : (_) => _runList(
+                      () => _data.setListHidden(c.id, !c.hiddenByStockist)),
+            ),
+          ],
+        ),
+        if (!c.hiddenByStockist)
+          Text('Hide this list first to delete it.',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        if (c.hiddenByStockist && !c.pendingDelete)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _busy ? null : () => _confirmScheduleListDelete(c),
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('Delete list'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            ),
+          ),
+        if (c.pendingDelete)
+          Container(
+            margin: const EdgeInsets.only(top: 6),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFEBEE),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.shade200),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.timer_outlined,
+                        size: 16, color: Colors.red),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                          'Scheduled for deletion · ${_deleteCountdown(c.deleteScheduledAt!)}',
+                          style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                    'Last chance — stop now to keep this list and its links. '
+                    'After the timer it cannot be recovered.',
+                    style: TextStyle(fontSize: 11, color: Colors.black54)),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    onPressed: _busy
+                        ? null
+                        : () => _runList(() => _data.cancelListDelete(c.id)),
+                    icon: const Icon(Icons.undo, size: 16),
+                    label: const Text('Keep list'),
+                    style: FilledButton.styleFrom(
+                        backgroundColor: _navy,
+                        visualDensity: VisualDensity.compact),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
