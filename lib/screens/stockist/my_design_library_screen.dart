@@ -1061,6 +1061,13 @@ class _State extends State<MyDesignLibraryScreen> {
     final brandAlias = singleBrand == null ? null : e.aliases[singleBrand];
     final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
     final titleName = showBrandName ? brandAlias : e.masterName;
+    final dnaTags = _dnaTags[e.id] ?? const <String>[];
+    // Size + surface on one line (surface no longer takes its own row).
+    final sizeLine = [
+      e.size.replaceAll(' mm', ''),
+      if (e.surfaceType.isNotEmpty && e.surfaceType.toLowerCase() != 'none')
+        e.surfaceType,
+    ].join('  ·  ');
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1073,106 +1080,115 @@ class _State extends State<MyDesignLibraryScreen> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 56,
-                height: 56,
-                child: e.imageUrl.isEmpty
-                    ? Container(
-                        color: Colors.grey.shade100,
-                        child: Icon(Icons.image_outlined,
-                            color: Colors.grey.shade400))
-                    : CachedNetworkImage(
-                        imageUrl:
-                            CloudinaryService.thumbUrl(e.imageUrl, width: 160),
-                        fit: BoxFit.cover,
-                        placeholder: (_, __) =>
-                            Container(color: Colors.grey.shade200),
-                        errorWidget: (_, __, ___) =>
-                            Container(color: Colors.grey.shade200)),
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Title = the MASTER identity name only (no brand prefix) + a
-                  // small "Master" tag, so the stockist sees the design's one true
-                  // name; each brand's own name is in the chips below.
+                  // Thumbnail + identity (name · size/surface · brand pills).
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Flexible(
-                        child: Text(titleName,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 14)),
-                      ),
-                      // "Master" tag only when showing the master name (M, and not
-                      // currently renamed to a single brand's alias).
-                      if (currentStockistBusinessType == 'M' && !showBrandName) ...[
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade200,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text('Master',
-                              style: TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey.shade600)),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: SizedBox(
+                          width: 56,
+                          height: 56,
+                          child: e.imageUrl.isEmpty
+                              ? Container(
+                                  color: Colors.grey.shade100,
+                                  child: Icon(Icons.image_outlined,
+                                      color: Colors.grey.shade400))
+                              : CachedNetworkImage(
+                                  imageUrl: CloudinaryService.thumbUrl(
+                                      e.imageUrl,
+                                      width: 160),
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, __) =>
+                                      Container(color: Colors.grey.shade200),
+                                  errorWidget: (_, __, ___) =>
+                                      Container(color: Colors.grey.shade200)),
                         ),
-                      ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Master identity name + a small "Master" tag.
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(titleName,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14)),
+                                ),
+                                if (currentStockistBusinessType == 'M' &&
+                                    !showBrandName) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey.shade200,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text('Master',
+                                        style: TextStyle(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey.shade600)),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            Text(sizeLine,
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.grey.shade600)),
+                            // Per-brand chips: solid navy = the BRAND, light =
+                            // that brand's design name.
+                            if (e.aliases.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: e.aliases.entries
+                                    .map((a) => _brandNamePill(a.key, a.value))
+                                    .toList(),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                  Text(e.size.replaceAll(' mm', ''),
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  if (e.surfaceType.isNotEmpty &&
-                      e.surfaceType.toLowerCase() != 'none')
-                    Text(e.surfaceType,
-                        style: TextStyle(
-                            fontSize: 11, color: Colors.grey.shade500)),
-                  // Per-brand chips show what each brand calls this tile — shown
-                  // for every design (1+ brands) so the brand→name mapping is
-                  // always visible. Two-tone pill: solid navy = the BRAND, light =
-                  // that brand's design name — so "my brand vs its name" is obvious.
-                  if (e.aliases.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: e.aliases.entries
-                          .map((a) => _brandNamePill(a.key, a.value))
-                          .toList(),
-                    ),
-                  ],
-                  if ((_dnaTags[e.id] ?? const []).isNotEmpty) ...[
-                    const SizedBox(height: 6),
+                  // DNA chips span the FULL width below — filling the empty space
+                  // under the thumbnail rather than crowding the narrow column.
+                  if (dnaTags.isNotEmpty) ...[
+                    const SizedBox(height: 8),
                     Wrap(
                       spacing: 5,
                       runSpacing: 4,
-                      children: _dnaTags[e.id]!.map((t) {
-                        return Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 7, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFB9770E).withValues(alpha: 0.10),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(t,
-                              style: const TextStyle(
-                                  fontSize: 11, color: Color(0xFF8A5A09))),
-                        );
-                      }).toList(),
+                      children: dnaTags
+                          .map((t) => Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFB9770E)
+                                      .withValues(alpha: 0.10),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(t,
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Color(0xFF8A5A09))),
+                              ))
+                          .toList(),
                     ),
                   ],
                 ],
               ),
             ),
+            const SizedBox(width: 6),
             Column(
               children: [
                 IconButton(
