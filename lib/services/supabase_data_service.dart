@@ -94,6 +94,8 @@ class SupabaseDataService {
         catalogIds:   (d['catalog_ids'] as List?)?.map((e) => e.toString()).toList()
                         ?? const [],
         brandId:      (lib?['brand_id'] ?? d['brand_id'])?.toString(),
+        libraryId:    (d['library_id'] ?? '').toString(),
+        familyKey:    (d['family_key'] ?? '').toString(),
         // Brand the design is sold under (market_designs/my_private_designs);
         // masked to null for anonymous public listings. Empty for legacy rows.
         brandName:    d['brand_name'] ?? '',

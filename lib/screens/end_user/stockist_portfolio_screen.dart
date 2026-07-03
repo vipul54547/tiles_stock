@@ -1229,44 +1229,122 @@ class _State extends State<StockistPortfolioScreen> {
                         ),
                       )
                     else
-                      SliverPadding(
-                        padding:
-                            const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                        sliver: SliverMasonryGrid(
-                          gridDelegate:
-                              const SliverSimpleGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                          ),
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          delegate: SliverChildBuilderDelegate(
-                            (_, i) {
-                              final d = _filtered[i];
-                              return TileCard(
-                                design: d,
-                                onTap: () => _openDesign(i),
-                                isChosen: myChoiceQuantities
-                                    .containsKey(d.id),
-                                onChoiceTap: () => setState(() {
-                                  final id = d.id;
-                                  if (myChoiceQuantities
-                                      .containsKey(id)) {
-                                    setMyChoiceQty(id, 0);
-                                  } else {
-                                    setMyChoiceQty(id, d.boxQuantity);
-                                  }
-                                }),
-                              );
-                            },
-                            childCount: _filtered.length,
-                          ),
-                        ),
-                      ),
+                      _familyGridSliver(),
                   ],
                 ),
               ),
             ]),
       bottomNavigationBar: _loading ? null : _buildSendBar(),
+    );
+  }
+
+  Widget _tileCard(TileDesign d, int i) => TileCard(
+        design: d,
+        onTap: () => _openDesign(i),
+        isChosen: myChoiceQuantities.containsKey(d.id),
+        onChoiceTap: () => setState(() {
+          final id = d.id;
+          if (myChoiceQuantities.containsKey(id)) {
+            setMyChoiceQty(id, 0);
+          } else {
+            setMyChoiceQty(id, d.boxQuantity);
+          }
+        }),
+      );
+
+  // ── Concept-family bands ──────────────────────────────────────────────────
+  // Variants sharing (size + familyKey) with >=2 distinct masters are ringed in
+  // one thin coloured family band. Only in-stock designs reach here.
+  static const List<Color> _familyColors = [
+    Color(0xFF1B9E77), Color(0xFFD95F02), Color(0xFF7570B3),
+    Color(0xFFE7298A), Color(0xFF66A61E), Color(0xFFE6AB02),
+    Color(0xFFA6761D), Color(0xFF1F78B4),
+  ];
+  Color _famColorFor(String gk) =>
+      _familyColors[gk.hashCode.abs() % _familyColors.length];
+  String _gkOf(TileDesign d) =>
+      d.familyKey.isEmpty ? '' : '${d.size}|${d.familyKey}';
+
+  Widget _familyGridSliver() {
+    final list = _filtered;
+    final fam = <String, Set<String>>{};
+    for (final d in list) {
+      final gk = _gkOf(d);
+      if (gk.isNotEmpty) {
+        (fam[gk] ??= <String>{}).add(d.libraryId.isNotEmpty ? d.libraryId : d.id);
+      }
+    }
+    final blocks = <Widget>[];
+    final emitted = <String>{};
+    var run = <Widget>[];
+    void flush() {
+      if (run.isEmpty) return;
+      final items = run;
+      run = [];
+      blocks.add(_staggeredRun(items));
+    }
+
+    for (var i = 0; i < list.length; i++) {
+      final gk = _gkOf(list[i]);
+      final isFam = gk.isNotEmpty && (fam[gk]?.length ?? 0) >= 2;
+      if (!isFam) {
+        run.add(_tileCard(list[i], i));
+        continue;
+      }
+      if (emitted.contains(gk)) continue;
+      emitted.add(gk);
+      flush();
+      final members = [
+        for (var j = 0; j < list.length; j++)
+          if (_gkOf(list[j]) == gk) _tileCard(list[j], j)
+      ];
+      blocks.add(_familyBand(gk, members));
+    }
+    flush();
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+        child: Column(
+          children: [
+            for (var i = 0; i < blocks.length; i++) ...[
+              if (i > 0) const SizedBox(height: 12),
+              blocks[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _staggeredRun(List<Widget> items) => StaggeredGrid.count(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        children: [
+          for (final w in items)
+            StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
+        ],
+      );
+
+  Widget _familyBand(String gk, List<Widget> members) {
+    final color = _famColorFor(gk);
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1.4),
+        borderRadius: BorderRadius.circular(14),
+        color: color.withValues(alpha: 0.04),
+      ),
+      padding: const EdgeInsets.all(8),
+      child: StaggeredGrid.count(
+        crossAxisCount: 2,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        children: [
+          for (final w in members)
+            StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
+        ],
+      ),
     );
   }
 }

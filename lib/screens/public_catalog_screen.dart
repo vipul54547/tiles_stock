@@ -876,16 +876,7 @@ class _State extends State<PublicCatalogScreen> {
                       style: TextStyle(color: Colors.grey))),
             )
           else
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-              sliver: SliverMasonryGrid.count(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childCount: list.length,
-                itemBuilder: (_, i) => _card(list[i]),
-              ),
-            ),
+            _familyGridSliver(list),
           SliverToBoxAdapter(child: _poweredBy()),
         ],
       ),
@@ -1270,6 +1261,105 @@ class _State extends State<PublicCatalogScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── Concept-family bands ────────────────────────────────────────────────────
+  // Designs sharing (size + family_key) are variants of one concept (1801-A /
+  // 1801-B). Standalone cards flow in the normal 2-col masonry; a family (>=2
+  // DISTINCT masters) is pulled into one full-width band ringed by a thin colour.
+  // (Only in-stock designs reach here — public_catalog already filters boxes>0.)
+  static const List<Color> _familyColors = [
+    Color(0xFF1B9E77), Color(0xFFD95F02), Color(0xFF7570B3),
+    Color(0xFFE7298A), Color(0xFF66A61E), Color(0xFFE6AB02),
+    Color(0xFFA6761D), Color(0xFF1F78B4),
+  ];
+  Color _famColorFor(String gk) =>
+      _familyColors[gk.hashCode.abs() % _familyColors.length];
+
+  String _gkOf(Map<String, dynamic> d) {
+    final fk = (d['family_key'] ?? '').toString();
+    return fk.isEmpty ? '' : '${d['size']}|$fk';
+  }
+
+  Widget _familyGridSliver(List<Map<String, dynamic>> list) {
+    // A family needs >=2 DISTINCT masters — a design's own Premium/Standard split
+    // (same library_id) must not look like a family.
+    final fam = <String, Set<String>>{};
+    for (final d in list) {
+      final gk = _gkOf(d);
+      if (gk.isNotEmpty) {
+        (fam[gk] ??= <String>{}).add((d['library_id'] ?? d['id'] ?? '').toString());
+      }
+    }
+    final blocks = <Widget>[];
+    final emitted = <String>{};
+    var run = <Widget>[];
+    void flush() {
+      if (run.isEmpty) return;
+      final items = run;
+      run = [];
+      blocks.add(_staggeredRun(items));
+    }
+
+    for (final d in list) {
+      final gk = _gkOf(d);
+      final isFam = gk.isNotEmpty && (fam[gk]?.length ?? 0) >= 2;
+      if (!isFam) {
+        run.add(_card(d));
+        continue;
+      }
+      if (emitted.contains(gk)) continue;
+      emitted.add(gk);
+      flush();
+      final members = [for (final x in list) if (_gkOf(x) == gk) _card(x)];
+      blocks.add(_familyBand(gk, members));
+    }
+    flush();
+
+    return SliverToBoxAdapter(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+        child: Column(
+          children: [
+            for (var i = 0; i < blocks.length; i++) ...[
+              if (i > 0) const SizedBox(height: 12),
+              blocks[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _staggeredRun(List<Widget> items) => StaggeredGrid.count(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        children: [
+          for (final w in items)
+            StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
+        ],
+      );
+
+  Widget _familyBand(String gk, List<Widget> members) {
+    final color = _famColorFor(gk);
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1.4),
+        borderRadius: BorderRadius.circular(14),
+        color: color.withValues(alpha: 0.04),
+      ),
+      padding: const EdgeInsets.all(8),
+      child: StaggeredGrid.count(
+        crossAxisCount: 2,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        children: [
+          for (final w in members)
+            StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
+        ],
       ),
     );
   }
