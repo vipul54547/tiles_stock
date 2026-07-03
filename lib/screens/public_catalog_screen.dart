@@ -1283,38 +1283,73 @@ class _State extends State<PublicCatalogScreen> {
     return fk.isEmpty ? '' : '${d['size']}|$fk';
   }
 
+  // Light boost: a rich family (>=3 distinct masters) nudges up a few slots so a
+  // coordinated set surfaces above lone tiles, capped so old families don't jump
+  // to the top. (concept ranking #6)
+  static int _famBoost(int masters) =>
+      masters < 3 ? 0 : (4 + (masters - 3) * 2).clamp(0, 12);
+
   Widget _familyGridSliver(List<Map<String, dynamic>> list) {
     // A family needs >=2 DISTINCT masters — a design's own Premium/Standard split
     // (same library_id) must not look like a family.
-    final fam = <String, Set<String>>{};
-    for (final d in list) {
-      final gk = _gkOf(d);
-      if (gk.isNotEmpty) {
-        (fam[gk] ??= <String>{}).add((d['library_id'] ?? d['id'] ?? '').toString());
+    final masters = <String, Set<String>>{};
+    final firstPos = <String, int>{};
+    for (var i = 0; i < list.length; i++) {
+      final gk = _gkOf(list[i]);
+      if (gk.isEmpty) continue;
+      (masters[gk] ??= <String>{})
+          .add((list[i]['library_id'] ?? list[i]['id'] ?? '').toString());
+      firstPos.putIfAbsent(gk, () => i);
+    }
+    bool isFam(String gk) => gk.isNotEmpty && (masters[gk]?.length ?? 0) >= 2;
+
+    // Order blocks (families + singles) by key = position − family boost, stable
+    // on ties so unboosted order is preserved.
+    final ordered =
+        <({double key, int seq, bool fam, String gk, List<int> idx})>[];
+    final seen = <String>{};
+    var seq = 0;
+    for (var i = 0; i < list.length; i++) {
+      final gk = _gkOf(list[i]);
+      if (isFam(gk)) {
+        if (seen.contains(gk)) continue;
+        seen.add(gk);
+        final idx = [
+          for (var j = 0; j < list.length; j++)
+            if (_gkOf(list[j]) == gk) j
+        ];
+        ordered.add((
+          key: (firstPos[gk]! - _famBoost(masters[gk]!.length)).toDouble(),
+          seq: seq++,
+          fam: true,
+          gk: gk,
+          idx: idx,
+        ));
+      } else {
+        ordered.add((key: i.toDouble(), seq: seq++, fam: false, gk: '', idx: [i]));
       }
     }
-    final blocks = <Widget>[];
-    final emitted = <String>{};
+    ordered.sort((a, b) {
+      final c = a.key.compareTo(b.key);
+      return c != 0 ? c : a.seq.compareTo(b.seq);
+    });
+
+    // Consecutive singles → one masonry run; each family → its band.
+    final widgets = <Widget>[];
     var run = <Widget>[];
     void flush() {
       if (run.isEmpty) return;
       final items = run;
       run = [];
-      blocks.add(_staggeredRun(items));
+      widgets.add(_staggeredRun(items));
     }
-
-    for (final d in list) {
-      final gk = _gkOf(d);
-      final isFam = gk.isNotEmpty && (fam[gk]?.length ?? 0) >= 2;
-      if (!isFam) {
-        run.add(_card(d));
+    for (final b in ordered) {
+      if (!b.fam) {
+        run.add(_card(list[b.idx.first]));
         continue;
       }
-      if (emitted.contains(gk)) continue;
-      emitted.add(gk);
       flush();
-      final members = [for (final x in list) if (_gkOf(x) == gk) _card(x)];
-      blocks.add(_familyBand(gk, members));
+      widgets.add(_familyBand(b.gk, [for (final j in b.idx) _card(list[j])]));
     }
     flush();
 
@@ -1323,9 +1358,9 @@ class _State extends State<PublicCatalogScreen> {
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
         child: Column(
           children: [
-            for (var i = 0; i < blocks.length; i++) ...[
+            for (var i = 0; i < widgets.length; i++) ...[
               if (i > 0) const SizedBox(height: 12),
-              blocks[i],
+              widgets[i],
             ],
           ],
         ),
