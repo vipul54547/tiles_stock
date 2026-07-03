@@ -230,7 +230,19 @@ class _State extends State<ImportMappingExcelScreen> {
     for (final e in brandCols.entries) {
       if (e.value == _defaultBrandId) { defaultCol = e.key; break; }
     }
-    if (masterCol < 0 && defaultCol == null) {
+    // For M the master design name is the IDENTITY anchor (brand-free name+size),
+    // so it is REQUIRED — never silently defaulted to a brand alias (that guessed
+    // identity is what created duplicate masters). T/W (single silo) may still
+    // fall back to the main-brand column. (project_library_identity_model)
+    final isM = currentStockistBusinessType == 'M';
+    if (isM && masterCol < 0) {
+      setState(() => _blockError =
+          'Add a required "Master design name" column. It is this design\'s one '
+          'true brand-free name; each brand column is only that brand\'s alias '
+          'for it.');
+      return;
+    }
+    if (!isM && masterCol < 0 && defaultCol == null) {
       setState(() => _blockError =
           'Add a "Master design name" column, or include your main brand '
           '(${_brands.isEmpty ? 'default' : _brands.first.name}) as a column.');
@@ -258,7 +270,7 @@ class _State extends State<ImportMappingExcelScreen> {
         sizeRaw: cell(row, sizeCol),
         masterRaw: masterCol >= 0
             ? cell(row, masterCol)
-            : (defaultCol != null ? cell(row, defaultCol) : ''),
+            : (isM ? '' : (defaultCol != null ? cell(row, defaultCol) : '')),
         brandNames: brandNames,
       ));
     }
@@ -279,7 +291,12 @@ class _State extends State<ImportMappingExcelScreen> {
       }
       r.size = sz;
       r.master = r.masterRaw.trim();
-      if (r.master.isEmpty) { r.error = 'Missing master / main-brand name'; continue; }
+      if (r.master.isEmpty) {
+        r.error = isM
+            ? 'Missing master design name (required)'
+            : 'Missing master / main-brand name';
+        continue;
+      }
       if (r.brandNames.isEmpty) { r.error = 'No brand names on this row'; continue; }
     }
 
@@ -572,8 +589,11 @@ class _State extends State<ImportMappingExcelScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             const SizedBox(height: 8),
             _introRow('Size', 'required — must match your sizes'),
-            _introRow('Master design name',
-                'optional — defaults to your main brand\'s name'),
+            _introRow(
+                'Master design name',
+                currentStockistBusinessType == 'M'
+                    ? 'required — this design\'s one true brand-free name'
+                    : 'optional — defaults to your main brand\'s name'),
             for (final b in _brands)
               _introRow(b.name,
                   b.id == _defaultBrandId
