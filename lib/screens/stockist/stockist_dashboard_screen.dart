@@ -11,7 +11,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/tile_card.dart';
-import '../../widgets/dna_tag_expander.dart';
+import '../../widgets/family_correction_sheet.dart';
 import '../../widgets/filter_section.dart';
 import '../../widgets/powered_by_tiles_stock.dart';
 import '../../widgets/notification_bell.dart';
@@ -36,7 +36,6 @@ const _qualityMeta = {
   'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
 };
 
-const int _lowStockThreshold = 10;
 
 // Design-Stock-Type options for the filter (multi-select; nothing selected =
 // show all; 'None' isn't a stored value any more). Matches the buyer filter.
@@ -84,8 +83,6 @@ class _State extends State<StockistDashboardScreen> {
   List<DnaAttribute> _dnaAttrs = [];           // catalog, for facet chips
   Map<String, Set<String>> _dnaValues = {};    // designId → canonical value ids
   final Set<String> _selectedDna = {};         // selected canonical value ids
-  // Which card's DNA-tag ▾ is currently expanded (only one at a time).
-  String? _expandedDnaDesignId;
   // This stockist's own words per canonical DNA value ("My Words"), used to
   // label tags in this stockist's own wording and to widen search matching.
   Map<String, List<String>> _myWords = {};
@@ -280,6 +277,143 @@ class _State extends State<StockistDashboardScreen> {
 
   // Group holdings by their master (library) for the "All Brands" view, preserving
   // the incoming (already-sorted) order.
+  // ── Concept-family bands ────────────────────────────────────────────────────
+  // Designs sharing (size + familyKey) are variants of one concept (1801-A /
+  // 1801-B / …). Standalone cards flow in the normal 2-col masonry; each family
+  // (>=2 members) is pulled out into one full-width band ringed by a thin colour
+  // so the eye reads them as a set — cards stay separate inside. (design family P2)
+  static const List<Color> _familyColors = [
+    Color(0xFF1B9E77), Color(0xFFD95F02), Color(0xFF7570B3),
+    Color(0xFFE7298A), Color(0xFF66A61E), Color(0xFFE6AB02),
+    Color(0xFFA6761D), Color(0xFF1F78B4),
+  ];
+  Color _famColorFor(String gk) =>
+      _familyColors[gk.hashCode.abs() % _familyColors.length];
+
+  List<Widget> _gridSlivers(List<TileDesign> designs) {
+    final bool masterMode = _brandFilter == 'all' && _isM;
+    // A "unit" = one card. In master mode a card is a per-master group; else a
+    // single holding. gk (size|familyKey) ties same-size family members together;
+    // libId (the master) tells same-design quality/brand splits apart.
+    final List<({String gk, String libId, Widget child})> units = [];
+    if (masterMode) {
+      for (final g in _groupByMaster(designs)) {
+        final f = g.first;
+        units.add((
+          gk: f.familyKey.isEmpty ? '' : '${f.size}|${f.familyKey}',
+          libId: f.libraryId.isNotEmpty ? f.libraryId : f.id,
+          child: _masterGroupTile(g),
+        ));
+      }
+    } else {
+      // Single brand: merge each master's Premium + Standard holdings into one
+      // card (group by master, like All-brands but per-quality). (per-brand P2)
+      for (final g in _groupByMaster(designs)) {
+        final f = g.first;
+        units.add((
+          gk: f.familyKey.isEmpty ? '' : '${f.size}|${f.familyKey}',
+          libId: f.libraryId.isNotEmpty ? f.libraryId : f.id,
+          child: _brandDesignTile(g),
+        ));
+      }
+    }
+    // A real family needs >=2 DISTINCT masters. The same design split into
+    // Premium + Standard (or across brands) shares one library_id, so it must
+    // NOT be ringed as a family of itself. (design family P2)
+    final famMasters = <String, Set<String>>{};
+    for (final u in units) {
+      if (u.gk.isNotEmpty) (famMasters[u.gk] ??= <String>{}).add(u.libId);
+    }
+    // Build a flat list of blocks (standalone-card runs + family bands), then put
+    // them ALL inside ONE SliverToBoxAdapter. Deliberate: a SliverMasonryGrid
+    // mis-reports its scroll extent whenever another sliver follows it (→ endless
+    // scroll), so we avoid sliver grids and lay everything out with non-scrolling
+    // StaggeredGrids in a single box. (design family P2)
+    final blocks = <Widget>[];
+    final emitted = <String>{};
+    var run = <Widget>[];
+    void flushRun() {
+      if (run.isEmpty) return;
+      final items = run;
+      run = [];
+      blocks.add(_staggeredRun(items));
+    }
+
+    for (final u in units) {
+      final isFamily = u.gk.isNotEmpty && (famMasters[u.gk]?.length ?? 0) >= 2;
+      if (!isFamily) {
+        run.add(u.child);
+        continue;
+      }
+      if (emitted.contains(u.gk)) continue; // later member — already banded
+      emitted.add(u.gk);
+      flushRun();
+      final members = [for (final x in units) if (x.gk == u.gk) x.child];
+      blocks.add(_familyBand(u.gk, members));
+    }
+    flushRun();
+
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.only(
+              top: 12, bottom: MediaQuery.viewPaddingOf(context).bottom + 12),
+          child: Column(
+            children: [
+              for (var i = 0; i < blocks.length; i++) ...[
+                if (i > 0) const SizedBox(height: 12),
+                blocks[i],
+              ],
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
+  // A run of standalone cards → a non-scrolling 2-col masonry (StaggeredGrid).
+  Widget _staggeredRun(List<Widget> items) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: StaggeredGrid.count(
+          crossAxisCount: 2,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          children: [
+            for (final w in items)
+              StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
+          ],
+        ),
+      );
+
+  // One family: a thin coloured rounded ring around the member cards. Each card
+  // stays a normal separate card; the ring just encircles the concept group.
+  Widget _familyBand(String gk, List<Widget> members) {
+    final color = _famColorFor(gk);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: color, width: 1.4),
+          borderRadius: BorderRadius.circular(14),
+          color: color.withValues(alpha: 0.04),
+        ),
+        padding: const EdgeInsets.all(8),
+        // StaggeredGrid is a NON-scrolling widget (unlike MasonryGridView), so it
+        // never nests a scrollable inside the outer CustomScrollView. .fit tiles
+        // size to their own height → masonry look without a scroll-extent fight.
+        child: StaggeredGrid.count(
+          crossAxisCount: 2,
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          children: [
+            for (final m in members)
+              StaggeredGridTile.fit(crossAxisCellCount: 1, child: m),
+          ],
+        ),
+      ),
+    );
+  }
+
   List<List<TileDesign>> _groupByMaster(List<TileDesign> list) {
     final map = <String, List<TileDesign>>{};
     final order = <String>[];
@@ -296,15 +430,41 @@ class _State extends State<StockistDashboardScreen> {
     return [for (final k in order) map[k]!];
   }
 
-  // "All Brands" card: one per master, showing the master name + a per-brand box
-  // breakdown. Each brand row taps through to edit that brand's holding.
-  // (project_per_brand_stock)
+  // Quality fonts on the All-brands card: premium = amber, standard = blue
+  // (same colours as the quality filter buttons / _qualityMeta).
+  static const _premColor = Color(0xFFF9A825);
+  static const _stdColor = Color(0xFF1565C0);
+
+  // "All Brands" card: one per master. Header = name + size·grand-total; then one
+  // row PER BRAND showing that brand's P & F split into premium (amber) + standard
+  // (blue); surface alias badge over the image. Tapping a brand row edits the
+  // holding (or asks Premium/Standard when the brand has both). (per-brand + quality)
   Widget _masterGroupTile(List<TileDesign> group) {
     final first = group.first;
     final ratio = aspectRatioFromSize(first.size);
     final img = first.faceImageUrls.isNotEmpty ? first.faceImageUrls.first : '';
-    // Total boxes across all this master's brands (the stockist's full P_Stock).
+    // Total boxes across all this master's brands + qualities (full P_Stock).
     final totalP = group.fold<int>(0, (s, d) => s + d.boxQuantity);
+    final surface = first.surfaceType;
+    final showSurface = surface.isNotEmpty && surface.toLowerCase() != 'none';
+
+    // Sub-group the holdings by brand (keeping first-seen order); within a brand
+    // the Premium/Standard holdings are shown inline on one row.
+    final byBrand = <String?, List<TileDesign>>{};
+    final brandOrder = <String?>[];
+    for (final d in group) {
+      final bId = (d.brandId != null && d.brandId!.isNotEmpty)
+          ? d.brandId
+          : _libById[d.libraryId]?.brandId;
+      final list = byBrand[bId];
+      if (list == null) {
+        byBrand[bId] = [d];
+        brandOrder.add(bId);
+      } else {
+        list.add(d);
+      }
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -315,9 +475,38 @@ class _State extends State<StockistDashboardScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AspectRatio(
-            aspectRatio: ratio,
-            child: TileImage(url: img, tileAspectRatio: ratio, thumbWidth: 600),
+          Stack(
+            children: [
+              AspectRatio(
+                aspectRatio: ratio,
+                child:
+                    TileImage(url: img, tileAspectRatio: ratio, thumbWidth: 600),
+              ),
+              if (showSurface)
+                Positioned(
+                  left: 6,
+                  bottom: 6,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      first.finishLabel != null && first.finishLabel!.isNotEmpty
+                          ? '$surface · ${first.finishLabel}'
+                          : surface,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              // Top-left: round DNA button (same affordance as the 1-brand card).
+              Positioned(top: 6, left: 6, child: _dnaButton(first)),
+            ],
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
@@ -329,63 +518,26 @@ class _State extends State<StockistDashboardScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(
-                    '${first.size.replaceAll(' mm', '')}'
-                    '  ·  $totalP boxes',
-                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
-                const SizedBox(height: 6),
-                // Per-brand breakdown — separate boxes per brand.
-                ...group.map((d) => InkWell(
-                      onTap: () => context
-                          .push('/stockist/stock/edit/${d.id}')
-                          .then((_) => _load()),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                  _brandNm(d.brandId).isNotEmpty
-                                      ? _brandNm(d.brandId)
-                                      : (_brandNm(_libById[d.libraryId]?.brandId)
-                                              .isNotEmpty
-                                          ? _brandNm(
-                                              _libById[d.libraryId]?.brandId)
-                                          : '—'),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: Color(0xFF1B4F72))),
-                            ),
-                            Text('P ${d.boxQuantity}',
-                                style: TextStyle(
-                                    fontSize: 10.5, color: Colors.grey.shade600)),
-                            const SizedBox(width: 8),
-                            Text('F ${d.fStock}',
-                                style: const TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF2E7D32))),
-                          ],
-                        ),
-                      ),
-                    )),
-                // DNA tags are set once on the shared master, so every brand's
-                // holding here carries the same tags — look them up via any one
-                // holding (first.id) and key the shared expand-state the same way.
-                DnaTagExpander(
-                  tagsByAttribute: _dnaTagsFor(first.id),
-                  isExpanded: _expandedDnaDesignId == first.id,
-                  onToggleExpand: () => setState(() => _expandedDnaDesignId =
-                      _expandedDnaDesignId == first.id ? null : first.id),
-                  onCollapseIfExpanded: () {
-                    if (_expandedDnaDesignId == first.id) {
-                      setState(() => _expandedDnaDesignId = null);
-                    }
-                  },
+                // Size on the left, grand total on the right (dark gray).
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(first.size.replaceAll(' mm', ''),
+                          style: TextStyle(
+                              fontSize: 10.5, color: Colors.grey.shade600)),
+                    ),
+                    Text('$totalP boxes',
+                        style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade700)),
+                  ],
                 ),
+                const SizedBox(height: 6),
+                // One row per brand: chip + P(prem+std) + F(prem+std=total).
+                ...brandOrder.map((bId) => _brandStockRow(bId, byBrand[bId]!)),
+                const SizedBox(height: 4),
+                _familyChip(first.libraryId),
               ],
             ),
           ),
@@ -394,22 +546,165 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Stock-list helpers. The active lists in the current brand view drive the
-  // dashboard's "filter by list" row; the name map labels each design's card.
-  Map<String, String> get _catalogName =>
-      {for (final c in _catalogs) c.id: c.name};
-  // A design can be published in several lists; label it with the first one that
-  // matches the current brand view (else any). (stocklist-output)
-  String? _designListName(TileDesign d) {
-    final ids = d.catalogIds.where(_catalogName.containsKey).toList();
-    if (ids.isEmpty) return null;
-    final inBrand = _brandFilter == 'all'
-        ? ids.first
-        : ids.firstWhere(
-            (id) => _catalogs.any((c) => c.id == id && c.brandId == _brandFilter),
-            orElse: () => ids.first);
-    return _catalogName[inBrand];
+  // One brand's row on the All-brands card. Premium + Standard holdings of that
+  // brand are shown inline (amber + blue). Tap → edit; if both qualities exist,
+  // ask which one first. (per-brand + quality)
+  Widget _brandStockRow(String? bId, List<TileDesign> holds) {
+    // Resolve the brand label. A brand-agnostic holding (no brand_id at all) is an
+    // M "shared box" → label it with the main (default) brand rather than blank.
+    final resolved = _brandNm(bId);
+    final String name;
+    if (resolved.isNotEmpty) {
+      name = resolved;
+    } else if (bId == null) {
+      final def = _brands.where((b) => b.isDefault).toList();
+      name = def.isNotEmpty ? def.first.name : '—';
+    } else {
+      name = '—';
+    }
+    TileDesign? prem, std;
+    for (final d in holds) {
+      if (d.quality == 'Premium') {
+        prem = d;
+      } else if (d.quality == 'Standard') {
+        std = d;
+      } else {
+        prem ??= d; // any other quality shares the premium slot
+      }
+    }
+    final both = prem != null && std != null;
+    return InkWell(
+      onTap: () {
+        if (both) {
+          _showQualityChooser(prem!, std!);
+        } else {
+          final d = prem ?? std!;
+          context.push('/stockist/stock/edit/${d.id}').then((_) => _load());
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Brand name on its own row (full width) so it never truncates.
+            Row(
+              children: [
+                Flexible(
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFF1B4F72),
+                        borderRadius: BorderRadius.circular(6)),
+                    child: Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            // P & F values on the next row.
+            Row(
+              children: [
+                _pfCluster('P', prem?.boxQuantity, std?.boxQuantity),
+                const SizedBox(width: 12),
+                _pfCluster('F', prem?.fStock, std?.fStock, showTotal: true),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
+
+  // "P(8+2)" / "F(6+2=8)" — premium amber, standard blue; frame + total in gray.
+  // A single quality shows just its own coloured number, no "+".
+  Widget _pfCluster(String label, int? prem, int? std, {bool showTotal = false}) {
+    final gray = TextStyle(fontSize: 10.5, color: Colors.grey.shade600);
+    final spans = <InlineSpan>[TextSpan(text: '$label(', style: gray)];
+    var first = true;
+    if (prem != null) {
+      spans.add(TextSpan(
+          text: '$prem',
+          style: const TextStyle(
+              fontSize: 10.5, fontWeight: FontWeight.bold, color: _premColor)));
+      first = false;
+    }
+    if (std != null) {
+      if (!first) spans.add(TextSpan(text: '+', style: gray));
+      spans.add(TextSpan(
+          text: '$std',
+          style: const TextStyle(
+              fontSize: 10.5, fontWeight: FontWeight.bold, color: _stdColor)));
+    }
+    if (showTotal && prem != null && std != null) {
+      spans.add(TextSpan(
+          text: '=${prem + std}',
+          style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade800)));
+    }
+    spans.add(TextSpan(text: ')', style: gray));
+    return Text.rich(TextSpan(children: spans));
+  }
+
+  // Both Premium and Standard exist for this brand — ask which one to edit.
+  void _showQualityChooser(TileDesign prem, TileDesign std) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Edit which quality?',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.star_rounded, color: _premColor),
+              title: const Text('Premium'),
+              trailing: Text('P ${prem.boxQuantity} · F ${prem.fStock}'),
+              onTap: () {
+                Navigator.pop(ctx);
+                context
+                    .push('/stockist/stock/edit/${prem.id}')
+                    .then((_) => _load());
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.verified_outlined, color: _stdColor),
+              title: const Text('Standard'),
+              trailing: Text('P ${std.boxQuantity} · F ${std.fStock}'),
+              onTap: () {
+                Navigator.pop(ctx);
+                context
+                    .push('/stockist/stock/edit/${std.id}')
+                    .then((_) => _load());
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Stock-list helpers. The active lists in the current brand view drive the
+  // dashboard's "filter by list" row.
   List<StockCatalog> get _filterLists {
     var cs = _catalogs.where((c) => c.isActive);
     if (_brandFilter != 'all') {
@@ -949,32 +1244,7 @@ class _State extends State<StockistDashboardScreen> {
                     style: TextStyle(color: Colors.grey))),
           )
         else
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(
-                12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
-            sliver: Builder(builder: (_) {
-              // "All Brands" → one card per master with a per-brand box breakdown
-              // (stock is per-brand). A specific brand → normal per-holding cards
-              // showing that brand's alias name. (project_per_brand_stock)
-              if (_brandFilter == 'all' && _isM) {
-                final groups = _groupByMaster(designs);
-                return SliverMasonryGrid.count(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childCount: groups.length,
-                  itemBuilder: (_, i) => _masterGroupTile(groups[i]),
-                );
-              }
-              return SliverMasonryGrid.count(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childCount: designs.length,
-                itemBuilder: (_, i) => _designTile(designs[i]),
-              );
-            }),
-          ),
+          ..._gridSlivers(designs),
       ],
     );
   }
@@ -1015,8 +1285,10 @@ class _State extends State<StockistDashboardScreen> {
   // _designTile). Tooltip shows the percent.
   Widget _dnaDot(double fill) {
     final pct = (fill * 100).round();
-    final Color c =
-        Color.lerp(const Color(0xFFD32F2F), const Color(0xFFF9A825), fill)!;
+    // Diffusing colour by how tagged the DNA is: red → amber → green (complete).
+    final Color c = fill >= 1.0
+        ? const Color(0xFF2E7D32)
+        : Color.lerp(const Color(0xFFD32F2F), const Color(0xFFF9A825), fill)!;
     return Tooltip(
       message: 'Design DNA $pct% tagged',
       child: Container(
@@ -1053,29 +1325,259 @@ class _State extends State<StockistDashboardScreen> {
     if (mounted) _load();
   }
 
-  // The label shown for a value: this stockist's own word for it (My Words)
-  // if set, else the admin's canonical name — same convention as dna_editor_sheet.
-  String _dnaLabel(DnaValue v) {
-    final words = _myWords[v.id];
-    return (words != null && words.isNotEmpty) ? words.first : v.name;
+  // Round DNA "diffusing" button — the single DNA affordance on stockist cards.
+  // Colour reflects how tagged the design is; tap → the DNA editor. (design DNA)
+  Widget _dnaButton(TileDesign d) => GestureDetector(
+        onTap: () => _openDnaForDesign(d),
+        child: _dnaDot(_dnaFill[d.id] ?? 0.0),
+      );
+
+  // Small "Family" chip — opens the shared add/remove-from-family sheet.
+  Widget _familyChip(String libraryId) => InkWell(
+        onTap: () => _openFamilySheet(libraryId),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          margin: const EdgeInsets.only(top: 2),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+                color: const Color(0xFF1B4F72).withValues(alpha: 0.28)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.account_tree_outlined,
+                  size: 12, color: Colors.grey.shade700),
+              const SizedBox(width: 3),
+              Text('Family',
+                  style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700)),
+            ],
+          ),
+        ),
+      );
+
+  Future<void> _openFamilySheet(String libraryId) async {
+    final keep = _libById[libraryId];
+    if (keep == null) return;
+    await showFamilyCorrectionSheet(context,
+        data: _service, keep: keep, allEntries: _library);
+    if (mounted) _load();
   }
 
-  // This design's DNA tags grouped by attribute name, for the card's
-  // expandable ▾ section. Reuses the already-loaded facet catalog/values —
-  // no extra fetch. (project_design_dna_engine)
-  Map<String, List<String>> _dnaTagsFor(String designId) {
-    final vals = _dnaValues[designId];
-    if (vals == null || vals.isEmpty) return const {};
-    final out = <String, List<String>>{};
-    for (final attr in _dnaAttrs) {
-      for (final v in attr.values) {
-        if (v.name.toLowerCase() != 'none' && vals.contains(v.id)) {
-          (out[attr.name] ??= []).add(_dnaLabel(v));
-        }
+  // Single-brand card: a design's Premium + Standard holdings MERGED into one
+  // card. Size row shows F(prem+std=total); the figures row shows P·C·H split
+  // premium(amber)+standard(blue), no F. Top-left DNA button, bottom Family chip.
+  // Tap → edit (or asks which quality when both exist). (per-brand + quality)
+  Widget _brandDesignTile(List<TileDesign> group) {
+    final first = group.first;
+    final ratio = aspectRatioFromSize(first.size);
+    final img = first.faceImageUrls.isNotEmpty ? first.faceImageUrls.first : '';
+    final surface = first.surfaceType;
+    final showSurface = surface.isNotEmpty && surface.toLowerCase() != 'none';
+
+    TileDesign? prem, std;
+    for (final d in group) {
+      if (d.quality == 'Premium') {
+        prem = d;
+      } else if (d.quality == 'Standard') {
+        std = d;
+      } else {
+        prem ??= d;
       }
     }
-    return out;
+    final totalP = group.fold<int>(0, (s, d) => s + d.boxQuantity);
+    final outOfStock = totalP == 0;
+    final both = prem != null && std != null;
+    final ids = group.map((d) => d.id).toList();
+    final anySelected = ids.any(_selectedIds.contains);
+
+    void openEdit() {
+      if (both) {
+        _showQualityChooser(prem!, std!);
+      } else {
+        final d = prem ?? std!;
+        context.push('/stockist/stock/edit/${d.id}').then((_) => _load());
+      }
+    }
+
+    return GestureDetector(
+      onLongPress: () => setState(() {
+        _selectMode = true;
+        _selectedIds.addAll(ids);
+      }),
+      onTap: _selectMode
+          ? () => setState(() {
+                if (anySelected) {
+                  _selectedIds.removeAll(ids);
+                } else {
+                  _selectedIds.addAll(ids);
+                }
+              })
+          : null,
+      child: Stack(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Stack(
+                  children: [
+                    AspectRatio(
+                      aspectRatio: ratio,
+                      child: TileImage(
+                          url: img, tileAspectRatio: ratio, thumbWidth: 600),
+                    ),
+                    if (showSurface)
+                      Positioned(
+                        left: 6,
+                        bottom: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.62),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Text(
+                            first.finishLabel != null &&
+                                    first.finishLabel!.isNotEmpty
+                                ? '$surface · ${first.finishLabel}'
+                                : surface,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      GestureDetector(
+                        onTap: _selectMode ? null : openEdit,
+                        behavior: HitTestBehavior.opaque,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_designDisplayName(first),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold, fontSize: 13)),
+                            // Size on the left, grand total on the right (dark
+                            // gray) — same as the All-brands card.
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(first.size.replaceAll(' mm', ''),
+                                      style: TextStyle(
+                                          fontSize: 10.5,
+                                          color: Colors.grey.shade600)),
+                                ),
+                                Text('$totalP boxes',
+                                    style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.grey.shade700)),
+                              ],
+                            ),
+                            const SizedBox(height: 5),
+                            // P · C · H, each split premium(amber)+standard(blue).
+                            Wrap(
+                              spacing: 12,
+                              runSpacing: 2,
+                              children: [
+                                _pfCluster('P', prem?.boxQuantity,
+                                    std?.boxQuantity),
+                                _pfCluster('C', prem?.controlQuantity,
+                                    std?.controlQuantity),
+                                _pfCluster('H', prem?.heldQuantity,
+                                    std?.heldQuantity),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      // Family chip on the left, F(prem+std=total) on the right.
+                      Row(
+                        children: [
+                          _familyChip(first.libraryId),
+                          const Spacer(),
+                          _pfCluster('F', prem?.fStock, std?.fStock,
+                              showTotal: true),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Top-left: round DNA button + out-of-stock badge.
+          Positioned(
+            top: 6,
+            left: 6,
+            child: Row(
+              children: [
+                _dnaButton(first),
+                if (outOfStock) ...[
+                  const SizedBox(width: 4),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(6)),
+                    child: const Text('Out of Stock',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (_selectMode)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: anySelected
+                      ? const Color(0xFF1B4F72)
+                      : Colors.white.withValues(alpha: 0.85),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF1B4F72), width: 2),
+                ),
+                child: anySelected
+                    ? const Icon(Icons.check, size: 14, color: Colors.white)
+                    : null,
+              ),
+            ),
+        ],
+      ),
+    );
   }
+
 
   // Search match against a design's DNA tags: the canonical name AND this
   // stockist's own alias words for each tagged value. [terms] is the
@@ -1093,137 +1595,6 @@ class _State extends State<StockistDashboardScreen> {
       }
     }
     return false;
-  }
-
-  Widget _designTile(TileDesign d) {
-    final outOfStock = d.boxQuantity == 0;
-    final lowStock = !outOfStock && d.boxQuantity < _lowStockThreshold;
-    final dnaFill = _dnaFill[d.id];
-    // Only flag designs that still need DNA work — fully-tagged ones show no dot.
-    final showDnaDot = dnaFill != null && dnaFill < 1.0;
-    final isSelected = _selectedIds.contains(d.id);
-    return GestureDetector(
-      onLongPress: () => setState(() {
-        _selectMode = true;
-        _selectedIds.add(d.id);
-      }),
-      onTap: _selectMode
-          ? () => setState(() {
-                if (isSelected) {
-                  _selectedIds.remove(d.id);
-                } else {
-                  _selectedIds.add(d.id);
-                }
-              })
-          : null,
-      child: Stack(
-        children: [
-          TileCard(
-            design: d,
-            displayName: _designDisplayName(d),
-            showQuality: false, // stockist has a quality filter; chip is redundant
-            showControlFigures: true, // stockist sees P · C · H · F (fstock model)
-            onTap: _selectMode
-                ? () {}
-                : () => context.push('/stockist/stock/edit/${d.id}'),
-            dnaTagsByAttribute: _dnaTagsFor(d.id),
-            isDnaExpanded: _expandedDnaDesignId == d.id,
-            onToggleDnaExpand: () => setState(() => _expandedDnaDesignId =
-                _expandedDnaDesignId == d.id ? null : d.id),
-            onCollapseDnaIfExpanded: () {
-              if (_expandedDnaDesignId == d.id) {
-                setState(() => _expandedDnaDesignId = null);
-              }
-            },
-          ),
-          // Stock-list badge — which list this design belongs to (shown only
-          // when the brand has more than one list, so it carries information).
-          // Top-right (not bottom-left): that corner is now the DNA tag ▾
-          // arrow's territory, which grows taller when expanded — an
-          // absolutely-positioned bottom-left badge would sit on top of it.
-          // Select-mode's checkmark also lives top-right, but the two never
-          // show at once.
-          if (!_selectMode &&
-              _filterLists.length > 1 &&
-              _designListName(d) != null)
-            Positioned(
-              top: 6,
-              right: 6,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(_designListName(d)!,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold)),
-              ),
-            ),
-          // Top-left: DNA-completeness dot (only while incomplete) + the
-          // out/low-stock badge beside it when relevant.
-          if (showDnaDot || outOfStock || lowStock)
-            Positioned(
-              top: 6,
-              left: 6,
-              child: Row(
-                children: [
-                  if (showDnaDot)
-                    GestureDetector(
-                      // Tap the dot → open the Design-DNA editor for this design
-                      // (creating its Library master first if it has none yet).
-                      onTap: () => _openDnaForDesign(d),
-                      child: _dnaDot(dnaFill),
-                    ),
-                  if (outOfStock || lowStock) ...[
-                    if (showDnaDot) const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 7, vertical: 3),
-                      decoration: BoxDecoration(
-                        color:
-                            outOfStock ? Colors.red : Colors.orange.shade700,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        outOfStock ? 'Out of Stock' : 'Low Stock',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          if (_selectMode)
-            Positioned(
-              top: 6,
-              right: 6,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? const Color(0xFF1B4F72)
-                      : Colors.white.withValues(alpha: 0.85),
-                  shape: BoxShape.circle,
-                  border:
-                      Border.all(color: const Color(0xFF1B4F72), width: 2),
-                ),
-                child: isSelected
-                    ? const Icon(Icons.check, size: 14, color: Colors.white)
-                    : null,
-              ),
-            ),
-        ],
-      ),
-    );
   }
 
   // "+ Add" splits the two real intents BEFORE anything else, so the stockist

@@ -208,6 +208,7 @@ class SupabaseDataService {
       brandId:      d['brand_id']?.toString(),
       libraryId:    (d['library_id'] ?? '').toString(),
       masterDesignName: (d['master_design_name'] ?? '').toString(),
+      familyKey:    (d['family_key'] ?? '').toString(),
       updatedAt:    DateTime.parse(d['updated_at']),
       quality:      quality,
       stockType:    effectiveStockType((d['stock_type'] ?? 'Uncertain').toString(), quality),

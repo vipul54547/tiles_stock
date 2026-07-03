@@ -56,6 +56,11 @@ class TileDesign {
   /// The brand-agnostic master design name (CLOUD ONYX). For M, holdings of the
   /// same design share this → the Stock Control page groups by it. (fstock model)
   final String masterDesignName;
+  /// The "concept family" key of this design's master (server-computed via
+  /// `_family_effective_key` — auto name-root, or the stockist's override). Empty
+  /// when unknown. Designs sharing (size + familyKey) are variants of one concept
+  /// and are drawn inside a single thin coloured family boundary. (design family)
+  final String familyKey;
   /// The brand this design is sold under (parent of the catalog). Shown on the
   /// card in place of the seller's company name. Empty for legacy/brandless
   /// rows, and masked (empty) for anonymous public listings — callers fall back
@@ -94,6 +99,7 @@ class TileDesign {
     this.brandId,
     this.libraryId = '',
     this.masterDesignName = '',
+    this.familyKey = '',
     this.brandName = '',
     required this.updatedAt,
     required this.quality,
@@ -126,6 +132,7 @@ class TileDesign {
         stockistName: json['stockist_display_name'] ?? '',
         catalogId: json['catalog_id'] as String?,
         brandName: json['brand_name'] ?? '',
+        familyKey: json['family_key'] ?? '',
         updatedAt: DateTime.parse(json['updated_at']),
         quality: json['quality'] ?? 'Standard',
         stockType: json['stock_type'] ?? 'Uncertain',
@@ -148,7 +155,8 @@ class TileDesign {
         stockistId: stockistId, stockistName: stockistName,
         catalogId: catalogId, catalogIds: catalogIds,
         brandId: brandId, libraryId: libraryId,
-        masterDesignName: masterDesignName, brandName: brandName,
+        masterDesignName: masterDesignName, familyKey: familyKey,
+        brandName: brandName,
         updatedAt: updatedAt, quality: quality, stockType: stockType,
         createdAt: createdAt, stockistPriority: stockistPriority,
       );
