@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/stockist.dart';
 import '../../services/supabase_data_service.dart';
-import '../../widgets/tile_card.dart';
+import '../../widgets/merged_family_grid.dart';
+import '../../widgets/quality_choice_sheet.dart';
+import '../../utils/quality_merge.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
@@ -142,6 +143,9 @@ class _State extends State<StockistPortfolioScreen> {
 
   List<TileDesign> get _chosenFromThisStockist =>
       _designs.where((d) => myChoiceQuantities.containsKey(d.id)).toList();
+
+  // Filtered holdings folded into merged (Premium+Standard) buyer cards.
+  List<MergedDesign> get _mergedFiltered => mergeByQuality(_filtered);
 
   @override
   void initState() {
@@ -415,7 +419,8 @@ class _State extends State<StockistPortfolioScreen> {
   // ── Design detail sheet ───────────────────────────────────────────────────
 
   void _openDesign(int startIndex) {
-    final list        = _filtered;
+    // Page across the merged cards' representative holdings (matches the grid).
+    final list        = _mergedFiltered.map((m) => m.rep).toList();
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.75;
     showModalBottomSheet<void>(
       context: context,
@@ -1238,146 +1243,19 @@ class _State extends State<StockistPortfolioScreen> {
     );
   }
 
-  Widget _tileCard(TileDesign d, int i) => TileCard(
-        design: d,
-        onTap: () => _openDesign(i),
-        isChosen: myChoiceQuantities.containsKey(d.id),
-        onChoiceTap: () => setState(() {
-          final id = d.id;
-          if (myChoiceQuantities.containsKey(id)) {
-            setMyChoiceQty(id, 0);
-          } else {
-            setMyChoiceQty(id, d.boxQuantity);
-          }
-        }),
-      );
-
-  // ── Concept-family bands ──────────────────────────────────────────────────
-  // Variants sharing (size + familyKey) with >=2 distinct masters are ringed in
-  // one thin coloured family band. Only in-stock designs reach here.
-  static const List<Color> _familyColors = [
-    Color(0xFF1B9E77), Color(0xFFD95F02), Color(0xFF7570B3),
-    Color(0xFFE7298A), Color(0xFF66A61E), Color(0xFFE6AB02),
-    Color(0xFFA6761D), Color(0xFF1F78B4),
-  ];
-  Color _famColorFor(String gk) =>
-      _familyColors[gk.hashCode.abs() % _familyColors.length];
-  String _gkOf(TileDesign d) =>
-      d.familyKey.isEmpty ? '' : '${d.size}|${d.familyKey}';
-
-  // Light boost: a rich family (>=3 distinct masters) nudges a few slots up the
-  // newest-first order — a coordinated set surfaces above lone tiles without
-  // yanking old families to the top (capped). (concept ranking #6)
-  static int _famBoost(int masters) =>
-      masters < 3 ? 0 : (4 + (masters - 3) * 2).clamp(0, 12);
-
-  Widget _familyGridSliver() {
-    final list = _filtered;
-    final masters = <String, Set<String>>{};
-    final firstPos = <String, int>{};
-    for (var i = 0; i < list.length; i++) {
-      final gk = _gkOf(list[i]);
-      if (gk.isEmpty) continue;
-      (masters[gk] ??= <String>{})
-          .add(list[i].libraryId.isNotEmpty ? list[i].libraryId : list[i].id);
-      firstPos.putIfAbsent(gk, () => i);
-    }
-    bool isFam(String gk) => gk.isNotEmpty && (masters[gk]?.length ?? 0) >= 2;
-
-    // Order blocks (families + singles) by key = position − family boost, stable
-    // on ties so unboosted order is preserved.
-    final ordered =
-        <({double key, int seq, bool fam, String gk, List<int> idx})>[];
-    final seen = <String>{};
-    var seq = 0;
-    for (var i = 0; i < list.length; i++) {
-      final gk = _gkOf(list[i]);
-      if (isFam(gk)) {
-        if (seen.contains(gk)) continue;
-        seen.add(gk);
-        final idx = [
-          for (var j = 0; j < list.length; j++)
-            if (_gkOf(list[j]) == gk) j
-        ];
-        ordered.add((
-          key: (firstPos[gk]! - _famBoost(masters[gk]!.length)).toDouble(),
-          seq: seq++,
-          fam: true,
-          gk: gk,
-          idx: idx,
-        ));
-      } else {
-        ordered.add((key: i.toDouble(), seq: seq++, fam: false, gk: '', idx: [i]));
-      }
-    }
-    ordered.sort((a, b) {
-      final c = a.key.compareTo(b.key);
-      return c != 0 ? c : a.seq.compareTo(b.seq);
-    });
-
-    // Consecutive singles → one masonry run; each family → its band.
-    final widgets = <Widget>[];
-    var run = <Widget>[];
-    void flush() {
-      if (run.isEmpty) return;
-      final items = run;
-      run = [];
-      widgets.add(_staggeredRun(items));
-    }
-    for (final b in ordered) {
-      if (!b.fam) {
-        run.add(_tileCard(list[b.idx.first], b.idx.first));
-        continue;
-      }
-      flush();
-      widgets.add(
-          _familyBand(b.gk, [for (final j in b.idx) _tileCard(list[j], j)]));
-    }
-    flush();
-
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-        child: Column(
-          children: [
-            for (var i = 0; i < widgets.length; i++) ...[
-              if (i > 0) const SizedBox(height: 12),
-              widgets[i],
-            ],
-          ],
+  // Banded, quality-merged buyer grid (shared with the discover feed). Only
+  // in-stock designs reach here; Premium+Standard of a tile are folded into one
+  // card, and >=2-master families are ringed. (Scenario-2 buyer merge)
+  Widget _familyGridSliver() => SliverToBoxAdapter(
+        child: MergedFamilyGrid(
+          cards: _mergedFiltered,
+          onOpenDetail: _openDesign,
+          isChosen: (m) =>
+              m.holdings.any((h) => myChoiceQuantities.containsKey(h.id)),
+          onChoiceTap: (m) async {
+            await showQualityChoiceSheet(context, m);
+            if (mounted) setState(() {});
+          },
         ),
-      ),
-    );
-  }
-
-  Widget _staggeredRun(List<Widget> items) => StaggeredGrid.count(
-        crossAxisCount: 2,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        children: [
-          for (final w in items)
-            StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
-        ],
       );
-
-  Widget _familyBand(String gk, List<Widget> members) {
-    final color = _famColorFor(gk);
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: color, width: 1.4),
-        borderRadius: BorderRadius.circular(14),
-        color: color.withValues(alpha: 0.04),
-      ),
-      padding: const EdgeInsets.all(8),
-      child: StaggeredGrid.count(
-        crossAxisCount: 2,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        children: [
-          for (final w in members)
-            StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
-        ],
-      ),
-    );
-  }
 }

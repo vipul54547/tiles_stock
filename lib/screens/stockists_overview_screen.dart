@@ -9,6 +9,8 @@ import '../models/tile_design.dart';
 import '../services/supabase_data_service.dart';
 import '../services/supabase_auth_service.dart';
 import '../widgets/tile_card.dart';
+import '../widgets/quality_choice_sheet.dart';
+import '../utils/quality_merge.dart';
 import '../services/cloudinary_service.dart';
 import 'end_user/stockist_group_screen.dart'
     show stockistGroups, loadStockistGroupsFromDb, confirmToggleStockistInGroup;
@@ -1586,6 +1588,10 @@ class _State extends State<StockistsOverviewScreen> {
 
     final filteredStockists = _filteredData;
     final filteredDesigns = _filteredDesigns;
+    // Fold each tile's Premium+Standard holdings into one merged card (same
+    // brand+surface). (Scenario-2 buyer merge)
+    final mergedDesigns = mergeByQuality(filteredDesigns);
+    final mergedReps = [for (final m in mergedDesigns) m.rep];
     // System navigation-bar height — added to the grid's bottom padding so the
     // last row isn't clipped by the Android nav bar (edge-to-edge).
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
@@ -1612,54 +1618,55 @@ class _State extends State<StockistsOverviewScreen> {
           // Progressive one-time suggestion to group suppliers (after ~7).
           if (_showGroupTip) _buildGroupTip(),
           _buildGroupRow(
-              _viewDesigns ? filteredDesigns.length : filteredStockists.length),
+              _viewDesigns ? mergedDesigns.length : filteredStockists.length),
           if (_viewDesigns)
             ActiveFilterBar(
                 filters: _activeDesignFilters(),
                 onClearAll: _clearAllDesignFilters),
           Expanded(
             child: _viewDesigns
-                ? filteredDesigns.isEmpty
+                ? mergedDesigns.isEmpty
                     ? _marketEmpty(designs: true)
                     : MasonryGridView.count(
                         padding: EdgeInsets.fromLTRB(12, 4, 12, 12 + bottomInset),
                         crossAxisCount: 2,
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
-                        itemCount: filteredDesigns.length,
-                        itemBuilder: (_, i) => TileCard(
-                          design: filteredDesigns[i],
-                          onTap: () => _openDesignSheet(i, filteredDesigns),
-                          isChosen: myChoiceQuantities
-                              .containsKey(filteredDesigns[i].id),
-                          onChoiceTap: () => setState(() {
-                            final id = filteredDesigns[i].id;
-                            if (myChoiceQuantities.containsKey(id)) {
-                              setMyChoiceQty(id, 0);
-                            } else {
-                              setMyChoiceQty(id, filteredDesigns[i].boxQuantity);
-                            }
-                          }),
-                          onStockistTap: () => context.push(
-                            '/stockist/${filteredDesigns[i].stockistId}/portfolio',
-                            extra: filteredDesigns[i].id,
-                          ),
-                          dnaTagsByAttribute:
-                              _dnaTagsFor(filteredDesigns[i].id),
-                          isDnaExpanded:
-                              _expandedDnaDesignId == filteredDesigns[i].id,
-                          onToggleDnaExpand: () => setState(() =>
-                              _expandedDnaDesignId =
-                                  _expandedDnaDesignId == filteredDesigns[i].id
-                                      ? null
-                                      : filteredDesigns[i].id),
-                          onCollapseDnaIfExpanded: () {
-                            if (_expandedDnaDesignId ==
-                                filteredDesigns[i].id) {
-                              setState(() => _expandedDnaDesignId = null);
-                            }
-                          },
-                        ),
+                        itemCount: mergedDesigns.length,
+                        itemBuilder: (_, i) {
+                          final m = mergedDesigns[i];
+                          final rep = m.rep;
+                          return TileCard(
+                            design: rep,
+                            premiumBoxes:
+                                m.premium != null ? m.premiumBoxes : null,
+                            standardBoxes:
+                                m.standard != null ? m.standardBoxes : null,
+                            onTap: () => _openDesignSheet(i, mergedReps),
+                            isChosen: m.holdings.any(
+                                (h) => myChoiceQuantities.containsKey(h.id)),
+                            onChoiceTap: () async {
+                              await showQualityChoiceSheet(context, m);
+                              if (mounted) setState(() {});
+                            },
+                            onStockistTap: () => context.push(
+                              '/stockist/${rep.stockistId}/portfolio',
+                              extra: rep.id,
+                            ),
+                            dnaTagsByAttribute: _dnaTagsFor(rep.id),
+                            isDnaExpanded: _expandedDnaDesignId == rep.id,
+                            onToggleDnaExpand: () => setState(() =>
+                                _expandedDnaDesignId =
+                                    _expandedDnaDesignId == rep.id
+                                        ? null
+                                        : rep.id),
+                            onCollapseDnaIfExpanded: () {
+                              if (_expandedDnaDesignId == rep.id) {
+                                setState(() => _expandedDnaDesignId = null);
+                              }
+                            },
+                          );
+                        },
                       )
                 : filteredStockists.isEmpty
                     ? _marketEmpty(designs: false)

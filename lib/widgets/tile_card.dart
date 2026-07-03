@@ -26,6 +26,14 @@ class TileCard extends StatelessWidget {
   /// the brand-agnostic master name. Null → falls back to [design.name].
   final String? displayName;
 
+  /// Scenario-2 buyer merge: box split for a quality-merged buyer card. When
+  /// EITHER is non-null the card renders in "merged" mode — the single boxes
+  /// count is replaced by a Premium(amber)/Standard(blue) split, and the quality
+  /// badge shows Both / Premium / Standard accordingly. A null grade is a grade
+  /// this tile isn't stocked in (not shown). Ignored when [showControlFigures].
+  final int? premiumBoxes;
+  final int? standardBoxes;
+
   /// This design's DNA tags grouped by attribute name (e.g. {"Series":
   /// ["Monochrome"]}), for the expandable ▾ tag section. Null/empty → no
   /// arrow shown at all.
@@ -44,6 +52,8 @@ class TileCard extends StatelessWidget {
     this.showQuality = true,
     this.showControlFigures = false,
     this.displayName,
+    this.premiumBoxes,
+    this.standardBoxes,
     this.dnaTagsByAttribute,
     this.isDnaExpanded = false,
     this.onToggleDnaExpand,
@@ -72,6 +82,47 @@ class TileCard extends StatelessWidget {
         fig('C', design.controlQuantity, const Color(0xFFEF6C00)),
         fig('H', design.heldQuantity, const Color(0xFF1565C0)),
         fig('F', design.fStock, const Color(0xFF2E7D32)),
+      ],
+    );
+  }
+
+  // Scenario-2 buyer merge: this card folds Premium+Standard into one.
+  bool get _merged =>
+      !showControlFigures && (premiumBoxes != null || standardBoxes != null);
+
+  // Derived badge for a merged card: Both when the tile is stocked in both
+  // grades, else the single grade it carries.
+  String get _mergedQuality => (premiumBoxes ?? 0) > 0 && (standardBoxes ?? 0) > 0
+      ? 'Both'
+      : premiumBoxes != null
+          ? 'Premium'
+          : 'Standard';
+
+  // Boxes line for a merged card: P n (amber) · S m (blue), only the grades
+  // this tile is actually stocked in.
+  Widget _mergedBoxes() {
+    Widget grade(String label, int n, Color c) => Text.rich(TextSpan(children: [
+          TextSpan(
+              text: '$label ',
+              style: TextStyle(fontSize: 9, color: c.withValues(alpha: 0.8))),
+          TextSpan(
+              text: '$n',
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.bold, color: c)),
+        ]));
+    final parts = <Widget>[
+      if (premiumBoxes != null)
+        grade('P', premiumBoxes!, const Color(0xFFF9A825)),
+      if (standardBoxes != null)
+        grade('S', standardBoxes!, const Color(0xFF1565C0)),
+    ];
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < parts.length; i++) ...[
+          if (i > 0) const SizedBox(width: 10),
+          parts[i],
+        ],
       ],
     );
   }
@@ -181,7 +232,8 @@ class TileCard extends StatelessWidget {
                       ),
                       if (showQuality) ...[
                         const SizedBox(width: 4),
-                        _QualityBadge(quality: design.quality),
+                        _QualityBadge(
+                            quality: _merged ? _mergedQuality : design.quality),
                       ],
                     ],
                   ),
@@ -200,7 +252,10 @@ class TileCard extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
+                            if (_merged)
+                              _mergedBoxes()
+                            else
+                              Text(
                                 showControlFigures
                                     ? (design.fStock == 0 &&
                                             design.controlQuantity > 0

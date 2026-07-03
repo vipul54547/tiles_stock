@@ -270,9 +270,210 @@ class _State extends State<PublicCatalogScreen> {
         }
       });
 
+  // ── Quality merge (Scenario-2 buyer merge) ─────────────────────────────────
+  // Fold a tile's Premium + Standard holdings (same library_id + surface on this
+  // single-stockist page) into one "rep" map carrying both holding ids/boxes in
+  // _premId/_premBoxes/_stdId/_stdBoxes. Preserves first-appearance order; a
+  // family band still needs >=2 DISTINCT masters, so a lone tile's own P/S split
+  // never bands. Merges across quality only — a different surface stays separate.
+  List<Map<String, dynamic>> _mergeByQuality(List<Map<String, dynamic>> rows) {
+    final order = <String>[];
+    final prem = <String, Map<String, dynamic>>{};
+    final std = <String, Map<String, dynamic>>{};
+    for (final d in rows) {
+      final lib = (d['library_id'] ?? d['id'] ?? '').toString();
+      final surface = (d['surface'] ?? '').toString();
+      final k = '$lib|$surface';
+      if (!prem.containsKey(k) && !std.containsKey(k)) order.add(k);
+      final isPrem = '${d['quality']}'.toLowerCase() == 'premium';
+      final m = isPrem ? prem : std;
+      final cur = m[k];
+      if (cur == null ||
+          ((d['boxes'] as num?) ?? 0) > ((cur['boxes'] as num?) ?? 0)) {
+        m[k] = d;
+      }
+    }
+    final out = <Map<String, dynamic>>[];
+    for (final k in order) {
+      final p = prem[k];
+      final s = std[k];
+      final rep = Map<String, dynamic>.from((p ?? s)!);
+      rep['_premId'] = p?['id'];
+      rep['_premBoxes'] = p?['boxes'];
+      rep['_stdId'] = s?['id'];
+      rep['_stdBoxes'] = s?['boxes'];
+      out.add(rep);
+    }
+    return out;
+  }
+
+  // Premium/Standard/Both chooser for a merged public card (step 3). Writes box
+  // counts into _selected keyed per real holding id, so "Both" is two steppers.
+  void _showQualityChoicePublic(Map<String, dynamic> d) {
+    final premId = d['_premId'] == null ? null : '${d['_premId']}';
+    final stdId = d['_stdId'] == null ? null : '${d['_stdId']}';
+    final premBoxes = (d['_premBoxes'] as num?)?.toInt() ?? 0;
+    final stdBoxes = (d['_stdBoxes'] as num?)?.toInt() ?? 0;
+    // Default each grade's wanted quantity to its full available stock (buyer
+    // starts from the in-stock count and trims down), unless already chosen.
+    if (premId != null && !_selected.containsKey(premId) && premBoxes > 0) {
+      _selected[premId] = premBoxes;
+    }
+    if (stdId != null && !_selected.containsKey(stdId) && stdBoxes > 0) {
+      _selected[stdId] = stdBoxes;
+    }
+    setState(() {});
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          Widget grade(String? id, String label, int max, Color fg, Color bg) {
+            if (id == null) return const SizedBox.shrink();
+            final qty = _selected[id] ?? 0;
+            void set(int v) {
+              _setQty(id, v.clamp(0, max));
+              setSheet(() {});
+            }
+
+            Widget step(IconData icon, VoidCallback? onTap) => InkResponse(
+                  onTap: onTap,
+                  radius: 18,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: onTap == null
+                              ? Colors.grey.shade300
+                              : Colors.grey),
+                    ),
+                    child: Icon(icon,
+                        size: 16,
+                        color: onTap == null
+                            ? Colors.grey.shade300
+                            : Colors.grey.shade800),
+                  ),
+                );
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: bg.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: fg.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(label,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: fg,
+                                fontSize: 13)),
+                        Text('$max boxes available',
+                            style: TextStyle(
+                                color: Colors.grey.shade600, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  step(Icons.remove, qty > 0 ? () => set(qty - 1) : null),
+                  GestureDetector(
+                    onTap: () async {
+                      await _editQty(id, qty, max);
+                      setSheet(() {});
+                    },
+                    child: SizedBox(
+                      width: 44,
+                      child: Text('$qty',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: fg,
+                              decoration: TextDecoration.underline,
+                              decorationColor: fg.withValues(alpha: 0.4))),
+                    ),
+                  ),
+                  step(Icons.add, qty < max ? () => set(qty + 1) : null),
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: qty == max ? () => set(0) : () => set(max),
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: fg.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(qty == max ? 'Clear' : 'All',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: fg)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text((d['name'] ?? '').toString(),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 12),
+                  grade(premId, 'Premium', premBoxes, const Color(0xFFF9A825),
+                      const Color(0xFFFFF8E1)),
+                  grade(stdId, 'Standard', stdBoxes, const Color(0xFF1565C0),
+                      const Color(0xFFE3F2FD)),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: _brand),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('Done'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   // Manual quantity entry — tapping the number opens this so the buyer can type
   // a large box count directly instead of holding the +/- steppers.
-  Future<void> _editQty(String id, int current) async {
+  Future<void> _editQty(String id, int current, [int? max]) async {
     // TextFormField (self-managed controller) avoids the '_dependents.isEmpty'
     // crash a hand-disposed controller caused during the dialog's close.
     int? entered = current;
@@ -303,7 +504,9 @@ class _State extends State<PublicCatalogScreen> {
         ],
       ),
     );
-    if (value != null && value > 0) _setQty(id, value);
+    if (value != null && value > 0) {
+      _setQty(id, max != null ? value.clamp(0, max) : value);
+    }
   }
 
   // ── WhatsApp enquiry (lists the selected designs) ──────────────────────────
@@ -854,6 +1057,8 @@ class _State extends State<PublicCatalogScreen> {
           backgroundColor: Color(0xFFF5F5F5), body: _Unavailable());
     }
     final list = _filtered;
+    // Fold each tile's Premium+Standard holdings into one merged card.
+    final merged = _mergeByQuality(list);
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       body: CustomScrollView(
@@ -867,8 +1072,8 @@ class _State extends State<PublicCatalogScreen> {
             pinned: true,
             delegate: _PinnedHeader(height: 60, child: _searchRow()),
           ),
-          SliverToBoxAdapter(child: _metaRow(list.length)),
-          if (list.isEmpty)
+          SliverToBoxAdapter(child: _metaRow(merged.length)),
+          if (merged.isEmpty)
             const SliverFillRemaining(
               hasScrollBody: false,
               child: Center(
@@ -876,7 +1081,7 @@ class _State extends State<PublicCatalogScreen> {
                       style: TextStyle(color: Colors.grey))),
             )
           else
-            _familyGridSliver(list),
+            _familyGridSliver(merged),
           SliverToBoxAdapter(child: _poweredBy()),
         ],
       ),
@@ -1400,9 +1605,19 @@ class _State extends State<PublicCatalogScreen> {
   }
 
   Widget _card(Map<String, dynamic> d) {
-    final id = '${d['id']}';
-    final selected = _selected.containsKey(id);
+    // Merged rep: a tile stocked in Premium and/or Standard. hasBoth → tap opens
+    // the quality chooser; single-grade keeps the classic inline toggle/stepper.
+    final premId = d['_premId'] == null ? null : '${d['_premId']}';
+    final stdId = d['_stdId'] == null ? null : '${d['_stdId']}';
+    final premBoxes = (d['_premBoxes'] as num?)?.toInt() ?? 0;
+    final stdBoxes = (d['_stdBoxes'] as num?)?.toInt() ?? 0;
+    final hasBoth = premId != null && stdId != null;
+    final id = premId ?? stdId ?? '${d['id']}';
+    final selected = (premId != null && _selected.containsKey(premId)) ||
+        (stdId != null && _selected.containsKey(stdId));
     final qty = _selected[id] ?? 0;
+    void handleTap() =>
+        hasBoth ? _showQualityChoicePublic(d) : _toggle(id);
     final images = (d['images'] as List?) ?? const [];
     final img = images.isNotEmpty ? images.first.toString() : '';
     final finish = (d['finish'] ?? '').toString();
@@ -1414,7 +1629,7 @@ class _State extends State<PublicCatalogScreen> {
     final ratio = aspectRatioFromSize((d['size'] ?? '').toString());
 
     return GestureDetector(
-      onTap: () => _toggle(id),
+      onTap: handleTap,
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -1505,12 +1720,17 @@ class _State extends State<PublicCatalogScreen> {
                   Text(
                     [
                       (d['size'] ?? '').toString().replaceAll(' mm', ''),
-                      (d['quality'] ?? '').toString(),
+                      if (hasBoth)
+                        'Premium & Standard'
+                      else
+                        (d['quality'] ?? '').toString(),
                     ].where((x) => x.isNotEmpty).join(' · '),
                     style: const TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                   const SizedBox(height: 6),
-                  if (selected)
+                  if (hasBoth)
+                    _mergedStockOrSel(d, premId, stdId, premBoxes, stdBoxes)
+                  else if (selected)
                     _qtyStepper(id, qty)
                   else
                     Text('${d['boxes']} boxes in stock',
@@ -1536,6 +1756,63 @@ class _State extends State<PublicCatalogScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  // Merged card's bottom line: a Premium(amber)/Standard(blue) stock split, or —
+  // when either grade is selected — a compact "Selected · P x · S y" summary that
+  // reopens the quality chooser. (Scenario-2 buyer merge)
+  Widget _mergedStockOrSel(Map<String, dynamic> d, String premId, String stdId,
+      int premBoxes, int stdBoxes) {
+    final selP = _selected[premId];
+    final selS = _selected[stdId];
+    if (selP != null || selS != null) {
+      final parts = <String>[
+        if (selP != null) 'P $selP',
+        if (selS != null) 'S $selS',
+      ];
+      return GestureDetector(
+        onTap: () => _showQualityChoicePublic(d),
+        child: Row(
+          children: [
+            Icon(Icons.check_circle, size: 14, color: _brand),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text('Selected · ${parts.join(' · ')}',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: _brand),
+                  overflow: TextOverflow.ellipsis),
+            ),
+            Icon(Icons.edit, size: 13, color: _brand),
+          ],
+        ),
+      );
+    }
+    return Text.rich(
+      TextSpan(children: [
+        const TextSpan(
+            text: 'P ', style: TextStyle(fontSize: 10, color: Color(0xFFF9A825))),
+        TextSpan(
+            text: '$premBoxes',
+            style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFFF9A825))),
+        const TextSpan(text: '    '),
+        const TextSpan(
+            text: 'S ', style: TextStyle(fontSize: 10, color: Color(0xFF1565C0))),
+        TextSpan(
+            text: '$stdBoxes',
+            style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1565C0))),
+        const TextSpan(
+            text: ' in stock',
+            style: TextStyle(fontSize: 10, color: Colors.grey)),
+      ]),
     );
   }
 

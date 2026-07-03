@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
+import '../../widgets/merged_family_grid.dart';
+import '../../utils/quality_merge.dart';
+import '../../widgets/quality_choice_sheet.dart';
 import 'stockist_group_screen.dart'
     show stockistGroups, loadStockistGroupsFromDb, confirmToggleStockistInGroup;
 import '../../models/choice_state.dart';
@@ -167,6 +169,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // box-quantity sort, which clumped one stockist and never reshuffled).
     return result;
   }
+
+  // Filtered pool folded into merged (Premium+Standard) buyer cards for the
+  // banded grid. (Scenario-2 buyer merge)
+  List<MergedDesign> get _mergedFiltered => mergeByQuality(_filtered);
 
   // Removable chips for the active-filter bar above the grid.
   List<ActiveFilter> _activeFilters() {
@@ -650,7 +656,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Design detail modal ───────────────────────────────────────────────────
 
   void _openDesign(int startIndex) {
-    final list = _filtered;
+    // Page across the merged cards' representative holdings (matches the grid).
+    final list = _mergedFiltered.map((m) => m.rep).toList();
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.70;
     showModalBottomSheet<void>(
       context: context,
@@ -1365,29 +1372,19 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: _filtered.isEmpty
                       ? _emptyState()
-                      : MasonryGridView.count(
-                          padding:
-                              const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          itemCount: _filtered.length,
-                          itemBuilder: (_, i) => TileCard(
-                            design: _filtered[i],
-                            onTap: () => _openDesign(i),
-                            isChosen: myChoiceQuantities
-                                .containsKey(_filtered[i].id),
-                            onChoiceTap: () => setState(() {
-                              final id = _filtered[i].id;
-                              if (myChoiceQuantities.containsKey(id)) {
-                                setMyChoiceQty(id, 0);
-                              } else {
-                                setMyChoiceQty(id, _filtered[i].boxQuantity);
-                              }
-                            }),
-                            onStockistTap: () => context.push(
-                              '/stockist/${_filtered[i].stockistId}/portfolio',
-                              extra: _filtered[i].id,
+                      : SingleChildScrollView(
+                          child: MergedFamilyGrid(
+                            cards: _mergedFiltered,
+                            onOpenDetail: _openDesign,
+                            isChosen: (m) => m.holdings.any((h) =>
+                                myChoiceQuantities.containsKey(h.id)),
+                            onChoiceTap: (m) async {
+                              await showQualityChoiceSheet(context, m);
+                              if (mounted) setState(() {});
+                            },
+                            onStockistTap: (m) => context.push(
+                              '/stockist/${m.rep.stockistId}/portfolio',
+                              extra: m.rep.id,
                             ),
                           ),
                         ),
