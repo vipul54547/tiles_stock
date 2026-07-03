@@ -10,6 +10,7 @@ import '../../models/choice_state.dart';
 import '../../models/inquiry_order.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/my_choice.dart';
+import '../../utils/order_message.dart';
 
 class MyChoiceScreen extends StatefulWidget {
   const MyChoiceScreen({super.key});
@@ -121,32 +122,24 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   }
 
   String _buildMessage(Stockist stockist, List<TileDesign> designs) {
-    final buffer = StringBuffer();
-    buffer.writeln('Hello ${stockist.name},');
-    buffer.writeln();
     final order = designs.isEmpty ? null : _orderFor(designs.first.stockistId);
+    final extras = <String>[];
     if (order != null) {
-      buffer.writeln('Order No: ${order.token}');
-      buffer.writeln('Generated: ${_fmtDateTime(order.createdAt)}');
+      extras.add('Order No: ${order.token}');
+      extras.add('Generated: ${_fmtDateTime(order.createdAt)}');
       if (order.updatedAt.difference(order.createdAt).inSeconds.abs() > 1) {
-        buffer.writeln('Modified: ${_fmtDateTime(order.updatedAt)}');
+        extras.add('Modified: ${_fmtDateTime(order.updatedAt)}');
       }
-      buffer.writeln();
     }
-    buffer.writeln('Order Request:');
-    int total = 0;
-    for (int i = 0; i < designs.length; i++) {
-      final d = designs[i];
-      final qty = myChoiceQuantities[d.id] ?? d.boxQuantity;
-      total += qty;
-      buffer.writeln(
-          '${i + 1}. ${d.name} (${d.size.replaceAll(' mm', '')}, ${d.surfaceType}, ${d.quality}) — $qty boxes');
-    }
-    buffer.writeln();
-    buffer.writeln('Total: $total boxes');
-    buffer.writeln();
-    buffer.writeln('Please confirm availability.');
-    return buffer.toString();
+    return buildOrderMessage([
+      for (final d in designs)
+        (
+          name: d.name,
+          size: d.size,
+          quality: d.quality,
+          qty: myChoiceQuantities[d.id] ?? d.boxQuantity,
+        ),
+    ], headerExtras: extras);
   }
 
   void _showSendSheet(Stockist stockist, List<TileDesign> designs) {

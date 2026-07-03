@@ -25,6 +25,16 @@ class MergedFamilyGrid extends StatelessWidget {
   /// Portfolio leaves it null (already scoped to one stockist).
   final void Function(MergedDesign card)? onStockistTap;
 
+  /// Optional DNA-tag ▾ expander on each card (My Suppliers). Returns the card's
+  /// DNA tags grouped by attribute for [repId]; null/empty → no arrow.
+  final Map<String, List<String>>? Function(String repId)? dnaTagsFor;
+
+  /// The design id whose DNA chips are currently expanded (one open at a time).
+  final String? expandedDnaId;
+
+  /// Toggles the DNA expansion for [repId] (open it / collapse it).
+  final void Function(String repId)? onToggleDnaExpand;
+
   final EdgeInsets padding;
 
   const MergedFamilyGrid({
@@ -34,6 +44,9 @@ class MergedFamilyGrid extends StatelessWidget {
     required this.onChoiceTap,
     required this.isChosen,
     this.onStockistTap,
+    this.dnaTagsFor,
+    this.expandedDnaId,
+    this.onToggleDnaExpand,
     this.padding = const EdgeInsets.fromLTRB(12, 4, 12, 12),
   });
 
@@ -61,6 +74,15 @@ class MergedFamilyGrid extends StatelessWidget {
       onChoiceTap: () => onChoiceTap(m),
       onStockistTap:
           onStockistTap == null ? null : () => onStockistTap!(m),
+      dnaTagsByAttribute: dnaTagsFor?.call(rep.id),
+      isDnaExpanded: expandedDnaId == rep.id,
+      onToggleDnaExpand:
+          onToggleDnaExpand == null ? null : () => onToggleDnaExpand!(rep.id),
+      onCollapseDnaIfExpanded: onToggleDnaExpand == null
+          ? null
+          : () {
+              if (expandedDnaId == rep.id) onToggleDnaExpand!(rep.id);
+            },
     );
   }
 

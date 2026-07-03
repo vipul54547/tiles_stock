@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import '../models/stockist.dart';
 import '../models/tile_design.dart';
 import '../services/supabase_data_service.dart';
 import '../services/supabase_auth_service.dart';
-import '../widgets/tile_card.dart';
+import '../widgets/merged_family_grid.dart';
 import '../widgets/quality_choice_sheet.dart';
 import '../utils/quality_merge.dart';
 import '../services/cloudinary_service.dart';
@@ -1627,46 +1626,27 @@ class _State extends State<StockistsOverviewScreen> {
             child: _viewDesigns
                 ? mergedDesigns.isEmpty
                     ? _marketEmpty(designs: true)
-                    : MasonryGridView.count(
-                        padding: EdgeInsets.fromLTRB(12, 4, 12, 12 + bottomInset),
-                        crossAxisCount: 2,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                        itemCount: mergedDesigns.length,
-                        itemBuilder: (_, i) {
-                          final m = mergedDesigns[i];
-                          final rep = m.rep;
-                          return TileCard(
-                            design: rep,
-                            premiumBoxes:
-                                m.premium != null ? m.premiumBoxes : null,
-                            standardBoxes:
-                                m.standard != null ? m.standardBoxes : null,
-                            onTap: () => _openDesignSheet(i, mergedReps),
-                            isChosen: m.holdings.any(
-                                (h) => myChoiceQuantities.containsKey(h.id)),
-                            onChoiceTap: () async {
-                              await showQualityChoiceSheet(context, m);
-                              if (mounted) setState(() {});
-                            },
-                            onStockistTap: () => context.push(
-                              '/stockist/${rep.stockistId}/portfolio',
-                              extra: rep.id,
-                            ),
-                            dnaTagsByAttribute: _dnaTagsFor(rep.id),
-                            isDnaExpanded: _expandedDnaDesignId == rep.id,
-                            onToggleDnaExpand: () => setState(() =>
-                                _expandedDnaDesignId =
-                                    _expandedDnaDesignId == rep.id
-                                        ? null
-                                        : rep.id),
-                            onCollapseDnaIfExpanded: () {
-                              if (_expandedDnaDesignId == rep.id) {
-                                setState(() => _expandedDnaDesignId = null);
-                              }
-                            },
-                          );
-                        },
+                    : SingleChildScrollView(
+                        child: MergedFamilyGrid(
+                          cards: mergedDesigns,
+                          padding: EdgeInsets.fromLTRB(12, 4, 12, 12 + bottomInset),
+                          onOpenDetail: (i) => _openDesignSheet(i, mergedReps),
+                          isChosen: (m) => m.holdings.any(
+                              (h) => myChoiceQuantities.containsKey(h.id)),
+                          onChoiceTap: (m) async {
+                            await showQualityChoiceSheet(context, m);
+                            if (mounted) setState(() {});
+                          },
+                          onStockistTap: (m) => context.push(
+                            '/stockist/${m.rep.stockistId}/portfolio',
+                            extra: m.rep.id,
+                          ),
+                          dnaTagsFor: (id) => _dnaTagsFor(id),
+                          expandedDnaId: _expandedDnaDesignId,
+                          onToggleDnaExpand: (id) => setState(() =>
+                              _expandedDnaDesignId =
+                                  _expandedDnaDesignId == id ? null : id),
+                        ),
                       )
                 : filteredStockists.isEmpty
                     ? _marketEmpty(designs: false)

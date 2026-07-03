@@ -8,6 +8,7 @@ import '../../services/supabase_data_service.dart';
 import '../../widgets/merged_family_grid.dart';
 import '../../widgets/quality_choice_sheet.dart';
 import '../../utils/quality_merge.dart';
+import '../../utils/order_message.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
@@ -715,27 +716,15 @@ class _State extends State<StockistPortfolioScreen> {
 
   // ── Send order sheet (same layout as My Choice) ───────────────────────────
 
-  String _buildMessage(List<TileDesign> designs) {
-    final name   = _stockist?.name ?? 'Stockist ${widget.stockistId}';
-    final buffer = StringBuffer();
-    buffer.writeln('Hello $name,');
-    buffer.writeln();
-    buffer.writeln('Order Request:');
-    int total = 0;
-    for (int i = 0; i < designs.length; i++) {
-      final d   = designs[i];
-      final qty = myChoiceQuantities[d.id] ?? d.boxQuantity;
-      total += qty;
-      buffer.writeln(
-          '${i + 1}. ${d.name} (${d.size.replaceAll(' mm', '')}, '
-          '${d.surfaceType}, ${d.quality}) — $qty boxes');
-    }
-    buffer.writeln();
-    buffer.writeln('Total: $total boxes');
-    buffer.writeln();
-    buffer.writeln('Please confirm availability.');
-    return buffer.toString();
-  }
+  String _buildMessage(List<TileDesign> designs) => buildOrderMessage([
+        for (final d in designs)
+          (
+            name: d.name,
+            size: d.size,
+            quality: d.quality,
+            qty: myChoiceQuantities[d.id] ?? d.boxQuantity,
+          ),
+      ]);
 
   void _showSendSheet() {
     if (blockIfGuest(context, feature: 'Placing orders')) return;

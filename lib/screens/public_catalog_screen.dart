@@ -11,6 +11,7 @@ import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 import '../utils/banner_layout.dart' show effectiveCompanyPos;
+import '../utils/order_message.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/dna_tag_expander.dart';
 import '../widgets/tile_card.dart' show TileImage;
@@ -516,9 +517,6 @@ class _State extends State<PublicCatalogScreen> {
         '${_stockist['country_code'] ?? '+91'}${_stockist['phone'] ?? ''}'
             .replaceAll(RegExp(r'[^0-9]'), '');
     final name = (_stockist['name'] ?? '').toString();
-    final sid = (_stockist['id'] ?? '').toString();
-    final who = sid.isNotEmpty ? '$name ($sid)' : name;
-
     // Turn a selection into a real saved order so the stockist can manage it;
     // the returned connection code goes into the message as the shared handle.
     Map<String, dynamic>? order;
@@ -531,39 +529,32 @@ class _State extends State<PublicCatalogScreen> {
       );
     }
 
-    final lines = <String>[];
+    final String msg;
     if (_selected.isEmpty) {
-      lines.add('Hello $who, I saw your stock catalogue and would like to enquire '
-          'about some designs.');
+      msg = 'I would like to enquire about some designs.';
     } else {
-      lines.add('Hello $who, I would like to enquire about these designs '
-          'from your stock catalogue:');
+      final extras = <String>[];
       if (order != null) {
         final ot = (order['token'] ?? '').toString();
         final code = (order['connection_code'] ?? '').toString();
-        lines.add('Order: $ot${code.isNotEmpty ? '  [$code]' : ''}');
+        if (ot.isNotEmpty) {
+          extras.add('Order: $ot${code.isNotEmpty ? '  [$code]' : ''}');
+        }
       }
-      lines.add('');
-      var n = 1;
-      for (final d in _all) {
-        final id = '${d['id']}';
-        if (!_selected.containsKey(id)) continue;
-        final qty = _selected[id]!;
-        final desc = [
-          (d['name'] ?? '').toString(),
-          (d['size'] ?? '').toString().replaceAll(' mm', ''),
-          (d['surface'] ?? '').toString(),
-        ].where((x) => x.isNotEmpty).join(' · ');
-        lines.add('${n++}. $desc — $qty box${qty == 1 ? '' : 'es'}');
-      }
+      msg = buildOrderMessage([
+        for (final d in _all)
+          if (_selected.containsKey('${d['id']}'))
+            (
+              name: (d['name'] ?? '').toString(),
+              size: (d['size'] ?? '').toString(),
+              quality: (d['quality'] ?? '').toString(),
+              qty: _selected['${d['id']}']!,
+            ),
+      ], headerExtras: extras);
     }
     // Record this link enquiry (which catalog/visibility, selected designs) so
     // the stockist/admin can see demand coming via links. Best-effort.
     _svc.logLinkInquiry(widget.token, _selected.keys.toList());
-
-    lines.add('');
-    lines.add('— Powered by TilesDesign');
-    final msg = lines.join('\n');
     final uri = phone.isEmpty
         ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')
         : Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
