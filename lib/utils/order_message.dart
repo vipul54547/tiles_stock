@@ -1,48 +1,73 @@
 /// A single order/enquiry line, resolved to what the buyer wants.
-typedef OrderLine = ({String name, String size, String quality, int qty});
+typedef OrderLine = ({
+  String name,
+  String size,
+  String surface,
+  String quality,
+  int qty,
+});
 
-/// Builds a WhatsApp order/enquiry message. Designs are grouped by size — each
-/// size gets a bold title, then a fixed-width MONOSPACE table (wrapped in triple
-/// backticks so the columns align on the phone): design name | quality | qty.
-/// No greeting, no "powered by" footer — just the order.
+/// Builds a WhatsApp order/enquiry message in the plain-text grouped format:
 ///
-/// [headerExtras] are extra lines printed right under the title (e.g. an order
-/// number / connection code).
-String buildOrderMessage(List<OrderLine> lines,
-    {List<String> headerExtras = const []}) {
-  const nameW = 13; // narrow enough that a line never wraps on a phone
-  String padR(String s) =>
-      (s.length > nameW ? '${s.substring(0, nameW - 1)}…' : s).padRight(nameW);
-  String padL(Object s, int w) => '$s'.padLeft(w);
-
-  // Group by size, preserving first-seen order.
+///   Order Request
+///   Order: INQ 1234        <- only if [orderNo] given
+///   [C-4B0712]             <- only if [connectionCode] given
+///                          <- blank line
+///   *300x450*  *Glossy*    <- bold size + surface header
+///   PRM-10-Alaska White
+///   STD-5-Alaska Grey
+///
+///   *600x600*  *Matt*      <- new header whenever size OR surface changes
+///   STD-12-Onyx Black
+///
+///   *Total: 27 boxes*
+///
+/// Each design row is `PRM-`/`STD-` + `qty-` + design name. Designs are grouped
+/// by (size + surface); a fresh bold header prints whenever either changes.
+/// No greeting, no "powered by" footer.
+String buildOrderMessage(
+  List<OrderLine> lines, {
+  String? orderNo,
+  String? connectionCode,
+}) {
+  // Group by (size + surface), preserving first-seen order.
   final order = <String>[];
-  final bySize = <String, List<OrderLine>>{};
+  final groups = <String, List<OrderLine>>{};
+  final sizeOf = <String, String>{};
+  final surfaceOf = <String, String>{};
   for (final l in lines) {
     final sz = l.size.replaceAll(' mm', '').trim();
-    if (!bySize.containsKey(sz)) order.add(sz);
-    (bySize[sz] ??= []).add(l);
+    final sf = l.surface.trim();
+    final k = '$sz|$sf';
+    if (!groups.containsKey(k)) {
+      order.add(k);
+      sizeOf[k] = sz;
+      surfaceOf[k] = sf;
+    }
+    (groups[k] ??= []).add(l);
   }
 
-  final b = StringBuffer()..writeln('*Order Request*');
-  for (final e in headerExtras) {
-    b.writeln(e);
+  final b = StringBuffer()..writeln('Order Request');
+  if (orderNo != null && orderNo.trim().isNotEmpty) {
+    b.writeln('Order: ${orderNo.trim()}');
+  }
+  if (connectionCode != null && connectionCode.trim().isNotEmpty) {
+    b.writeln('[${connectionCode.trim()}]');
   }
 
   var total = 0;
-  for (final sz in order) {
+  for (final k in order) {
+    final sz = sizeOf[k]!;
+    final sf = surfaceOf[k]!;
     b
       ..writeln()
-      ..writeln('*$sz*')
-      ..writeln('```')
-      ..writeln('${padR('Design')}| Q |${padL('Qty', 5)}')
-      ..writeln('${'-' * nameW}|---|-----');
-    for (final l in bySize[sz]!) {
+      ..writeln(sf.isEmpty ? '*$sz*' : '*$sz*  *$sf*');
+    for (final l in groups[k]!) {
       total += l.qty;
-      final g = l.quality.trim().toLowerCase().startsWith('p') ? 'P' : 'S';
-      b.writeln('${padR(l.name)}| $g |${padL(l.qty, 5)}');
+      final q =
+          l.quality.trim().toLowerCase().startsWith('p') ? 'PRM' : 'STD';
+      b.writeln('$q-${l.qty}-${l.name}');
     }
-    b.writeln('```');
   }
 
   b

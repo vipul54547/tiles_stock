@@ -721,6 +721,7 @@ class _State extends State<StockistPortfolioScreen> {
           (
             name: d.name,
             size: d.size,
+            surface: d.surfaceType,
             quality: d.quality,
             qty: myChoiceQuantities[d.id] ?? d.boxQuantity,
           ),

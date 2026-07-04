@@ -533,24 +533,20 @@ class _State extends State<PublicCatalogScreen> {
     if (_selected.isEmpty) {
       msg = 'I would like to enquire about some designs.';
     } else {
-      final extras = <String>[];
-      if (order != null) {
-        final ot = (order['token'] ?? '').toString();
-        final code = (order['connection_code'] ?? '').toString();
-        if (ot.isNotEmpty) {
-          extras.add('Order: $ot${code.isNotEmpty ? '  [$code]' : ''}');
-        }
-      }
+      final ot = order == null ? '' : (order['token'] ?? '').toString();
+      final code =
+          order == null ? '' : (order['connection_code'] ?? '').toString();
       msg = buildOrderMessage([
         for (final d in _all)
           if (_selected.containsKey('${d['id']}'))
             (
               name: (d['name'] ?? '').toString(),
               size: (d['size'] ?? '').toString(),
+              surface: (d['surface'] ?? '').toString(),
               quality: (d['quality'] ?? '').toString(),
               qty: _selected['${d['id']}']!,
             ),
-      ], headerExtras: extras);
+      ], orderNo: ot, connectionCode: code);
     }
     // Record this link enquiry (which catalog/visibility, selected designs) so
     // the stockist/admin can see demand coming via links. Best-effort.

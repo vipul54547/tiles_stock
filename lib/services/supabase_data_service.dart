@@ -2012,33 +2012,34 @@ class SupabaseDataService {
     }
   }
 
-  /// Stockist confirms an order (locks it): freezes the buyer out and snapshots
-  /// the lines. [days] = guarantee window — boxes are reserved (counted as H) for
-  /// that many days, during which the buyer can Accept to lock them permanently.
-  /// 0/null = no time reservation (held only once the buyer accepts).
-  /// (Shown to the stockist as "Confirm Order".)
-  Future<void> lockInquiry(String id, {int? days}) async {
+  /// Stockist HOLDS a whole order: every line's held_qty = its ordered quantity.
+  /// Held boxes (H_Quantity) drop off the buyer-facing F_Stock and stay held until
+  /// the stockist un-holds or dispatches. Sets the order to 'locked' (ready to
+  /// dispatch). (project_fstock_model — Hold-Quantity model)
+  Future<void> holdOrder(String id) async {
     try {
-      await supabase.rpc('lock_inquiry', params: {'p_id': id, 'p_days': days});
+      await supabase.rpc('hold_order', params: {'p_id': id});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  /// Buyer accepts a stockist's confirmed offer (both-side lock): the reserved
-  /// boxes stay held past the guarantee window. (project_fstock_model · Phase 2)
-  Future<void> acceptOrder(String id) async {
+  /// Stockist holds SELECTED quantities per design. [items] = list of
+  /// {design_id, held_qty}; each is clamped to that line's ordered quantity.
+  Future<void> holdOrderItems(String id, List<Map<String, dynamic>> items) async {
     try {
-      await supabase.rpc('accept_inquiry', params: {'p_id': id});
+      await supabase.rpc('hold_order_items',
+          params: {'p_id': id, 'p_items': items});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  /// Stockist reopens a locked (not yet dispatched) order so the buyer can edit.
-  Future<void> unlockInquiry(String id) async {
+  /// Stockist releases a held order: clears every line's held_qty (H drops, F is
+  /// restored) and returns the order to 'sent'. Keeps the order's items intact.
+  Future<void> unholdOrder(String id) async {
     try {
-      await supabase.rpc('unlock_inquiry', params: {'p_id': id});
+      await supabase.rpc('unhold_order', params: {'p_id': id});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }

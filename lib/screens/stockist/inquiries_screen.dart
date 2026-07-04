@@ -36,12 +36,12 @@ const _months = [
       _             => (Colors.grey.shade700, const Color(0xFFF5F5F5)),
     };
 
-// Filter-chip / status display name. The buyer "sends" an inquiry; the stockist's
-// lock ('locked') is shown as the real "Confirmed".
+// Filter-chip / status display name. In the Hold model, a 'locked' order is one
+// the stockist has HELD (boxes reserved off buyer-facing stock).
 String _statusName(String s) => switch (s) {
       'sent'        => 'Sent',
       'confirmed'   => 'Sent',
-      'locked'      => 'Confirmed',
+      'locked'      => 'Held',
       'dispatching' => 'Dispatching',
       'completed'   => 'Completed',
       'rejected'    => 'Rejected',
@@ -563,7 +563,7 @@ class _State extends State<InquiriesScreen> {
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                       color: bg, borderRadius: BorderRadius.circular(20)),
-                  child: Text(o.statusLabel,
+                  child: Text(_statusName(o.status),
                       style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.bold,
@@ -653,9 +653,11 @@ class _State extends State<InquiriesScreen> {
                 ],
               ),
             ],
-            if (_reservationLine(o) != null) ...[
+            if (o.isHeld) ...[
               const SizedBox(height: 6),
-              _reservationLine(o)!,
+              _resChip(Icons.lock_outline,
+                  '${o.heldBoxes} box${o.heldBoxes == 1 ? '' : 'es'} held (off buyer stock)',
+                  const Color(0xFF6A1B9A)),
             ],
             const SizedBox(height: 8),
             _actions(o),
@@ -729,26 +731,6 @@ class _State extends State<InquiriesScreen> {
     await _run(() => _data.setInquiryHint(o.id, hint.trim()), 'Saved.');
   }
 
-  // A small reservation/acceptance status line for a confirmed (locked) order.
-  Widget? _reservationLine(InquiryOrder o) {
-    if (o.isAccepted) {
-      return _resChip(Icons.handshake_outlined, 'Accepted by buyer',
-          const Color(0xFF2E7D32));
-    }
-    if (o.reservationActive) {
-      final n = o.guaranteeDays ?? 0;
-      final label = n > 0
-          ? 'Reserved ${n}d · ${o.daysLeft} day${o.daysLeft == 1 ? '' : 's'} left'
-          : 'Reserved · ${o.daysLeft} day${o.daysLeft == 1 ? '' : 's'} left';
-      return _resChip(Icons.timer_outlined, label, const Color(0xFF1565C0));
-    }
-    if (o.reservationExpired) {
-      return _resChip(Icons.timer_off_outlined,
-          'Reservation expired — buyer didn\'t accept', const Color(0xFFE65100));
-    }
-    return null;
-  }
-
   Widget _resChip(IconData icon, String label, Color color) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -768,12 +750,15 @@ class _State extends State<InquiriesScreen> {
       if (o.phone.isNotEmpty || o.source == 'stockist')
         _actionChip('WhatsApp', Icons.chat, const Color(0xFF25D366),
             () => _whatsapp(o)),
-      if (o.status == 'draft' || o.status == 'sent')
-        _actionChip('Confirm Order', Icons.check_circle_outline,
-            const Color(0xFF2E7D32), () => _confirmOrder(o)),
+      if (o.status == 'draft' || o.status == 'sent' || o.status == 'locked') ...[
+        _actionChip('Hold', Icons.lock_outline, const Color(0xFF6A1B9A),
+            () => _hold(o)),
+        _actionChip('Hold selected', Icons.tune, const Color(0xFF6A1B9A),
+            () => _holdSelected(o)),
+      ],
       if (o.status == 'locked')
-        _actionChip('Reopen', Icons.lock_open_outlined, const Color(0xFFE65100),
-            () => _reopen(o)),
+        _actionChip('Un-hold', Icons.lock_open_outlined,
+            const Color(0xFFE65100), () => _unhold(o)),
       if (o.status == 'locked' || o.status == 'dispatching')
         _actionChip('Dispatch', Icons.local_shipping_outlined,
             const Color(0xFF00695C), () => _dispatch(o)),
@@ -835,116 +820,157 @@ class _State extends State<InquiriesScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  Future<void> _confirmOrder(InquiryOrder o) async {
-    final days = await _askGuaranteeDays(o);
-    if (days == null) return; // cancelled
-    await _run(() => _data.lockInquiry(o.id, days: days),
-        days > 0
-            ? '${o.token} confirmed — reserved for $days day${days == 1 ? '' : 's'}.'
-            : '${o.token} confirmed.');
+  // Hold the WHOLE order — every line's full ordered quantity comes off the
+  // buyer-facing stock (H_Quantity) and stays held until un-held or dispatched.
+  Future<void> _hold(InquiryOrder o) async {
+    await _run(() => _data.holdOrder(o.id),
+        '${o.token} held — ${o.totalBoxes} box${o.totalBoxes == 1 ? '' : 'es'} off buyer stock.');
   }
 
-  /// Confirm dialog that also captures the guarantee window (N days the boxes are
-  /// reserved for this buyer). Returns the chosen days (0 = no reservation), or
-  /// null if cancelled. (project_fstock_model · Phase 2)
-  Future<int?> _askGuaranteeDays(InquiryOrder o) async {
-    int days = 7; // sensible default
-    final ctrl = TextEditingController(text: '7');
-    const presets = [3, 7, 15, 30];
-    return showDialog<int>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setD) {
-          void setDays(int d) {
-            setD(() {
-              days = d;
-              ctrl.text = d == 0 ? '' : '$d';
-            });
-          }
+  // Hold SELECTED quantities — a per-design picker (pre-filled to each line's
+  // current hold, or its full ordered qty if nothing held yet).
+  Future<void> _holdSelected(InquiryOrder o) async {
+    final detail = await _data.getInquiryDetail(o.id);
+    if (!mounted) return;
+    final lines = ((detail?['lines'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    if (lines.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No items to hold')));
+      return;
+    }
+    // held per design: default to line_held if any already held, else full qty.
+    final held = <String, int>{};
+    for (final l in lines) {
+      final id = (l['design_id'] ?? '').toString();
+      final qty = (l['quantity'] as num?)?.toInt() ?? 0;
+      final lineHeld = (l['line_held'] as num?)?.toInt() ?? 0;
+      held[id] = lineHeld > 0 ? lineHeld : qty;
+    }
 
-          return AlertDialog(
-            title: Text('Confirm ${o.token}?'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Confirming locks the order — the buyer can no longer change it. '
-                  'It becomes ready for dispatch.',
-                  style: TextStyle(fontSize: 13),
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16,
+              16 + MediaQuery.of(ctx).viewPadding.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
-                const SizedBox(height: 12),
-                const Text('Reserve the boxes for the buyer for:',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
+              ),
+              Text('Hold quantities · ${o.token}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 4),
+              Text('Held boxes drop off the buyer-facing stock.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              const SizedBox(height: 8),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
                   children: [
-                    for (final p in presets)
-                      ChoiceChip(
-                        label: Text('$p d'),
-                        selected: days == p,
-                        onSelected: (_) => setDays(p),
-                      ),
-                    ChoiceChip(
-                      label: const Text('None'),
-                      selected: days == 0,
-                      onSelected: (_) => setDays(0),
-                    ),
+                    for (final l in lines)
+                      _holdRow(l, held, setSheet),
                   ],
                 ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 70,
-                      child: TextField(
-                        controller: ctrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                            isDense: true, border: OutlineInputBorder()),
-                        onChanged: (v) =>
-                            setD(() => days = int.tryParse(v.trim()) ?? 0),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('days', style: TextStyle(fontSize: 13)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  days > 0
-                      ? 'These boxes are held off the buyer-facing stock for '
-                          '$days day${days == 1 ? '' : 's'}. The buyer can Accept to '
-                          'keep them locked; otherwise they auto-release.'
-                      : 'No time reservation — boxes are only held once the buyer Accepts.',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx, days < 0 ? 0 : days),
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E7D32),
-                    foregroundColor: Colors.white),
-                child: const Text('Confirm'),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  TextButton(
+                    onPressed: () => setSheet(() {
+                      for (final l in lines) {
+                        held[(l['design_id'] ?? '').toString()] =
+                            (l['quantity'] as num?)?.toInt() ?? 0;
+                      }
+                    }),
+                    child: const Text('Hold all'),
+                  ),
+                  const Spacer(),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF6A1B9A),
+                        foregroundColor: Colors.white),
+                    child: const Text('Apply hold'),
+                  ),
+                ],
               ),
             ],
-          );
-        },
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+    final items = [
+      for (final e in held.entries)
+        {'design_id': e.key, 'held_qty': e.value},
+    ];
+    await _run(() => _data.holdOrderItems(o.id, items), '${o.token} hold updated.');
+  }
+
+  Widget _holdRow(
+      Map<String, dynamic> l, Map<String, int> held, StateSetter setSheet) {
+    final id = (l['design_id'] ?? '').toString();
+    final name = (l['design_name'] ?? '').toString();
+    final qty = (l['quantity'] as num?)?.toInt() ?? 0;
+    final cur = held[id] ?? 0;
+    void set(int v) => setSheet(() => held[id] = v.clamp(0, qty));
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 13)),
+                Text('ordered $qty',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.remove_circle_outline),
+            onPressed: cur > 0 ? () => set(cur - 1) : null,
+          ),
+          SizedBox(
+            width: 44,
+            child: Text('$cur',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 15)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            onPressed: cur < qty ? () => set(cur + 1) : null,
+          ),
+        ],
       ),
     );
   }
 
-  Future<void> _reopen(InquiryOrder o) async {
-    final ok = await _confirm('Reopen ${o.token}?',
-        'This lets the buyer change the order again and clears the confirmed copy.');
+  Future<void> _unhold(InquiryOrder o) async {
+    final ok = await _confirm('Un-hold ${o.token}?',
+        'Releases all held boxes back to the buyer-facing stock. The order stays, '
+        'ready to hold again.');
     if (!ok) return;
-    await _run(() => _data.unlockInquiry(o.id), '${o.token} reopened.');
+    await _run(() => _data.unholdOrder(o.id), '${o.token} released.');
   }
 
   Future<void> _dispatch(InquiryOrder o) async {
