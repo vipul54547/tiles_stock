@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -513,6 +514,8 @@ class _State extends State<PublicCatalogScreen> {
   // ── WhatsApp enquiry (lists the selected designs) ──────────────────────────
 
   Future<void> _enquire() async {
+    // Real supplier phone (country code alone must NOT count as a number).
+    final rawPhone = (_stockist['phone'] ?? '').toString().trim();
     final phone =
         '${_stockist['country_code'] ?? '+91'}${_stockist['phone'] ?? ''}'
             .replaceAll(RegExp(r'[^0-9]'), '');
@@ -551,9 +554,20 @@ class _State extends State<PublicCatalogScreen> {
     // Record this link enquiry (which catalog/visibility, selected designs) so
     // the stockist/admin can see demand coming via links. Best-effort.
     _svc.logLinkInquiry(widget.token, _selected.keys.toList());
-    final uri = phone.isEmpty
-        ? Uri.parse('https://wa.me/?text=${Uri.encodeComponent(msg)}')
-        : Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
+
+    // No supplier number on file → copy the order so the buyer can paste it into
+    // any chat, instead of a blank WhatsApp chooser.
+    if (rawPhone.isEmpty) {
+      await Clipboard.setData(ClipboardData(text: msg));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Order copied — paste it into your chat.'),
+            backgroundColor: Color(0xFF2E7D32)));
+      }
+      return;
+    }
+    final uri =
+        Uri.parse('https://wa.me/$phone?text=${Uri.encodeComponent(msg)}');
 
     // High-intent moment: on the web, the FIRST time a browser visitor sends an
     // enquiry, offer the app (once). The enquiry is NEVER blocked — "Skip & send"

@@ -34,7 +34,7 @@ const _navy = Color(0xFF1B4F72);
 // ── Shared little helpers ─────────────────────────────────────────────────────
 
 // Small Premium/Standard pill.
-Widget _qualityBadge(String quality) {
+Widget qualityBadge(String quality) {
   final isP = quality.trim().toLowerCase().startsWith('p');
   final c = isP ? Colors.amber : Colors.blue;
   return Container(
@@ -50,7 +50,7 @@ Widget _qualityBadge(String quality) {
 }
 
 // Numeric entry for a box quantity (dialog → keyboard never covers anything).
-Future<int?> _promptQty(BuildContext context, int current) {
+Future<int?> promptQty(BuildContext context, int current) {
   final ctrl = TextEditingController(text: current > 0 ? '$current' : '');
   int parse(String s) => (int.tryParse(s.trim()) ?? current).clamp(0, 1 << 30);
   return showDialog<int>(
@@ -142,7 +142,7 @@ class _State extends State<StockistAddOrderScreen> {
   Future<void> _pickDesigns() async {
     final result = await Navigator.of(context).push<Map<String, int>>(
       MaterialPageRoute(
-        builder: (_) => _DesignPicker(
+        builder: (_) => DesignPicker(
           stock: _stock,
           brandById: _brandById,
           initial: {for (final e in _picks.entries) e.key: e.value.qty},
@@ -320,7 +320,7 @@ class _State extends State<StockistAddOrderScreen> {
                               fontWeight: FontWeight.w600, fontSize: 14)),
                     ),
                     const SizedBox(width: 6),
-                    _qualityBadge(d.quality),
+                    qualityBadge(d.quality),
                   ]),
                   const SizedBox(height: 3),
                   Text(
@@ -354,7 +354,7 @@ class _State extends State<StockistAddOrderScreen> {
                 const SizedBox(height: 3),
                 InkWell(
                   onTap: () async {
-                    final v = await _promptQty(context, p.qty);
+                    final v = await promptQty(context, p.qty);
                     if (v != null) setState(() { p.qty = v; _dirty = true; });
                   },
                   borderRadius: BorderRadius.circular(8),
@@ -396,17 +396,20 @@ class _State extends State<StockistAddOrderScreen> {
 
 // ── Full-screen design picker: select + set quantity in one place ─────────────
 
-class _DesignPicker extends StatefulWidget {
+class DesignPicker extends StatefulWidget {
   final List<TileDesign> stock;
   final Map<String, String> brandById;
   final Map<String, int> initial; // designId → qty
-  const _DesignPicker(
-      {required this.stock, required this.brandById, required this.initial});
+  const DesignPicker(
+      {super.key,
+      required this.stock,
+      required this.brandById,
+      required this.initial});
   @override
-  State<_DesignPicker> createState() => _DesignPickerState();
+  State<DesignPicker> createState() => DesignPickerState();
 }
 
-class _DesignPickerState extends State<_DesignPicker> {
+class DesignPickerState extends State<DesignPicker> {
   late Map<String, int> _qtys;
   final _searchCtrl = TextEditingController();
   String _q = '';
@@ -445,18 +448,16 @@ class _DesignPickerState extends State<_DesignPicker> {
         (_fSurf.isEmpty || _fSurf.contains(d.surfaceType)) &&
         (_fBrand.isEmpty || _fBrand.contains(_brandOf(d)));
     final ql = _q.toLowerCase();
-    // Chosen designs are always kept (pinned first) so search/filter never drops
-    // your selections.
+    // Chosen designs are always kept (even if they don't match search) so a
+    // selection is never dropped. Order stays a STABLE alphabetical list — we do
+    // NOT pin selected to the top, otherwise a row jumps when you tap it (looked
+    // like the wrong row got selected).
     return widget.stock
         .where((d) =>
             _qtys.containsKey(d.id) ||
             ((_q.isEmpty || d.name.toLowerCase().contains(ql)) && pass(d)))
         .toList()
-      ..sort((a, b) {
-        final sa = _qtys.containsKey(a.id) ? 0 : 1;
-        final sb = _qtys.containsKey(b.id) ? 0 : 1;
-        return sa != sb ? sa - sb : a.name.compareTo(b.name);
-      });
+      ..sort((a, b) => a.name.compareTo(b.name));
   }
 
   void _openFilter() {
@@ -680,7 +681,7 @@ class _DesignPickerState extends State<_DesignPicker> {
                               fontWeight: FontWeight.w600, fontSize: 14)),
                     ),
                     const SizedBox(width: 6),
-                    _qualityBadge(d.quality),
+                    qualityBadge(d.quality),
                   ]),
                   const SizedBox(height: 2),
                   Text(
@@ -708,7 +709,7 @@ class _DesignPickerState extends State<_DesignPicker> {
                 const SizedBox(height: 3),
                 InkWell(
                   onTap: () async {
-                    final v = await _promptQty(context, sel ? qv : d.fStock);
+                    final v = await promptQty(context, sel ? qv : d.fStock);
                     if (v != null) {
                       setState(() {
                         if (v > 0) {

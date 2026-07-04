@@ -2346,7 +2346,9 @@ class SupabaseDataService {
       final res = await supabase
           .from('dispatches')
           .select(
-              'id, quantity_dispatched, buyer_name, notes, created_at, designs(name)')
+              'id, quantity_dispatched, buyer_name, notes, created_at, dispatch_note_id, '
+              'designs(name), '
+              'dispatch_notes(dispatch_no, invoice_no, vehicle_no, transporter, dispatched_on)')
           .eq('stockist_id', currentStockistUUID)
           .order('created_at', ascending: false);
       return (res as List).map((e) => Map<String, dynamic>.from(e)).toList();

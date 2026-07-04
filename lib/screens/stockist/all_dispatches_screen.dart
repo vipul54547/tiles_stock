@@ -23,6 +23,7 @@ class _State extends State<AllDispatchesScreen> {
   DateTimeRange? _customRange;
   String? _designFilter; // design name
   String? _buyerFilter;  // buyer name
+  String? _expandedKey;  // accordion — one dispatch event open at a time
 
   @override
   void initState() {
@@ -92,6 +93,28 @@ class _State extends State<AllDispatchesScreen> {
       _datePreset != _DatePreset.all ||
       _designFilter != null ||
       _buyerFilter != null;
+
+  // Group the filtered dispatch rows into dispatch EVENTS — one per dispatch note
+  // (rows without a note stand alone). Newest-first order preserved. When a design
+  // filter is active, each group only carries that design's line(s).
+  List<({String key, List<Map<String, dynamic>> rows})> get _groups {
+    final order = <String>[];
+    final map = <String, List<Map<String, dynamic>>>{};
+    for (final r in _filtered) {
+      final key = (r['dispatch_note_id'] ?? 'row:${r['id']}').toString();
+      if (!map.containsKey(key)) order.add(key);
+      (map[key] ??= []).add(r);
+    }
+    return [for (final k in order) (key: k, rows: map[k]!)];
+  }
+
+  Map<String, dynamic> _note(Map<String, dynamic> r) {
+    final n = r['dispatch_notes'];
+    return n is Map ? Map<String, dynamic>.from(n) : const {};
+  }
+
+  int _boxesOf(List<Map<String, dynamic>> rows) => rows.fold(
+      0, (s, r) => s + ((r['quantity_dispatched'] as num?)?.toInt() ?? 0));
 
   List<String> get _designOptions =>
       _all.map(_designName).toSet().toList()..sort();
@@ -331,8 +354,8 @@ class _State extends State<AllDispatchesScreen> {
   }
 
   Widget _buildList() {
-    final rows = _filtered;
-    if (rows.isEmpty) {
+    final groups = _groups;
+    if (groups.isEmpty) {
       return RefreshIndicator(
         onRefresh: _load,
         child: ListView(
@@ -363,8 +386,11 @@ class _State extends State<AllDispatchesScreen> {
       );
     }
 
-    final totalBoxes = rows.fold(
-        0, (s, r) => s + ((r['quantity_dispatched'] as num?)?.toInt() ?? 0));
+    final totalBoxes =
+        groups.fold(0, (s, g) => s + _boxesOf(g.rows));
+    final header = _designFilter != null
+        ? '$_designFilter · ${groups.length} dispatches · $totalBoxes boxes'
+        : '${groups.length} dispatches · $totalBoxes boxes total';
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -374,7 +400,7 @@ class _State extends State<AllDispatchesScreen> {
             width: double.infinity,
             color: Colors.red.shade50,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Text('${rows.length} dispatches · $totalBoxes boxes total',
+            child: Text(header,
                 style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -384,14 +410,26 @@ class _State extends State<AllDispatchesScreen> {
             child: ListView.separated(
               padding: EdgeInsets.fromLTRB(
                   12, 12, 12, 12 + MediaQuery.viewPaddingOf(context).bottom),
-              itemCount: rows.length,
+              itemCount: groups.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (_, i) => _dispatchCard(rows[i]),
+              itemBuilder: (_, i) => _dispatchGroupCard(groups[i]),
             ),
           ),
         ],
       ),
     );
+  }
+
+  // Date only, e.g. "4 Jul 2026" (collapsed row). [iso] may be a date or datetime.
+  String _dateOnly(String? iso) {
+    if (iso == null || iso.isEmpty) return '';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
   }
 
   String _formatDate(String? iso) {
@@ -408,84 +446,147 @@ class _State extends State<AllDispatchesScreen> {
     return '${dt.day} ${months[dt.month - 1]} ${dt.year}, $h:$m $ap';
   }
 
-  Widget _dispatchCard(Map<String, dynamic> r) {
-    final designName = _designName(r);
-    final qty = (r['quantity_dispatched'] as num?)?.toInt() ?? 0;
-    final buyer = (r['buyer_name'] ?? '').toString();
-    final notes = (r['notes'] ?? '').toString();
+  // One dispatch EVENT (grouped) — collapsed to buyer + boxes + DSP·date·truck;
+  // tap to expand the design lines + time + invoice/vehicle/transporter.
+  Widget _dispatchGroupCard(({String key, List<Map<String, dynamic>> rows}) g) {
+    final rows = g.rows;
+    final first = rows.first;
+    final note = _note(first);
+    final buyer = (first['buyer_name'] ?? '').toString().trim();
+    final primary = buyer.isNotEmpty ? buyer : 'Walk-in';
+    final total = _boxesOf(rows);
+    final dispNo = (note['dispatch_no'] ?? '').toString().trim();
+    final vehicle = (note['vehicle_no'] ?? '').toString().trim();
+    final dateStr =
+        _dateOnly(note['dispatched_on']?.toString() ?? first['created_at']?.toString());
+    final expanded = _expandedKey == g.key;
+
+    final secondary = [
+      if (dispNo.isNotEmpty) dispNo,
+      if (dateStr.isNotEmpty) dateStr,
+      if (vehicle.isNotEmpty) '🚚 $vehicle',
+    ].join('  ·  ');
 
     return Container(
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(Icons.local_shipping_outlined,
-                size: 20, color: Colors.red.shade700),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(designName,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 14),
-                    overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                if (buyer.isNotEmpty)
-                  Row(
-                    children: [
-                      Icon(Icons.business_outlined,
-                          size: 13, color: Colors.grey.shade600),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(buyer,
-                            style: TextStyle(
-                                fontSize: 12, color: Colors.grey.shade700),
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                    ],
+          InkWell(
+            onTap: () =>
+                setState(() => _expandedKey = expanded ? null : g.key),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Icon(Icons.local_shipping_outlined,
+                        size: 20, color: Colors.red.shade700),
                   ),
-                if (notes.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(notes,
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontStyle: FontStyle.italic,
-                            color: Colors.grey.shade500)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(primary,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
+                        if (secondary.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(secondary,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: Colors.grey.shade600)),
+                          ),
+                      ],
+                    ),
                   ),
-                const SizedBox(height: 4),
-                Text(_formatDate(r['created_at']?.toString()),
-                    style:
-                        TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-              ],
+                  const SizedBox(width: 8),
+                  Text('$total boxes',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
+                          color: Colors.red.shade700)),
+                  Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                      color: Colors.grey.shade500),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.red.shade700,
-              borderRadius: BorderRadius.circular(8),
+          if (expanded) _groupDetail(rows, note),
+        ],
+      ),
+    );
+  }
+
+  Widget _groupDetail(
+      List<Map<String, dynamic>> rows, Map<String, dynamic> note) {
+    final first = rows.first;
+    final orderRef = (first['notes'] ?? '').toString().trim();
+    final invoice = (note['invoice_no'] ?? '').toString().trim();
+    final vehicle = (note['vehicle_no'] ?? '').toString().trim();
+    final transporter = (note['transporter'] ?? '').toString().trim();
+    final meta = [
+      if (invoice.isNotEmpty) '🧾 $invoice',
+      if (vehicle.isNotEmpty) '🚚 $vehicle',
+      if (transporter.isNotEmpty) transporter,
+    ].join('   ·   ');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Divider(height: 1),
+          const SizedBox(height: 6),
+          Text(_formatDate(first['created_at']?.toString()),
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+          if (orderRef.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(orderRef,
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade700)),
             ),
-            child: Text('-$qty',
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14)),
-          ),
+          const SizedBox(height: 6),
+          for (final r in rows)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(_designName(r),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13)),
+                  ),
+                  Text('${(r['quantity_dispatched'] as num?)?.toInt() ?? 0}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 13)),
+                ],
+              ),
+            ),
+          if (meta.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(meta,
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+          ],
         ],
       ),
     );

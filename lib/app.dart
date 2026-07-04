@@ -175,6 +175,7 @@ final GoRouter _router = GoRouter(
           company: e['company']?.toString(),
           phone: e['phone']?.toString(),
           countryCode: e['country_code']?.toString(),
+          reduceStock: e['reduce_stock'] as bool?,
         );
       },
     ),

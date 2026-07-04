@@ -1,13 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../models/tile_design.dart';
 import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/unsaved_changes.dart';
+import 'stockist_add_order_screen.dart' show DesignPicker;
 
 /// Dispatch a locked order by token: every line shows buyer-ordered vs your
 /// stock, with an editable "Dispatch now" box per line. The stockist can add or
@@ -20,13 +21,17 @@ class DispatchInquiryScreen extends StatefulWidget {
   final String? company;
   final String? phone;       // buyer phone — to send the dispatch report
   final String? countryCode; // buyer dialling code (e.g. +91)
+  /// Chosen up-front by the stockist (no silent default): true = reduce from
+  /// stock, false = release holding only.
+  final bool? reduceStock;
   const DispatchInquiryScreen(
       {super.key,
       required this.inquiryId,
       this.token,
       this.company,
       this.phone,
-      this.countryCode});
+      this.countryCode,
+      this.reduceStock});
   @override
   State<DispatchInquiryScreen> createState() => _State();
 }
@@ -70,7 +75,7 @@ class _State extends State<DispatchInquiryScreen> {
   // (P_Stock −= dispatched); false = release the holding only, leaving P_Stock
   // for the stockist to manage in their own software.
   // (project_dispatch_order_redesign · Phase D)
-  bool _reduceStock = true;
+  late bool _reduceStock;
 
   // Dispatch-note metadata (sent to the buyer in the WhatsApp report).
   final _invoiceCtrl = TextEditingController();
@@ -83,6 +88,7 @@ class _State extends State<DispatchInquiryScreen> {
   void initState() {
     super.initState();
     _token = widget.token ?? '';
+    _reduceStock = widget.reduceStock ?? true; // caller chooses; default only if absent
     _load();
   }
 
@@ -139,6 +145,7 @@ class _State extends State<DispatchInquiryScreen> {
 
   Future<void> _addDesign() async {
     final all = await _data.getDesignsByStockist(currentStockistUUID);
+    final brands = await _data.getMyBrands();
     if (!mounted) return;
     final existing = _lines.map((l) => l.designId).toSet();
     final options = all
@@ -150,77 +157,35 @@ class _State extends State<DispatchInquiryScreen> {
           content: Text('No other in-stock designs to add.')));
       return;
     }
-    final picked = await showModalBottomSheet<TileDesign>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) {
-        var q = '';
-        return StatefulBuilder(
-          builder: (ctx, setS) {
-            final filtered = q.isEmpty
-                ? options
-                : options
-                    .where((d) => d.name.toLowerCase().contains(q.toLowerCase()))
-                    .toList();
-            return SizedBox(
-              height: MediaQuery.sizeOf(ctx).height * 0.7,
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-                    child: TextField(
-                      autofocus: true,
-                      onChanged: (v) => setS(() => q = v),
-                      decoration: InputDecoration(
-                        hintText: 'Search a design to add…',
-                        prefixIcon: const Icon(Icons.search, size: 20),
-                        isDense: true,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) {
-                        final d = filtered[i];
-                        return ListTile(
-                          dense: true,
-                          title: Text(d.name,
-                              maxLines: 1, overflow: TextOverflow.ellipsis),
-                          subtitle: Text(
-                              '${d.size.replaceAll(' mm', '')} · ${d.surfaceType}'),
-                          trailing: Text('${d.boxQuantity} in stock',
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.grey)),
-                          onTap: () => Navigator.pop(ctx, d),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
+    // Full-screen "Select designs" page (same as +Add Order) — pick one or more
+    // designs (with a box qty that pre-fills the dispatch amount).
+    final result = await Navigator.of(context).push<Map<String, int>>(
+      MaterialPageRoute(
+        builder: (_) => DesignPicker(
+          stock: options,
+          brandById: {for (final b in brands) b.id: b.name},
+          initial: const {},
+        ),
+      ),
     );
-    if (picked == null || !mounted) return;
+    if (result == null || result.isEmpty || !mounted) return;
     setState(() {
-      _lines.add(_Line(
-        designId: picked.id,
-        name: picked.name,
-        size: picked.size,
-        surface: picked.surfaceType,
-        image: picked.faceImageUrls.isNotEmpty ? picked.faceImageUrls.first : '',
-        ordered: 0,
-        dispatchedAlready: 0,
-        available: picked.boxQuantity,
-        ctrl: TextEditingController(),
-      ));
+      for (final e in result.entries) {
+        final matches = options.where((x) => x.id == e.key);
+        if (matches.isEmpty) continue;
+        final d = matches.first;
+        _lines.add(_Line(
+          designId: d.id,
+          name: d.name,
+          size: d.size,
+          surface: d.surfaceType,
+          image: d.faceImageUrls.isNotEmpty ? d.faceImageUrls.first : '',
+          ordered: 0,
+          dispatchedAlready: 0,
+          available: d.boxQuantity,
+          ctrl: TextEditingController(text: e.value > 0 ? '${e.value}' : ''),
+        ));
+      }
       _dirty = true;
     });
   }
@@ -463,6 +428,8 @@ class _State extends State<DispatchInquiryScreen> {
 
   // Post-dispatch: preview the report and let the stockist send it to the buyer.
   Future<void> _showReportSheet(String report, String status) async {
+    // WhatsApp only when there's a REAL phone (not just a '+91' country code).
+    final hasPhone = (widget.phone ?? '').trim().isNotEmpty;
     final digits = '${widget.countryCode ?? ''}${widget.phone ?? ''}'
         .replaceAll(RegExp(r'[^0-9]'), '');
     await showModalBottomSheet<void>(
@@ -506,29 +473,51 @@ class _State extends State<DispatchInquiryScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            if (digits.isNotEmpty)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    final uri = Uri.parse(
-                        'https://wa.me/$digits?text=${Uri.encodeComponent(report)}');
-                    await launchUrl(uri,
-                        mode: LaunchMode.externalApplication);
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                  icon: const Icon(Icons.chat_rounded, size: 18),
-                  label: const Text('Send report via WhatsApp'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF25D366),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
+            // Copy is always available (works for web/no-phone orders too); send
+            // straight to WhatsApp only when we have the customer's number.
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: report));
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text(
+                                'Report copied — paste it into your chat.'),
+                            backgroundColor: Color(0xFF2E7D32)));
+                      }
+                    },
+                    icon: const Icon(Icons.copy, size: 18),
+                    label: const Text('Copy report'),
+                    style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13)),
                   ),
                 ),
-              )
-            else
-              const Text('No buyer phone on file — report not sent.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+                if (hasPhone) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final uri = Uri.parse(
+                            'https://wa.me/$digits?text=${Uri.encodeComponent(report)}');
+                        await launchUrl(uri,
+                            mode: LaunchMode.externalApplication);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      },
+                      icon: const Icon(Icons.chat_rounded, size: 18),
+                      label: const Text('WhatsApp'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF25D366),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Done')),
