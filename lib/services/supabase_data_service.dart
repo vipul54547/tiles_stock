@@ -2124,6 +2124,44 @@ class SupabaseDataService {
     }
   }
 
+  // ── Order link (customer confirms a pre-made order on the web) ──────────────
+
+  /// Stockist creates an order-scoped share link; returns its token. Build the
+  /// URL as `<shareBaseUrl>/o/<token>`. [days] null = no expiry.
+  Future<String?> createOrderLink(String inquiryId, {int? days}) async {
+    try {
+      final res = await supabase.rpc('create_order_link',
+          params: {'p_inquiry': inquiryId, 'p_days': days});
+      return (Map<String, dynamic>.from(res as Map)['token'])?.toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Login-free view of an order behind an order-link token (buyer-facing).
+  Future<Map<String, dynamic>?> publicOrder(String token) async {
+    try {
+      final res = await supabase.rpc('public_order', params: {'p_token': token});
+      return res == null ? null : Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('publicOrder failed ($token): $e\n$st');
+      return null;
+    }
+  }
+
+  /// Buyer confirms the order via the link with adjusted quantities (0 drops a
+  /// line). Marks it confirmed + notifies the stockist. Returns {token, code}.
+  Future<Map<String, dynamic>> confirmOrderLink(
+      String token, List<Map<String, dynamic>> lines) async {
+    try {
+      final res = await supabase.rpc('confirm_order_link',
+          params: {'p_token': token, 'p_lines': lines});
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Edit an OPEN, no-buyer order: replace its line items + customer hint. Blocked
   /// once held/dispatched or for app-buyer orders. (project_dispatch_order_redesign)
   Future<void> updateStockistOrder(

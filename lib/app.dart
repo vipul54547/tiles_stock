@@ -15,6 +15,7 @@ import 'screens/login_screen.dart';
 
 import 'screens/notifications_screen.dart';
 import 'screens/share_link_handler_screen.dart';
+import 'screens/order_link_screen.dart';
 import 'screens/web_landing_screen.dart';
 
 import 'screens/reset_password_screen.dart';
@@ -108,6 +109,13 @@ final GoRouter _router = GoRouter(
       path: '/s/:token',
       builder: (_, state) =>
           ShareLinkHandlerScreen(token: state.pathParameters['token']!),
+    ),
+
+    // Order link — buyer confirms a stockist-made order (login-free).
+    GoRoute(
+      path: '/o/:token',
+      builder: (_, state) =>
+          OrderLinkScreen(token: state.pathParameters['token']!),
     ),
 
     GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),

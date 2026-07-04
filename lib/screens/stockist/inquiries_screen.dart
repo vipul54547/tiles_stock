@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/inquiry_order.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../config/app_config.dart';
 import '../../utils/order_message.dart';
 import 'stockist_add_order_screen.dart';
 
@@ -65,9 +66,10 @@ class _State extends State<InquiriesScreen> {
   final _searchCtrl = TextEditingController();
 
   // Completed (fully dispatched) orders leave the inquiry list → they live in
-  // Records (dashboard → Records / all dispatches).
+  // Records. 'draft' dropped: web/stockist orders start at 'sent', so nothing is
+  // ever a draft here.
   static const _statuses = [
-    'all', 'draft', 'sent', 'locked', 'dispatching', 'rejected'
+    'all', 'sent', 'locked', 'dispatching', 'rejected'
   ];
 
   @override
@@ -801,7 +803,6 @@ class _State extends State<InquiriesScreen> {
       );
 
   Widget _actions(InquiryOrder o) {
-    final hasPhone = o.phone.trim().isNotEmpty;
     // Quick buttons = the two most-used (Hold/Un-hold + Dispatch); everything
     // else goes in the "More" dropdown so nothing needs left/right swiping.
     final quick = <Widget>[
@@ -820,6 +821,11 @@ class _State extends State<InquiriesScreen> {
         (o.status == 'draft' || o.status == 'sent') && o.endUserId.isEmpty;
     final canReject = o.status != 'completed' && o.status != 'rejected';
     final canDelete = o.status == 'rejected';
+    // Order link works while the order is still open (public_order gate).
+    final canLink = o.status == 'draft' ||
+        o.status == 'sent' ||
+        o.status == 'confirmed' ||
+        o.status == 'locked';
     return Row(
       children: [
         for (final w in quick)
@@ -833,6 +839,8 @@ class _State extends State<InquiriesScreen> {
                 _showItems(o);
               case 'share':
                 _shareOrder(o);
+              case 'link':
+                _orderLink(o);
               case 'edit':
                 _editOrder(o);
               case 'reject':
@@ -843,9 +851,9 @@ class _State extends State<InquiriesScreen> {
           },
           itemBuilder: (_) => [
             _menuItem('items', 'Items', Icons.list_alt_outlined, _navy),
-            _menuItem('share', hasPhone ? 'WhatsApp' : 'Copy order',
-                hasPhone ? Icons.chat : Icons.copy,
-                hasPhone ? const Color(0xFF25D366) : _navy),
+            _menuItem('share', 'Send order', Icons.ios_share, _navy),
+            if (canLink)
+              _menuItem('link', 'Order link', Icons.link, _navy),
             if (canEdit) _menuItem('edit', 'Edit', Icons.edit_outlined, _navy),
             if (canReject)
               _menuItem('reject', 'Reject', Icons.block_outlined,
@@ -967,27 +975,100 @@ class _State extends State<InquiriesScreen> {
     ], orderNo: o.token, connectionCode: o.connectionCode);
   }
 
-  // Send on WhatsApp when we have the customer's number; otherwise COPY the order
-  // so the stockist can paste it into their existing chat. (No stored number for
-  // stockist-created / web orders.)
+  // Digits for wa.me — only when a REAL phone is on file (a lone country code
+  // must not count).
+  String _waDigits(InquiryOrder o) => o.phone.trim().isEmpty
+      ? ''
+      : '${o.countryCode}${o.phone}'.replaceAll(RegExp(r'[^0-9]'), '');
+
+  // Share sheet with BOTH Copy and WhatsApp. WhatsApp uses the buyer's number if
+  // on file, else opens the chooser so the stockist picks the chat.
+  Future<void> _shareSheet(String message, {String digits = ''}) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await Clipboard.setData(ClipboardData(text: message));
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                            content: Text('Copied — paste it in your chat.'),
+                            backgroundColor: Color(0xFF2E7D32)));
+                      }
+                    },
+                    icon: const Icon(Icons.copy, size: 18),
+                    label: const Text('Copy'),
+                    style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final uri = digits.isEmpty
+                          ? Uri.parse(
+                              'https://wa.me/?text=${Uri.encodeComponent(message)}')
+                          : Uri.parse(
+                              'https://wa.me/$digits?text=${Uri.encodeComponent(message)}');
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    },
+                    icon: const Icon(Icons.chat, size: 18),
+                    label: const Text('WhatsApp'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF25D366),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13)),
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Create an order link the buyer opens on the web to review/adjust + confirm,
+  // then offer Copy/WhatsApp. No expiry.
+  Future<void> _orderLink(InquiryOrder o) async {
+    try {
+      final token = await _data.createOrderLink(o.id);
+      if (!mounted || token == null || token.isEmpty) return;
+      final url = '${AppConfig.shareBaseUrl}/o/$token';
+      final code = o.connectionCode.isNotEmpty ? ' [${o.connectionCode}]' : '';
+      final msg = 'Please review & confirm your order ${o.token}$code:\n$url';
+      await _shareSheet(msg, digits: _waDigits(o));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
+  }
+
+  // Share the order — Copy and/or WhatsApp (both offered).
   Future<void> _shareOrder(InquiryOrder o) async {
     final msg = await _orderMessage(o);
     if (!mounted) return;
-    // Decide on the ACTUAL phone — not country-code+phone (a lone '+91' would
-    // otherwise look like a number and wrongly open WhatsApp).
-    if (o.phone.trim().isEmpty) {
-      await Clipboard.setData(ClipboardData(text: msg));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Order copied — paste it into your chat.'),
-          backgroundColor: Color(0xFF2E7D32)));
-    } else {
-      final digits =
-          '${o.countryCode}${o.phone}'.replaceAll(RegExp(r'[^0-9]'), '');
-      final uri =
-          Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(msg)}');
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+    await _shareSheet(msg, digits: _waDigits(o));
   }
 
   // Hold the WHOLE order — every line's full ordered quantity comes off the

@@ -43,7 +43,8 @@ class _Line {
   final int ordered;            // buyer-requested boxes (reference)
   final int dispatchedAlready;  // already dispatched on earlier rounds
   int available;                // current system stock
-  final int held;               // total boxes committed (H) across all orders
+  final int held;               // total boxes committed (H) across ALL orders
+  final int lineHeld;           // THIS order's held boxes for the design
   final TextEditingController ctrl;
   _Line({
     required this.designId,
@@ -55,12 +56,13 @@ class _Line {
     required this.dispatchedAlready,
     required this.available,
     this.held = 0,
+    this.lineHeld = 0,
     required this.ctrl,
   });
   int get remaining => (ordered - dispatchedAlready).clamp(0, 1 << 30);
   int get dispatchNow => int.tryParse(ctrl.text.trim()) ?? 0;
-  // Boxes committed to OTHER orders (H minus this order's own outstanding).
-  int get otherHeld => (held - remaining).clamp(0, 1 << 30);
+  // Boxes committed to OTHER orders = total H minus THIS order's own hold.
+  int get otherHeld => (held - lineHeld).clamp(0, 1 << 30);
 }
 
 class _State extends State<DispatchInquiryScreen> {
@@ -125,7 +127,6 @@ class _State extends State<DispatchInquiryScreen> {
         final l = Map<String, dynamic>.from(raw as Map);
         final ordered = (l['quantity'] as num?)?.toInt() ?? 0;
         final dispatched = (l['dispatched_qty'] as num?)?.toInt() ?? 0;
-        final remaining = (ordered - dispatched).clamp(0, 1 << 30);
         _lines.add(_Line(
           designId: (l['design_id'] ?? '').toString(),
           name: (l['design_name'] ?? '').toString(),
@@ -136,7 +137,10 @@ class _State extends State<DispatchInquiryScreen> {
           dispatchedAlready: dispatched,
           available: (l['available'] as num?)?.toInt() ?? 0,
           held: (l['held'] as num?)?.toInt() ?? 0,
-          ctrl: TextEditingController(text: remaining > 0 ? '$remaining' : ''),
+          lineHeld: (l['line_held'] as num?)?.toInt() ?? 0,
+          // Default the dispatch qty to 0 — the stockist types what actually
+          // ships (prevents accidental full dispatch / over-reduce).
+          ctrl: TextEditingController(),
         ));
       }
       _loading = false;
