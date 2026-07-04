@@ -9,6 +9,7 @@ import '../../widgets/merged_family_grid.dart';
 import '../../widgets/quality_choice_sheet.dart';
 import '../../utils/quality_merge.dart';
 import '../../utils/order_message.dart';
+import '../../utils/buyer_dna.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
@@ -52,6 +53,9 @@ class _State extends State<StockistPortfolioScreen> {
   Set<String> _selectedTypes    = {};
   Set<String> _selectedThickness = {};
   Set<String> _selectedStockTypes = {};
+  // Design DNA (image DNA) — chips/bottom-sheet + facet filter + search.
+  final _dna = BuyerDna();
+  final Set<String> _selectedDna = {};
   final _minQtyCtrl  = TextEditingController();
   final _maxQtyCtrl  = TextEditingController();
   final _searchCtrl  = TextEditingController();
@@ -66,6 +70,7 @@ class _State extends State<StockistPortfolioScreen> {
     if (_selectedTypes.isNotEmpty)    n++;
     if (_selectedThickness.isNotEmpty) n++;
     if (_selectedStockTypes.isNotEmpty) n++;
+    if (_selectedDna.isNotEmpty) n++;
     if (_minQtyCtrl.text.trim().isNotEmpty || _maxQtyCtrl.text.trim().isNotEmpty) n++;
     return n;
   }
@@ -76,7 +81,15 @@ class _State extends State<StockistPortfolioScreen> {
         : _designs.where((d) => _selectedQualities.contains(d.quality)).toList();
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
+      // Also match the design's DNA tag words (e.g. "wooden", "matt").
+      result = result
+          .where((d) =>
+              d.matchesSearch(q, smart: smartSearch) ||
+              _dna.words(d.id).toLowerCase().contains(q))
+          .toList();
+    }
+    if (_selectedDna.isNotEmpty) {
+      result = result.where((d) => _dna.matches(d.id, _selectedDna)).toList();
     }
     if (_selectedSizes.isNotEmpty) {
       result = result.where((d) => _selectedSizes.contains(d.size)).toList();
@@ -138,6 +151,7 @@ class _State extends State<StockistPortfolioScreen> {
         _selectedThickness.clear();
         _selectedQualities.clear();
         _selectedStockTypes.clear();
+        _selectedDna.clear();
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
       });
@@ -197,6 +211,9 @@ class _State extends State<StockistPortfolioScreen> {
     } catch (_) {}
     final finishes = await _service.getActiveFinishNames();
     final sizes = await _service.getActiveSizeNames();
+    // Design DNA: global catalog (once) + this portfolio's designs' tags.
+    if (!_dna.hasCatalog) await _dna.loadCatalog();
+    await _dna.loadDesigns(designs.map((d) => d.id).toList());
     if (!mounted) return;
     setState(() {
       _designs  = designs;
@@ -892,6 +909,8 @@ class _State extends State<StockistPortfolioScreen> {
     var localThickness = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_designs);
     final localStockTypes = {..._selectedStockTypes};
+    final localDna = {..._selectedDna};
+    final dnaInUse = _dna.valueIdsInUse(_designs.map((d) => d.id));
     final sheetHeight  = MediaQuery.sizeOf(context).height * 0.72;
     final bottomPad    = MediaQuery.paddingOf(context).bottom;
 
@@ -946,6 +965,67 @@ class _State extends State<StockistPortfolioScreen> {
                 );
               }).toList(),
             );
+          }
+
+          // Design DNA (image DNA): one labelled chip row per attribute, only
+          // showing values actually tagged on this portfolio's designs. Chips are
+          // keyed by value id (names can repeat across attributes).
+          Widget dnaSection() {
+            final blocks = <Widget>[];
+            for (final a in _dna.facets) {
+              final values = ((a['values'] as List?) ?? const [])
+                  .where((v) => dnaInUse.contains((v['id'] ?? '').toString()))
+                  .toList();
+              if (values.isEmpty) continue;
+              blocks.add(Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Text((a['name'] ?? '').toString(),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 12.5)),
+              ));
+              blocks.add(Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final v in values)
+                    Builder(builder: (_) {
+                      final id = (v['id'] ?? '').toString();
+                      final active = localDna.contains(id);
+                      return GestureDetector(
+                        onTap: () => setSheet(() =>
+                            active ? localDna.remove(id) : localDna.add(id)),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: active
+                                ? const Color(0xFF1B4F72)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: active
+                                    ? const Color(0xFF1B4F72)
+                                    : Colors.grey.shade300),
+                          ),
+                          child: Text((v['name'] ?? '').toString(),
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: active
+                                      ? Colors.white
+                                      : Colors.grey.shade700)),
+                        ),
+                      );
+                    }),
+                ],
+              ));
+            }
+            if (blocks.isEmpty) {
+              return const Text('No DNA tags on these designs',
+                  style: TextStyle(color: Colors.grey, fontSize: 12));
+            }
+            return Column(
+                crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
           }
 
           Widget stockTypeRow() {
@@ -1151,6 +1231,11 @@ class _State extends State<StockistPortfolioScreen> {
                         summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
                         child: stockTypeRow(),
                       ),
+                      FilterSection(
+                        title: 'Design DNA',
+                        summary: localDna.isEmpty ? 'All' : '${localDna.length} selected',
+                        child: dnaSection(),
+                      ),
                     ],
                   ),
                 ),
@@ -1191,6 +1276,9 @@ class _State extends State<StockistPortfolioScreen> {
         _selectedTypes     = Set<String>.from(localTypes);
         _selectedThickness = Set<String>.from(localThickness);
         _selectedStockTypes = {...localStockTypes};
+        _selectedDna
+          ..clear()
+          ..addAll(localDna);
       });
     });
   }
@@ -1246,6 +1334,8 @@ class _State extends State<StockistPortfolioScreen> {
             await showQualityChoiceSheet(context, m);
             if (mounted) setState(() {});
           },
+          // DNA chips on each card → tap opens the DNA bottom sheet.
+          dnaTagsFor: (id) => _dna.tagsFor(id),
         ),
       );
 }

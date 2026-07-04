@@ -1403,6 +1403,21 @@ class SupabaseDataService {
     }
   }
 
+  /// Buyer-wide DNA facet catalog (every active attribute + value, id+name),
+  /// across all stockists. Anonymous-callable — for DNA chips/filter/search on
+  /// any buyer surface. Returns [{id,name,is_multi,values:[{id,name}]}].
+  Future<List<Map<String, dynamic>>> publicDnaCatalog() async {
+    try {
+      final res = await supabase.rpc('public_dna_catalog');
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('publicDnaCatalog failed: $e');
+      return [];
+    }
+  }
+
   // ── Design "family" (concept grouping) ─────────────────────────────────────
 
   /// The family (concept) a design belongs to — every sibling variant (same
