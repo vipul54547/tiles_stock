@@ -765,6 +765,10 @@ class _State extends State<InquiriesScreen> {
       if (o.status != 'completed' && o.status != 'rejected')
         _actionChip('Reject', Icons.block_outlined, Colors.red.shade700,
             () => _reject(o)),
+      // A rejected order can be permanently removed to keep the list clean.
+      if (o.status == 'rejected')
+        _actionChip('Delete', Icons.delete_outline, Colors.red.shade700,
+            () => _delete(o)),
     ];
     return Wrap(spacing: 6, runSpacing: 6, children: btns);
   }
@@ -840,13 +844,16 @@ class _State extends State<InquiriesScreen> {
           const SnackBar(content: Text('No items to hold')));
       return;
     }
-    // held per design: default to line_held if any already held, else full qty.
+    // Pre-fill: if the order is already held, show each line's SAVED held qty
+    // exactly (a deliberately-zeroed line stays 0); for a never-held order,
+    // default every line to its full ordered quantity.
+    final alreadyHeld = o.status == 'locked' || o.isHeld;
     final held = <String, int>{};
     for (final l in lines) {
       final id = (l['design_id'] ?? '').toString();
       final qty = (l['quantity'] as num?)?.toInt() ?? 0;
       final lineHeld = (l['line_held'] as num?)?.toInt() ?? 0;
-      held[id] = lineHeld > 0 ? lineHeld : qty;
+      held[id] = alreadyHeld ? lineHeld : qty;
     }
 
     final confirmed = await showModalBottomSheet<bool>(
@@ -949,12 +956,25 @@ class _State extends State<InquiriesScreen> {
             icon: const Icon(Icons.remove_circle_outline),
             onPressed: cur > 0 ? () => set(cur - 1) : null,
           ),
-          SizedBox(
-            width: 44,
-            child: Text('$cur',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 15)),
+          // Tap the number to type an exact quantity (clamped to the ordered qty).
+          InkWell(
+            onTap: () async {
+              final v = await _promptQty(cur, qty);
+              if (v != null) set(v);
+            },
+            borderRadius: BorderRadius.circular(6),
+            child: Container(
+              width: 48,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade300),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text('$cur',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15)),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
@@ -963,6 +983,39 @@ class _State extends State<InquiriesScreen> {
         ],
       ),
     );
+  }
+
+  // Numeric entry for a hold quantity (clamped 0..max). Returns null on cancel.
+  Future<int?> _promptQty(int current, int max) async {
+    final ctrl = TextEditingController(text: '$current');
+    final v = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Hold quantity'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            helperText: 'Max $max',
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (s) =>
+              Navigator.pop(ctx, (int.tryParse(s.trim()) ?? current).clamp(0, max)),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(
+                ctx, (int.tryParse(ctrl.text.trim()) ?? current).clamp(0, max)),
+            child: const Text('Set'),
+          ),
+        ],
+      ),
+    );
+    return v;
   }
 
   Future<void> _unhold(InquiryOrder o) async {
@@ -990,6 +1043,14 @@ class _State extends State<InquiriesScreen> {
         'This cannot be undone.');
     if (!ok) return;
     await _run(() => _data.rejectOrder(o.id), '${o.token} rejected.');
+  }
+
+  Future<void> _delete(InquiryOrder o) async {
+    final ok = await _confirm('Delete ${o.token}?',
+        'Permanently removes this rejected order from your inquiry list. '
+        'This cannot be undone.');
+    if (!ok) return;
+    await _run(() => _data.deleteInquiry(o.id), '${o.token} deleted.');
   }
 
   Future<bool> _confirm(String title, String body) async {

@@ -56,6 +56,10 @@ class _State extends State<StockistDashboardScreen> {
   List<LibraryEntry> _library = [];
   // Buyer My-Choice interest in this stockist's designs: designId → (buyers, boxes).
   Map<String, ({int buyers, int boxes})> _inquiries = {};
+  // Count of NEW orders awaiting action (status 'sent') — app AND web/walk-in —
+  // drives the Inquiry pill badge. (my_design_inquiries only sees app baskets, so
+  // a web order wouldn't otherwise show a number.)
+  int _newOrders = 0;
   // Design DNA completeness per design: designId → fraction (0..1) of the
   // fillable DNA attributes that are tagged. Drives the corner indicator.
   Map<String, double> _dnaFill = {};
@@ -183,6 +187,7 @@ class _State extends State<StockistDashboardScreen> {
   Future<void> _load() async {
     final data = await _service.getDesignsByStockist(_myStockistId);
     final inquiries = await _service.getMyDesignInquiries();
+    final orders = await _service.getMyInquiries();
     final pending = await _service.myPendingStockBoxes();
     final catalogs = await _service.getCatalogs(_myStockistId);
     final brands = await _service.getMyBrands();
@@ -212,6 +217,7 @@ class _State extends State<StockistDashboardScreen> {
     setState(() {
       _designs = enriched;
       _inquiries = inquiries;
+      _newOrders = orders.where((o) => o.status == 'sent').length;
       _pendingBoxes = pending;
       _catalogs = catalogs;
       _brands = brands;
@@ -1071,7 +1077,10 @@ class _State extends State<StockistDashboardScreen> {
   // Row 2 (pinned): My Stock / Buyer Interest tabs + quality chips in one
   // horizontally-scrollable row (All-Design chip style).
   Widget _buildChipRow() {
-    final interestCount = _buyerInterestDesigns.length;
+    // Badge = new orders awaiting action (includes web orders my_design_inquiries
+    // can't see); fall back to buyer-interest designs if there are no new orders.
+    final interestCount =
+        _newOrders > 0 ? _newOrders : _buyerInterestDesigns.length;
     return Container(
       // Extra top padding leaves room for the Inquiry badge that sits above the
       // pill, so it isn't clipped by the header.

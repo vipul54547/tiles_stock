@@ -2055,6 +2055,16 @@ class SupabaseDataService {
     }
   }
 
+  /// Stockist permanently deletes a REJECTED order (removes it from the inquiry
+  /// list to keep it clean). Cascades its items + share-link rows.
+  Future<void> deleteInquiry(String id) async {
+    try {
+      await supabase.rpc('delete_inquiry', params: {'p_id': id});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Dispatch a locked order by token. [lines] is the full current line set —
   /// each `{ 'design_id': <uuid>, 'dispatch': <boxes> }`; omitted designs are
   /// removed, new design_ids are added. Over-stock dispatch is allowed (system
