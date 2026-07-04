@@ -750,15 +750,22 @@ class _State extends State<InquiriesScreen> {
       if (o.phone.isNotEmpty || o.source == 'stockist')
         _actionChip('WhatsApp', Icons.chat, const Color(0xFF25D366),
             () => _whatsapp(o)),
+      // Edit is only for an OPEN, stockist-managed (no app buyer) order — its
+      // lines aren't a live buyer basket and it isn't held/dispatched yet.
+      if ((o.status == 'draft' || o.status == 'sent') && o.endUserId.isEmpty)
+        _actionChip('Edit', Icons.edit_outlined, _navy, () => _editOrder(o)),
+      // Single Hold ⇄ Un-hold toggle: shows Un-hold when the order holds boxes,
+      // else Hold. "Hold selected" stays as the partial-hold option.
       if (o.status == 'draft' || o.status == 'sent' || o.status == 'locked') ...[
-        _actionChip('Hold', Icons.lock_outline, const Color(0xFF6A1B9A),
-            () => _hold(o)),
+        if (o.isHeld)
+          _actionChip('Un-hold', Icons.lock_open_outlined,
+              const Color(0xFFE65100), () => _unhold(o))
+        else
+          _actionChip('Hold', Icons.lock_outline, const Color(0xFF6A1B9A),
+              () => _hold(o)),
         _actionChip('Hold selected', Icons.tune, const Color(0xFF6A1B9A),
             () => _holdSelected(o)),
       ],
-      if (o.status == 'locked')
-        _actionChip('Un-hold', Icons.lock_open_outlined,
-            const Color(0xFFE65100), () => _unhold(o)),
       if (o.status == 'locked' || o.status == 'dispatching')
         _actionChip('Dispatch', Icons.local_shipping_outlined,
             const Color(0xFF00695C), () => _dispatch(o)),
@@ -805,6 +812,34 @@ class _State extends State<InquiriesScreen> {
     final id = (res['id'] ?? '').toString();
     final created = _orders.where((o) => o.id == id);
     if (created.isNotEmpty) _whatsapp(created.first);
+  }
+
+  // Edit an OPEN, no-buyer order — reuses the add-order screen pre-filled with
+  // the order's current hint + lines; saves via update_order_items.
+  Future<void> _editOrder(InquiryOrder o) async {
+    final detail = await _data.getInquiryDetail(o.id);
+    if (!mounted) return;
+    final lines = ((detail?['lines'] as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .map((l) => {'design_id': l['design_id'], 'quantity': l['quantity']})
+        .toList();
+    final res = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => StockistAddOrderScreen(
+          orderId: o.id,
+          initialHint: o.customerHint,
+          initialLines: lines,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (res != null) {
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Order updated.'),
+          backgroundColor: Color(0xFF2E7D32)));
+    }
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────

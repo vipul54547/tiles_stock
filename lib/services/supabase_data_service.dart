@@ -2124,6 +2124,18 @@ class SupabaseDataService {
     }
   }
 
+  /// Edit an OPEN, no-buyer order: replace its line items + customer hint. Blocked
+  /// once held/dispatched or for app-buyer orders. (project_dispatch_order_redesign)
+  Future<void> updateStockistOrder(
+      String id, String hint, List<Map<String, dynamic>> lines) async {
+    try {
+      await supabase.rpc('update_order_items',
+          params: {'p_id': id, 'p_hint': hint, 'p_lines': lines});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Per-buyer breakdown for one of the stockist's designs: each entry has
   /// end_user_id, company, contact, phone, boxes. Empty unless the design
   /// belongs to caller.
