@@ -815,6 +815,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final stdCol = header.indexWhere((h) => _standardQtyHeaders.contains(h));
     final brandCol = idx(_brandColHeaders);
     final boxpackCol = header.indexWhere((h) => _boxPackHeaders.contains(h));
+    // Optional identity columns — read when present so new ENTRY designs carry
+    // tile type / pieces / weight from the sheet (no manual per-row fill).
+    final ttCol = idx(_headerSynonyms['tiletype']!);
+    final pcCol = idx(_headerSynonyms['pieces']!);
+    final wtCol = idx(_headerSynonyms['weight']!);
 
     String cellAt(List<Data?> row, int i) {
       if (i < 0 || i >= row.length) return '';
@@ -865,6 +870,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (preCol >= 0) a.premium += _toInt(cellAt(row, preCol)) ?? 0;
       if (stdCol >= 0) a.standard += _toInt(cellAt(row, stdCol)) ?? 0;
       if (catCol >= 0 && a.surface.isEmpty) a.surface = cellAt(row, catCol).trim();
+      // Take the first non-empty identity value seen across the design's batch.
+      if (ttCol >= 0 && a.tileType.isEmpty) a.tileType = cellAt(row, ttCol).trim();
+      if (pcCol >= 0 && a.pieces == null) a.pieces = _toInt(cellAt(row, pcCol));
+      if (wtCol >= 0 && a.weight == null) a.weight = _toDouble(cellAt(row, wtCol));
       if (bid != null) a.brandIds.add(bid);
     }
 
@@ -880,11 +889,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           sizeRaw: a.size,
           qualityRaw: quality,
           surfaceRaw: a.surface,
-          tileType: '',
+          tileType: a.tileType,
           colour: '',
           qty: qty,
-          pieces: null,
-          weight: null,
+          pieces: a.pieces,
+          weight: a.weight,
         );
         x.brandNames = Map.of(brandNames);
         x.masterName = a.name;
@@ -2302,10 +2311,24 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             width: double.infinity,
             color: const Color(0xFFFFF3E0),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Text(
-                '$incomplete new design${incomplete == 1 ? '' : 's'} need Tile Type, '
-                'Pieces and Box Weight. Fill them below (or untick the row) to import.',
-                style: TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                    '$incomplete new design${incomplete == 1 ? '' : 's'} need Tile Type, '
+                    'Pieces and Box Weight. Fill them below (or untick the row) to import.',
+                    style:
+                        TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
+                const SizedBox(height: 3),
+                Text(
+                    'Tip: add “Tile Type”, “Pieces/Box” and “Weight (kg)” columns to your '
+                    'file and they’ll import automatically — no filling needed.',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                        color: Colors.orange.shade800)),
+              ],
+            ),
           ),
         // Prominent skipped-rows warning: invalid rows are excluded from the import,
         // so a wrong row (e.g. two brand columns filled) can't slip past unnoticed.
@@ -2924,6 +2947,11 @@ class _EntryAgg {
   int premium = 0;
   int standard = 0;
   String surface = '';
+  // Optional identity, read from the ENTRY sheet when the manufacturer adds the
+  // Tile type / Pieces / Weight columns (so new designs don't need per-row fill).
+  String tileType = '';
+  int? pieces;
+  double? weight;
   final Set<String> brandIds = {};
   _EntryAgg({required this.name, required this.size});
 }
