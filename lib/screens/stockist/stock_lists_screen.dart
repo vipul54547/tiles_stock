@@ -1411,6 +1411,7 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
     final lSurf = Set<String>.from(_fSurfaces);
     final lCol = Set<String>.from(_fColours);
     final lType = Set<String>.from(_fTypes);
+    var showMore = false; // reveal advanced facets (Tile Type, Colour)
     final minCtrl = TextEditingController(text: _minFCtrl.text);
     final maxCtrl = TextEditingController(text: _maxFCtrl.text);
 
@@ -1489,6 +1490,7 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
                     controller: scroll,
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
+                      // Essentials — always visible.
                       if (sizes.isNotEmpty)
                         FilterSection(
                             title: 'Size',
@@ -1504,16 +1506,26 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
                             title: 'Finish',
                             summary: filterSummary(lSurf),
                             child: chipWrap(surfaces, lSurf)),
-                      if (types.isNotEmpty)
-                        FilterSection(
-                            title: 'Tile Type',
-                            summary: filterSummary(lType),
-                            child: chipWrap(types, lType)),
-                      if (colours.isNotEmpty)
-                        FilterSection(
-                            title: 'Colour',
-                            summary: filterSummary(lCol),
-                            child: chipWrap(colours, lCol)),
+                      // Advanced — behind the "More filters" toggle.
+                      if (types.isNotEmpty || colours.isNotEmpty)
+                        MoreFiltersToggle(
+                          expanded: showMore,
+                          activeHidden: (lType.isNotEmpty ? 1 : 0) +
+                              (lCol.isNotEmpty ? 1 : 0),
+                          onToggle: () => setSheet(() => showMore = !showMore),
+                        ),
+                      if (showMore) ...[
+                        if (types.isNotEmpty)
+                          FilterSection(
+                              title: 'Tile Type',
+                              summary: filterSummary(lType),
+                              child: chipWrap(types, lType)),
+                        if (colours.isNotEmpty)
+                          FilterSection(
+                              title: 'Colour',
+                              summary: filterSummary(lCol),
+                              child: chipWrap(colours, lCol)),
+                      ],
                     ],
                   ),
                 ),

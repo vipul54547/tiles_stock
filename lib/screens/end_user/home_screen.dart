@@ -256,6 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final localStockTypes = {..._selectedStockTypes};
     final localDna = {..._selectedDna};
     final dnaInUse = _dna.valueIdsInUse(_base.map((d) => d.id));
+    var showMore = false; // reveal advanced facets (Tile Type, Thickness, DNA)
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     showModalBottomSheet<bool>(
       context: context,
@@ -481,6 +482,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
+                      // Essentials — always visible.
                       FilterSection(
                         title: 'Size',
                         summary: filterSummary(localSizes),
@@ -491,17 +493,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         summary: filterSummary(localSurfaces),
                         child: chipWrap(_surfaceOpts, localSurfaces),
                       ),
-                      FilterSection(
-                        title: 'Tile Type',
-                        summary: filterSummary(localTypes),
-                        child: chipWrap(kTileTypes, localTypes),
-                      ),
-                      if (thicknessBands.isNotEmpty)
-                        FilterSection(
-                          title: 'Thickness (approx)',
-                          summary: filterSummary(localThickness),
-                          child: chipWrap(thicknessBands, localThickness),
-                        ),
                       FilterSection(
                         title: 'Stock Type',
                         summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
@@ -516,13 +507,34 @@ class _HomeScreenState extends State<HomeScreen> {
                               .toList(),
                         ),
                       ),
-                      FilterSection(
-                        title: 'Design DNA',
-                        summary: localDna.isEmpty
-                            ? 'All'
-                            : '${localDna.length} selected',
-                        child: dnaSection(),
+                      // Advanced — behind the "More filters" toggle.
+                      MoreFiltersToggle(
+                        expanded: showMore,
+                        activeHidden: (localTypes.isNotEmpty ? 1 : 0) +
+                            (localThickness.isNotEmpty ? 1 : 0) +
+                            (localDna.isNotEmpty ? 1 : 0),
+                        onToggle: () => setSheet(() => showMore = !showMore),
                       ),
+                      if (showMore) ...[
+                        FilterSection(
+                          title: 'Tile Type',
+                          summary: filterSummary(localTypes),
+                          child: chipWrap(kTileTypes, localTypes),
+                        ),
+                        if (thicknessBands.isNotEmpty)
+                          FilterSection(
+                            title: 'Thickness (approx)',
+                            summary: filterSummary(localThickness),
+                            child: chipWrap(thicknessBands, localThickness),
+                          ),
+                        FilterSection(
+                          title: 'Design DNA',
+                          summary: localDna.isEmpty
+                              ? 'All'
+                              : '${localDna.length} selected',
+                          child: dnaSection(),
+                        ),
+                      ],
                     ],
                   ),
                 ),

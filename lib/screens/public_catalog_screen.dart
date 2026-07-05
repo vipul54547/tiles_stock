@@ -787,6 +787,7 @@ class _State extends State<PublicCatalogScreen> {
   // ── Filters sheet ──────────────────────────────────────────────────────────
 
   void _openFilters() {
+    var showMore = false; // reveal advanced facets (Quality, Tile Type, DNA…)
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -987,31 +988,42 @@ class _State extends State<PublicCatalogScreen> {
                             ],
                           ),
                         ),
+                        // Essentials — always visible.
                         section('Size', _distinct('size'), _fSizes),
-                        section('Finish', _distinct('surface'), _fFinishes),
-                        // Series sits next to Finish — it reads like a
-                        // collection/finish choice, not a tagging attribute.
-                        if (seriesAttr != null) dnaSection(seriesAttr),
                         section('Quality', _distinct('quality'), _fQualities),
-                        section('Tile Type', _distinct('tile_type'), _fTypes),
-                        section('Thickness (approx)', _thicknessBands(),
-                            _fThickness),
+                        section('Finish', _distinct('surface'), _fFinishes),
                         section(
                             'Stock Type', _distinct('stock_type'), _fStockTypes),
-                        // Every other DNA attribute (Punch/Look Type/…) nested
-                        // under one group, so the top-level list stays short.
-                        if (otherDnaFacets.any((a) => dnaValuesInUse(a).isNotEmpty))
-                          FilterSection(
-                            title: 'Design DNA',
-                            summary: otherDnaPickedCount == 0
-                                ? 'All'
-                                : '$otherDnaPickedCount chosen',
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children:
-                                  otherDnaFacets.map(dnaAttributeBlock).toList(),
+                        // Advanced — behind the "More filters" toggle.
+                        MoreFiltersToggle(
+                          expanded: showMore,
+                          activeHidden: (_fTypes.isNotEmpty ? 1 : 0) +
+                              (_fThickness.isNotEmpty ? 1 : 0) +
+                              (_fDna.isNotEmpty ? 1 : 0),
+                          onToggle: () => setSheet(() => showMore = !showMore),
+                        ),
+                        if (showMore) ...[
+                          if (seriesAttr != null) dnaSection(seriesAttr),
+                          section('Tile Type', _distinct('tile_type'), _fTypes),
+                          section('Thickness (approx)', _thicknessBands(),
+                              _fThickness),
+                          // Every other DNA attribute (Punch/Look Type/…) nested
+                          // under one group, so the list stays short.
+                          if (otherDnaFacets
+                              .any((a) => dnaValuesInUse(a).isNotEmpty))
+                            FilterSection(
+                              title: 'Design DNA',
+                              summary: otherDnaPickedCount == 0
+                                  ? 'All'
+                                  : '$otherDnaPickedCount chosen',
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: otherDnaFacets
+                                    .map(dnaAttributeBlock)
+                                    .toList(),
+                              ),
                             ),
-                          ),
+                        ],
                         const SizedBox(height: 8),
                       ],
                     ),

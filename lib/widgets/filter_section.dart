@@ -78,6 +78,72 @@ class _FilterSectionState extends State<FilterSection> {
   }
 }
 
+/// The "More filters / Fewer filters" row that reveals the advanced (secondary)
+/// facets below the essential ones. Looks like a FilterSection header so it feels
+/// native. Shows "(N active)" while collapsed if any hidden facet is set, so a
+/// hidden selection is never invisible.
+class MoreFiltersToggle extends StatelessWidget {
+  final bool expanded;
+  final int activeHidden;
+  final VoidCallback onToggle;
+
+  const MoreFiltersToggle({
+    super.key,
+    required this.expanded,
+    required this.activeHidden,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: () {
+            FocusManager.instance.primaryFocus?.unfocus();
+            onToggle();
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            child: Row(
+              children: [
+                AnimatedRotation(
+                  turns: expanded ? 0.25 : 0,
+                  duration: const Duration(milliseconds: 150),
+                  child: const Icon(Icons.chevron_right, size: 20, color: _kNavy),
+                ),
+                const SizedBox(width: 4),
+                Text(expanded ? 'Fewer filters' : 'More filters',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: _kNavy)),
+                const Spacer(),
+                if (!expanded && activeHidden > 0)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: _kNavy.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text('$activeHidden active',
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: _kNavy,
+                            fontWeight: FontWeight.w600)),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        Divider(height: 1, color: Colors.grey.shade200),
+      ],
+    );
+  }
+}
+
 /// One removable chip in the active-filter bar.
 class ActiveFilter {
   final String label;

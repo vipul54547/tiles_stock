@@ -762,6 +762,7 @@ class _State extends State<StockistsOverviewScreen> {
     final localDna = {..._selectedDna};
     final dnaFacets = _dnaFacetAttrs;
     final dnaInUse = _dnaValuesInUse;
+    var showMore = false; // reveal advanced facets (Tile Type, Thickness, DNA)
 
     showModalBottomSheet<bool>(
       context: context,
@@ -938,6 +939,7 @@ class _State extends State<StockistsOverviewScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     children: [
+                      // Essentials — always visible.
                       FilterSection(
                         title: 'Size',
                         summary: filterSummary(localSizes),
@@ -949,17 +951,6 @@ class _State extends State<StockistsOverviewScreen> {
                         child: chipWrap(_allSurfaces, localSurfaces),
                       ),
                       FilterSection(
-                        title: 'Tile Type',
-                        summary: filterSummary(localTypes),
-                        child: chipWrap(kTileTypes, localTypes),
-                      ),
-                      if (thicknessBands.isNotEmpty)
-                        FilterSection(
-                          title: 'Thickness (approx)',
-                          summary: filterSummary(localThickness),
-                          child: chipWrap(thicknessBands, localThickness),
-                        ),
-                      FilterSection(
                         title: 'Stock Type',
                         summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
                         child: Wrap(spacing: 8, runSpacing: 8,
@@ -970,34 +961,58 @@ class _State extends State<StockistsOverviewScreen> {
                                 : localStockTypes.add(t)),
                           )).toList()),
                       ),
-                      // ── Design DNA facets (only attributes with tagged values
-                      // present in the current pool are shown) ─────────────────
-                      ...dnaFacets.map((attr) {
-                        final vals = attr.values
-                            .where((v) => dnaInUse.contains(v.id))
-                            .toList();
-                        final picked = vals
-                            .where((v) => localDna.contains(v.id))
-                            .map((v) => v.name)
-                            .toList();
-                        return FilterSection(
-                          title: attr.name,
-                          summary: picked.isEmpty ? 'All' : picked.join(', '),
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: vals
-                                .map((v) => filterChip(
-                                      v.name,
-                                      localDna.contains(v.id),
-                                      () => setSheet(() => localDna.contains(v.id)
-                                          ? localDna.remove(v.id)
-                                          : localDna.add(v.id)),
-                                    ))
-                                .toList(),
+                      // Advanced — behind the "More filters" toggle.
+                      MoreFiltersToggle(
+                        expanded: showMore,
+                        activeHidden: (localTypes.isNotEmpty ? 1 : 0) +
+                            (localThickness.isNotEmpty ? 1 : 0) +
+                            dnaFacets
+                                .where((a) => a.values
+                                    .any((v) => localDna.contains(v.id)))
+                                .length,
+                        onToggle: () => setSheet(() => showMore = !showMore),
+                      ),
+                      if (showMore) ...[
+                        FilterSection(
+                          title: 'Tile Type',
+                          summary: filterSummary(localTypes),
+                          child: chipWrap(kTileTypes, localTypes),
+                        ),
+                        if (thicknessBands.isNotEmpty)
+                          FilterSection(
+                            title: 'Thickness (approx)',
+                            summary: filterSummary(localThickness),
+                            child: chipWrap(thicknessBands, localThickness),
                           ),
-                        );
-                      }),
+                        // ── Design DNA facets (only attributes with tagged values
+                        // present in the current pool are shown) ───────────────
+                        ...dnaFacets.map((attr) {
+                          final vals = attr.values
+                              .where((v) => dnaInUse.contains(v.id))
+                              .toList();
+                          final picked = vals
+                              .where((v) => localDna.contains(v.id))
+                              .map((v) => v.name)
+                              .toList();
+                          return FilterSection(
+                            title: attr.name,
+                            summary: picked.isEmpty ? 'All' : picked.join(', '),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: vals
+                                  .map((v) => filterChip(
+                                        v.name,
+                                        localDna.contains(v.id),
+                                        () => setSheet(() => localDna.contains(v.id)
+                                            ? localDna.remove(v.id)
+                                            : localDna.add(v.id)),
+                                      ))
+                                  .toList(),
+                            ),
+                          );
+                        }),
+                      ],
                     ],
                   ),
                 ),

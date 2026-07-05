@@ -376,6 +376,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
     final lSurf = Set<String>.from(_surfaces);
     final lCol = Set<String>.from(_colours);
     final lType = Set<String>.from(_types);
+    var showMore = false; // reveal advanced facets (Tile Type, Colour)
     final minCtrl = TextEditingController(text: _minFCtrl.text);
     final maxCtrl = TextEditingController(text: _maxFCtrl.text);
 
@@ -454,6 +455,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
                     controller: scroll,
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
+                      // Essentials — always visible.
                       if (sizes.isNotEmpty)
                         FilterSection(
                             title: 'Size',
@@ -468,16 +470,26 @@ class _StockControlScreenState extends State<StockControlScreen> {
                             title: 'Finish',
                             summary: filterSummary(lSurf),
                             child: chipWrap(surfaces, lSurf)),
-                      if (types.isNotEmpty)
-                        FilterSection(
-                            title: 'Tile Type',
-                            summary: filterSummary(lType),
-                            child: chipWrap(types, lType)),
-                      if (colours.isNotEmpty)
-                        FilterSection(
-                            title: 'Colour',
-                            summary: filterSummary(lCol),
-                            child: chipWrap(colours, lCol)),
+                      // Advanced — behind the "More filters" toggle.
+                      if (types.isNotEmpty || colours.isNotEmpty)
+                        MoreFiltersToggle(
+                          expanded: showMore,
+                          activeHidden: (lType.isNotEmpty ? 1 : 0) +
+                              (lCol.isNotEmpty ? 1 : 0),
+                          onToggle: () => setSheet(() => showMore = !showMore),
+                        ),
+                      if (showMore) ...[
+                        if (types.isNotEmpty)
+                          FilterSection(
+                              title: 'Tile Type',
+                              summary: filterSummary(lType),
+                              child: chipWrap(types, lType)),
+                        if (colours.isNotEmpty)
+                          FilterSection(
+                              title: 'Colour',
+                              summary: filterSummary(lCol),
+                              child: chipWrap(colours, lCol)),
+                      ],
                     ],
                   ),
                 ),

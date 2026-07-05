@@ -1976,6 +1976,7 @@ class _State extends State<StockistDashboardScreen> {
     var localThickness = Set<String>.from(_selectedThickness);
     final localStockTypes = {..._selectedStockTypes};
     final localDna = {..._selectedDna};
+    var showMore = false; // reveal advanced facets (Tile Type, Thickness, Colour, DNA)
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
 
     showModalBottomSheet<bool>(
@@ -2148,6 +2149,7 @@ class _State extends State<StockistDashboardScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
+                      // Essentials — always visible.
                       if (sizes.isNotEmpty)
                         FilterSection(
                           title: 'Size',
@@ -2159,24 +2161,6 @@ class _State extends State<StockistDashboardScreen> {
                           title: 'Finish',
                           summary: filterSummary(localSurfaces),
                           child: chipWrap(surfaces, localSurfaces),
-                        ),
-                      if (types.isNotEmpty)
-                        FilterSection(
-                          title: 'Tile Type',
-                          summary: filterSummary(localTypes),
-                          child: chipWrap(types, localTypes),
-                        ),
-                      if (thicknessBands.isNotEmpty)
-                        FilterSection(
-                          title: 'Thickness (approx)',
-                          summary: filterSummary(localThickness),
-                          child: chipWrap(thicknessBands, localThickness),
-                        ),
-                      if (colours.isNotEmpty)
-                        FilterSection(
-                          title: 'Colour',
-                          summary: filterSummary(localColours),
-                          child: chipWrap(colours, localColours),
                         ),
                       FilterSection(
                         title: 'Stock Type',
@@ -2192,35 +2176,67 @@ class _State extends State<StockistDashboardScreen> {
                               .toList(),
                         ),
                       ),
-                      // ── Design DNA "special search" facets ──────────────────
-                      // One section per admin attribute (Punch/Glaze/Look/…),
-                      // showing only values tagged on the in-stock pool.
-                      ...dnaFacets.map((attr) {
-                        final vals = attr.values
-                            .where((v) => dnaInUse.contains(v.id))
-                            .toList();
-                        final picked = vals
-                            .where((v) => localDna.contains(v.id))
-                            .map((v) => v.name)
-                            .toList();
-                        return FilterSection(
-                          title: attr.name,
-                          summary: picked.isEmpty ? 'All' : picked.join(', '),
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: vals
-                                .map((v) => chip(
-                                      v.name,
-                                      localDna.contains(v.id),
-                                      () => setSheet(() => localDna.contains(v.id)
-                                          ? localDna.remove(v.id)
-                                          : localDna.add(v.id)),
-                                    ))
-                                .toList(),
+                      // Advanced — behind the "More filters" toggle.
+                      MoreFiltersToggle(
+                        expanded: showMore,
+                        activeHidden: (localTypes.isNotEmpty ? 1 : 0) +
+                            (localThickness.isNotEmpty ? 1 : 0) +
+                            (localColours.isNotEmpty ? 1 : 0) +
+                            dnaFacets
+                                .where((a) => a.values
+                                    .any((v) => localDna.contains(v.id)))
+                                .length,
+                        onToggle: () => setSheet(() => showMore = !showMore),
+                      ),
+                      if (showMore) ...[
+                        if (types.isNotEmpty)
+                          FilterSection(
+                            title: 'Tile Type',
+                            summary: filterSummary(localTypes),
+                            child: chipWrap(types, localTypes),
                           ),
-                        );
-                      }),
+                        if (thicknessBands.isNotEmpty)
+                          FilterSection(
+                            title: 'Thickness (approx)',
+                            summary: filterSummary(localThickness),
+                            child: chipWrap(thicknessBands, localThickness),
+                          ),
+                        if (colours.isNotEmpty)
+                          FilterSection(
+                            title: 'Colour',
+                            summary: filterSummary(localColours),
+                            child: chipWrap(colours, localColours),
+                          ),
+                        // ── Design DNA "special search" facets ────────────────
+                        // One section per admin attribute (Punch/Glaze/Look/…),
+                        // showing only values tagged on the in-stock pool.
+                        ...dnaFacets.map((attr) {
+                          final vals = attr.values
+                              .where((v) => dnaInUse.contains(v.id))
+                              .toList();
+                          final picked = vals
+                              .where((v) => localDna.contains(v.id))
+                              .map((v) => v.name)
+                              .toList();
+                          return FilterSection(
+                            title: attr.name,
+                            summary: picked.isEmpty ? 'All' : picked.join(', '),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: vals
+                                  .map((v) => chip(
+                                        v.name,
+                                        localDna.contains(v.id),
+                                        () => setSheet(() => localDna.contains(v.id)
+                                            ? localDna.remove(v.id)
+                                            : localDna.add(v.id)),
+                                      ))
+                                  .toList(),
+                            ),
+                          );
+                        }),
+                      ],
                     ],
                   ),
                 ),
