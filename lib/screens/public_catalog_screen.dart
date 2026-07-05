@@ -1144,15 +1144,26 @@ class _State extends State<PublicCatalogScreen> {
     final companyPos = effectiveCompanyPos(
         (_banner['company_pos'] ?? 'none').toString(),
         hasLogo: companyLogo.isNotEmpty);
-    final tdPos = (_banner['td_pos'] ?? 'footer').toString();
+    final tdPos = (_banner['td_pos'] ?? 'top-right').toString();
+    // Admin decides whether the TilesDesign mark shows (per stockist); the
+    // stockist only chose its position. Applies to every source, incl. pool.
+    final tdShow = _banner['td_show'] == true;
     final name = (_banner['name'] ?? _stockist['name'] ?? '').toString();
+    // Message banner (Library text mode): a heading + message over the background.
+    final msg = (_banner['banner_text'] ?? '').toString().trim();
+    final msgHeading = (_banner['banner_heading'] ?? '').toString().trim();
+    final hasMsg = msg.isNotEmpty;
     final topRow = companyPos == 'top-left' ||
         companyPos == 'top-center' ||
         companyPos == 'top-right';
     // Welcome text: pool always; library only when the company is NOT on the top
-    // row (top logo hides Welcome); upload never (the design is self-contained).
-    final showWelcome = source == 'pool' || (source == 'library' && !topRow);
-    final showCompany = source == 'library' && companyPos != 'none';
+    // row (top logo hides Welcome); upload never. Suppressed in message mode.
+    final showWelcome =
+        !hasMsg && (source == 'pool' || (source == 'library' && !topRow));
+    // In message mode the message replaces the company NAME; keep only the logo.
+    final showCompany = source == 'library' &&
+        companyPos != 'none' &&
+        (!hasMsg || companyLogo.isNotEmpty);
 
     return LayoutBuilder(
       builder: (context, c) {
@@ -1170,6 +1181,67 @@ class _State extends State<PublicCatalogScreen> {
                     errorBuilder: (_, __, ___) => _bannerGradient())
               else
                 _bannerGradient(),
+              // Message banner: legibility veil + heading + message.
+              if (hasMsg)
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [Colors.black54, Colors.black26, Colors.black45],
+                      ),
+                    ),
+                  ),
+                ),
+              if (hasMsg)
+                Align(
+                  alignment: companyLogo.isNotEmpty
+                      ? Alignment.centerRight
+                      : Alignment.center,
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                        left: companyLogo.isNotEmpty
+                            ? c.maxWidth * 0.26
+                            : c.maxWidth * 0.06,
+                        right: c.maxWidth * 0.06),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: companyLogo.isNotEmpty
+                          ? CrossAxisAlignment.start
+                          : CrossAxisAlignment.center,
+                      children: [
+                        if (msgHeading.isNotEmpty) ...[
+                          Text(msgHeading.toUpperCase(),
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: (h * 0.11).clamp(9.0, 16.0),
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.4)),
+                          Container(
+                              margin: const EdgeInsets.only(top: 3, bottom: 6),
+                              height: 2,
+                              width: (h * 0.9).clamp(30.0, 90.0),
+                              color: const Color(0xFFC1974A)),
+                        ],
+                        Text(msg,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: companyLogo.isNotEmpty
+                                ? TextAlign.left
+                                : TextAlign.center,
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: (h * 0.16).clamp(13.0, 26.0),
+                                fontWeight: FontWeight.w600,
+                                height: 1.22,
+                                shadows: const [
+                                  Shadow(blurRadius: 5, color: Colors.black87)
+                                ])),
+                      ],
+                    ),
+                  ),
+                ),
               // Company logo or big name (library path)
               if (showCompany)
                 Align(
@@ -1195,9 +1267,9 @@ class _State extends State<PublicCatalogScreen> {
                     ),
                   ),
                 ),
-              // TilesDesign logo (library/upload only; pool never shows it).
-              // "None" position means the stockist chose to hide it entirely.
-              if (source != 'pool' && tdPos != 'none')
+              // TilesDesign mark — shown only when admin enabled it for this
+              // stockist (td_show), at the stockist's chosen position, any source.
+              if (tdShow && tdPos != 'none')
                 Align(
                   alignment: _alignFor(tdPos),
                   child: Padding(

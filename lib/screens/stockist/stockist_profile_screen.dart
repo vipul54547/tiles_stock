@@ -35,6 +35,7 @@ class _State extends State<StockistProfileScreen> {
   final _tagline = TextEditingController();
   final _city = TextEditingController();
   final _pincode = TextEditingController();
+  final _hexCtl = TextEditingController();
 
   List<String> _states = [];
   List<String> _districts = [];
@@ -59,6 +60,7 @@ class _State extends State<StockistProfileScreen> {
     _tagline.dispose();
     _city.dispose();
     _pincode.dispose();
+    _hexCtl.dispose();
     super.dispose();
   }
 
@@ -78,6 +80,7 @@ class _State extends State<StockistProfileScreen> {
       _district = (p['district'] ?? '').toString();
     }
     if (_state.isNotEmpty) _districts = await IndiaGeo.districts(_state);
+    _hexCtl.text = _brandColor.replaceAll('#', '').toUpperCase();
     if (mounted) setState(() => _loading = false);
   }
 
@@ -165,9 +168,29 @@ class _State extends State<StockistProfileScreen> {
     }
   }
 
+  // Hex → Color, tolerant of '#', 3-digit shorthand, and junk (falls back to navy
+  // so a bad stored value never crashes the picker).
   Color _hex(String h) {
-    final v = h.replaceAll('#', '');
+    var v = h.replaceAll('#', '').trim();
+    if (v.length == 3) v = v.split('').map((c) => '$c$c').join();
+    if (!RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(v)) return const Color(0xFF1B4F72);
     return Color(int.parse('FF$v', radix: 16));
+  }
+
+  String _toHex(Color c) {
+    int f(double x) => (x * 255).round().clamp(0, 255);
+    return [f(c.r), f(c.g), f(c.b)]
+        .map((v) => v.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
+  }
+
+  // Commit a colour chosen from the spectrum/box/preset and sync the hex field.
+  void _setColor(Color c) {
+    final hex = _toHex(c);
+    setState(() => _brandColor = '#$hex');
+    _hexCtl.value = TextEditingValue(
+        text: hex, selection: TextSelection.collapsed(offset: hex.length));
   }
 
   @override
@@ -343,21 +366,72 @@ class _State extends State<StockistProfileScreen> {
   }
 
   Widget _brandColorField() {
+    final current = _hex(_brandColor);
+    final hsv = HSVColor.fromColor(current);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _label('Brand colour'),
-        const SizedBox(height: 2),
+        _label('Brand colour', trailing: 'share card & accents'),
+        Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: current,
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: Colors.black12),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 128,
+              child: TextField(
+                controller: _hexCtl,
+                enabled: !_busy,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp('[0-9a-fA-F]')),
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                onChanged: (v) {
+                  if (v.length == 6) {
+                    setState(() => _brandColor = '#${v.toUpperCase()}');
+                  }
+                },
+                decoration: InputDecoration(
+                  prefixText: '#',
+                  isDense: true,
+                  filled: true,
+                  fillColor: Colors.white,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Colors.black12)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: Colors.black12)),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _svBox(hsv),
+        const SizedBox(height: 10),
+        _hueBar(hsv),
+        const SizedBox(height: 12),
         Wrap(
-          spacing: 10,
-          runSpacing: 10,
+          spacing: 9,
+          runSpacing: 9,
           children: _swatches.map((h) {
             final on = _brandColor.toUpperCase() == h.toUpperCase();
             return GestureDetector(
-              onTap: _busy ? null : () => setState(() => _brandColor = h),
+              onTap: _busy ? null : () => _setColor(_hex(h)),
               child: Container(
-                width: 34,
-                height: 34,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
                   color: _hex(h),
                   borderRadius: BorderRadius.circular(8),
@@ -365,7 +439,7 @@ class _State extends State<StockistProfileScreen> {
                       color: on ? Colors.black : Colors.transparent, width: 2.5),
                 ),
                 child: on
-                    ? const Icon(Icons.check, color: Colors.white, size: 18)
+                    ? const Icon(Icons.check, color: Colors.white, size: 16)
                     : null,
               ),
             );
@@ -374,6 +448,125 @@ class _State extends State<StockistProfileScreen> {
       ],
     );
   }
+
+  // Saturation (x) × brightness (y) box for the current hue.
+  Widget _svBox(HSVColor hsv) {
+    const h = 150.0;
+    final hueColor = HSVColor.fromAHSV(1, hsv.hue, 1, 1).toColor();
+    return LayoutBuilder(builder: (ctx, box) {
+      final w = box.maxWidth;
+      void handle(Offset p) {
+        if (_busy) return;
+        final s = (p.dx / w).clamp(0.0, 1.0);
+        final v = (1 - p.dy / h).clamp(0.0, 1.0);
+        _setColor(HSVColor.fromAHSV(1, hsv.hue, s, v).toColor());
+      }
+
+      return GestureDetector(
+        onPanDown: (d) => handle(d.localPosition),
+        onPanUpdate: (d) => handle(d.localPosition),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: SizedBox(
+            width: double.infinity,
+            height: h,
+            child: Stack(
+              children: [
+                Positioned.fill(child: ColoredBox(color: hueColor)),
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                        colors: [Colors.white, Colors.transparent],
+                      ),
+                    ),
+                  ),
+                ),
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Colors.black],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: (hsv.saturation * w - 7).clamp(0.0, w - 14),
+                  top: ((1 - hsv.value) * h - 7).clamp(0.0, h - 14),
+                  child: _thumb(circle: true),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  // Hue spectrum bar.
+  Widget _hueBar(HSVColor hsv) {
+    const h = 22.0;
+    const hueColors = [
+      Color(0xFFFF0000), Color(0xFFFFFF00), Color(0xFF00FF00),
+      Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFFFF00FF),
+      Color(0xFFFF0000),
+    ];
+    return LayoutBuilder(builder: (ctx, box) {
+      final w = box.maxWidth;
+      void handle(Offset p) {
+        if (_busy) return;
+        final hue = (p.dx / w * 360).clamp(0.0, 359.9);
+        final s = hsv.saturation == 0 ? 1.0 : hsv.saturation;
+        final v = hsv.value == 0 ? 1.0 : hsv.value;
+        _setColor(HSVColor.fromAHSV(1, hue, s, v).toColor());
+      }
+
+      return GestureDetector(
+        onPanDown: (d) => handle(d.localPosition),
+        onPanUpdate: (d) => handle(d.localPosition),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: SizedBox(
+            width: double.infinity,
+            height: h,
+            child: Stack(
+              children: [
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: hueColors),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: (hsv.hue / 360 * w - 6).clamp(0.0, w - 12),
+                  top: 1,
+                  child: _thumb(width: 12, height: h - 2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _thumb({bool circle = false, double width = 14, double height = 14}) =>
+      Container(
+        width: circle ? 14 : width,
+        height: circle ? 14 : height,
+        decoration: BoxDecoration(
+          shape: circle ? BoxShape.circle : BoxShape.rectangle,
+          borderRadius: circle ? null : BorderRadius.circular(3),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [BoxShadow(color: Colors.black45, blurRadius: 2)],
+        ),
+      );
 
   // ── small field helpers ────────────────────────────────────────────────────
   Widget _label(String t, {bool optional = false, String? trailing}) => Padding(

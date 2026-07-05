@@ -544,7 +544,9 @@ class SupabaseDataService {
     String bgUrl = '',
     String companyLogoUrl = '',
     String companyPos = 'none',
-    String tdPos = 'footer',
+    String tdPos = 'top-right',
+    String heading = '',
+    String message = '',
   }) async {
     await supabase.rpc('set_list_banner_config', params: {
       'p_catalog_id': catalogId,
@@ -553,6 +555,8 @@ class SupabaseDataService {
       'p_company_logo_url': companyLogoUrl,
       'p_company_pos': companyPos,
       'p_td_pos': tdPos,
+      'p_heading': heading,
+      'p_message': message,
     });
   }
 
@@ -1011,12 +1015,15 @@ class SupabaseDataService {
   // ── Catalog banners (admin-controlled) ──────────────────────────────────────
   /// Admin: the generic/anonymous banner pool (shown on anonymous lists + as the
   /// fallback, daily-rotated). Newest first.
-  Future<List<Map<String, dynamic>>> getGenericBanners() async {
+  /// [kind] = 'generic' (decorative pool) or 'text' (clean backgrounds for the
+  /// Library message-banner mode).
+  Future<List<Map<String, dynamic>>> getGenericBanners(
+      {String kind = 'generic'}) async {
     try {
       final data = await supabase
           .from('banners')
           .select('id, image_url, is_active, created_at')
-          .eq('kind', 'generic')
+          .eq('kind', kind)
           .order('created_at', ascending: false);
       return data
           .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
@@ -1027,11 +1034,12 @@ class SupabaseDataService {
     }
   }
 
-  /// Admin: add a banner to the generic/anonymous pool (Cloudinary URL).
-  Future<void> addGenericBanner(String imageUrl) async {
+  /// Admin: add a banner (Cloudinary URL). [kind] 'generic' = decorative pool,
+  /// 'text' = clean background for message banners.
+  Future<void> addGenericBanner(String imageUrl, {String kind = 'generic'}) async {
     await supabase
         .from('banners')
-        .insert({'image_url': imageUrl, 'kind': 'generic'});
+        .insert({'image_url': imageUrl, 'kind': kind});
   }
 
   Future<void> setBannerActive(String id, bool active) async {
@@ -1623,6 +1631,13 @@ class SupabaseDataService {
     });
   }
 
+  /// Admin: toggle whether the TilesDesign mark shows on a stockist's banners
+  /// (the stockist controls only its position). (td mark admin gate)
+  Future<void> setStockistTd(String sequentialId, bool show) async {
+    await supabase.rpc('admin_set_stockist_td',
+        params: {'p_seq': sequentialId, 'p_show': show});
+  }
+
   /// Admin: mint a fresh masked public code (retires the old one to history).
   Future<String?> regeneratePublicCode(String sequentialId) async {
     final res = await supabase
@@ -1860,6 +1875,7 @@ class SupabaseDataService {
         tagline:    s['tagline'] ?? '',
         brandColor: s['brand_color'] ?? '',
         mapUrl:     s['map_url'] ?? '',
+        tdShow:     s['td_show'] ?? false,
         createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
             DateTime.now(),
       );

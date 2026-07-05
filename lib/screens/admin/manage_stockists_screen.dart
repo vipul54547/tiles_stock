@@ -481,6 +481,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   String _businessType = 'M'; // M = Manufacturer/Author, T/W = importer
   bool _listed = true; // shown in the public market (false = link-only)
   bool _canPrivate = false; // may create private (Most Exclusive) catalogs
+  bool _tdShow = false; // show the TilesDesign mark on this stockist's banners
   bool _anonymous = false; // public anonymity (trade name + masked code)
   final _tradeName = TextEditingController();
   String _publicCode = ''; // current masked code (read-only, server-minted)
@@ -525,6 +526,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           kBusinessTypes.contains(s.businessType) ? s.businessType : 'M';
       _listed = s.isListed;
       _canPrivate = s.canCreatePrivateCatalog;
+      _tdShow = s.tdShow;
       _anonymous = s.isAnonymous;
       _tradeName.text = s.publicDisplayName;
       _publicCode = s.publicCode;
@@ -909,6 +911,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           brandColor: _brandColor.trim(),
           mapUrl: _mapUrl.text.trim(),
         );
+        await _dataSvc.setStockistTd(widget.existing!.id, _tdShow);
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -1111,6 +1114,22 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                             : 'Public stock catalogues only. Turn on for premium/trusted stockists.',
                         style: const TextStyle(fontSize: 11)),
                     onChanged: (v) => setState(() => _canPrivate = v),
+                  ),
+                ),
+              if (_isEdit)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _tdShow,
+                    activeThumbColor: const Color(0xFF1B4F72),
+                    title: const Text('Show TilesDesign mark on banners'),
+                    subtitle: Text(
+                        _tdShow
+                            ? 'The TilesDesign mark shows on this stockist\'s banners, at the position they choose.'
+                            : 'Off — no TilesDesign mark on this stockist\'s banners.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _tdShow = v),
                   ),
                 ),
               if (_isEdit && publicMarketLive) _anonymitySection(),

@@ -38,6 +38,24 @@ function cxText(s) {
 // in white on their brand colour. No TilesDesign mark — used when they have neither
 // an uploaded banner nor a logo. Base asset `share_card_base` is a plain canvas
 // flooded to the brand colour via e_colorize.
+// A message banner baked for the share card: the stockist's text-background with
+// their heading + message overlaid (darkened for legibility). Returns null if the
+// background isn't a Cloudinary URL, so the caller falls back to the raw image.
+function messageCard(bgUrl, heading, message) {
+  const marker = '/image/upload/';
+  const i = bgUrl.indexOf(marker);
+  if (i < 0) return null;
+  const at = i + marker.length;
+  const head = heading
+    ? `/l_text:Arial_46_bold:${cxText(heading.toUpperCase())},co_rgb:ffffff,c_fit,w_1000/fl_layer_apply,g_center,y_-120`
+    : '';
+  const body =
+    `/l_text:Arial_60_bold:${cxText(message)},co_rgb:ffffff,c_fit,w_980` +
+    `/fl_layer_apply,g_center,y_${heading ? '50' : '0'}`;
+  const t = `c_fill,ar_5:2,w_1200,e_brightness:-45${head}${body}`;
+  return bgUrl.slice(0, at) + t + '/' + bgUrl.slice(at);
+}
+
 function nameCard(title, city, brandColorHex) {
   const t = cxText(title || 'Tile Catalog');
   const sub = city ? cxText(city) : '';
@@ -117,12 +135,19 @@ export default async (request, context) => {
     const c = String(stockist.brand_color || '').replace('#', '').trim();
     return /^[0-9a-fA-F]{6}$/.test(c) ? c.toLowerCase() : '1b4f72';
   })();
+  const bannerText =
+    banner && banner.banner_text ? String(banner.banner_text).trim() : '';
+  const bannerHeading =
+    banner && banner.banner_heading ? String(banner.banner_heading).trim() : '';
   const ownBanner =
     !overlay && banner && banner.image_url && String(banner.image_url).trim()
       ? String(banner.image_url).trim()
       : '';
   const logo = stockist.logo_url && String(stockist.logo_url).trim();
+  // A message banner is baked (text over background); otherwise own banner → logo
+  // → auto name-card. No TilesDesign in any branch.
   const image =
+    (bannerText && ownBanner && messageCard(ownBanner, bannerHeading, bannerText)) ||
     ownBanner ||
     logo ||
     nameCard(name, stockist.city && String(stockist.city).trim(), brandColorHex);

@@ -95,6 +95,10 @@ class Stockist {
   final String brandColor;
   final String mapUrl;
 
+  /// Admin-controlled: whether the TilesDesign mark shows on this stockist's
+  /// banners (the stockist only chooses its position). Default off.
+  final bool tdShow;
+
   final DateTime createdAt;
 
 
@@ -160,6 +164,8 @@ class Stockist {
     this.brandColor = '',
 
     this.mapUrl = '',
+
+    this.tdShow = false,
 
     required this.createdAt,
 
@@ -230,6 +236,8 @@ class Stockist {
     brandColor: json['brand_color'] ?? '',
 
     mapUrl: json['map_url'] ?? '',
+
+    tdShow: json['td_show'] ?? false,
 
     createdAt: DateTime.parse(json['created_at']),
 

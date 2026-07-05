@@ -16,6 +16,10 @@ class StockCatalog {
   final String companyLogoUrl; // optional brand logo (library path)
   final String companyPos;     // 9-cell placement key, or 'none'
   final String tdPos;          // TilesDesign mark placement key
+  /// Optional message banner (Library "text" mode): a short heading + message
+  /// overlaid on a text-friendly background. Empty = plain banner.
+  final String bannerHeading;
+  final String bannerText;
   final String visibility; // 'public' | 'private'
   final bool showInMarketplace; // public catalog: appears in the app marketplace
   final String shareToken; // the catalog's own /s/<token> link
@@ -62,6 +66,8 @@ class StockCatalog {
     this.companyLogoUrl = '',
     this.companyPos = 'none',
     this.tdPos = 'footer',
+    this.bannerHeading = '',
+    this.bannerText = '',
     required this.visibility,
     required this.showInMarketplace,
     required this.shareToken,
@@ -103,6 +109,8 @@ class StockCatalog {
         companyLogoUrl: (j['company_logo_url'] as String?) ?? '',
         companyPos: (j['company_pos'] as String?) ?? 'none',
         tdPos: (j['td_pos'] as String?) ?? 'footer',
+        bannerHeading: (j['banner_heading'] as String?) ?? '',
+        bannerText: (j['banner_text'] as String?) ?? '',
         visibility: (j['visibility'] as String?) ?? 'public',
         showInMarketplace: j['show_in_marketplace'] as bool? ?? true,
         shareToken: (j['share_token'] as String?) ?? '',

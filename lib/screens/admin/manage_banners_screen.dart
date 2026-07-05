@@ -21,6 +21,8 @@ class _State extends State<ManageBannersScreen> {
   List<Map<String, dynamic>> _banners = [];
   bool _loading = true;
   bool _uploading = false;
+  // 'generic' = decorative pool; 'text' = clean backgrounds for message banners.
+  String _kind = 'generic';
 
   static const Color _navy = Color(0xFF1B4F72);
 
@@ -31,7 +33,7 @@ class _State extends State<ManageBannersScreen> {
   }
 
   Future<void> _load() async {
-    final banners = await _data.getGenericBanners();
+    final banners = await _data.getGenericBanners(kind: _kind);
     if (!mounted) return;
     setState(() {
       _banners = banners;
@@ -47,7 +49,7 @@ class _State extends State<ManageBannersScreen> {
     final url = await CloudinaryService.uploadImage(x.path);
     if (url != null) {
       try {
-        await _data.addGenericBanner(url);
+        await _data.addGenericBanner(url, kind: _kind);
         await _load();
       } catch (e) {
         _snack('Could not save banner: $e', error: true);
@@ -119,7 +121,9 @@ class _State extends State<ManageBannersScreen> {
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: Colors.white))
             : const Icon(Icons.add_photo_alternate_outlined),
-        label: Text(_uploading ? 'Uploading…' : 'Upload banner'),
+        label: Text(_uploading
+            ? 'Uploading…'
+            : (_kind == 'text' ? 'Upload text background' : 'Upload banner')),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -129,10 +133,33 @@ class _State extends State<ManageBannersScreen> {
 
   Widget _poolTab() {
     final activeCount = _banners.where((b) => b['is_active'] == true).length;
+    final isText = _kind == 'text';
     return ListView(
       padding: EdgeInsets.fromLTRB(
           16, 16, 16, 90 + MediaQuery.viewPaddingOf(context).bottom),
       children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            segments: const [
+              ButtonSegment(value: 'generic', label: Text('Decorative')),
+              ButtonSegment(value: 'text', label: Text('Text backgrounds')),
+            ],
+            selected: {_kind},
+            onSelectionChanged: _uploading
+                ? null
+                : (s) {
+                    setState(() {
+                      _kind = s.first;
+                      _loading = true;
+                    });
+                    _load();
+                  },
+          ),
+        ),
+        const SizedBox(height: 14),
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -141,13 +168,19 @@ class _State extends State<ManageBannersScreen> {
           ),
           child: Row(
             children: [
-              const Icon(Icons.theater_comedy, color: _navy),
+              Icon(isText ? Icons.text_fields : Icons.theater_comedy,
+                  color: _navy),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                    'Default / Anonymous pool — $activeCount active. Shown on '
-                    'anonymous lists and as the fallback. One is picked per day, '
-                    'so upload several (1500×600, 2.5:1).',
+                    isText
+                        ? 'Text backgrounds — $activeCount active. Clean, low-detail '
+                            'art for stockists\' message banners (order conditions '
+                            'etc). Upload calm 1500×600 images so white text stays '
+                            'readable.'
+                        : 'Default / Anonymous pool — $activeCount active. Shown on '
+                            'anonymous lists and as the fallback. One is picked per day, '
+                            'so upload several (1500×600, 2.5:1).',
                     style: const TextStyle(fontSize: 12.5, color: _navy)),
               ),
             ],
