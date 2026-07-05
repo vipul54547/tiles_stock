@@ -73,8 +73,14 @@ class _State extends State<ListBannerEditorScreen> {
   void _onTextChanged() {
     setState(() {}); // reflect message-mode UI (bg kind + position options)
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 700), () {
-      if (mounted) _apply();
+    // Silent save (no _saving toggle) so the field is never disabled while the
+    // keyboard is up — that was dismissing the keyboard on every save.
+    _debounce = Timer(const Duration(milliseconds: 800), () async {
+      try {
+        await _persist();
+      } catch (e) {
+        if (mounted) _snack('$e', error: true);
+      }
     });
   }
 
@@ -103,20 +109,26 @@ class _State extends State<ListBannerEditorScreen> {
     super.dispose();
   }
 
+  // The actual save. Shared by the visible _apply (spinner) and the silent text
+  // debounce (no spinner, so the keyboard never loses focus mid-typing).
+  Future<void> _persist() async {
+    await _data.setListBannerConfig(
+      widget.catalog.id,
+      source: _source,
+      bgUrl: _bgUrl,
+      companyLogoUrl: _logoUrl,
+      companyPos: _companyPosForSave,
+      tdPos: _tdPos,
+      heading: _source == 'library' ? _heading.text.trim() : '',
+      message: _source == 'library' ? _message.text.trim() : '',
+    );
+    _changed = true;
+  }
+
   Future<void> _apply() async {
     setState(() => _saving = true);
     try {
-      await _data.setListBannerConfig(
-        widget.catalog.id,
-        source: _source,
-        bgUrl: _bgUrl,
-        companyLogoUrl: _logoUrl,
-        companyPos: _companyPosForSave,
-        tdPos: _tdPos,
-        heading: _source == 'library' ? _heading.text.trim() : '',
-        message: _source == 'library' ? _message.text.trim() : '',
-      );
-      _changed = true;
+      await _persist();
     } catch (e) {
       _snack('$e', error: true);
     } finally {
@@ -563,7 +575,6 @@ class _State extends State<ListBannerEditorScreen> {
         maxLines: maxLines,
         maxLength: max,
         textCapitalization: TextCapitalization.sentences,
-        enabled: !_saving,
         onChanged: (_) => _onTextChanged(),
         style: const TextStyle(fontSize: 13.5),
         decoration: InputDecoration(

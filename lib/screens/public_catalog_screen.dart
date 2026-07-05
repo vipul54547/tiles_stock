@@ -1202,7 +1202,7 @@ class _State extends State<PublicCatalogScreen> {
                   child: Padding(
                     padding: EdgeInsets.only(
                         left: companyLogo.isNotEmpty
-                            ? c.maxWidth * 0.26
+                            ? c.maxWidth * 0.30
                             : c.maxWidth * 0.06,
                         right: c.maxWidth * 0.06),
                     child: Column(
@@ -1213,15 +1213,17 @@ class _State extends State<PublicCatalogScreen> {
                       children: [
                         if (msgHeading.isNotEmpty) ...[
                           Text(msgHeading.toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: (h * 0.11).clamp(9.0, 16.0),
+                                  fontSize: (h * 0.072).clamp(8.0, 13.0),
                                   fontWeight: FontWeight.w700,
-                                  letterSpacing: 1.4)),
+                                  letterSpacing: 1.2)),
                           Container(
-                              margin: const EdgeInsets.only(top: 3, bottom: 6),
+                              margin: const EdgeInsets.only(top: 3, bottom: 5),
                               height: 2,
-                              width: (h * 0.9).clamp(30.0, 90.0),
+                              width: (h * 0.55).clamp(24.0, 64.0),
                               color: const Color(0xFFC1974A)),
                         ],
                         Text(msg,
@@ -1232,9 +1234,9 @@ class _State extends State<PublicCatalogScreen> {
                                 : TextAlign.center,
                             style: TextStyle(
                                 color: Colors.white,
-                                fontSize: (h * 0.16).clamp(13.0, 26.0),
+                                fontSize: (h * 0.10).clamp(11.0, 16.0),
                                 fontWeight: FontWeight.w600,
-                                height: 1.22,
+                                height: 1.2,
                                 shadows: const [
                                   Shadow(blurRadius: 5, color: Colors.black87)
                                 ])),
@@ -1250,8 +1252,15 @@ class _State extends State<PublicCatalogScreen> {
                     padding: const EdgeInsets.all(8),
                     child: _scrim(
                       companyLogo.isNotEmpty
-                          ? Image.network(CloudinaryService.logoUrl(companyLogo),
-                              height: h * 0.40, fit: BoxFit.contain)
+                          ? ConstrainedBox(
+                              constraints: BoxConstraints(
+                                  maxWidth:
+                                      hasMsg ? c.maxWidth * 0.22 : c.maxWidth),
+                              child: Image.network(
+                                  CloudinaryService.logoUrl(companyLogo),
+                                  height: h * (hasMsg ? 0.34 : 0.40),
+                                  fit: BoxFit.contain),
+                            )
                           : Text(
                               name,
                               maxLines: 2,

@@ -12,3 +12,10 @@
 alter table public.stock_catalogs
   add column if not exists banner_heading text,
   add column if not exists banner_text    text;
+
+-- Fix (banners_kind_allow_text): the banners.kind CHECK originally allowed only
+-- 'generic'/'brand', rejecting the new 'text' backgrounds. Widen it.
+alter table public.banners drop constraint if exists banners_kind_check;
+alter table public.banners
+  add constraint banners_kind_check
+  check (kind = any (array['generic'::text, 'brand'::text, 'text'::text]));
