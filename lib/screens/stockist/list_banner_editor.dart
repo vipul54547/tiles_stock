@@ -41,7 +41,7 @@ class _State extends State<ListBannerEditorScreen> {
     'center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'
   ];
 
-  // Working copy of the list's banner config (empty source = brand fallback).
+  // Working copy of the list's banner config (empty source = shared pool).
   late String _source;
   late String _bgUrl;
   late String _logoUrl;
@@ -88,17 +88,17 @@ class _State extends State<ListBannerEditorScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Use the brand banner?'),
+        title: const Text('Reset to the shared pool?'),
         content: const Text(
             'This list will stop using its own banner and fall back to the '
-            'brand banner.'),
+            'shared daily-rotating pool background.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Use brand banner')),
+              child: const Text('Reset to pool')),
         ],
       ),
     );
@@ -156,7 +156,9 @@ class _State extends State<ListBannerEditorScreen> {
                       borderRadius: BorderRadius.circular(8),
                       child: AspectRatio(
                         aspectRatio: 2.5,
-                        child: Image.network((p['image_url'] ?? '').toString(),
+                        child: Image.network(
+                            CloudinaryService.bannerUrl(
+                                (p['image_url'] ?? '').toString()),
                             fit: BoxFit.cover),
                       ),
                     ),
@@ -181,7 +183,7 @@ class _State extends State<ListBannerEditorScreen> {
           if (widget.catalog.hasOwnBanner || _changed)
             TextButton(
               onPressed: _saving ? null : _reset,
-              child: const Text('Use brand banner',
+              child: const Text('Reset to pool',
                   style: TextStyle(color: Colors.white, fontSize: 12.5)),
             ),
         ],
@@ -329,7 +331,8 @@ class _State extends State<ListBannerEditorScreen> {
             style: TextStyle(fontSize: 11, color: _navy)),
       );
     } else if (_bgUrl.isNotEmpty) {
-      bgWidget = CachedNetworkImage(imageUrl: _bgUrl, fit: BoxFit.cover);
+      bgWidget = CachedNetworkImage(
+          imageUrl: CloudinaryService.bannerUrl(_bgUrl), fit: BoxFit.cover);
     } else {
       bgWidget = Container(
         color: Colors.grey.shade200,
@@ -360,7 +363,8 @@ class _State extends State<ListBannerEditorScreen> {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: _logoUrl.isNotEmpty
-                      ? Image.network(_logoUrl, height: 28)
+                      ? Image.network(CloudinaryService.logoUrl(_logoUrl),
+                          height: 28)
                       : const Text('Company name',
                           style: TextStyle(
                               color: Colors.white,

@@ -419,6 +419,49 @@ class SupabaseDataService {
     }
   }
 
+  /// The logged-in stockist's own editable profile fields (RLS: read-own).
+  /// Returns null if not signed in as a stockist.
+  Future<Map<String, dynamic>?> getMyProfile() async {
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return null;
+      return await supabase
+          .from('stockists')
+          .select(
+              'name, logo_url, brand_color, tagline, pincode, state, district, city')
+          .eq('user_id', uid)
+          .maybeSingle();
+    } catch (e, st) {
+      debugPrint('getMyProfile failed: $e\n$st');
+      return null;
+    }
+  }
+
+  /// Self-service profile save (SECURITY DEFINER RPC scoped to auth.uid()).
+  /// State/district slugs are computed server-side for SEO. Pass '' to clear
+  /// logo/tagline; blank name/brand_color are ignored server-side.
+  Future<void> updateMyProfile({
+    required String name,
+    required String logoUrl,
+    required String brandColor,
+    required String tagline,
+    required String pincode,
+    required String state,
+    required String district,
+    required String city,
+  }) async {
+    await supabase.rpc('stockist_update_profile', params: {
+      'p_name': name,
+      'p_logo_url': logoUrl,
+      'p_brand_color': brandColor,
+      'p_tagline': tagline,
+      'p_pincode': pincode,
+      'p_state': state,
+      'p_district': district,
+      'p_city': city,
+    });
+  }
+
   /// The calling stockist's admin-set stock-list limit (per brand). Default 3.
   Future<int> myStockListLimit() async {
     try {

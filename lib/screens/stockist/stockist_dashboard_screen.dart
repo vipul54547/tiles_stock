@@ -21,6 +21,7 @@ import '../../models/dna.dart';
 import 'dna_editor_sheet.dart';
 import 'stock_control_screen.dart';
 import 'stock_lists_screen.dart';
+import 'stockist_profile_screen.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/account_actions.dart';
 
@@ -880,10 +881,18 @@ class _State extends State<StockistDashboardScreen> {
                 ),
                 PopupMenuButton<String>(
                   tooltip: 'Account',
-                  onSelected: (v) {
-                    if (v == 'delete') confirmDeleteAccount(context);
+                  onSelected: (v) async {
+                    if (v == 'profile') {
+                      await Navigator.of(context).push<bool>(MaterialPageRoute(
+                          builder: (_) => const StockistProfileScreen()));
+                      if (mounted) _load();
+                    } else if (v == 'delete') {
+                      confirmDeleteAccount(context);
+                    }
                   },
                   itemBuilder: (_) => const [
+                    PopupMenuItem(
+                        value: 'profile', child: Text('Edit profile')),
                     PopupMenuItem(
                         value: 'delete', child: Text('Delete account')),
                   ],

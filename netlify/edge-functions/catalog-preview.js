@@ -10,6 +10,14 @@
 const SUPABASE_URL = 'https://buxjebeeiwyrsakeucyk.supabase.co';
 const SUPABASE_ANON = 'sb_publishable_6-1LdA_YMfkTvaDA0JwCXg_YuHmcb-x';
 
+// ── TilesDesign branding on the share card (B, C, D) ────────────────────────
+// Master switch for every "TilesDesign" mention in the link-preview card:
+//   B) og:site_name label,  C) "· Powered by TilesDesign" in the description,
+//   D) the "— TilesDesign" suffix in the <title>.
+// Set to `true` when we launch the marketplace to show TilesDesign branding
+// again — that ONE line re-enables all of B/C/D. (Does NOT affect the A image.)
+const SHOW_TILESDESIGN_BRANDING = false;
+
 function esc(s) {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -18,11 +26,35 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Encode text for a Cloudinary `l_text` layer: URL-encode, then double-encode the
+// comma and slash Cloudinary treats as transformation delimiters.
+function cxText(s) {
+  return encodeURIComponent(String(s ?? '').trim())
+    .replace(/%2C/g, '%252C')
+    .replace(/%2F/g, '%252F');
+}
+
+// A branded fallback share image generated on the fly: the stockist's name (+ city)
+// in white on their brand colour. No TilesDesign mark — used when they have neither
+// an uploaded banner nor a logo. Base asset `share_card_base` is a plain canvas
+// flooded to the brand colour via e_colorize.
+function nameCard(title, city, brandColorHex) {
+  const t = cxText(title || 'Tile Catalog');
+  const sub = city ? cxText(city) : '';
+  const bg = `w_1200,h_630,c_fill,e_colorize,co_rgb:${brandColorHex}`;
+  const l1 =
+    `l_text:Arial_82_bold:${t},co_white,c_fit,w_1040/fl_layer_apply,g_center,` +
+    (sub ? 'y_-36' : 'y_0');
+  const l2 = sub
+    ? `/l_text:Arial_44:${sub},co_white,c_fit,w_900/fl_layer_apply,g_center,y_78`
+    : '';
+  return `https://res.cloudinary.com/dt9cifer9/image/upload/${bg}/${l1}${l2}/share_card_base.png`;
+}
+
 export default async (request, context) => {
   const url = new URL(request.url);
   const token = (url.pathname.split('/s/')[1] || '').split('/')[0].split('?')[0];
   const appUrl = `${url.origin}/#/s/${encodeURIComponent(token)}`;
-  const fallbackImg = `${url.origin}/tilesdesign-og.png`;
 
   if (!token) return Response.redirect(`${url.origin}/`, 302);
 
@@ -73,22 +105,36 @@ export default async (request, context) => {
       ? String(stockist.tagline).trim()
       : `${designCount} tile design${designCount === 1 ? '' : 's'} in stock`;
   const byLine = !overlay && brandName ? `by ${company} · ` : '';
-  const description = `${byLine}${taglineBase} · Powered by TilesDesign`;
-  // Use the admin-chosen banner (branded image, or the daily-rotated generic one)
-  // so the link-preview thumbnail matches the on-page banner. Fall back to brand
-  // logo, then stockist logo, then the TilesDesign mark.
+  const poweredBy = SHOW_TILESDESIGN_BRANDING ? ' · Powered by TilesDesign' : '';
+  const description = `${byLine}${taglineBase}${poweredBy}`;
+  // Share-card image (slot A) — no TilesDesign anywhere in the chain:
+  //   1. the stockist's OWN uploaded banner (overlay=false → genuinely theirs)
+  //   2. their logo
+  //   3. an auto-generated name-card on their brand colour
+  // A generic/pool banner (overlay=true) is deliberately skipped — it isn't the
+  // stockist's own art and used to leak TilesDesign branding.
+  const brandColorHex = (() => {
+    const c = String(stockist.brand_color || '').replace('#', '').trim();
+    return /^[0-9a-fA-F]{6}$/.test(c) ? c.toLowerCase() : '1b4f72';
+  })();
+  const ownBanner =
+    !overlay && banner && banner.image_url && String(banner.image_url).trim()
+      ? String(banner.image_url).trim()
+      : '';
+  const logo = stockist.logo_url && String(stockist.logo_url).trim();
   const image =
-    (banner && banner.image_url && String(banner.image_url).trim()) ||
-    (brand && brand.logo_url) || stockist.logo_url || fallbackImg;
+    ownBanner ||
+    logo ||
+    nameCard(name, stockist.city && String(stockist.city).trim(), brandColorHex);
 
   const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(name)} — TilesDesign</title>
+<title>${esc(name)}${SHOW_TILESDESIGN_BRANDING ? ' — TilesDesign' : ''}</title>
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="TilesDesign">
+${SHOW_TILESDESIGN_BRANDING ? '<meta property="og:site_name" content="TilesDesign">' : ''}
 <meta property="og:title" content="${esc(name)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:image" content="${esc(image)}">

@@ -1165,7 +1165,7 @@ class _State extends State<PublicCatalogScreen> {
             children: [
               // Background
               if (bg.isNotEmpty)
-                Image.network(bg,
+                Image.network(CloudinaryService.bannerUrl(bg),
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => _bannerGradient())
               else
@@ -1178,7 +1178,7 @@ class _State extends State<PublicCatalogScreen> {
                     padding: const EdgeInsets.all(8),
                     child: _scrim(
                       companyLogo.isNotEmpty
-                          ? Image.network(companyLogo,
+                          ? Image.network(CloudinaryService.logoUrl(companyLogo),
                               height: h * 0.40, fit: BoxFit.contain)
                           : Text(
                               name,

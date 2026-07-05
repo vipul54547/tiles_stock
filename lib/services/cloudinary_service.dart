@@ -133,14 +133,16 @@ class CloudinaryService {
   /// Rewrites a Cloudinary URL into a **logo-safe** delivery for the branded
   /// catalog page. Stockists upload logos at wildly different sizes/shapes, so
   /// we normalise WITHOUT distorting or recolouring:
-  ///   • `c_fit` into a [size]×[size] box → scales DOWN preserving aspect ratio,
-  ///     never crops, never stretches (a wide logo stays wide, square stays
-  ///     square). `dpr_auto` keeps it crisp on retina.
+  ///   • `c_fit` into a [w]×[h] box → scales DOWN preserving aspect ratio, never
+  ///     crops, never stretches. The box supports the two finalized logo shapes:
+  ///     a **square** (1:1) fits to h×h (240×240), a **rectangle** (up to 2:1
+  ///     wide) fits to w×h (480×240). Anything in between just fits. `dpr_auto`
+  ///     keeps it crisp on retina.
   ///   • Colour-safe: `q_100` (no lossy colour shift) and we DON'T use `f_auto`
   ///     (which can flatten a transparent PNG onto white). PNG/transparency is
   ///     preserved by leaving the format as uploaded.
   /// Non-Cloudinary/empty URLs are returned unchanged.
-  static String logoUrl(String url, {int size = 240}) {
+  static String logoUrl(String url, {int w = 480, int h = 240}) {
     if (url.isEmpty) return url;
     const marker = '/image/upload/';
     final i = url.indexOf(marker);
@@ -149,15 +151,16 @@ class CloudinaryService {
     final rest = url.substring(insertAt);
     if (RegExp(r'^[a-z]{1,3}_').hasMatch(rest)) return url; // already transformed
     return '${url.substring(0, insertAt)}'
-        'c_fit,w_$size,h_$size,q_100,dpr_auto/$rest';
+        'c_fit,w_$w,h_$h,q_100,dpr_auto/$rest';
   }
 
-  /// Rewrites a Cloudinary URL into a **3:1 header banner** for the branded
-  /// catalog page. Stockists supply banners at varying ratios, so we
-  /// `c_fill,ar_3:1,g_center` → fill a clean 3:1 box, centre-cropping anything
-  /// off-ratio (the stockist keeps important content centred). `w_[width]` caps
-  /// the delivered size; `q_auto,f_auto` compress for the web. Non-Cloudinary/
-  /// empty URLs are returned unchanged.
+  /// Rewrites a Cloudinary URL into the **finalized 2.5:1 (1500×600) header
+  /// banner** for the catalog page — matches what the `/s/` page actually
+  /// renders (`h = maxWidth / 2.5`). Stockists supply banners at varying ratios,
+  /// so we `c_fill,ar_5:2,g_center` → fill a clean 2.5:1 box, centre-cropping
+  /// anything off-ratio (the stockist keeps important content centred).
+  /// `w_[width]` caps the delivered size (1500 → height 600); `q_auto,f_auto`
+  /// compress for the web. Non-Cloudinary/empty URLs are returned unchanged.
   static String bannerUrl(String url, {int width = 1500}) {
     if (url.isEmpty) return url;
     const marker = '/image/upload/';
@@ -167,6 +170,6 @@ class CloudinaryService {
     final rest = url.substring(insertAt);
     if (RegExp(r'^[a-z]{1,3}_').hasMatch(rest)) return url; // already transformed
     return '${url.substring(0, insertAt)}'
-        'c_fill,ar_3:1,g_center,w_$width,q_auto,f_auto/$rest';
+        'c_fill,ar_5:2,g_center,w_$width,q_auto,f_auto/$rest';
   }
 }
