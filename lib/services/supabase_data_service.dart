@@ -1418,6 +1418,17 @@ class SupabaseDataService {
     }
   }
 
+  /// The buyer-facing DNA catalog as typed [DnaAttribute]s, for buyer screens
+  /// still built around the DnaAttribute model (My Suppliers). Same buyer-wide
+  /// source as [publicDnaCatalog]: it returns free-text facet values (Series,
+  /// Punch Look) regardless of which stockist created them — unlike the stockist
+  /// [dnaCatalog], which scopes free-text values to the logged-in stockist and so
+  /// hides them from buyers.
+  Future<List<DnaAttribute>> publicDnaCatalogAttrs() async {
+    final maps = await publicDnaCatalog();
+    return maps.map(DnaAttribute.fromJson).toList();
+  }
+
   // ── Design "family" (concept grouping) ─────────────────────────────────────
 
   /// The family (concept) a design belongs to — every sibling variant (same

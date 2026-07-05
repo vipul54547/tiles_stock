@@ -470,8 +470,11 @@ class _State extends State<StockistsOverviewScreen> {
 
     // Design DNA: the canonical attribute/value catalog (for the facet chips) +
     // each design's canonical value ids (the search bridge), across the whole
-    // visible pool (public + private).
-    final dnaAttrs = await _service.dnaCatalog();
+    // visible pool (public + private). Use the BUYER catalog (not the stockist
+    // dnaCatalog): it exposes free-text facet values (Series, Punch Look) from
+    // every stockist, whereas dnaCatalog scopes them to the logged-in stockist
+    // and so hides them from buyers on this screen.
+    final dnaAttrs = await _service.publicDnaCatalogAttrs();
     final dnaIds = <String>{
       ...designs.map((d) => d.id),
       ...privateDesigns.map((d) => d.id),

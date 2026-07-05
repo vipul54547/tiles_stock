@@ -14,6 +14,7 @@ import '../../utils/finishes.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/design_ranking.dart';
 import '../../utils/my_choice.dart';
+import '../../utils/buyer_dna.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/account_actions.dart';
 import '../../widgets/filter_section.dart';
@@ -56,6 +57,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _selectedThickness = {};
   Set<String> _selectedQualities = {};
   Set<String> _selectedStockTypes = {};
+  // Design DNA (image DNA) — card bottom-sheet + facet filter + DNA-aware search.
+  final _dna = BuyerDna();
+  final Set<String> _selectedDna = {};
   final _minQtyCtrl = TextEditingController();
   final _maxQtyCtrl = TextEditingController();
   int _activeGroupIndex = -1;
@@ -105,6 +109,12 @@ class _HomeScreenState extends State<HomeScreen> {
     // Stockist seq-id → name (for the group confirm dialog). Empty for guests.
     // Masked: anonymized stockists surface as trade name + public code.
     final stockists = await _service.getMarketStockists();
+    // Design DNA: global catalog (once) + DNA tags for both pools' designs.
+    if (!_dna.hasCatalog) await _dna.loadCatalog();
+    await _dna.loadDesigns([
+      for (final d in ranked) d.id,
+      for (final d in privateRanked) d.id,
+    ]);
     if (!mounted) return;
     setState(() {
       _designs = ranked;
@@ -133,7 +143,15 @@ class _HomeScreenState extends State<HomeScreen> {
     var result = _base;
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
-      result = result.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
+      // Also match the design's DNA tag words (e.g. "wooden", "matt").
+      result = result
+          .where((d) =>
+              d.matchesSearch(q, smart: smartSearch) ||
+              _dna.words(d.id).toLowerCase().contains(q))
+          .toList();
+    }
+    if (_selectedDna.isNotEmpty) {
+      result = result.where((d) => _dna.matches(d.id, _selectedDna)).toList();
     }
     if (_activeGroupIndex >= 0) {
       final groupIds = stockistGroups[_activeGroupIndex].stockistIds;
@@ -209,6 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedThickness.clear();
         _selectedQualities.clear();
         _selectedStockTypes.clear();
+        _selectedDna.clear();
         _minQtyCtrl.clear();
         _maxQtyCtrl.clear();
       });
@@ -221,6 +240,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_selectedThickness.isNotEmpty) c++;
     if (_selectedQualities.isNotEmpty) c++;
     if (_selectedStockTypes.isNotEmpty) c++;
+    if (_selectedDna.isNotEmpty) c++;
     if (_minQtyCtrl.text.isNotEmpty) c++;
     if (_maxQtyCtrl.text.isNotEmpty) c++;
     return c;
@@ -234,6 +254,8 @@ class _HomeScreenState extends State<HomeScreen> {
     var localThickness = Set<String>.from(_selectedThickness);
     final thicknessBands = availableThicknessBands(_base);
     final localStockTypes = {..._selectedStockTypes};
+    final localDna = {..._selectedDna};
+    final dnaInUse = _dna.valueIdsInUse(_base.map((d) => d.id));
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     showModalBottomSheet<bool>(
       context: context,
@@ -284,6 +306,48 @@ class _HomeScreenState extends State<HomeScreen> {
                     .toList(),
               );
 
+          // Design DNA (image DNA): one labelled chip row per attribute, showing
+          // only values tagged on the current tab's designs. Chips are keyed by
+          // value id (names can repeat across attributes).
+          Widget dnaSection() {
+            final blocks = <Widget>[];
+            for (final a in _dna.facets) {
+              final values = ((a['values'] as List?) ?? const [])
+                  .where((v) => dnaInUse.contains((v['id'] ?? '').toString()))
+                  .toList();
+              if (values.isEmpty) continue;
+              blocks.add(Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Text((a['name'] ?? '').toString(),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 12.5)),
+              ));
+              blocks.add(Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final v in values)
+                    Builder(builder: (_) {
+                      final id = (v['id'] ?? '').toString();
+                      return filterChip(
+                        (v['name'] ?? '').toString(),
+                        localDna.contains(id),
+                        () => setSheet(() => localDna.contains(id)
+                            ? localDna.remove(id)
+                            : localDna.add(id)),
+                      );
+                    }),
+                ],
+              ));
+            }
+            if (blocks.isEmpty) {
+              return const Text('No DNA tags on these designs',
+                  style: TextStyle(color: Colors.grey, fontSize: 12));
+            }
+            return Column(
+                crossAxisAlignment: CrossAxisAlignment.start, children: blocks);
+          }
+
           // Live count of designs that the current (local) selections would show.
           int previewCount() {
             var r = _base;
@@ -306,6 +370,9 @@ class _HomeScreenState extends State<HomeScreen> {
             }
             if (localStockTypes.isNotEmpty) {
               r = r.where((d) => localStockTypes.contains(d.stockType)).toList();
+            }
+            if (localDna.isNotEmpty) {
+              r = r.where((d) => _dna.matches(d.id, localDna)).toList();
             }
             final mn = int.tryParse(_minQtyCtrl.text);
             final mx = int.tryParse(_maxQtyCtrl.text);
@@ -382,6 +449,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           localTypes.clear();
                           localThickness.clear();
                           localStockTypes.clear();
+                          localDna.clear();
                           _minQtyCtrl.clear();
                           _maxQtyCtrl.clear();
                         }),
@@ -448,6 +516,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               .toList(),
                         ),
                       ),
+                      FilterSection(
+                        title: 'Design DNA',
+                        summary: localDna.isEmpty
+                            ? 'All'
+                            : '${localDna.length} selected',
+                        child: dnaSection(),
+                      ),
                     ],
                   ),
                 ),
@@ -491,6 +566,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedTypes     = Set<String>.from(localTypes);
         _selectedThickness = Set<String>.from(localThickness);
         _selectedStockTypes = {...localStockTypes};
+        _selectedDna
+          ..clear()
+          ..addAll(localDna);
       });
     });
   }
@@ -1105,6 +1183,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final res = await _service.claimCatalog(ctrl.text);
       final name = (res['catalog_name'] ?? 'Stock catalogue').toString();
       final priv = await _service.getMyPrivateDesigns();
+      await _dna.loadDesigns([for (final d in priv) d.id]);
       if (!mounted) return;
       setState(() {
         _privateDesigns = rankDesigns(priv,
@@ -1336,6 +1415,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             _selectedThickness.clear();
                             _selectedQualities = {};
                             _selectedStockTypes.clear();
+                            _selectedDna.clear();
                             _minQtyCtrl.clear();
                             _maxQtyCtrl.clear();
                           }),
@@ -1386,6 +1466,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               '/stockist/${m.rep.stockistId}/portfolio',
                               extra: m.rep.id,
                             ),
+                            // DNA chips on each card → tap opens the DNA sheet.
+                            dnaTagsFor: (id) => _dna.tagsFor(id),
                           ),
                         ),
                 ),
