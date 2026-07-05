@@ -856,13 +856,15 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     for (final row in dataRows) {
       final dn = cellAt(row, nameCol).trim();
       if (dn.isEmpty) continue;
+      final bid = brandMap[_cleanBrandVal(cellAt(row, brandValCol))];
+      // "Don't import" → drop the row entirely (no qty, surface or brand from it).
+      if (bid == _kSkip) continue;
       final sz = _cleanSize(cellAt(row, sizeCol));
       final key = '${dn.toLowerCase()}|${_sizeKey(sz)}';
       final a = agg.putIfAbsent(key, () => _EntryAgg(name: dn, size: sz));
       if (preCol >= 0) a.premium += _toInt(cellAt(row, preCol)) ?? 0;
       if (stdCol >= 0) a.standard += _toInt(cellAt(row, stdCol)) ?? 0;
       if (catCol >= 0 && a.surface.isEmpty) a.surface = cellAt(row, catCol).trim();
-      final bid = brandMap[_cleanBrandVal(cellAt(row, brandValCol))];
       if (bid != null) a.brandIds.add(bid);
     }
 
@@ -1224,16 +1226,19 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // Map each distinct brand value → an existing brand or a new one. Returns
   // { brandValue : brandId }, or null on cancel. New brands are created on Apply.
   static const _kCreateBrand = '__create__';
+  static const _kSkip = '__skip__';
   Future<Map<String, String>?> _mapBrandValues(List<String> values) async {
     if (values.isEmpty) return {};
-    // value → chosen ('__create__' or an existing brand id). Default: match an
-    // existing brand by name, else create.
+    // value → chosen ('__skip__', '__create__', or an existing brand id).
+    // Default: match an existing brand by name, else "Don't import" — creating a
+    // brand can hit the 5-brand cap, and unmatched values are often stray data
+    // (e.g. a design name in the wrong column), not real brands.
     final choice = <String, String>{};
     for (final v in values) {
       final m = _brands
           .where((b) => b.name.trim().toLowerCase() == v.trim().toLowerCase())
           .toList();
-      choice[v] = m.isEmpty ? _kCreateBrand : m.first.id;
+      choice[v] = m.isEmpty ? _kSkip : m.first.id;
     }
     final ok = await showDialog<bool>(
       context: context,
@@ -1249,7 +1254,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               children: [
                 const Text(
                     'Link each brand from your file to one of your brands, or '
-                    'create it. Designs are filed under the brand you pick.',
+                    'create it. Designs are filed under the brand you pick. '
+                    'Unknown values default to “Don’t import”, so their rows are '
+                    'skipped.',
                     style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 12),
                 Flexible(
@@ -1272,6 +1279,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                                   isExpanded: true,
                                   value: choice[v],
                                   items: [
+                                    const DropdownMenuItem(
+                                        value: _kSkip,
+                                        child: Text('🚫 Don’t import',
+                                            style: TextStyle(
+                                                fontSize: 12,
+                                                color: Colors.black54))),
                                     DropdownMenuItem(
                                         value: _kCreateBrand,
                                         child: Text('➕ Create “$v”',
@@ -1314,14 +1327,24 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     // Resolve creates → real brand ids (server enforces the brand limit).
     final result = <String, String>{};
     for (final entry in choice.entries) {
-      if (entry.value == _kCreateBrand) {
+      if (entry.value == _kSkip) {
+        result[entry.key] = _kSkip; // pass through; rows with it are dropped
+      } else if (entry.value == _kCreateBrand) {
         try {
           final id = await _dataSvc.createBrand(entry.key);
           if (id.isEmpty) throw 'no id';
           result[entry.key] = id;
         } catch (e) {
+          // A brand-cap hit is the common case — guide instead of dumping the raw
+          // exception, and don't lose the whole import to one stray value.
+          final capped = e.toString().toLowerCase().contains('limit');
           if (mounted) {
-            _snack('Could not create brand “${entry.key}” — $e', Colors.red);
+            _snack(
+                capped
+                    ? 'You’ve reached the 5-brand limit. Set “${entry.key}” to '
+                        '“Don’t import” or map it to an existing brand, then try again.'
+                    : 'Could not create brand “${entry.key}” — $e',
+                Colors.red);
           }
           return null; // abort; stockist resolves and re-runs
         }
