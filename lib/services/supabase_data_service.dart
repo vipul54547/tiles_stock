@@ -1848,6 +1848,60 @@ class SupabaseDataService {
     }
   }
 
+  // ─── Banner Video (stockist "My Videos") ─────────────────────────────────
+  // A stockist manages their OWN collection/promo videos; whether they display
+  // is governed by the admin-set mode. Each RPC auto-scopes to the caller.
+
+  /// The caller stockist's own videos (INCLUDING hidden).
+  Future<List<Map<String, dynamic>>> stockistMyVideos() async {
+    final res = await supabase.rpc('stockist_my_videos');
+    return ((res as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  /// The admin-set display mode for the caller stockist (off|admin|mixed|stockist).
+  Future<String> stockistMyVideoMode() async {
+    final res = await supabase.rpc('stockist_my_video_mode');
+    return (res as String?) ?? 'mixed';
+  }
+
+  /// Create ([id] null) or edit one of the caller's own videos. Server derives
+  /// the YouTube id and enforces the 50-library / 5-active caps.
+  Future<String> stockistSaveVideo({
+    String? id,
+    required String kind,
+    required String title,
+    required String subtitle,
+    required String url,
+    int sortOrder = 0,
+    bool isActive = true,
+  }) async {
+    final res = await supabase.rpc('stockist_save_video', params: {
+      'p_id': id,
+      'p_kind': kind,
+      'p_title': title,
+      'p_subtitle': subtitle,
+      'p_url': url,
+      'p_sort_order': sortOrder,
+      'p_is_active': isActive,
+    });
+    return res as String;
+  }
+
+  Future<void> stockistSetVideoActive(String id, bool active) async {
+    await supabase.rpc('stockist_set_video_active',
+        params: {'p_id': id, 'p_active': active});
+  }
+
+  Future<void> stockistDeleteVideo(String id) async {
+    await supabase.rpc('stockist_delete_video', params: {'p_id': id});
+  }
+
+  Future<void> stockistRestoreVideo(String id) async {
+    await supabase.rpc('stockist_restore_video', params: {'p_id': id});
+  }
+
   // ── Stockist share links (permanent + create-on-demand, optional expiry) ────
 
   /// A specific catalog's links: its always-on Permanent link plus every active
