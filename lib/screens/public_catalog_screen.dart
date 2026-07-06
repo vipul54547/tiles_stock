@@ -13,6 +13,8 @@ import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 import '../utils/order_message.dart';
 import '../widgets/banner_view.dart';
+import '../widgets/alternating_banner.dart';
+import '../widgets/video_lightbox.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/dna_tag_expander.dart';
 import '../widgets/tile_card.dart' show TileImage;
@@ -41,6 +43,9 @@ class _State extends State<PublicCatalogScreen> {
   // overlay=true → generic/anonymous banner, render the "Welcome to [name]"
   // trust strip; false → a finished branded image shown as-is.
   Map<String, dynamic> _banner = {};
+  // Banner Video list for this stockist's /s/ page (server applies the 4-step
+  // mode + mixed interleave). Empty = no video → banner is unchanged.
+  List<Map<String, dynamic>> _videos = [];
   List<Map<String, dynamic>> _all = [];
 
   // Selection: designId -> box quantity wanted.
@@ -81,7 +86,14 @@ class _State extends State<PublicCatalogScreen> {
   }
 
   Future<void> _load() async {
-    final data = await _svc.getPublicCatalog(widget.token);
+    // Catalog + Banner Video list in parallel (videos are best-effort: a
+    // failure just yields an empty list, leaving the banner unchanged).
+    final results = await Future.wait([
+      _svc.getPublicCatalog(widget.token),
+      _svc.getPublicVideos(widget.token),
+    ]);
+    final data = results[0] as Map<String, dynamic>?;
+    final videos = results[1] as List<Map<String, dynamic>>;
     if (!mounted) return;
     if (data == null) {
       setState(() {
@@ -91,6 +103,7 @@ class _State extends State<PublicCatalogScreen> {
       return;
     }
     setState(() {
+      _videos = videos;
       _stockist = Map<String, dynamic>.from(data['stockist'] ?? {});
       _brandInfo = data['brand'] != null
           ? Map<String, dynamic>.from(data['brand'])
@@ -1113,8 +1126,9 @@ class _State extends State<PublicCatalogScreen> {
     // ONE shared renderer — identical to the stockist editor preview
     // (lib/widgets/banner_view.dart), so what a stockist designs is exactly
     // what buyers see here. Never inline a second copy of this layout.
-    return BannerView(
-      source: (_banner['source'] ?? 'pool').toString(),
+    final source = (_banner['source'] ?? 'pool').toString();
+    final identity = BannerView(
+      source: source,
       bgUrl: (_banner['bg_url'] ?? _banner['image_url'] ?? '').toString(),
       companyLogoUrl: (_banner['company_logo_url'] ?? '').toString(),
       companyPos: (_banner['company_pos'] ?? 'none').toString(),
@@ -1130,6 +1144,15 @@ class _State extends State<PublicCatalogScreen> {
       textValign: (_banner['banner_text_valign'] ?? '').toString(),
       name: (_banner['name'] ?? _stockist['name'] ?? '').toString(),
       brandColor: _brand,
+    );
+    // Banner Video: the identity banner alternates with a video promo in the
+    // SAME slot (zero extra height). When the stockist removed the banner
+    // (source 'none') or there are no videos, this is a no-op.
+    return AlternatingBanner(
+      videos: source == 'none' ? const [] : _videos,
+      brandColor: _brand,
+      onPlay: (v) => showVideoLightbox(context, v),
+      child: identity,
     );
   }
 

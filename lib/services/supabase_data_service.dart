@@ -1815,6 +1815,25 @@ class SupabaseDataService {
     }
   }
 
+  /// Public (no login): the Banner Video list for a stockist's `/s/` page,
+  /// resolved by the same share token. The server applies the stockist's
+  /// 4-step mode (off/admin/mixed/stockist) + the mixed 2:1 interleave, so the
+  /// client just renders what comes back. Each item:
+  /// {id, kind, title, subtitle, youtube_id, video_url, thumbnail, owner}.
+  /// Returns [] for mode `off`, an invalid token, or any error.
+  Future<List<Map<String, dynamic>>> getPublicVideos(String token) async {
+    try {
+      final res =
+          await supabase.rpc('public_list_videos', params: {'p_token': token});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getPublicVideos failed ($token): $e\n$st');
+      return [];
+    }
+  }
+
   // ── Stockist share links (permanent + create-on-demand, optional expiry) ────
 
   /// A specific catalog's links: its always-on Permanent link plus every active
