@@ -420,12 +420,17 @@ class _VideoEditSheetState extends State<_VideoEditSheet> {
   Widget build(BuildContext context) {
     final id = _ytId(_url.text);
     final editing = widget.existing != null;
+    // Clear whichever is taller at the bottom: the keyboard (viewInsets) or the
+    // system navigation bar (viewPadding) — so the Save button never hides under
+    // the nav bar when the keyboard is closed.
+    final kb = MediaQuery.viewInsetsOf(context).bottom;
+    final navBar = MediaQuery.viewPaddingOf(context).bottom;
     return Padding(
       padding: EdgeInsets.only(
           left: 20,
           right: 20,
           top: 18,
-          bottom: 18 + MediaQuery.viewInsetsOf(context).bottom),
+          bottom: 18 + (kb > navBar ? kb : navBar)),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
