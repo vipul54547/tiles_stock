@@ -1087,8 +1087,15 @@ class _State extends State<PublicCatalogScreen> {
     final merged = _mergeByQuality(list);
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
-      body: CustomScrollView(
-        slivers: [
+      body: Column(
+        children: [
+          // Brand-coloured strip behind the status bar so the banner starts
+          // cleanly BELOW it (previously it ran edge-to-edge under the clock).
+          // On web padding.top is 0, so this is a no-op there.
+          Container(height: MediaQuery.paddingOf(context).top, color: _brand),
+          Expanded(
+            child: CustomScrollView(
+              slivers: [
           // No separate name bar: the banner IS the top of the page now. The
           // name already shows once on its "Welcome to X" line, so a bar above
           // it with no title/icons of its own was just dead colored space.
@@ -1109,6 +1116,9 @@ class _State extends State<PublicCatalogScreen> {
           else
             _familyGridSliver(merged),
           SliverToBoxAdapter(child: _poweredBy()),
+              ],
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: _enquireBar(),
