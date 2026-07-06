@@ -159,6 +159,7 @@ class _VideosTabState extends State<_VideosTab>
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _edit(),
         backgroundColor: _navy,
+        foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
         label: const Text('Add video'),
       ),
