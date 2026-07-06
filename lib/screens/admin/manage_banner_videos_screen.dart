@@ -17,10 +17,17 @@ class ManageBannerVideosScreen extends StatelessWidget {
         backgroundColor: const Color(0xFFF5F5F5),
         appBar: AppBar(
           title: const Text('Banner Video'),
-          bottom: const TabBar(tabs: [
-            Tab(text: 'Learning videos'),
-            Tab(text: 'Stockist modes'),
-          ]),
+          bottom: const TabBar(
+            labelColor: Colors.white,
+            unselectedLabelColor: Colors.white70,
+            indicatorColor: Colors.white,
+            indicatorWeight: 3,
+            labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+            tabs: [
+              Tab(text: 'Learning videos'),
+              Tab(text: 'Stockist modes'),
+            ],
+          ),
         ),
         body: const TabBarView(
           children: [
@@ -137,7 +144,10 @@ class _VideosTabState extends State<_VideosTab>
           borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
       builder: (_) => _VideoEditSheet(existing: existing),
     );
-    if (saved == true) _load();
+    if (saved == true) {
+      await _load();
+      _snack('Saved.');
+    }
   }
 
   @override
