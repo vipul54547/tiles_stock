@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/stock_catalog.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../utils/banner_layout.dart';
+import '../../widgets/banner_view.dart';
 
 /// Per-list banner editor — the full layout system (parity with the per-brand
 /// banner): a source (pool / library / upload), an optional company logo or big
@@ -60,6 +60,10 @@ class _State extends State<ListBannerEditorScreen> {
   // Admin decides whether the TilesDesign mark shows at all; the stockist only
   // picks WHERE. When off, the whole TD-position control is hidden.
   bool _tdShow = false;
+  // Real stockist name + brand colour, so the preview's big-name / welcome
+  // strip / gradient match exactly what buyers see on /s/ (true WYSIWYG).
+  String _stkName = '';
+  Color _brandColor = _navy;
 
   // Message mode: a non-empty message turns the Library banner into a text
   // banner (text-friendly backgrounds + logo locked to the left column).
@@ -102,12 +106,28 @@ class _State extends State<ListBannerEditorScreen> {
     _tdPos = (c.tdPos.isEmpty || c.tdPos == 'none') ? 'top-right' : c.tdPos;
     _heading.text = c.bannerHeading;
     _message.text = c.bannerText;
-    _loadTdShow();
+    _loadStockistMeta();
   }
 
-  Future<void> _loadTdShow() async {
-    final v = await _data.getMyTdShow();
-    if (mounted) setState(() => _tdShow = v);
+  // td_show (admin gate) + name + brand colour, used by the shared BannerView.
+  Future<void> _loadStockistMeta() async {
+    final td = await _data.getMyTdShow();
+    final profile = await _data.getMyProfile();
+    if (!mounted) return;
+    setState(() {
+      _tdShow = td;
+      _stkName = (profile?['name'] ?? '').toString();
+      final c = _parseHex((profile?['brand_color'] ?? '').toString());
+      if (c != null) _brandColor = c;
+    });
+  }
+
+  static Color? _parseHex(String s) {
+    var h = s.trim().replaceAll('#', '');
+    if (h.length == 6) h = 'FF$h';
+    if (h.length != 8) return null;
+    final v = int.tryParse(h, radix: 16);
+    return v == null ? null : Color(v);
   }
 
   @override
@@ -420,9 +440,10 @@ class _State extends State<ListBannerEditorScreen> {
     );
   }
 
-  // Approximate render: background + company logo/name + a TilesDesign chip at
-  // their chosen positions. The real /s/ page uses your company name for the
-  // name text; here it shows a placeholder.
+  // Live preview — renders through the SAME widget as the buyer-facing /s/ page
+  // (lib/widgets/banner_view.dart), so what the stockist designs here is exactly
+  // what buyers see. The only editor-specific bits are stand-ins for backgrounds
+  // that aren't loaded yet (the rotating pool, or an empty slot).
   Widget _bannerPreview() {
     if (_source == 'none') {
       return ClipRRect(
@@ -441,23 +462,16 @@ class _State extends State<ListBannerEditorScreen> {
         ),
       );
     }
-    final companyPos = _msgMode
-        ? _companyPosForSave
-        : effectiveCompanyPos(_companyPos, hasLogo: _logoUrl.isNotEmpty);
-
-    Widget bgWidget;
+    Widget? placeholder;
     if (_source == 'pool') {
-      bgWidget = Container(
+      placeholder = Container(
         color: _navy.withValues(alpha: 0.12),
         alignment: Alignment.center,
         child: const Text('Shared pool (rotates daily)',
             style: TextStyle(fontSize: 11, color: _navy)),
       );
-    } else if (_bgUrl.isNotEmpty) {
-      bgWidget = CachedNetworkImage(
-          imageUrl: CloudinaryService.bannerUrl(_bgUrl), fit: BoxFit.cover);
-    } else {
-      bgWidget = Container(
+    } else if (_bgUrl.isEmpty) {
+      placeholder = Container(
         color: Colors.grey.shade200,
         alignment: Alignment.center,
         child: Text(
@@ -465,113 +479,22 @@ class _State extends State<ListBannerEditorScreen> {
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
       );
     }
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: AspectRatio(
-        aspectRatio: 2.5,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            bgWidget,
-            if (_source == 'library' && _msgMode) ...[
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.34)),
-                ),
-              ),
-              Align(
-                // Match /s/: nudge the block slightly above centre.
-                alignment: _logoUrl.isNotEmpty
-                    ? const Alignment(1.0, -0.12)
-                    : const Alignment(0.0, -0.12),
-                child: Padding(
-                  padding: EdgeInsets.only(
-                      left: _logoUrl.isNotEmpty ? 74 : 14,
-                      right: 14,
-                      top: 6,
-                      bottom: 6),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: _logoUrl.isNotEmpty
-                        ? CrossAxisAlignment.start
-                        : CrossAxisAlignment.center,
-                    children: [
-                      if (_heading.text.trim().isNotEmpty) ...[
-                        Text(_heading.text.trim().toUpperCase(),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
-                                height: 1.15,
-                                letterSpacing: 0.8)),
-                        Container(
-                            margin: const EdgeInsets.only(top: 2, bottom: 3),
-                            height: 2,
-                            width: 30,
-                            color: const Color(0xFFC1974A)),
-                      ],
-                      Text(_message.text.trim(),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: _logoUrl.isNotEmpty
-                              ? TextAlign.left
-                              : TextAlign.center,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w500,
-                              height: 1.25)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            if (_source == 'library' &&
-                companyPos != 'none' &&
-                !(_msgMode && _logoUrl.isEmpty))
-              Align(
-                alignment: _alignFor(companyPos),
-                child: Container(
-                  margin: const EdgeInsets.all(6),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.45),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: _logoUrl.isNotEmpty
-                      ? Image.network(CloudinaryService.logoUrl(_logoUrl),
-                          height: 28)
-                      : const Text('Company name',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold)),
-                ),
-              ),
-            if (_tdShow && _tdPos != 'none')
-              Align(
-                alignment: _alignFor(_tdPos),
-                child: Container(
-                  margin: const EdgeInsets.all(4),
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.85),
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                  child: const Text('TilesDesign',
-                      style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                          color: _navy)),
-                ),
-              ),
-          ],
-        ),
+      child: BannerView(
+        source: _source,
+        bgUrl: _source == 'pool' ? '' : _bgUrl,
+        companyLogoUrl: _logoUrl,
+        // _companyPosForSave applies the message-mode "logo to the left column"
+        // rule exactly as it is persisted (so /s/ sees the same value).
+        companyPos: _companyPosForSave,
+        tdPos: _tdPos,
+        tdShow: _tdShow,
+        heading: _heading.text,
+        message: _message.text,
+        name: _stkName,
+        brandColor: _brandColor,
+        bgPlaceholder: placeholder,
       ),
     );
   }
@@ -715,32 +638,6 @@ class _State extends State<ListBannerEditorScreen> {
         ),
       ],
     );
-  }
-
-  Alignment _alignFor(String pos) {
-    switch (pos) {
-      case 'top-left':
-        return Alignment.topLeft;
-      case 'top-center':
-        return Alignment.topCenter;
-      case 'top-right':
-        return Alignment.topRight;
-      case 'middle-left':
-        return Alignment.centerLeft;
-      case 'center':
-        return Alignment.center;
-      case 'middle-right':
-        return Alignment.centerRight;
-      case 'bottom-left':
-        return Alignment.bottomLeft;
-      case 'bottom-center':
-      case 'footer':
-        return Alignment.bottomCenter;
-      case 'bottom-right':
-        return Alignment.bottomRight;
-      default:
-        return Alignment.center;
-    }
   }
 
   void _snack(String msg, {bool error = false}) {

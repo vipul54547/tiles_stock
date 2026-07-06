@@ -8,6 +8,37 @@
 /// name mode; the renderer coerces any legacy value the same way.
 library;
 
+import 'package:flutter/widgets.dart';
+
+/// Maps a 9-grid placement key (+ 'footer') to a Flutter [Alignment]. Shared by
+/// the public /s/ banner and the stockist editor preview so both place overlays
+/// identically.
+Alignment alignFor(String pos) {
+  switch (pos) {
+    case 'top-left':
+      return Alignment.topLeft;
+    case 'top-center':
+      return Alignment.topCenter;
+    case 'top-right':
+      return Alignment.topRight;
+    case 'middle-left':
+      return Alignment.centerLeft;
+    case 'center':
+      return Alignment.center;
+    case 'middle-right':
+      return Alignment.centerRight;
+    case 'bottom-left':
+      return Alignment.bottomLeft;
+    case 'bottom-center':
+    case 'footer':
+      return Alignment.bottomCenter;
+    case 'bottom-right':
+      return Alignment.bottomRight;
+    default:
+      return Alignment.center;
+  }
+}
+
 /// All company placements: 9 grid cells + "none" (hidden). Used when a logo is
 /// set (a small logo sits fine anywhere).
 const List<String> kCompanyPosAll = [

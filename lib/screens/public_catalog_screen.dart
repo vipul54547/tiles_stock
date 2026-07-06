@@ -11,8 +11,8 @@ import '../services/cloudinary_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
-import '../utils/banner_layout.dart' show effectiveCompanyPos;
 import '../utils/order_message.dart';
+import '../widgets/banner_view.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/dna_tag_expander.dart';
 import '../widgets/tile_card.dart' show TileImage;
@@ -1109,249 +1109,23 @@ class _State extends State<PublicCatalogScreen> {
   // trust strip (overlay=true). Falls back to a brand-colour gradient + strip
   // when no pool image is configured yet. Replaces the old tall logo/name/
   // tagline/address header that ate ~half the screen. (project_admin_banner_system)
-  // Maps a placement key to an Alignment for overlay positioning.
-  static Alignment _alignFor(String pos) {
-    switch (pos) {
-      case 'top-left':
-        return Alignment.topLeft;
-      case 'top-center':
-        return Alignment.topCenter;
-      case 'top-right':
-        return Alignment.topRight;
-      case 'middle-left':
-        return Alignment.centerLeft;
-      case 'center':
-        return Alignment.center;
-      case 'middle-right':
-        return Alignment.centerRight;
-      case 'bottom-left':
-        return Alignment.bottomLeft;
-      case 'bottom-center':
-      case 'footer':
-        return Alignment.bottomCenter;
-      case 'bottom-right':
-        return Alignment.bottomRight;
-      default:
-        return Alignment.center;
-    }
-  }
-
   Widget _bannerArea() {
-    final source = (_banner['source'] ?? 'pool').toString();
-    // 'none' = the stockist removed the banner: the catalogue starts at the tiles.
-    if (source == 'none') return const SizedBox.shrink();
-    final bg = (_banner['bg_url'] ?? _banner['image_url'] ?? '').toString();
-    final companyLogo = (_banner['company_logo_url'] ?? '').toString();
-    // Big NAME (no logo) never uses the middle row — coerce legacy values down.
-    final companyPos = effectiveCompanyPos(
-        (_banner['company_pos'] ?? 'none').toString(),
-        hasLogo: companyLogo.isNotEmpty);
-    final tdPos = (_banner['td_pos'] ?? 'top-right').toString();
-    // Admin decides whether the TilesDesign mark shows (per stockist); the
-    // stockist only chose its position. Applies to every source, incl. pool.
-    final tdShow = _banner['td_show'] == true;
-    final name = (_banner['name'] ?? _stockist['name'] ?? '').toString();
-    // Message banner (Library text mode): a heading + message over the background.
-    final msg = (_banner['banner_text'] ?? '').toString().trim();
-    final msgHeading = (_banner['banner_heading'] ?? '').toString().trim();
-    final hasMsg = msg.isNotEmpty;
-    final topRow = companyPos == 'top-left' ||
-        companyPos == 'top-center' ||
-        companyPos == 'top-right';
-    // Welcome text: pool always; library only when the company is NOT on the top
-    // row (top logo hides Welcome); upload never. Suppressed in message mode.
-    final showWelcome =
-        !hasMsg && (source == 'pool' || (source == 'library' && !topRow));
-    // In message mode the message replaces the company NAME; keep only the logo.
-    final showCompany = source == 'library' &&
-        companyPos != 'none' &&
-        (!hasMsg || companyLogo.isNotEmpty);
-
-    return LayoutBuilder(
-      builder: (context, c) {
-        final h = (c.maxWidth / 2.5).clamp(0.0, 200.0);
-        return SizedBox(
-          width: double.infinity,
-          height: h,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // Background
-              if (bg.isNotEmpty)
-                Image.network(CloudinaryService.bannerUrl(bg),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => _bannerGradient())
-              else
-                _bannerGradient(),
-              // Message banner: legibility veil + heading + message.
-              if (hasMsg)
-                const Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.centerLeft,
-                        end: Alignment.centerRight,
-                        colors: [Colors.black54, Colors.black26, Colors.black45],
-                      ),
-                    ),
-                  ),
-                ),
-              if (hasMsg)
-                Align(
-                  // Nudged slightly above centre so the heading + rule sit
-                  // higher and read cleaner alongside the left logo.
-                  alignment: companyLogo.isNotEmpty
-                      ? const Alignment(1.0, -0.12)
-                      : const Alignment(0.0, -0.12),
-                  child: Padding(
-                    padding: EdgeInsets.only(
-                        left: companyLogo.isNotEmpty
-                            ? c.maxWidth * 0.30
-                            : c.maxWidth * 0.06,
-                        right: c.maxWidth * 0.06),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: companyLogo.isNotEmpty
-                          ? CrossAxisAlignment.start
-                          : CrossAxisAlignment.center,
-                      children: [
-                        if (msgHeading.isNotEmpty) ...[
-                          Text(msgHeading.toUpperCase(),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: (h * 0.11).clamp(14.0, 20.0),
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.15,
-                                  letterSpacing: 1.0)),
-                          Container(
-                              margin: const EdgeInsets.only(top: 3, bottom: 5),
-                              height: 2,
-                              width: (h * 0.55).clamp(24.0, 64.0),
-                              color: const Color(0xFFC1974A)),
-                        ],
-                        Text(msg,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: companyLogo.isNotEmpty
-                                ? TextAlign.left
-                                : TextAlign.center,
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: (h * 0.072).clamp(10.0, 14.0),
-                                fontWeight: FontWeight.w500,
-                                height: 1.25,
-                                shadows: const [
-                                  Shadow(blurRadius: 5, color: Colors.black87)
-                                ])),
-                      ],
-                    ),
-                  ),
-                ),
-              // Company logo or big name (library path)
-              if (showCompany)
-                Align(
-                  alignment: _alignFor(companyPos),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: _scrim(
-                      companyLogo.isNotEmpty
-                          ? ConstrainedBox(
-                              constraints: BoxConstraints(
-                                  maxWidth:
-                                      hasMsg ? c.maxWidth * 0.22 : c.maxWidth),
-                              child: Image.network(
-                                  CloudinaryService.logoUrl(companyLogo),
-                                  height: h * (hasMsg ? 0.34 : 0.40),
-                                  fit: BoxFit.contain),
-                            )
-                          : Text(
-                              name,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: (h * 0.20).clamp(16.0, 34.0),
-                                  fontWeight: FontWeight.bold,
-                                  shadows: const [
-                                    Shadow(blurRadius: 4, color: Colors.black87)
-                                  ]),
-                            ),
-                    ),
-                  ),
-                ),
-              // TilesDesign mark — shown only when admin enabled it for this
-              // stockist (td_show), at the stockist's chosen position, any source.
-              if (tdShow && tdPos != 'none')
-                Align(
-                  alignment: _alignFor(tdPos),
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: _scrim(Image.asset(
-                        tdPos == 'footer'
-                            ? 'assets/brand/tilesdesign_wide.png'
-                            : 'assets/brand/tilesdesign_square.png',
-                        height: tdPos == 'footer' ? h * 0.16 : h * 0.22)),
-                  ),
-                ),
-              // Welcome trust strip
-              if (showWelcome) _trustStrip(name),
-            ],
-          ),
-        );
-      },
+    // ONE shared renderer — identical to the stockist editor preview
+    // (lib/widgets/banner_view.dart), so what a stockist designs is exactly
+    // what buyers see here. Never inline a second copy of this layout.
+    return BannerView(
+      source: (_banner['source'] ?? 'pool').toString(),
+      bgUrl: (_banner['bg_url'] ?? _banner['image_url'] ?? '').toString(),
+      companyLogoUrl: (_banner['company_logo_url'] ?? '').toString(),
+      companyPos: (_banner['company_pos'] ?? 'none').toString(),
+      tdPos: (_banner['td_pos'] ?? 'top-right').toString(),
+      tdShow: _banner['td_show'] == true,
+      heading: (_banner['banner_heading'] ?? '').toString(),
+      message: (_banner['banner_text'] ?? '').toString(),
+      name: (_banner['name'] ?? _stockist['name'] ?? '').toString(),
+      brandColor: _brand,
     );
   }
-
-  // A subtle translucent backing so an overlay stays legible on any art.
-  Widget _scrim(Widget child) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.28),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: child,
-      );
-
-  // Brand-colour gradient shown when no banner image is configured yet.
-  Widget _bannerGradient() => DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [_brand, Color.lerp(_brand, Colors.black, 0.35)!],
-          ),
-        ),
-      );
-
-  // System trust strip for generic/anonymous banners: centred "Welcome to
-  // [name]", over a dark scrim for readability.
-  Widget _trustStrip(String name) => Align(
-        alignment: Alignment.topCenter,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xB3000000), Color(0x00000000)],
-            ),
-          ),
-          child: Text(
-            name.trim().isEmpty ? 'Welcome' : 'Welcome to $name',
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
-          ),
-        ),
-      );
 
   // Result count + city, with a compact "Directions" link (Maps) when set.
   Widget _metaRow(int shown) {
