@@ -70,6 +70,7 @@ class _State extends State<ListBannerEditorScreen> {
   String _msgSize = '';
   String _msgColor = '';
   String _textAlign = '';
+  String _textValign = '';
 
   // Message mode: a non-empty message turns the Library banner into a text
   // banner (text-friendly backgrounds + logo locked to the left column).
@@ -117,6 +118,7 @@ class _State extends State<ListBannerEditorScreen> {
     _msgSize = c.bannerMsgSize;
     _msgColor = c.bannerMsgColor;
     _textAlign = c.bannerTextAlign;
+    _textValign = c.bannerTextValign;
     _loadStockistMeta();
   }
 
@@ -168,6 +170,7 @@ class _State extends State<ListBannerEditorScreen> {
       msgSize: (!none && _source == 'library') ? _msgSize : '',
       msgColor: (!none && _source == 'library') ? _msgColor : '',
       textAlign: (!none && _source == 'library') ? _textAlign : '',
+      textValign: (!none && _source == 'library') ? _textValign : '',
     );
     _changed = true;
   }
@@ -513,6 +516,7 @@ class _State extends State<ListBannerEditorScreen> {
         msgSize: _msgSize,
         msgColor: _msgColor,
         textAlign: _textAlign,
+        textValign: _textValign,
         name: _stkName,
         brandColor: _brandColor,
         bgPlaceholder: placeholder,
@@ -570,6 +574,8 @@ class _State extends State<ListBannerEditorScreen> {
               _msgColor, (v) => setState(() => _msgColor = v)),
           const SizedBox(height: 10),
           _alignLine(),
+          const SizedBox(height: 8),
+          _valignLine(),
         ],
       ],
     );
@@ -698,6 +704,50 @@ class _State extends State<ListBannerEditorScreen> {
             selected: {eff},
             onSelectionChanged: (s) {
               setState(() => _textAlign = s.first);
+              _apply();
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _valignLine() {
+    final eff = _textValign.isEmpty ? 'middle' : _textValign;
+    return Row(
+      children: [
+        SizedBox(
+            width: 70,
+            child: Text('Vertical',
+                style: TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w600))),
+        SizedBox(
+          height: 32,
+          child: SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 11)),
+            ),
+            segments: const [
+              ButtonSegment(
+                  value: 'top',
+                  label: Text('Top'),
+                  icon: Icon(Icons.vertical_align_top, size: 15)),
+              ButtonSegment(
+                  value: 'middle',
+                  label: Text('Middle'),
+                  icon: Icon(Icons.vertical_align_center, size: 15)),
+              ButtonSegment(
+                  value: 'bottom',
+                  label: Text('Bottom'),
+                  icon: Icon(Icons.vertical_align_bottom, size: 15)),
+            ],
+            selected: {eff},
+            onSelectionChanged: (s) {
+              setState(() => _textValign = s.first);
               _apply();
             },
           ),

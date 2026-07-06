@@ -56,14 +56,25 @@ function messageCard(bgUrl, heading, message, style) {
   };
   const hCol = hex(st.headingColor);
   const mCol = hex(st.msgColor);
-  // Left vs centred (the app auto-lefts beside a logo; here there is no logo).
-  const grav = st.align === 'left' ? 'g_west,x_80' : 'g_center';
+  // Compound gravity: vertical (top/bottom → north/south) × horizontal (left →
+  // west, else centre). y offsets are relative to that gravity edge.
+  const vpart = st.valign === 'top' ? 'north' : st.valign === 'bottom' ? 'south' : '';
+  const hpart = st.align === 'left' ? 'west' : '';
+  const grav =
+    'g_' + ([vpart, hpart].filter(Boolean).join('_') || 'center') +
+    (hpart ? ',x_80' : '');
+  let hY, mY;
+  if (st.valign === 'top') { hY = 70; mY = 190; }
+  else if (st.valign === 'bottom') { hY = 190; mY = 70; }
+  else { hY = -90; mY = 70; }
+  const bodyOnlyY =
+    st.valign === 'top' ? 90 : st.valign === 'bottom' ? 90 : 0;
   const head = heading
-    ? `/l_text:Arial_${hSize}_bold:${cxText(heading)},co_rgb:${hCol},c_fit,w_1040/fl_layer_apply,${grav},y_-90`
+    ? `/l_text:Arial_${hSize}_bold:${cxText(heading)},co_rgb:${hCol},c_fit,w_1040/fl_layer_apply,${grav},y_${hY}`
     : '';
   const body =
     `/l_text:Arial_${mSize}:${cxText(message)},co_rgb:${mCol},c_fit,w_980` +
-    `/fl_layer_apply,${grav},y_${heading ? '70' : '0'}`;
+    `/fl_layer_apply,${grav},y_${heading ? mY : bodyOnlyY}`;
   const t = `c_fill,ar_5:2,w_1200,e_brightness:-45${head}${body}`;
   return bgUrl.slice(0, at) + t + '/' + bgUrl.slice(at);
 }

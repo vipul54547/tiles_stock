@@ -33,6 +33,7 @@ class BannerView extends StatelessWidget {
   final String msgSize;
   final String msgColor;
   final String textAlign;
+  final String textValign; // 'top' | 'middle' | 'bottom' ('' = middle)
 
   /// Stockist/brand name — used for the big-name overlay and the welcome strip.
   final String name;
@@ -64,6 +65,7 @@ class BannerView extends StatelessWidget {
     this.msgSize = '',
     this.msgColor = '',
     this.textAlign = '',
+    this.textValign = '',
     this.brandColor = const Color(0xFF1B4F72),
     this.showWelcomeStrip = true,
     this.bgPlaceholder,
@@ -111,6 +113,12 @@ class BannerView extends StatelessWidget {
         ? textAlign
         : (companyLogo.isNotEmpty ? 'left' : 'center');
     final alignLeft = align == 'left';
+    // Vertical placement: top / bottom, else the default slightly-above-centre.
+    final vy = switch (textValign) {
+      'top' => -1.0,
+      'bottom' => 1.0,
+      _ => -0.12,
+    };
 
     return LayoutBuilder(
       builder: (context, c) {
@@ -166,17 +174,20 @@ class BannerView extends StatelessWidget {
                 ),
               if (hasMsg)
                 Align(
-                  // Nudged slightly above centre so the heading + rule sit
-                  // higher and read cleaner alongside the left logo.
-                  alignment: companyLogo.isNotEmpty
-                      ? const Alignment(1.0, -0.12)
-                      : Alignment(alignLeft ? -1.0 : 0.0, -0.12),
+                  // Horizontal: right of a left logo, else per align. Vertical:
+                  // per the stockist's Top/Middle/Bottom choice.
+                  alignment: Alignment(
+                      companyLogo.isNotEmpty ? 1.0 : (alignLeft ? -1.0 : 0.0),
+                      vy),
                   child: Padding(
                     padding: EdgeInsets.only(
                         left: companyLogo.isNotEmpty
                             ? c.maxWidth * 0.30
                             : c.maxWidth * 0.06,
-                        right: c.maxWidth * 0.06),
+                        right: c.maxWidth * 0.06,
+                        // Keep top/bottom text off the very edge.
+                        top: textValign == 'top' ? h * 0.10 : 0,
+                        bottom: textValign == 'bottom' ? h * 0.10 : 0),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: alignLeft

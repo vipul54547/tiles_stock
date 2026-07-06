@@ -28,6 +28,7 @@ class StockCatalog {
   final String bannerMsgSize;
   final String bannerMsgColor;
   final String bannerTextAlign;
+  final String bannerTextValign; // 'top'|'middle'|'bottom' ('' = middle default)
   final String visibility; // 'public' | 'private'
   final bool showInMarketplace; // public catalog: appears in the app marketplace
   final String shareToken; // the catalog's own /s/<token> link
@@ -81,6 +82,7 @@ class StockCatalog {
     this.bannerMsgSize = '',
     this.bannerMsgColor = '',
     this.bannerTextAlign = '',
+    this.bannerTextValign = '',
     required this.visibility,
     required this.showInMarketplace,
     required this.shareToken,
@@ -129,6 +131,7 @@ class StockCatalog {
         bannerMsgSize: (j['banner_msg_size'] as String?) ?? '',
         bannerMsgColor: (j['banner_msg_color'] as String?) ?? '',
         bannerTextAlign: (j['banner_text_align'] as String?) ?? '',
+        bannerTextValign: (j['banner_text_valign'] as String?) ?? '',
         visibility: (j['visibility'] as String?) ?? 'public',
         showInMarketplace: j['show_in_marketplace'] as bool? ?? true,
         shareToken: (j['share_token'] as String?) ?? '',

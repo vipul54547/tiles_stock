@@ -571,6 +571,7 @@ class SupabaseDataService {
     String msgSize = '',
     String msgColor = '',
     String textAlign = '',
+    String textValign = '',
   }) async {
     await supabase.rpc('set_list_banner_config', params: {
       'p_catalog_id': catalogId,
@@ -586,6 +587,7 @@ class SupabaseDataService {
       'p_msg_size': msgSize,
       'p_msg_color': msgColor,
       'p_text_align': textAlign,
+      'p_text_valign': textValign,
     });
   }
 
