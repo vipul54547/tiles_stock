@@ -19,6 +19,8 @@ import '../utils/design_ranking.dart';
 import '../utils/my_choice.dart';
 import '../utils/tile_types.dart';
 import '../widgets/filter_section.dart';
+import '../widgets/learning_video_strip.dart';
+import '../widgets/video_lightbox.dart';
 import '../widgets/notification_bell.dart';
 import '../utils/stockist_tiers.dart';
 import '../utils/guest_gate.dart';
@@ -64,6 +66,9 @@ class _State extends State<StockistsOverviewScreen> {
   List<String> _allSurfaces = [];
   bool _loading = true;
   bool _viewDesigns = false;
+  // Admin learning videos (Banner Video) shown as a strip at the top of the
+  // buyer home. Empty = no strip.
+  List<Map<String, dynamic>> _learnVideos = [];
 
   // Father & Child market context — a single global toggle that governs every
   // buyer tab (Group / Stock / All Design). 'Public' = the Open Market,
@@ -373,6 +378,7 @@ class _State extends State<StockistsOverviewScreen> {
     final results = await Future.wait([
       _service.getMarketStockists(),
       _service.getAllDesigns(),
+      _service.getGlobalVideos(),
     ]);
 
     // Link-only stockists are hidden from the public market (reachable only via
@@ -380,6 +386,7 @@ class _State extends State<StockistsOverviewScreen> {
     final stockists =
         (results[0] as List<Stockist>).where((s) => s.isListed).toList();
     final designs = results[1] as List<TileDesign>;
+    _learnVideos = results[2] as List<Map<String, dynamic>>;
     await loadStockistGroupsFromDb(); // the user's saved group filters
     await loadMyChoices();            // restore saved My Choice selections
 
@@ -1634,6 +1641,13 @@ class _State extends State<StockistsOverviewScreen> {
             _buildAddSupplierBar(),
           // Progressive one-time suggestion to group suppliers (after ~7).
           if (_showGroupTip) _buildGroupTip(),
+          // Admin learning videos (Banner Video) — a compact strip at the top
+          // of the buyer home. Renders nothing when there are none.
+          if (!_searchActive)
+            LearningVideoStrip(
+              videos: _learnVideos,
+              onPlay: (v) => showVideoLightbox(context, v),
+            ),
           _buildGroupRow(
               _viewDesigns ? mergedDesigns.length : filteredStockists.length),
           if (_viewDesigns)

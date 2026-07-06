@@ -1834,6 +1834,20 @@ class SupabaseDataService {
     }
   }
 
+  /// The global admin learning videos for the buyer home (no token). Same item
+  /// shape as [getPublicVideos]. Returns [] on any error.
+  Future<List<Map<String, dynamic>>> getGlobalVideos() async {
+    try {
+      final res = await supabase.rpc('global_videos');
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getGlobalVideos failed: $e\n$st');
+      return [];
+    }
+  }
+
   // ── Stockist share links (permanent + create-on-demand, optional expiry) ────
 
   /// A specific catalog's links: its always-on Permanent link plus every active
