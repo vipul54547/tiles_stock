@@ -18,6 +18,8 @@ import '../../utils/guest_gate.dart';
 import '../../utils/my_choice.dart';
 import '../../utils/tile_types.dart';
 import '../../widgets/filter_section.dart';
+import '../../widgets/learning_video_strip.dart';
+import '../../widgets/video_lightbox.dart';
 
 class StockistPortfolioScreen extends StatefulWidget {
   final String stockistId;
@@ -42,6 +44,9 @@ class _State extends State<StockistPortfolioScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs  = [];
   Stockist?        _stockist;
+  // This supplier's Banner Videos (server applies their 4-step mode). Empty =
+  // no strip.
+  List<Map<String, dynamic>> _videos = [];
   // Finish + size options for the filter, in the admin's master order.
   List<String>     _surfaceOpts = kFinishes;
   List<String>     _sizeOpts = _filterSizes;
@@ -191,10 +196,12 @@ class _State extends State<StockistPortfolioScreen> {
       _service.getDesignsByStockistSeqId(widget.stockistId),
       _service.getMarketStockists(),
       _service.getMyPrivateDesigns(),
+      _service.getStockistVideos(widget.stockistId),
     ]);
     if (!mounted) return;
     final publicDesigns = results[0] as List<TileDesign>;
     final stockists = results[1] as List<Stockist>;
+    _videos = results[3] as List<Map<String, dynamic>>;
     // getDesignsByStockistSeqId reads the public market view (empty when the public
     // market is off), so a private (claimed) supplier would show a blank portfolio.
     // Merge in this stockist's private designs so the portfolio is never empty.
@@ -1310,6 +1317,13 @@ class _State extends State<StockistPortfolioScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [
+              // This supplier's Banner Videos (collection/promo + any admin
+              // learning videos, per their mode). Renders nothing when empty.
+              LearningVideoStrip(
+                videos: _videos,
+                title: 'Videos',
+                onPlay: (v) => showVideoLightbox(context, v),
+              ),
               _buildQualityFilter(),
               ActiveFilterBar(
                   filters: _activeFilters(), onClearAll: _clearAllFilters),

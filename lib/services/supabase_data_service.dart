@@ -1848,6 +1848,22 @@ class SupabaseDataService {
     }
   }
 
+  /// A supplier's Banner Video list for the in-app portfolio, resolved by the
+  /// stockist's sequential id (applies the 4-step mode + interleave). Same item
+  /// shape as [getPublicVideos]. Returns [] on any error.
+  Future<List<Map<String, dynamic>>> getStockistVideos(String sequentialId) async {
+    try {
+      final res = await supabase
+          .rpc('stockist_public_videos', params: {'p_seq': sequentialId});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getStockistVideos failed ($sequentialId): $e\n$st');
+      return [];
+    }
+  }
+
   // ─── Banner Video (stockist "My Videos") ─────────────────────────────────
   // A stockist manages their OWN collection/promo videos; whether they display
   // is governed by the admin-set mode. Each RPC auto-scopes to the caller.

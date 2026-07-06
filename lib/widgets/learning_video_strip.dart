@@ -8,10 +8,15 @@ class LearningVideoStrip extends StatelessWidget {
     super.key,
     required this.videos,
     required this.onPlay,
+    this.title = 'Learn how to use this',
   });
 
   final List<Map<String, dynamic>> videos;
   final void Function(Map<String, dynamic> video) onPlay;
+
+  /// Section heading (buyer home = "Learn how to use this"; a supplier
+  /// portfolio = e.g. "Videos").
+  final String title;
 
   static const _navy = Color(0xFF1B4F72);
 
@@ -23,14 +28,14 @@ class LearningVideoStrip extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(14, 0, 14, 6),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
             child: Row(
               children: [
-                Icon(Icons.play_circle_outline, size: 18, color: _navy),
-                SizedBox(width: 6),
-                Text('Learn how to use this',
-                    style: TextStyle(
+                const Icon(Icons.play_circle_outline, size: 18, color: _navy),
+                const SizedBox(width: 6),
+                Text(title,
+                    style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                         color: _navy)),
