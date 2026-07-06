@@ -241,7 +241,7 @@ class _VideosTabState extends State<_VideosTab>
             InkWell(
               onTap: () => _edit(v),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   SizedBox(
                     width: 96,
