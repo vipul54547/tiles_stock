@@ -184,7 +184,9 @@ class BannerView extends StatelessWidget {
                           : CrossAxisAlignment.center,
                       children: [
                         if (msgHeading.isNotEmpty) ...[
-                          Text(msgHeading.toUpperCase(),
+                          // Shown exactly as typed — the stockist chooses the
+                          // case (ALL CAPS / lowercase / Title Case).
+                          Text(msgHeading,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               textAlign:

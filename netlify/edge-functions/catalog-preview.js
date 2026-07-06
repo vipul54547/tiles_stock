@@ -59,7 +59,7 @@ function messageCard(bgUrl, heading, message, style) {
   // Left vs centred (the app auto-lefts beside a logo; here there is no logo).
   const grav = st.align === 'left' ? 'g_west,x_80' : 'g_center';
   const head = heading
-    ? `/l_text:Arial_${hSize}_bold:${cxText(heading.toUpperCase())},co_rgb:${hCol},c_fit,w_1040/fl_layer_apply,${grav},y_-90`
+    ? `/l_text:Arial_${hSize}_bold:${cxText(heading)},co_rgb:${hCol},c_fit,w_1040/fl_layer_apply,${grav},y_-90`
     : '';
   const body =
     `/l_text:Arial_${mSize}:${cxText(message)},co_rgb:${mCol},c_fit,w_980` +
