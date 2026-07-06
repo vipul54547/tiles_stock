@@ -45,6 +45,7 @@ import 'screens/admin/manage_design_dna_screen.dart';
 import 'screens/stockist/my_dna_words_screen.dart';
 import 'screens/admin/manage_sizes_screen.dart';
 import 'screens/admin/manage_banners_screen.dart';
+import 'screens/admin/manage_banner_videos_screen.dart';
 import 'screens/admin/manage_stockists_screen.dart';
 import 'screens/admin/manage_end_users_screen.dart';
 import 'screens/admin/manage_admins_screen.dart';
@@ -219,6 +220,7 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/stockist/dna-words', builder: (_, __) => const MyDnaWordsScreen()),
     GoRoute(path: '/admin/sizes', builder: (_, __) => const ManageSizesScreen()),
     GoRoute(path: '/admin/banners', builder: (_, __) => const ManageBannersScreen()),
+    GoRoute(path: '/admin/banner-video', builder: (_, __) => const ManageBannerVideosScreen()),
     GoRoute(path: '/admin/stockists', builder: (_, __) => const ManageStockistsScreen()),
     GoRoute(path: '/admin/end-users', builder: (_, __) => const ManageEndUsersScreen()),
     GoRoute(path: '/admin/registration-requests', builder: (_, __) => const ManageRegistrationRequestsScreen()),

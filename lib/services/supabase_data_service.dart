@@ -1669,6 +1669,76 @@ class SupabaseDataService {
         params: {'p_seq': sequentialId, 'p_show': show});
   }
 
+  // ─── Banner Video (admin) ───────────────────────────────────────────────
+  // A "▶ Watch" video system shown in the top banner of a stockist's /s/ page.
+  // Admin manages GLOBAL learning videos + sets each stockist's 4-step display
+  // mode (off | admin | mixed | stockist). (project_tutorial_videos_plan)
+
+  /// Admin: the global (admin/owner) learning videos, INCLUDING hidden ones so
+  /// the admin can toggle them. Excludes soft-deleted.
+  Future<List<Map<String, dynamic>>> adminListVideos() async {
+    final res = await supabase.rpc('admin_list_videos');
+    return ((res as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  /// Admin: every active stockist with its current video mode + own-video
+  /// counts ({seq, name, city, mode, active_count, lib_count}).
+  Future<List<Map<String, dynamic>>> adminStockistVideoModes() async {
+    final res = await supabase.rpc('admin_stockist_video_modes');
+    return ((res as List?) ?? const [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  /// Admin: create ([id] null) or edit a video. [stockistId] null = global.
+  /// The server derives the YouTube id from any link form; returns the row id.
+  Future<String> adminSaveVideo({
+    String? id,
+    required String kind, // 'tutorial' | 'collection'
+    required String title,
+    required String subtitle,
+    required String url,
+    int sortOrder = 0,
+    bool isActive = true,
+    String? stockistId,
+  }) async {
+    final res = await supabase.rpc('admin_save_video', params: {
+      'p_id': id,
+      'p_kind': kind,
+      'p_title': title,
+      'p_subtitle': subtitle,
+      'p_url': url,
+      'p_sort_order': sortOrder,
+      'p_is_active': isActive,
+      'p_stockist_id': stockistId,
+    });
+    return res as String;
+  }
+
+  /// Admin: show/hide a video (server enforces the 5-active cap for stockist
+  /// rows; global rows are uncapped).
+  Future<void> adminSetVideoActive(String id, bool active) async {
+    await supabase
+        .rpc('admin_set_video_active', params: {'p_id': id, 'p_active': active});
+  }
+
+  /// Admin: soft-delete a video (24h grace) / restore it within the grace.
+  Future<void> adminDeleteVideo(String id) async {
+    await supabase.rpc('admin_delete_video', params: {'p_id': id});
+  }
+
+  Future<void> adminRestoreVideo(String id) async {
+    await supabase.rpc('admin_restore_video', params: {'p_id': id});
+  }
+
+  /// Admin: set a stockist's 4-step display mode.
+  Future<void> adminSetStockistVideoMode(String sequentialId, String mode) async {
+    await supabase.rpc('admin_set_stockist_video_mode',
+        params: {'p_seq': sequentialId, 'p_mode': mode});
+  }
+
   /// Admin: mint a fresh masked public code (retires the old one to history).
   Future<String?> regeneratePublicCode(String sequentialId) async {
     final res = await supabase
