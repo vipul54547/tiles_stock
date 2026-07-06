@@ -1122,6 +1122,12 @@ class _State extends State<PublicCatalogScreen> {
       tdShow: _banner['td_show'] == true,
       heading: (_banner['banner_heading'] ?? '').toString(),
       message: (_banner['banner_text'] ?? '').toString(),
+      headingSize: (_banner['banner_heading_size'] ?? '').toString(),
+      headingColor: (_banner['banner_heading_color'] ?? '').toString(),
+      msgSize: (_banner['banner_msg_size'] ?? '').toString(),
+      msgColor: (_banner['banner_msg_color'] ?? '').toString(),
+      textAlign: (_banner['banner_text_align'] ?? '').toString(),
+      textValign: (_banner['banner_text_valign'] ?? '').toString(),
       name: (_banner['name'] ?? _stockist['name'] ?? '').toString(),
       brandColor: _brand,
     );
