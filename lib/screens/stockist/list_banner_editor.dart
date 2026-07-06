@@ -64,6 +64,12 @@ class _State extends State<ListBannerEditorScreen> {
   // strip / gradient match exactly what buyers see on /s/ (true WYSIWYG).
   String _stkName = '';
   Color _brandColor = _navy;
+  // Message text styles: size ('s'|'m'|'l'), colour (hex, no '#'), align.
+  String _headingSize = '';
+  String _headingColor = '';
+  String _msgSize = '';
+  String _msgColor = '';
+  String _textAlign = '';
 
   // Message mode: a non-empty message turns the Library banner into a text
   // banner (text-friendly backgrounds + logo locked to the left column).
@@ -106,6 +112,11 @@ class _State extends State<ListBannerEditorScreen> {
     _tdPos = (c.tdPos.isEmpty || c.tdPos == 'none') ? 'top-right' : c.tdPos;
     _heading.text = c.bannerHeading;
     _message.text = c.bannerText;
+    _headingSize = c.bannerHeadingSize;
+    _headingColor = c.bannerHeadingColor;
+    _msgSize = c.bannerMsgSize;
+    _msgColor = c.bannerMsgColor;
+    _textAlign = c.bannerTextAlign;
     _loadStockistMeta();
   }
 
@@ -152,6 +163,11 @@ class _State extends State<ListBannerEditorScreen> {
       tdPos: none ? '' : _tdPos,
       heading: (!none && _source == 'library') ? _heading.text.trim() : '',
       message: (!none && _source == 'library') ? _message.text.trim() : '',
+      headingSize: (!none && _source == 'library') ? _headingSize : '',
+      headingColor: (!none && _source == 'library') ? _headingColor : '',
+      msgSize: (!none && _source == 'library') ? _msgSize : '',
+      msgColor: (!none && _source == 'library') ? _msgColor : '',
+      textAlign: (!none && _source == 'library') ? _textAlign : '',
     );
     _changed = true;
   }
@@ -492,6 +508,11 @@ class _State extends State<ListBannerEditorScreen> {
         tdShow: _tdShow,
         heading: _heading.text,
         message: _message.text,
+        headingSize: _headingSize,
+        headingColor: _headingColor,
+        msgSize: _msgSize,
+        msgColor: _msgColor,
+        textAlign: _textAlign,
         name: _stkName,
         brandColor: _brandColor,
         bgPlaceholder: placeholder,
@@ -526,7 +547,7 @@ class _State extends State<ListBannerEditorScreen> {
             'Message — e.g. 25% matt selection compulsory to place an order',
             _messageMax,
             maxLines: 3),
-        if (_msgMode)
+        if (_msgMode) ...[
           const Padding(
             padding: EdgeInsets.only(top: 6),
             child: Text(
@@ -537,8 +558,163 @@ class _State extends State<ListBannerEditorScreen> {
                     color: _navy,
                     fontWeight: FontWeight.w600)),
           ),
+          const SizedBox(height: 12),
+          const Text('Text style',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          _styleLine('Heading', _headingSize,
+              (v) => setState(() => _headingSize = v), _headingColor,
+              (v) => setState(() => _headingColor = v)),
+          const SizedBox(height: 10),
+          _styleLine('Message', _msgSize, (v) => setState(() => _msgSize = v),
+              _msgColor, (v) => setState(() => _msgColor = v)),
+          const SizedBox(height: 10),
+          _alignLine(),
+        ],
       ],
     );
+  }
+
+  // One "Heading"/"Message" styling line: an S/M/L size selector + a colour
+  // swatch row. Both save live (BannerView reflects it instantly = WYSIWYG).
+  Widget _styleLine(String label, String size, ValueChanged<String> onSize,
+      String color, ValueChanged<String> onColor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: TextStyle(
+                fontSize: 11.5,
+                color: Colors.grey.shade700,
+                fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            _sizeSeg(size, (v) {
+              onSize(v);
+              _apply();
+            }),
+            const SizedBox(width: 12),
+            Expanded(
+                child: _swatches(color, (v) {
+              onColor(v);
+              _apply();
+            })),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _sizeSeg(String value, ValueChanged<String> onChanged) => SizedBox(
+        height: 32,
+        child: SegmentedButton<String>(
+          showSelectedIcon: false,
+          style: ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            padding: WidgetStateProperty.all(
+                const EdgeInsets.symmetric(horizontal: 8)),
+            textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 11)),
+          ),
+          segments: const [
+            ButtonSegment(value: 's', label: Text('S')),
+            ButtonSegment(value: 'm', label: Text('M')),
+            ButtonSegment(value: 'l', label: Text('L')),
+          ],
+          selected: {value.isEmpty ? 'm' : value},
+          onSelectionChanged: (s) => onChanged(s.first),
+        ),
+      );
+
+  // Curated text colours (safe on the WhatsApp card too): white, black, brass,
+  // the stockist's brand colour, and a neutral dark grey.
+  Widget _swatches(String value, ValueChanged<String> onChanged) {
+    final palette = <String>{
+      'FFFFFF',
+      '000000',
+      'C1974A',
+      _hexOf(_brandColor),
+      '3A3A3A',
+    }.toList();
+    final sel = (value.isEmpty ? 'FFFFFF' : value).toUpperCase();
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: palette.map((hex) {
+        final c = _parseHex(hex) ?? Colors.white;
+        final on = hex.toUpperCase() == sel;
+        return GestureDetector(
+          onTap: () => onChanged(hex),
+          child: Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: c,
+              shape: BoxShape.circle,
+              border: Border.all(
+                  color: on ? _navy : Colors.grey.shade400,
+                  width: on ? 2.5 : 1),
+            ),
+            child: on
+                ? Icon(Icons.check, size: 15, color: _contrast(c))
+                : null,
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _alignLine() {
+    final eff = _textAlign.isNotEmpty
+        ? _textAlign
+        : (_logoUrl.isNotEmpty ? 'left' : 'center');
+    return Row(
+      children: [
+        SizedBox(
+            width: 70,
+            child: Text('Align',
+                style: TextStyle(
+                    fontSize: 11.5,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w600))),
+        SizedBox(
+          height: 32,
+          child: SegmentedButton<String>(
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 11)),
+            ),
+            segments: const [
+              ButtonSegment(
+                  value: 'left',
+                  label: Text('Left'),
+                  icon: Icon(Icons.format_align_left, size: 15)),
+              ButtonSegment(
+                  value: 'center',
+                  label: Text('Center'),
+                  icon: Icon(Icons.format_align_center, size: 15)),
+            ],
+            selected: {eff},
+            onSelectionChanged: (s) {
+              setState(() => _textAlign = s.first);
+              _apply();
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _hexOf(Color c) =>
+      (c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase();
+
+  static Color _contrast(Color c) {
+    final argb = c.toARGB32();
+    final lum = 0.299 * ((argb >> 16) & 0xFF) +
+        0.587 * ((argb >> 8) & 0xFF) +
+        0.114 * (argb & 0xFF);
+    return lum > 150 ? Colors.black : Colors.white;
   }
 
   Widget _msgField(TextEditingController c, String hint, int max,

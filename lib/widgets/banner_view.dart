@@ -26,6 +26,14 @@ class BannerView extends StatelessWidget {
   final String heading;
   final String message;
 
+  /// Message text styling. size = 's'|'m'|'l' ('' = medium); colour = hex
+  /// without '#' ('' = white); align = 'left'|'center' ('' = auto).
+  final String headingSize;
+  final String headingColor;
+  final String msgSize;
+  final String msgColor;
+  final String textAlign;
+
   /// Stockist/brand name — used for the big-name overlay and the welcome strip.
   final String name;
 
@@ -51,10 +59,24 @@ class BannerView extends StatelessWidget {
     required this.heading,
     required this.message,
     required this.name,
+    this.headingSize = '',
+    this.headingColor = '',
+    this.msgSize = '',
+    this.msgColor = '',
+    this.textAlign = '',
     this.brandColor = const Color(0xFF1B4F72),
     this.showWelcomeStrip = true,
     this.bgPlaceholder,
   });
+
+  // Hex ('RRGGBB' or '#RRGGBB') → Color; falls back to [fallback] when unset.
+  static Color _hex(String s, Color fallback) {
+    var h = s.trim().replaceAll('#', '');
+    if (h.isEmpty) return fallback;
+    if (h.length == 6) h = 'FF$h';
+    final v = h.length == 8 ? int.tryParse(h, radix: 16) : null;
+    return v == null ? fallback : Color(v);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -81,9 +103,40 @@ class BannerView extends StatelessWidget {
         companyPosEff != 'none' &&
         (!hasMsg || companyLogo.isNotEmpty);
 
+    // Text style: colour (default white), and alignment — explicit choice wins,
+    // else auto (left beside a logo, centred without).
+    final headingCol = _hex(headingColor, Colors.white);
+    final msgCol = _hex(msgColor, Colors.white);
+    final align = textAlign.isNotEmpty
+        ? textAlign
+        : (companyLogo.isNotEmpty ? 'left' : 'center');
+    final alignLeft = align == 'left';
+
     return LayoutBuilder(
       builder: (context, c) {
         final h = (c.maxWidth / 2.5).clamp(0.0, 200.0);
+        // S/M/L → font size (proportional to banner height, with sane clamps).
+        double headingFs() {
+          switch (headingSize) {
+            case 's':
+              return (h * 0.085).clamp(11.0, 16.0);
+            case 'l':
+              return (h * 0.14).clamp(18.0, 26.0);
+            default:
+              return (h * 0.11).clamp(14.0, 20.0);
+          }
+        }
+
+        double msgFs() {
+          switch (msgSize) {
+            case 's':
+              return (h * 0.058).clamp(9.0, 12.0);
+            case 'l':
+              return (h * 0.092).clamp(12.0, 18.0);
+            default:
+              return (h * 0.072).clamp(10.0, 14.0);
+          }
+        }
         return SizedBox(
           width: double.infinity,
           height: h,
@@ -117,7 +170,7 @@ class BannerView extends StatelessWidget {
                   // higher and read cleaner alongside the left logo.
                   alignment: companyLogo.isNotEmpty
                       ? const Alignment(1.0, -0.12)
-                      : const Alignment(0.0, -0.12),
+                      : Alignment(alignLeft ? -1.0 : 0.0, -0.12),
                   child: Padding(
                     padding: EdgeInsets.only(
                         left: companyLogo.isNotEmpty
@@ -126,7 +179,7 @@ class BannerView extends StatelessWidget {
                         right: c.maxWidth * 0.06),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: companyLogo.isNotEmpty
+                      crossAxisAlignment: alignLeft
                           ? CrossAxisAlignment.start
                           : CrossAxisAlignment.center,
                       children: [
@@ -134,12 +187,17 @@ class BannerView extends StatelessWidget {
                           Text(msgHeading.toUpperCase(),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
+                              textAlign:
+                                  alignLeft ? TextAlign.left : TextAlign.center,
                               style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: (h * 0.11).clamp(14.0, 20.0),
+                                  color: headingCol,
+                                  fontSize: headingFs(),
                                   fontWeight: FontWeight.w800,
                                   height: 1.15,
-                                  letterSpacing: 1.0)),
+                                  letterSpacing: 1.0,
+                                  shadows: const [
+                                    Shadow(blurRadius: 4, color: Colors.black87)
+                                  ])),
                           Container(
                               margin: const EdgeInsets.only(top: 3, bottom: 5),
                               height: 2,
@@ -149,12 +207,11 @@ class BannerView extends StatelessWidget {
                         Text(msg,
                             maxLines: 3,
                             overflow: TextOverflow.ellipsis,
-                            textAlign: companyLogo.isNotEmpty
-                                ? TextAlign.left
-                                : TextAlign.center,
+                            textAlign:
+                                alignLeft ? TextAlign.left : TextAlign.center,
                             style: TextStyle(
-                                color: Colors.white,
-                                fontSize: (h * 0.072).clamp(10.0, 14.0),
+                                color: msgCol,
+                                fontSize: msgFs(),
                                 fontWeight: FontWeight.w500,
                                 height: 1.25,
                                 shadows: const [

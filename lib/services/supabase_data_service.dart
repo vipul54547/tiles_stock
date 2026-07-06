@@ -566,6 +566,11 @@ class SupabaseDataService {
     String tdPos = 'top-right',
     String heading = '',
     String message = '',
+    String headingSize = '',
+    String headingColor = '',
+    String msgSize = '',
+    String msgColor = '',
+    String textAlign = '',
   }) async {
     await supabase.rpc('set_list_banner_config', params: {
       'p_catalog_id': catalogId,
@@ -576,6 +581,11 @@ class SupabaseDataService {
       'p_td_pos': tdPos,
       'p_heading': heading,
       'p_message': message,
+      'p_heading_size': headingSize,
+      'p_heading_color': headingColor,
+      'p_msg_size': msgSize,
+      'p_msg_color': msgColor,
+      'p_text_align': textAlign,
     });
   }
 

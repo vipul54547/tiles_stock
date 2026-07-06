@@ -20,6 +20,14 @@ class StockCatalog {
   /// overlaid on a text-friendly background. Empty = plain banner.
   final String bannerHeading;
   final String bannerText;
+  /// Message text styling (Library "text" mode). Size = 's'|'m'|'l' ('' = medium
+  /// default); colour = hex without '#' ('' = white); align = 'left'|'center'
+  /// ('' = auto: left with a logo, centred without).
+  final String bannerHeadingSize;
+  final String bannerHeadingColor;
+  final String bannerMsgSize;
+  final String bannerMsgColor;
+  final String bannerTextAlign;
   final String visibility; // 'public' | 'private'
   final bool showInMarketplace; // public catalog: appears in the app marketplace
   final String shareToken; // the catalog's own /s/<token> link
@@ -68,6 +76,11 @@ class StockCatalog {
     this.tdPos = 'footer',
     this.bannerHeading = '',
     this.bannerText = '',
+    this.bannerHeadingSize = '',
+    this.bannerHeadingColor = '',
+    this.bannerMsgSize = '',
+    this.bannerMsgColor = '',
+    this.bannerTextAlign = '',
     required this.visibility,
     required this.showInMarketplace,
     required this.shareToken,
@@ -111,6 +124,11 @@ class StockCatalog {
         tdPos: (j['td_pos'] as String?) ?? 'footer',
         bannerHeading: (j['banner_heading'] as String?) ?? '',
         bannerText: (j['banner_text'] as String?) ?? '',
+        bannerHeadingSize: (j['banner_heading_size'] as String?) ?? '',
+        bannerHeadingColor: (j['banner_heading_color'] as String?) ?? '',
+        bannerMsgSize: (j['banner_msg_size'] as String?) ?? '',
+        bannerMsgColor: (j['banner_msg_color'] as String?) ?? '',
+        bannerTextAlign: (j['banner_text_align'] as String?) ?? '',
         visibility: (j['visibility'] as String?) ?? 'public',
         showInMarketplace: j['show_in_marketplace'] as bool? ?? true,
         shareToken: (j['share_token'] as String?) ?? '',

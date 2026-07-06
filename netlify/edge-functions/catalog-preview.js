@@ -41,18 +41,29 @@ function cxText(s) {
 // A message banner baked for the share card: the stockist's text-background with
 // their heading + message overlaid (darkened for legibility). Returns null if the
 // background isn't a Cloudinary URL, so the caller falls back to the raw image.
-function messageCard(bgUrl, heading, message) {
+function messageCard(bgUrl, heading, message, style) {
   const marker = '/image/upload/';
   const i = bgUrl.indexOf(marker);
   if (i < 0) return null;
   const at = i + marker.length;
-  // Title bigger than the message body (matches the app / /s/ render).
+  const st = style || {};
+  // S/M/L → font size; heading kept bigger than the body (matches the app).
+  const hSize = { s: 56, m: 70, l: 88 }[st.headingSize] || 70;
+  const mSize = { s: 36, m: 44, l: 56 }[st.msgSize] || 44;
+  const hex = (v) => {
+    const h = String(v || '').replace('#', '').toLowerCase();
+    return /^[0-9a-f]{6}$/.test(h) ? h : 'ffffff';
+  };
+  const hCol = hex(st.headingColor);
+  const mCol = hex(st.msgColor);
+  // Left vs centred (the app auto-lefts beside a logo; here there is no logo).
+  const grav = st.align === 'left' ? 'g_west,x_80' : 'g_center';
   const head = heading
-    ? `/l_text:Arial_70_bold:${cxText(heading.toUpperCase())},co_rgb:ffffff,c_fit,w_1040/fl_layer_apply,g_center,y_-90`
+    ? `/l_text:Arial_${hSize}_bold:${cxText(heading.toUpperCase())},co_rgb:${hCol},c_fit,w_1040/fl_layer_apply,${grav},y_-90`
     : '';
   const body =
-    `/l_text:Arial_44:${cxText(message)},co_rgb:ffffff,c_fit,w_980` +
-    `/fl_layer_apply,g_center,y_${heading ? '70' : '0'}`;
+    `/l_text:Arial_${mSize}:${cxText(message)},co_rgb:${mCol},c_fit,w_980` +
+    `/fl_layer_apply,${grav},y_${heading ? '70' : '0'}`;
   const t = `c_fill,ar_5:2,w_1200,e_brightness:-45${head}${body}`;
   return bgUrl.slice(0, at) + t + '/' + bgUrl.slice(at);
 }
@@ -147,8 +158,19 @@ export default async (request, context) => {
   const logo = stockist.logo_url && String(stockist.logo_url).trim();
   // A message banner is baked (text over background); otherwise own banner → logo
   // → auto name-card. No TilesDesign in any branch.
+  const msgStyle = banner
+    ? {
+        headingSize: banner.banner_heading_size,
+        headingColor: banner.banner_heading_color,
+        msgSize: banner.banner_msg_size,
+        msgColor: banner.banner_msg_color,
+        align: banner.banner_text_align,
+      }
+    : {};
   const image =
-    (bannerText && ownBanner && messageCard(ownBanner, bannerHeading, bannerText)) ||
+    (bannerText &&
+      ownBanner &&
+      messageCard(ownBanner, bannerHeading, bannerText, msgStyle)) ||
     ownBanner ||
     logo ||
     nameCard(name, stockist.city && String(stockist.city).trim(), brandColorHex);
