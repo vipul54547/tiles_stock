@@ -57,6 +57,9 @@ class _State extends State<ListBannerEditorScreen> {
   static const int _messageMax = 90;
   bool _saving = false;
   bool _changed = false;
+  // Admin decides whether the TilesDesign mark shows at all; the stockist only
+  // picks WHERE. When off, the whole TD-position control is hidden.
+  bool _tdShow = false;
 
   // Message mode: a non-empty message turns the Library banner into a text
   // banner (text-friendly backgrounds + logo locked to the left column).
@@ -99,6 +102,12 @@ class _State extends State<ListBannerEditorScreen> {
     _tdPos = (c.tdPos.isEmpty || c.tdPos == 'none') ? 'top-right' : c.tdPos;
     _heading.text = c.bannerHeading;
     _message.text = c.bannerText;
+    _loadTdShow();
+  }
+
+  Future<void> _loadTdShow() async {
+    final v = await _data.getMyTdShow();
+    if (mounted) setState(() => _tdShow = v);
   }
 
   @override
@@ -112,15 +121,17 @@ class _State extends State<ListBannerEditorScreen> {
   // The actual save. Shared by the visible _apply (spinner) and the silent text
   // debounce (no spinner, so the keyboard never loses focus mid-typing).
   Future<void> _persist() async {
+    // 'none' = no banner at all: store the source but clear every visual field.
+    final none = _source == 'none';
     await _data.setListBannerConfig(
       widget.catalog.id,
       source: _source,
-      bgUrl: _bgUrl,
-      companyLogoUrl: _logoUrl,
-      companyPos: _companyPosForSave,
-      tdPos: _tdPos,
-      heading: _source == 'library' ? _heading.text.trim() : '',
-      message: _source == 'library' ? _message.text.trim() : '',
+      bgUrl: none ? '' : _bgUrl,
+      companyLogoUrl: none ? '' : _logoUrl,
+      companyPos: none ? 'none' : _companyPosForSave,
+      tdPos: none ? '' : _tdPos,
+      heading: (!none && _source == 'library') ? _heading.text.trim() : '',
+      message: (!none && _source == 'library') ? _message.text.trim() : '',
     );
     _changed = true;
   }
@@ -272,9 +283,12 @@ class _State extends State<ListBannerEditorScreen> {
               ButtonSegment(value: 'pool', label: Text('Pool')),
               ButtonSegment(value: 'library', label: Text('Library')),
               ButtonSegment(value: 'upload', label: Text('Upload')),
+              ButtonSegment(value: 'none', label: Text('None')),
             ],
             selected: {
-              ['pool', 'library', 'upload'].contains(_source) ? _source : 'pool'
+              ['pool', 'library', 'upload', 'none'].contains(_source)
+                  ? _source
+                  : 'pool'
             },
             onSelectionChanged: _saving
                 ? null
@@ -290,12 +304,14 @@ class _State extends State<ListBannerEditorScreen> {
         if (_source == 'pool') ...[
           Text('Uses the shared daily-rotating background pool.',
               style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-          const SizedBox(height: 10),
-          _posDropdown('TilesDesign position', _tdPos, _tdPosKeys, (v) {
-            setState(() => _tdPos = v);
-            _apply();
-          }),
-          _tdHint(),
+          if (_tdShow) ...[
+            const SizedBox(height: 10),
+            _posDropdown('TilesDesign position', _tdPos, _tdPosKeys, (v) {
+              setState(() => _tdPos = v);
+              _apply();
+            }),
+            _tdHint(),
+          ],
         ] else if (_source == 'library') ...[
           Wrap(
             spacing: 8,
@@ -351,12 +367,14 @@ class _State extends State<ListBannerEditorScreen> {
               setState(() => _companyPos = v);
               _apply();
             }),
-          const SizedBox(height: 6),
-          _posDropdown('TilesDesign position', _tdPos, _tdPosKeys, (v) {
-            setState(() => _tdPos = v);
-            _apply();
-          }),
-          _tdHint(),
+          if (_tdShow) ...[
+            const SizedBox(height: 6),
+            _posDropdown('TilesDesign position', _tdPos, _tdPosKeys, (v) {
+              setState(() => _tdPos = v);
+              _apply();
+            }),
+            _tdHint(),
+          ],
           if (_logoUrl.isEmpty && !_msgMode)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -370,7 +388,7 @@ class _State extends State<ListBannerEditorScreen> {
               child: Text('No logo → your message shows centered.',
                   style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
             ),
-        ] else ...[
+        ] else if (_source == 'upload') ...[
           OutlinedButton.icon(
             onPressed: _saving
                 ? null
@@ -385,12 +403,18 @@ class _State extends State<ListBannerEditorScreen> {
             label: Text(_bgUrl.isEmpty ? 'Upload full banner' : 'Replace banner'),
           ),
           _bannerSizeHint(),
-          const SizedBox(height: 6),
-          _posDropdown('TilesDesign position', _tdPos, _tdPosKeys, (v) {
-            setState(() => _tdPos = v);
-            _apply();
-          }),
-          _tdHint(),
+          if (_tdShow) ...[
+            const SizedBox(height: 6),
+            _posDropdown('TilesDesign position', _tdPos, _tdPosKeys, (v) {
+              setState(() => _tdPos = v);
+              _apply();
+            }),
+            _tdHint(),
+          ],
+        ] else ...[
+          Text('This list has no banner. The share page starts straight at the '
+              'tiles — no header image, logo, or message.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
         ],
       ],
     );
@@ -400,6 +424,23 @@ class _State extends State<ListBannerEditorScreen> {
   // their chosen positions. The real /s/ page uses your company name for the
   // name text; here it shows a placeholder.
   Widget _bannerPreview() {
+    if (_source == 'none') {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: AspectRatio(
+          aspectRatio: 2.5,
+          child: Container(
+            color: Colors.grey.shade100,
+            alignment: Alignment.center,
+            child: Text('No banner',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                    fontWeight: FontWeight.w500)),
+          ),
+        ),
+      );
+    }
     final companyPos = _msgMode
         ? _companyPosForSave
         : effectiveCompanyPos(_companyPos, hasLogo: _logoUrl.isNotEmpty);
@@ -441,9 +482,10 @@ class _State extends State<ListBannerEditorScreen> {
                 ),
               ),
               Align(
+                // Match /s/: nudge the block slightly above centre.
                 alignment: _logoUrl.isNotEmpty
-                    ? Alignment.centerRight
-                    : Alignment.center,
+                    ? const Alignment(1.0, -0.12)
+                    : const Alignment(0.0, -0.12),
                 child: Padding(
                   padding: EdgeInsets.only(
                       left: _logoUrl.isNotEmpty ? 74 : 14,
@@ -456,13 +498,22 @@ class _State extends State<ListBannerEditorScreen> {
                         ? CrossAxisAlignment.start
                         : CrossAxisAlignment.center,
                     children: [
-                      if (_heading.text.trim().isNotEmpty)
+                      if (_heading.text.trim().isNotEmpty) ...[
                         Text(_heading.text.trim().toUpperCase(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1)),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                height: 1.15,
+                                letterSpacing: 0.8)),
+                        Container(
+                            margin: const EdgeInsets.only(top: 2, bottom: 3),
+                            height: 2,
+                            width: 30,
+                            color: const Color(0xFFC1974A)),
+                      ],
                       Text(_message.text.trim(),
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
@@ -471,9 +522,9 @@ class _State extends State<ListBannerEditorScreen> {
                               : TextAlign.center,
                           style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              height: 1.2)),
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w500,
+                              height: 1.25)),
                     ],
                   ),
                 ),
@@ -502,7 +553,7 @@ class _State extends State<ListBannerEditorScreen> {
                               fontWeight: FontWeight.bold)),
                 ),
               ),
-            if (_tdPos != 'none')
+            if (_tdShow && _tdPos != 'none')
               Align(
                 alignment: _alignFor(_tdPos),
                 child: Container(

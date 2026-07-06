@@ -1138,6 +1138,8 @@ class _State extends State<PublicCatalogScreen> {
 
   Widget _bannerArea() {
     final source = (_banner['source'] ?? 'pool').toString();
+    // 'none' = the stockist removed the banner: the catalogue starts at the tiles.
+    if (source == 'none') return const SizedBox.shrink();
     final bg = (_banner['bg_url'] ?? _banner['image_url'] ?? '').toString();
     final companyLogo = (_banner['company_logo_url'] ?? '').toString();
     // Big NAME (no logo) never uses the middle row — coerce legacy values down.
@@ -1196,9 +1198,11 @@ class _State extends State<PublicCatalogScreen> {
                 ),
               if (hasMsg)
                 Align(
+                  // Nudged slightly above centre so the heading + rule sit
+                  // higher and read cleaner alongside the left logo.
                   alignment: companyLogo.isNotEmpty
-                      ? Alignment.centerRight
-                      : Alignment.center,
+                      ? const Alignment(1.0, -0.12)
+                      : const Alignment(0.0, -0.12),
                   child: Padding(
                     padding: EdgeInsets.only(
                         left: companyLogo.isNotEmpty
@@ -1213,13 +1217,14 @@ class _State extends State<PublicCatalogScreen> {
                       children: [
                         if (msgHeading.isNotEmpty) ...[
                           Text(msgHeading.toUpperCase(),
-                              maxLines: 1,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                   color: Colors.white,
-                                  fontSize: (h * 0.072).clamp(8.0, 13.0),
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 1.2)),
+                                  fontSize: (h * 0.11).clamp(14.0, 20.0),
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.15,
+                                  letterSpacing: 1.0)),
                           Container(
                               margin: const EdgeInsets.only(top: 3, bottom: 5),
                               height: 2,
@@ -1234,9 +1239,9 @@ class _State extends State<PublicCatalogScreen> {
                                 : TextAlign.center,
                             style: TextStyle(
                                 color: Colors.white,
-                                fontSize: (h * 0.10).clamp(11.0, 16.0),
-                                fontWeight: FontWeight.w600,
-                                height: 1.2,
+                                fontSize: (h * 0.072).clamp(10.0, 14.0),
+                                fontWeight: FontWeight.w500,
+                                height: 1.25,
                                 shadows: const [
                                   Shadow(blurRadius: 5, color: Colors.black87)
                                 ])),

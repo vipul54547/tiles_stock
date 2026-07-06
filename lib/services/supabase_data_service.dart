@@ -437,6 +437,25 @@ class SupabaseDataService {
     }
   }
 
+  /// Whether the admin has enabled the TilesDesign mark for the current
+  /// stockist (`stockists.td_show`). Gates the banner editor's TD-position UI:
+  /// stockists only choose WHERE the mark sits, and only once admin turns it on.
+  Future<bool> getMyTdShow() async {
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return false;
+      final row = await supabase
+          .from('stockists')
+          .select('td_show')
+          .eq('user_id', uid)
+          .maybeSingle();
+      return (row?['td_show'] as bool?) ?? false;
+    } catch (e) {
+      debugPrint('getMyTdShow failed: $e');
+      return false;
+    }
+  }
+
   /// Self-service profile save (SECURITY DEFINER RPC scoped to auth.uid()).
   /// State/district slugs are computed server-side for SEO. Pass '' to clear
   /// logo/tagline; blank name/brand_color are ignored server-side.

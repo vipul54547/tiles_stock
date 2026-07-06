@@ -46,12 +46,13 @@ function messageCard(bgUrl, heading, message) {
   const i = bgUrl.indexOf(marker);
   if (i < 0) return null;
   const at = i + marker.length;
+  // Title bigger than the message body (matches the app / /s/ render).
   const head = heading
-    ? `/l_text:Arial_46_bold:${cxText(heading.toUpperCase())},co_rgb:ffffff,c_fit,w_1000/fl_layer_apply,g_center,y_-120`
+    ? `/l_text:Arial_70_bold:${cxText(heading.toUpperCase())},co_rgb:ffffff,c_fit,w_1040/fl_layer_apply,g_center,y_-90`
     : '';
   const body =
-    `/l_text:Arial_60_bold:${cxText(message)},co_rgb:ffffff,c_fit,w_980` +
-    `/fl_layer_apply,g_center,y_${heading ? '50' : '0'}`;
+    `/l_text:Arial_44:${cxText(message)},co_rgb:ffffff,c_fit,w_980` +
+    `/fl_layer_apply,g_center,y_${heading ? '70' : '0'}`;
   const t = `c_fill,ar_5:2,w_1200,e_brightness:-45${head}${body}`;
   return bgUrl.slice(0, at) + t + '/' + bgUrl.slice(at);
 }
