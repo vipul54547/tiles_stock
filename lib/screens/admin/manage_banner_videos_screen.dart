@@ -6,36 +6,61 @@ import '../../services/supabase_data_service.dart';
 /// (off | admin | mixed | stockist). Videos are YouTube-only; the server pulls
 /// the video id from any link form and auto-derives the thumbnail.
 /// (project_tutorial_videos_plan — Banner Video, step 2)
-class ManageBannerVideosScreen extends StatelessWidget {
+class ManageBannerVideosScreen extends StatefulWidget {
   const ManageBannerVideosScreen({super.key});
+  @override
+  State<ManageBannerVideosScreen> createState() =>
+      _ManageBannerVideosScreenState();
+}
+
+class _ManageBannerVideosScreenState extends State<ManageBannerVideosScreen> {
+  // Lets the outer Scaffold's FAB trigger the Videos tab's add flow — keeping
+  // the FAB on the real Scaffold so it clears the system navigation bar.
+  final _videosKey = GlobalKey<_VideosTabState>();
 
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 2,
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF5F5F5),
-        appBar: AppBar(
-          title: const Text('Banner Video'),
-          bottom: const TabBar(
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            indicatorColor: Colors.white,
-            indicatorWeight: 3,
-            labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-            tabs: [
-              Tab(text: 'Learning videos'),
-              Tab(text: 'Stockist modes'),
+      child: Builder(builder: (context) {
+        final tabs = DefaultTabController.of(context);
+        return Scaffold(
+          backgroundColor: const Color(0xFFF5F5F5),
+          appBar: AppBar(
+            title: const Text('Banner Video'),
+            bottom: const TabBar(
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white70,
+              indicatorColor: Colors.white,
+              indicatorWeight: 3,
+              labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              tabs: [
+                Tab(text: 'Learning videos'),
+                Tab(text: 'Stockist modes'),
+              ],
+            ),
+          ),
+          // Only the Learning-videos tab adds videos; hide the FAB elsewhere.
+          floatingActionButton: AnimatedBuilder(
+            animation: tabs,
+            builder: (_, __) => tabs.index == 0
+                ? FloatingActionButton.extended(
+                    onPressed: () => _videosKey.currentState?.addVideo(),
+                    backgroundColor: _navy,
+                    foregroundColor: Colors.white,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add video'),
+                  )
+                : const SizedBox.shrink(),
+          ),
+          body: TabBarView(
+            children: [
+              _VideosTab(key: _videosKey),
+              const _ModesTab(),
             ],
           ),
-        ),
-        body: const TabBarView(
-          children: [
-            _VideosTab(),
-            _ModesTab(),
-          ],
-        ),
-      ),
+        );
+      }),
     );
   }
 }
@@ -54,7 +79,7 @@ const _navy = Color(0xFF1B4F72);
 
 // ─── Tab 1: global learning videos ─────────────────────────────────────────
 class _VideosTab extends StatefulWidget {
-  const _VideosTab();
+  const _VideosTab({super.key});
   @override
   State<_VideosTab> createState() => _VideosTabState();
 }
@@ -135,6 +160,9 @@ class _VideosTabState extends State<_VideosTab>
     }
   }
 
+  /// Called by the outer Scaffold's FAB.
+  void addVideo() => _edit();
+
   Future<void> _edit([Map<String, dynamic>? existing]) async {
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -154,16 +182,7 @@ class _VideosTabState extends State<_VideosTab>
   Widget build(BuildContext context) {
     super.build(context);
     final active = _videos.where((v) => v['is_active'] == true).length;
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _edit(),
-        backgroundColor: _navy,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Add video'),
-      ),
-      body: _loading
+    return _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _load,
@@ -201,8 +220,7 @@ class _VideosTabState extends State<_VideosTab>
                     ..._videos.map(_tile),
                 ],
               ),
-            ),
-    );
+            );
   }
 
   Widget _empty(String title, String subtitle) => Padding(
