@@ -1,14 +1,18 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
+import 'youtube_embed.dart';
 
 /// Opens a Banner Video in a closable in-app window OVER the catalogue — the
-/// dealer never leaves the site. Same on app (native webview) and web (iframe).
+/// dealer never leaves the site.
 ///
-/// Presented as a full-screen OPAQUE route (not a dialog barrier): on Flutter
-/// web the YouTube player is a platform-view `<iframe>`, and platform views
-/// rendered inside a translucent dialog/overlay paint blank. A solid route
-/// hosts the iframe reliably on both web and app.
+/// Presented as a full-screen OPAQUE route (not a dialog barrier). Playback
+/// differs by platform:
+///  • App (mobile): youtube_player_iframe over a native webview (works well).
+///  • Web: a plain YouTube `<iframe>` via HtmlElementView. On web the
+///    youtube_player_iframe player throws (whole route renders as the release
+///    gray error widget), so we never touch its controller there.
 ///
 /// [video] is one item from `public_list_videos` / `global_videos`:
 /// {youtube_id, video_url, title, kind, ...}.
@@ -31,27 +35,31 @@ class _VideoScreen extends StatefulWidget {
 }
 
 class _VideoScreenState extends State<_VideoScreen> {
-  late final YoutubePlayerController _controller;
+  YoutubePlayerController? _controller; // mobile only
+
+  String get _id => (widget.video['youtube_id'] ?? '').toString();
 
   @override
   void initState() {
     super.initState();
-    _controller = YoutubePlayerController.fromVideoId(
-      videoId: (widget.video['youtube_id'] ?? '').toString(),
-      autoPlay: true,
-      params: const YoutubePlayerParams(
-        showControls: true,
-        showFullscreenButton: false,
-        mute: false,
-        enableCaption: false,
-        strictRelatedVideos: true,
-      ),
-    );
+    if (!kIsWeb) {
+      _controller = YoutubePlayerController.fromVideoId(
+        videoId: _id,
+        autoPlay: true,
+        params: const YoutubePlayerParams(
+          showControls: true,
+          showFullscreenButton: false,
+          mute: false,
+          enableCaption: false,
+          strictRelatedVideos: true,
+        ),
+      );
+    }
   }
 
   @override
   void dispose() {
-    _controller.close();
+    _controller?.close();
     super.dispose();
   }
 
@@ -61,6 +69,16 @@ class _VideoScreenState extends State<_VideoScreen> {
     await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
+  Widget _player(double w) {
+    final Widget child = kIsWeb
+        ? AspectRatio(aspectRatio: 9 / 16, child: buildYoutubeEmbed(_id))
+        : YoutubePlayer(controller: _controller!, aspectRatio: 9 / 16);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(width: w, child: child),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -68,7 +86,6 @@ class _VideoScreenState extends State<_VideoScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            // 9:16 player, sized to fit the screen.
             Center(
               child: LayoutBuilder(
                 builder: (context, c) {
@@ -76,16 +93,7 @@ class _VideoScreenState extends State<_VideoScreen> {
                   final maxW = c.maxWidth * 0.98;
                   var w = maxH * 9 / 16;
                   if (w > maxW) w = maxW;
-                  return ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: SizedBox(
-                      width: w,
-                      child: YoutubePlayer(
-                        controller: _controller,
-                        aspectRatio: 9 / 16,
-                      ),
-                    ),
-                  );
+                  return _player(w);
                 },
               ),
             ),
