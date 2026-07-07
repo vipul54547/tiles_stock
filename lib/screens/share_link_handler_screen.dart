@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/choice_state.dart';
 import '../services/supabase_auth_service.dart';
 import '../services/supabase_data_service.dart';
+import '../utils/claimed_link_store.dart';
 import 'public_catalog_screen.dart';
 
 /// Entry point for a supplier's `/s/<token>` link.
@@ -60,6 +61,8 @@ class _State extends State<ShareLinkHandlerScreen> {
       final res = await SupabaseDataService().claimCatalog(widget.token);
       final name = (res['catalog_name'] ?? 'Supplier').toString();
       message = name;
+      // Remember this link so the clipboard nudge won't re-prompt for it.
+      await ClaimedLinkStore.addClaimed(widget.token);
     } catch (_) {
       // Already saved / invalid link — still drop them on My Suppliers quietly.
       message = null;

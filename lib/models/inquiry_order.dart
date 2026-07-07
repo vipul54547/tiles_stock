@@ -42,7 +42,9 @@ class InquiryOrder {
   final String city;
 
   final int lineCount;
-  final int totalBoxes;
+  final int totalBoxes;    // ordered
+  final int dispatchedBoxes;
+  final int remainingBoxes; // ordered − dispatched
 
   /// Designs in this order ({id, name}), for the hub's design filter/preview.
   final List<Map<String, dynamic>> designs;
@@ -73,6 +75,8 @@ class InquiryOrder {
     this.city = '',
     this.lineCount = 0,
     this.totalBoxes = 0,
+    this.dispatchedBoxes = 0,
+    this.remainingBoxes = 0,
     this.designs = const [],
     this.brands = const [],
   });
@@ -105,6 +109,8 @@ class InquiryOrder {
         city:         (j['city'] ?? '').toString(),
         lineCount:    (j['line_count'] as num?)?.toInt() ?? 0,
         totalBoxes:   (j['total_boxes'] as num?)?.toInt() ?? 0,
+        dispatchedBoxes: (j['dispatched_boxes'] as num?)?.toInt() ?? 0,
+        remainingBoxes:  (j['remaining_boxes'] as num?)?.toInt() ?? 0,
         designs:      (j['designs'] as List?)
                 ?.map((e) => Map<String, dynamic>.from(e as Map))
                 .toList() ??

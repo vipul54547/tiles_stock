@@ -24,7 +24,6 @@ import 'stock_lists_screen.dart';
 import 'stockist_profile_screen.dart';
 import 'stockist_my_videos_screen.dart';
 import '../../utils/tile_types.dart';
-import '../../utils/account_actions.dart';
 
 class StockistDashboardScreen extends StatefulWidget {
   const StockistDashboardScreen({super.key});
@@ -872,14 +871,6 @@ class _State extends State<StockistDashboardScreen> {
                   },
                 ),
                 const NotificationBell(),
-                IconButton(
-                  icon: const Icon(Icons.logout),
-                  onPressed: () async {
-                    await SupabaseAuthService().logout();
-                    if (!context.mounted) return;
-                    context.go('/login');
-                  },
-                ),
                 PopupMenuButton<String>(
                   tooltip: 'Account',
                   onSelected: (v) async {
@@ -890,17 +881,38 @@ class _State extends State<StockistDashboardScreen> {
                     } else if (v == 'videos') {
                       await Navigator.of(context).push(MaterialPageRoute(
                           builder: (_) => const StockistMyVideosScreen()));
-                    } else if (v == 'delete') {
-                      confirmDeleteAccount(context);
+                    } else if (v == 'logout') {
+                      await SupabaseAuthService().logout();
+                      if (!context.mounted) return;
+                      context.go('/login');
                     }
                   },
                   itemBuilder: (_) => const [
                     PopupMenuItem(
-                        value: 'profile', child: Text('Edit profile')),
+                        value: 'profile',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.person_outline),
+                          title: Text('Edit profile'),
+                        )),
                     PopupMenuItem(
-                        value: 'videos', child: Text('My Videos')),
+                        value: 'videos',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.play_circle_outline),
+                          title: Text('My Videos'),
+                        )),
+                    PopupMenuDivider(),
                     PopupMenuItem(
-                        value: 'delete', child: Text('Delete account')),
+                        value: 'logout',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.logout),
+                          title: Text('Logout'),
+                        )),
                   ],
                 ),
               ],

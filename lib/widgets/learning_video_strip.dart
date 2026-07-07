@@ -50,7 +50,7 @@ class _LearningVideoStripState extends State<LearningVideoStrip>
     super.initState();
     _glow = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 5),
+      duration: const Duration(seconds: 8),
     )..repeat();
     _cycle = AnimationController(
       vsync: this,
@@ -121,9 +121,19 @@ class _LearningVideoStripState extends State<LearningVideoStrip>
                 padding: const EdgeInsets.symmetric(horizontal: 14),
                 child: Row(
                   children: [
-                    const Icon(Icons.play_circle_fill_rounded,
-                        size: 22, color: _navy),
-                    const SizedBox(width: 10),
+                    // Prominent filled play button so the bar clearly reads as
+                    // "tap to watch".
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: const BoxDecoration(
+                        color: _navy,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.play_arrow_rounded,
+                          size: 22, color: Colors.white),
+                    ),
+                    const SizedBox(width: 11),
                     Expanded(child: _ticker(multi)),
                     if (multi) ...[
                       const SizedBox(width: 8),
@@ -218,14 +228,14 @@ class _GlowBorderPainter extends CustomPainter {
   final double t;
 
   static const _radius = 14.0;
-  // Gemini-ish 4-stop palette (blue → purple → pink → cyan), wrapped for a
-  // seamless sweep.
+  // Softer, lower-saturation 4-stop palette (muted blue → lavender → rose →
+  // teal), wrapped for a seamless sweep — a tasteful shimmer, not a neon ring.
   static const _colors = [
-    Color(0xFF4285F4), // blue
-    Color(0xFF9B72F8), // purple
-    Color(0xFFEA4C89), // pink
-    Color(0xFF00C6FB), // cyan
-    Color(0xFF4285F4), // wrap back to blue
+    Color(0xFF7FA8D9), // muted blue
+    Color(0xFFA98BD1), // lavender
+    Color(0xFFD99BB0), // dusty rose
+    Color(0xFF8CC5D6), // soft teal
+    Color(0xFF7FA8D9), // wrap back to blue
   ];
 
   @override
@@ -240,18 +250,18 @@ class _GlowBorderPainter extends CustomPainter {
       transform: GradientRotation(t * 2 * math.pi),
     ).createShader(rect);
 
-    // Soft glow underneath the crisp ring.
+    // Soft, restrained glow underneath the crisp ring.
     final glow = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
+      ..strokeWidth = 3.5
       ..shader = shader
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
     canvas.drawRRect(rrect, glow);
 
-    // Crisp animated border.
+    // Thin, gentle animated border.
     final border = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2
+      ..strokeWidth = 1.4
       ..shader = shader;
     canvas.drawRRect(rrect, border);
   }

@@ -7,6 +7,7 @@ import 'package:flutter/services.dart'
 import 'package:image_picker/image_picker.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../utils/account_actions.dart';
 import '../../utils/india_geo.dart';
 
 /// Self-service stockist profile — the public identity used on the share-card,
@@ -233,8 +234,51 @@ class _State extends State<StockistProfileScreen> {
                       minimumSize: const Size.fromHeight(48)),
                   child: Text(_busy ? 'Saving…' : 'Save profile'),
                 ),
+                const SizedBox(height: 32),
+                _dangerZone(),
               ],
             ),
+    );
+  }
+
+  // Danger zone — account deletion lives in the profile (not the toolbar).
+  Widget _dangerZone() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Danger zone',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red.shade700)),
+          const SizedBox(height: 4),
+          Text(
+            'Permanently delete your account and all your data (profile, stock, '
+            'lists, videos). This cannot be undone.',
+            style: TextStyle(fontSize: 12, color: Colors.red.shade700),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => confirmDeleteAccount(context),
+              icon: const Icon(Icons.delete_forever, size: 18),
+              label: const Text('Delete account'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red.shade700,
+                side: BorderSide(color: Colors.red.shade400),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

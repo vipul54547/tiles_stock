@@ -437,6 +437,50 @@ class SupabaseDataService {
     }
   }
 
+  /// The logged-in BUYER's own editable profile fields (RLS: read-own).
+  /// Returns null if not signed in as an end user.
+  Future<Map<String, dynamic>?> getMyEndUserProfile() async {
+    try {
+      final uid = supabase.auth.currentUser?.id;
+      if (uid == null) return null;
+      return await supabase
+          .from('end_users')
+          .select(
+              'company_name, contact_person, phone, country_code, city, gst_number, state, district, pincode')
+          .eq('user_id', uid)
+          .maybeSingle();
+    } catch (e, st) {
+      debugPrint('getMyEndUserProfile failed: $e\n$st');
+      return null;
+    }
+  }
+
+  /// Self-service BUYER profile save (SECURITY DEFINER RPC scoped to auth.uid()).
+  /// Company is never blanked; other fields may be cleared with ''.
+  Future<void> updateMyEndUserProfile({
+    required String company,
+    required String contact,
+    required String phone,
+    required String countryCode,
+    required String city,
+    required String gst,
+    String state = '',
+    String district = '',
+    String pincode = '',
+  }) async {
+    await supabase.rpc('end_user_update_profile', params: {
+      'p_company':      company,
+      'p_contact':      contact,
+      'p_phone':        phone,
+      'p_country_code': countryCode,
+      'p_city':         city,
+      'p_gst':          gst,
+      'p_state':        state,
+      'p_district':     district,
+      'p_pincode':      pincode,
+    });
+  }
+
   /// Whether the admin has enabled the TilesDesign mark for the current
   /// stockist (`stockists.td_show`). Gates the banner editor's TD-position UI:
   /// stockists only choose WHERE the mark sits, and only once admin turns it on.
@@ -2291,6 +2335,26 @@ class SupabaseDataService {
     }
   }
 
+  /// Buyer: push a finished order's leftover (ordered − dispatched) back into
+  /// their basket (my_choices) as a fresh selection, ready to send as a new
+  /// order. Returns how many leftover designs were added.
+  /// (project_order_remaining_model — Phase 3 re-order)
+  Future<int> reorderRemaining(String inquiryId) async {
+    final res = await supabase
+        .rpc('reorder_remaining', params: {'p_inquiry': inquiryId});
+    return (res as num?)?.toInt() ?? 0;
+  }
+
+  /// Buyer SENDS their basket to a supplier: freezes the order lines, marks it
+  /// sent (notifies the stockist), and clears those designs out of My Choice.
+  /// [stockistKey] is the supplier's display id (sequential id / public code).
+  /// Returns the order token. (project_order_remaining_model — My Choice↔Order split)
+  Future<String?> sendOrderToStockist(String stockistKey) async {
+    final res = await supabase
+        .rpc('send_order_to_stockist', params: {'p_stockist_key': stockistKey});
+    return (Map<String, dynamic>.from(res as Map)['token'])?.toString();
+  }
+
   /// Buyer marks their inquiry as Sent when they send it to the stockist
   /// (draft -> sent; re-send just bumps Modified). Fire-and-forget.
   Future<void> markInquirySent(String id) async {
@@ -2360,6 +2424,12 @@ class SupabaseDataService {
   /// stock clamps at 0). The note metadata (invoice/vehicle/transporter/date)
   /// is saved as a Dispatch Note so a report can be sent to the buyer. Returns
   /// the new status, outstanding/dispatched totals and the dispatch_no.
+  /// [close] decides the fate of any remaining (ordered − dispatched) boxes:
+  ///   true  → close the order ('completed'), release the remaining hold →
+  ///           the buyer re-orders the rest if they still want it.
+  ///   false → keep the order open ('dispatching', a "Part-N"), the remaining
+  ///           stays reserved/held → the buyer just waits for the next lot.
+  /// (project_dispatch_order_redesign — "order remaining" model)
   Future<Map<String, dynamic>> dispatchInquiry(
     String id,
     List<Map<String, dynamic>> lines, {
@@ -2369,6 +2439,7 @@ class SupabaseDataService {
     String note = '',
     DateTime? date,
     bool reduceStock = true,
+    bool close = true,
   }) async {
     try {
       final res = await supabase.rpc('dispatch_inquiry', params: {
@@ -2380,6 +2451,7 @@ class SupabaseDataService {
         'p_note': note,
         'p_date': (date ?? DateTime.now()).toIso8601String().substring(0, 10),
         'p_reduce_stock': reduceStock,
+        'p_close': close,
       });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
@@ -2846,6 +2918,9 @@ class SupabaseDataService {
     String countryCode = '+91',
     String city = '',
     String? gstNumber,
+    String state = '',
+    String district = '',
+    String pincode = '',
   }) async {
     await supabase.rpc('submit_registration_request', params: {
       'p_email':          email,
@@ -2858,6 +2933,9 @@ class SupabaseDataService {
       'p_gst_number':     (gstNumber == null || gstNumber.trim().isEmpty)
           ? null
           : gstNumber.trim(),
+      'p_state':          state,
+      'p_district':       district,
+      'p_pincode':        pincode,
     });
   }
 

@@ -196,6 +196,20 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
               child: ElevatedButton.icon(
                 onPressed: () async {
                   Navigator.pop(context);
+                  // Send it as an ORDER (server-side, robust): freezes the lines,
+                  // marks it sent (notifies the stockist), and clears these
+                  // designs out of My Choice — independent of WhatsApp. The order
+                  // now lives in My Orders.
+                  try {
+                    await _service.sendOrderToStockist(stockist.id);
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('$e'), backgroundColor: Colors.red));
+                    }
+                    return;
+                  }
+                  if (mounted) _load();
                   // WhatsApp needs the full international number (country code +
                   // phone), digits only — no '+'.
                   final phone = '${stockist.countryCode}${stockist.phone}'
@@ -204,19 +218,12 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                       'https://wa.me/$phone?text=${Uri.encodeComponent(message)}');
                   final ok = await launchUrl(uri,
                       mode: LaunchMode.externalApplication);
-                  if (ok) {
-                    // Mark the inquiry Sent — this also notifies the stockist
-                    // (token-aware: "New inquiry" on first send, "Order updated"
-                    // on a re-send), so no separate notify call is needed.
-                    final order = designs.isEmpty
-                        ? null
-                        : _orderFor(designs.first.stockistId);
-                    if (order != null) await _service.markInquirySent(order.id);
-                    if (mounted) _load();
-                  } else if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Could not open WhatsApp')),
-                    );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(ok
+                            ? 'Order sent — track it in My Orders.'
+                            : 'Order sent — couldn\'t open WhatsApp; message the supplier manually. Track it in My Orders.'),
+                        backgroundColor: const Color(0xFF2E7D32)));
                   }
                 },
                 icon: const Icon(Icons.chat_rounded, size: 18),
@@ -486,7 +493,9 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
             ],
           ),
         ),
-        if (order != null) _buildOrderStrip(order),
+        // My Choice is now a pure pre-send basket (sent orders leave for My
+        // Orders), so only ever holds drafts — no order strip needed here.
+        if (order != null && !order.isDraft) _buildOrderStrip(order),
         ...designs.map((d) => _buildDesignRow(d, editable)),
         Divider(color: Colors.grey.shade200, height: 20),
       ],

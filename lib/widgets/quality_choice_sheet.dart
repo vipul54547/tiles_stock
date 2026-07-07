@@ -29,22 +29,26 @@ class _QualityChoiceSheet extends StatefulWidget {
 }
 
 class _QualityChoiceSheetState extends State<_QualityChoiceSheet> {
+  // LOCAL working quantities — nothing is written to My Choice until the buyer
+  // taps "Add to My Choice". Dismissing the sheet (tap outside / back) commits
+  // nothing, so a design is never selected by accident.
+  late final Map<String, int> _qty;
+
   @override
   void initState() {
     super.initState();
-    // Default each grade's wanted quantity to its full available stock (buyer
-    // starts from the in-stock count and trims down), unless already chosen.
-    for (final h in widget.card.holdings) {
-      if (!myChoiceQuantities.containsKey(h.id) && h.boxQuantity > 0) {
-        setMyChoiceQty(h.id, h.boxQuantity);
-      }
-    }
+    // Start from the current choice if any, else default to full available stock
+    // (buyer trims down). Local only.
+    _qty = {
+      for (final h in widget.card.holdings)
+        h.id: myChoiceQuantities[h.id] ?? (h.boxQuantity > 0 ? h.boxQuantity : 0),
+    };
   }
 
   // Numeric entry — tap the box count to type an exact quantity (clamped to the
   // available stock).
   Future<void> _editQty(TileDesign holding, int max) async {
-    int? entered = myChoiceQuantities[holding.id] ?? 0;
+    int? entered = _qty[holding.id] ?? 0;
     final value = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -73,7 +77,7 @@ class _QualityChoiceSheetState extends State<_QualityChoiceSheet> {
       ),
     );
     if (value != null) {
-      setState(() => setMyChoiceQty(holding.id, value.clamp(0, max)));
+      setState(() => _qty[holding.id] = value.clamp(0, max));
     }
   }
 
@@ -131,8 +135,14 @@ class _QualityChoiceSheetState extends State<_QualityChoiceSheet> {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Done'),
+                onPressed: () {
+                  // Commit the local quantities now (0 removes / skips a grade).
+                  for (final h in widget.card.holdings) {
+                    setMyChoiceQty(h.id, _qty[h.id] ?? 0);
+                  }
+                  Navigator.of(context).pop();
+                },
+                child: const Text('Add to My Choice'),
               ),
             ),
           ],
@@ -148,10 +158,10 @@ class _QualityChoiceSheetState extends State<_QualityChoiceSheet> {
     required Color fg,
     required Color bg,
   }) {
-    final qty = myChoiceQuantities[holding.id] ?? 0;
+    final qty = _qty[holding.id] ?? 0;
     final max = holding.boxQuantity;
     void set(int v) {
-      setState(() => setMyChoiceQty(holding.id, v.clamp(0, max)));
+      setState(() => _qty[holding.id] = v.clamp(0, max));
     }
 
     return Container(

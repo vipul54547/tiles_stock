@@ -24,7 +24,7 @@ import '../widgets/video_lightbox.dart';
 import '../widgets/notification_bell.dart';
 import '../utils/stockist_tiers.dart';
 import '../utils/guest_gate.dart';
-import '../utils/account_actions.dart';
+import '../utils/claimed_link_store.dart';
 import '../models/claimed_catalog.dart';
 import '../models/dna.dart';
 
@@ -32,10 +32,6 @@ const _qualities = ['Premium', 'Standard'];
 // Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
 // so a group's coloured circle never blends with the profile identity.
 const _groupColors = [Color(0xFFEF6C00), Color(0xFF2E7D32), Color(0xFF6A1B9A)];
-const _qualityMeta = {
-  'Premium': (icon: Icons.star_rounded,      bg: Color(0xFFFFF8E1), fg: Color(0xFFF9A825)),
-  'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
-};
 
 class _StockistData {
   final Stockist stockist;
@@ -65,7 +61,9 @@ class _State extends State<StockistsOverviewScreen> {
   List<String> _allSizes = [];
   List<String> _allSurfaces = [];
   bool _loading = true;
-  bool _viewDesigns = false;
+  // Buyer home opens on "All Design" (product-first) by default; the buyer can
+  // switch to the per-stockist "Stock" view via the top tab.
+  bool _viewDesigns = true;
   // Admin learning videos (Banner Video) shown as a strip at the top of the
   // buyer home. Empty = no strip.
   List<Map<String, dynamic>> _learnVideos = [];
@@ -81,10 +79,10 @@ class _State extends State<StockistsOverviewScreen> {
   List<ClaimedCatalog> _claimedCatalogs = [];
 
   // Clipboard auto-detect: a /s/ link found on the clipboard that the buyer can
-  // add to My Suppliers with one tap, plus tokens they've dismissed so the
-  // banner doesn't nag.
+  // add to My Suppliers with one tap. Tokens already claimed or dismissed are
+  // remembered in ClaimedLinkStore (persisted) so the banner never nags for a
+  // link the buyer has already handled — even across app restarts.
   String? _clipboardToken;
-  final Set<String> _dismissedClipboard = {};
 
   // Progressive group tip: once the buyer has a handful of suppliers and still
   // has no group, suggest grouping ONCE (then never again). Persisted so it
@@ -104,7 +102,8 @@ class _State extends State<StockistsOverviewScreen> {
 
   final _searchCtrl = TextEditingController();
   String _searchQuery  = '';
-  bool _searchActive   = false;
+  // Search now targets the active tab: All Design → design name (with smart
+  // search), Stock → stockist name/ID. Kept in sync by the tab handlers.
   bool _searchByDesign = true; // true = design name, false = stockist
 
   // Quality filter
@@ -199,7 +198,8 @@ class _State extends State<StockistsOverviewScreen> {
   }
 
   int get _designFilterCount {
-    int c = _selectedSizes.length +
+    int c = _selectedQualities.length +
+        _selectedSizes.length +
         _selectedSurfaces.length +
         _selectedTypes.length +
         _selectedThickness.length +
@@ -341,7 +341,7 @@ class _State extends State<StockistsOverviewScreen> {
   // suppliers (a flat list gets annoying), still has no group, and hasn't been
   // shown it before. Silent for the first few suppliers (frictionless).
   bool get _showGroupTip =>
-      !_searchActive &&
+      _searchQuery.isEmpty &&
       _market == 'Private' &&
       _privateData.length >= _groupTipThreshold &&
       stockistGroups.isEmpty &&
@@ -359,16 +359,6 @@ class _State extends State<StockistsOverviewScreen> {
     _minQtyCtrl.dispose();
     _maxQtyCtrl.dispose();
     super.dispose();
-  }
-
-  void _closeSearch() {
-    _dismissKeyboard();
-    _searchCtrl.clear();
-    setState(() {
-      _searchQuery    = '';
-      _searchActive   = false;
-      _searchByDesign = true;
-    });
   }
 
   void _dismissKeyboard() => FocusManager.instance.primaryFocus?.unfocus();
@@ -549,7 +539,9 @@ class _State extends State<StockistsOverviewScreen> {
       final text = data?.text ?? '';
       if (!text.contains('/s/')) return;
       final token = _resolveCatalogToken(text);
-      if (token == null || _dismissedClipboard.contains(token)) return;
+      if (token == null) return;
+      // Already added (any path) or dismissed before → don't nag (persisted).
+      if (await ClaimedLinkStore.isKnown(token)) return;
       if (mounted) setState(() => _clipboardToken = token);
     } catch (_) {
       // Clipboard can throw on some platforms — never block the screen on it.
@@ -761,6 +753,7 @@ class _State extends State<StockistsOverviewScreen> {
     _dismissKeyboard();
     final sheetHeight = MediaQuery.sizeOf(context).height * 0.82;
     var localSizes      = Set<String>.from(_selectedSizes);
+    final localQualities = Set<String>.from(_selectedQualities);
     var localSurfaces   = Set<String>.from(_selectedSurfaces);
     var localTypes      = Set<String>.from(_selectedTypes);
     var localThickness  = Set<String>.from(_selectedThickness);
@@ -838,8 +831,8 @@ class _State extends State<StockistsOverviewScreen> {
               final g = stockistGroups[_activeGroupIndex].stockistIds;
               r = r.where((d) => g.contains(d.stockistId)).toList();
             }
-            if (_selectedQualities.isNotEmpty) {
-              r = r.where((d) => _selectedQualities.contains(d.quality)).toList();
+            if (localQualities.isNotEmpty) {
+              r = r.where((d) => localQualities.contains(d.quality)).toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
             if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
@@ -953,6 +946,26 @@ class _State extends State<StockistsOverviewScreen> {
                         child: chipWrap(_allSizes, localSizes),
                       ),
                       FilterSection(
+                        title: 'Quality',
+                        summary: localQualities.isEmpty
+                            ? 'All'
+                            : localQualities.join(', '),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _qualities
+                              .map((q) => filterChip(
+                                    q,
+                                    localQualities.contains(q),
+                                    () => setSheet(() =>
+                                        localQualities.contains(q)
+                                            ? localQualities.remove(q)
+                                            : localQualities.add(q)),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                      FilterSection(
                         title: 'Finish',
                         summary: filterSummary(localSurfaces),
                         child: chipWrap(_allSurfaces, localSurfaces),
@@ -1058,6 +1071,7 @@ class _State extends State<StockistsOverviewScreen> {
       // Apply on any close (Apply button, swipe-down, or tap-outside).
       setState(() {
         _selectedSizes      ..clear()..addAll(localSizes);
+        _selectedQualities  ..clear()..addAll(localQualities);
         _selectedSurfaces   ..clear()..addAll(localSurfaces);
         _selectedTypes      ..clear()..addAll(localTypes);
         _selectedThickness  ..clear()..addAll(localThickness);
@@ -1518,22 +1532,9 @@ class _State extends State<StockistsOverviewScreen> {
   Widget build(BuildContext context) {
     final appBar = AppBar(
       // When this screen was pushed (e.g. admin opening it from the panel) show
-      // a Back button; when it's the buyer's home root, show Logout instead.
-      leading: Navigator.canPop(context)
-          ? const BackButton()
-          : IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Logout',
-              onPressed: () async {
-                // Guest with saved suppliers → double-confirm (logout is
-                // permanent for them) with a Create-login / Help rescue.
-                final ok = await confirmGuestLogout(context,
-                    supplierCount: _privateData.length);
-                if (!ok) return;
-                await SupabaseAuthService().logout();
-                if (context.mounted) context.go('/login');
-              },
-            ),
+      // a Back button; when it's the buyer's home root, no leading (Logout now
+      // lives in the ⋮ account menu).
+      leading: Navigator.canPop(context) ? const BackButton() : null,
       title: Text(currentEndUserId.isNotEmpty
           ? (_market == 'Private' ? 'My Suppliers' : 'Discover')
           : 'Tiles Stock'),
@@ -1546,16 +1547,68 @@ class _State extends State<StockistsOverviewScreen> {
           onPressed: _load,
         ),
         const NotificationBell(),
-        // Self-service account deletion (App Store 5.1.1(v)) — only on the
-        // buyer's own home root, not when an admin has pushed this screen.
+        // Account menu — profile (with Delete account inside), stock lists, and
+        // Logout. Only on the buyer's own home root, not an admin-pushed view.
         if (!Navigator.canPop(context))
           PopupMenuButton<String>(
             tooltip: 'Account',
-            onSelected: (v) {
-              if (v == 'delete') confirmDeleteAccount(context);
+            onSelected: (v) async {
+              if (v == 'profile') {
+                await context.push<bool>('/my-profile');
+                if (mounted) _load();
+              } else if (v == 'orders') {
+                await context.push('/my-orders');
+                if (mounted) _load();
+              } else if (v == 'lists') {
+                // Manage claimed stock lists; refresh home on return so any
+                // removals reflect immediately (system-back may not carry a
+                // result, so refresh unconditionally).
+                await context.push<bool>('/my-stock-lists');
+                if (mounted) _load();
+              } else if (v == 'logout') {
+                // Guest with saved suppliers → double-confirm (logout is
+                // permanent for them) with a Create-login / Help rescue.
+                final ok = await confirmGuestLogout(context,
+                    supplierCount: _privateData.length);
+                if (!ok) return;
+                await SupabaseAuthService().logout();
+                if (context.mounted) context.go('/login');
+              }
             },
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'delete', child: Text('Delete account')),
+              PopupMenuItem(
+                  value: 'profile',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.person_outline),
+                    title: Text('My Profile'),
+                  )),
+              PopupMenuItem(
+                  value: 'orders',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.receipt_long_outlined),
+                    title: Text('My Orders'),
+                  )),
+              PopupMenuItem(
+                  value: 'lists',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.playlist_add_check),
+                    title: Text('My Stock Lists'),
+                  )),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                  value: 'logout',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.logout),
+                    title: Text('Logout'),
+                  )),
             ],
           ),
       ],
@@ -1577,14 +1630,24 @@ class _State extends State<StockistsOverviewScreen> {
               _navButton(
                 'Stock',
                 Icons.inventory_2_outlined,
-                _viewDesigns ? () => setState(() => _viewDesigns = false) : null,
+                _viewDesigns
+                    ? () => setState(() {
+                          _viewDesigns = false;
+                          _searchByDesign = false;
+                        })
+                    : null,
                 active: !_viewDesigns,
               ),
               const SizedBox(width: 8),
               _navButton(
                 'All Design',
                 Icons.grid_view_rounded,
-                _viewDesigns ? null : () => setState(() => _viewDesigns = true),
+                _viewDesigns
+                    ? null
+                    : () => setState(() {
+                          _viewDesigns = true;
+                          _searchByDesign = true;
+                        }),
                 active: _viewDesigns,
               ),
               const SizedBox(width: 8),
@@ -1622,129 +1685,114 @@ class _State extends State<StockistsOverviewScreen> {
 
     return Scaffold(
       appBar: appBar,
-      body: Column(
-        children: [
-          // Public/Private/Both selector only appears once the public market is
-          // (The old Public/Private/Both selector is replaced by the two-mode
-          // bottom nav — My Suppliers · Discover — shown when the public market
-          // is live. project_two_mode_marketplace Phase 2 #9.)
-          // Guest-trial: nudge guests to create a permanent login.
-          if (isGuest && _market == 'Private') _buildGuestBanner(),
-          // One-tap "add" if a supplier link is sitting on the clipboard.
-          if (currentEndUserCanClaimPrivate && _clipboardToken != null)
-            _buildClipboardBanner(),
-          // Labeled "Add supplier" button — the primary manual entry on My
-          // Suppliers (replaces the old hidden app-bar link icon).
-          if (currentEndUserCanClaimPrivate &&
-              !_searchActive &&
-              _market == 'Private')
-            _buildAddSupplierBar(),
-          // Progressive one-time suggestion to group suppliers (after ~7).
-          if (_showGroupTip) _buildGroupTip(),
-          // Admin learning videos (Banner Video) — a compact strip at the top
-          // of the buyer home. Renders nothing when there are none.
-          if (!_searchActive)
-            LearningVideoStrip(
-              videos: _learnVideos,
-              onPlay: (v) => showVideoLightbox(context, v),
+      // Collapse-on-scroll: the header rows (add-supplier, glow video bar,
+      // group chips, active filters, legend) scroll away, while the search +
+      // filter row stays PINNED under the tabs as the grid scrolls beneath it.
+      body: NestedScrollView(
+        headerSliverBuilder: (context, innerScrolled) => [
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Guest-trial: nudge guests to create a permanent login.
+                if (isGuest && _market == 'Private') _buildGuestBanner(),
+                // One-tap "add" if a supplier link is on the clipboard.
+                if (currentEndUserCanClaimPrivate && _clipboardToken != null)
+                  _buildClipboardBanner(),
+                // "Add supplier" — the primary manual entry on My Suppliers.
+                if (currentEndUserCanClaimPrivate && _market == 'Private')
+                  _buildAddSupplierBar(),
+                // One-time "group your suppliers" suggestion.
+                if (_showGroupTip) _buildGroupTip(),
+                // Admin learning videos (Banner Video) glow bar. Empty = no-op.
+                LearningVideoStrip(
+                  videos: _learnVideos,
+                  onPlay: (v) => showVideoLightbox(context, v),
+                ),
+                _buildGroupRow(_viewDesigns
+                    ? mergedDesigns.length
+                    : filteredStockists.length),
+                if (_viewDesigns)
+                  ActiveFilterBar(
+                      filters: _activeDesignFilters(),
+                      onClearAll: _clearAllDesignFilters),
+                if (!_viewDesigns) _buildLegend(),
+              ],
             ),
-          _buildGroupRow(
-              _viewDesigns ? mergedDesigns.length : filteredStockists.length),
-          if (_viewDesigns)
-            ActiveFilterBar(
-                filters: _activeDesignFilters(),
-                onClearAll: _clearAllDesignFilters),
-          Expanded(
-            child: _viewDesigns
-                ? mergedDesigns.isEmpty
-                    ? _marketEmpty(designs: true)
-                    : SingleChildScrollView(
-                        child: MergedFamilyGrid(
-                          cards: mergedDesigns,
-                          padding: EdgeInsets.fromLTRB(12, 4, 12, 12 + bottomInset),
-                          onOpenDetail: (i) => _openDesignSheet(i, mergedReps),
-                          isChosen: (m) => m.holdings.any(
-                              (h) => myChoiceQuantities.containsKey(h.id)),
-                          onChoiceTap: (m) async {
-                            await showQualityChoiceSheet(context, m);
-                            if (mounted) setState(() {});
-                          },
-                          onStockistTap: (m) => context.push(
-                            '/stockist/${m.rep.stockistId}/portfolio',
-                            extra: m.rep.id,
-                          ),
-                          dnaTagsFor: (id) => _dnaTagsFor(id),
-                          expandedDnaId: _expandedDnaDesignId,
-                          onToggleDnaExpand: (id) => setState(() =>
-                              _expandedDnaDesignId =
-                                  _expandedDnaDesignId == id ? null : id),
-                        ),
-                      )
-                : filteredStockists.isEmpty
-                    ? _marketEmpty(designs: false)
-                    : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                        itemCount: filteredStockists.length,
-                        itemBuilder: (_, i) => _StockistCard(
-                          data: filteredStockists[i],
-                          sizes: _allSizes,
-                          surfaces: _allSurfaces,
-                          selectedQualities: _selectedQualities,
-                          selectedSizes: _selectedSizes,
-                          selectedSurfaces: _selectedSurfaces,
-                          matches: _matchesDesignFacets,
-                          onViewProfile: () async {
-                            await context.push(
-                                '/stockist/${filteredStockists[i].stockist.id}/portfolio');
-                            if (mounted) _load();
-                          },
-                          onToggleGroup: (groupIndex) async {
-                            final s = filteredStockists[i].stockist;
-                            final changed = await confirmToggleStockistInGroup(
-                              context,
-                              groupIndex: groupIndex,
-                              stockistId: s.id,
-                              stockistName: s.name,
-                            );
-                            if (changed && mounted) setState(() {});
-                          },
-                          // Per-card Remove only on My Suppliers (claimed) cards.
-                          onRemove: (currentEndUserCanClaimPrivate &&
-                                  _market == 'Private')
-                              ? () => _removeSupplier(filteredStockists[i])
-                              : null,
-                          // Closes the discover→save loop: in Discover, flag a
-                          // seller the buyer has already saved into My Suppliers.
-                          alreadySaved: _market != 'Private' &&
-                              _savedStockistKeys
-                                  .contains(filteredStockists[i].stockist.id),
-                        ),
-                      ),
           ),
-          if (!_viewDesigns) _buildLegend(),
-          // Pinned filter bar: Premium/Standard + Search + Filter live at the
-          // bottom now, always reachable as the grid scrolls above. SafeArea
-          // adds the system-nav inset only when there's no mode nav below.
-          SafeArea(
-            top: false,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(
-                    top: BorderSide(color: Colors.grey.shade200, width: 1)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 6,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
-              ),
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _buildQualityRow(),
-            ),
+          // Pinned search + filter row (freezes while the grid scrolls).
+          SliverPersistentHeader(
+            pinned: true,
+            delegate: _PinnedSearchHeader(child: _buildSearchRow()),
           ),
         ],
+        body: _viewDesigns
+            ? (mergedDesigns.isEmpty
+                ? _marketEmpty(designs: true)
+                : SingleChildScrollView(
+                    child: MergedFamilyGrid(
+                      cards: mergedDesigns,
+                      padding:
+                          EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
+                      onOpenDetail: (i) => _openDesignSheet(i, mergedReps),
+                      isChosen: (m) => m.holdings.any(
+                          (h) => myChoiceQuantities.containsKey(h.id)),
+                      onChoiceTap: (m) async {
+                        await showQualityChoiceSheet(context, m);
+                        if (mounted) setState(() {});
+                      },
+                      onStockistTap: (m) => context.push(
+                        '/stockist/${m.rep.stockistId}/portfolio',
+                        extra: m.rep.id,
+                      ),
+                      dnaTagsFor: (id) => _dnaTagsFor(id),
+                      expandedDnaId: _expandedDnaDesignId,
+                      onToggleDnaExpand: (id) => setState(() =>
+                          _expandedDnaDesignId =
+                              _expandedDnaDesignId == id ? null : id),
+                    ),
+                  ))
+            : (filteredStockists.isEmpty
+                ? _marketEmpty(designs: false)
+                : ListView.builder(
+                    padding:
+                        EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
+                    itemCount: filteredStockists.length,
+                    itemBuilder: (_, i) => _StockistCard(
+                      data: filteredStockists[i],
+                      sizes: _allSizes,
+                      surfaces: _allSurfaces,
+                      selectedQualities: _selectedQualities,
+                      selectedSizes: _selectedSizes,
+                      selectedSurfaces: _selectedSurfaces,
+                      matches: _matchesDesignFacets,
+                      onViewProfile: () async {
+                        await context.push(
+                            '/stockist/${filteredStockists[i].stockist.id}/portfolio');
+                        if (mounted) _load();
+                      },
+                      onToggleGroup: (groupIndex) async {
+                        final s = filteredStockists[i].stockist;
+                        final changed = await confirmToggleStockistInGroup(
+                          context,
+                          groupIndex: groupIndex,
+                          stockistId: s.id,
+                          stockistName: s.name,
+                        );
+                        if (changed && mounted) setState(() {});
+                      },
+                      // Per-card Remove only on My Suppliers (claimed) cards.
+                      onRemove: (currentEndUserCanClaimPrivate &&
+                              _market == 'Private')
+                          ? () => _removeSupplier(filteredStockists[i])
+                          : null,
+                      // Closes the discover→save loop: flag a seller already
+                      // saved into My Suppliers.
+                      alreadySaved: _market != 'Private' &&
+                          _savedStockistKeys
+                              .contains(filteredStockists[i].stockist.id),
+                    ),
+                  )),
       ),
       bottomNavigationBar: _buildModeNav(),
     );
@@ -1755,9 +1803,7 @@ class _State extends State<StockistsOverviewScreen> {
   // one surface, so no nav. Switching to Discover is product-first (the design
   // grid). Killed the old "Both". project_two_mode_marketplace Phase 2 #9.
   Widget? _buildModeNav() {
-    if (!publicMarketLive ||
-        !currentEndUserCanClaimPrivate ||
-        _searchActive) {
+    if (!publicMarketLive || !currentEndUserCanClaimPrivate) {
       return null;
     }
     return NavigationBar(
@@ -1793,38 +1839,102 @@ class _State extends State<StockistsOverviewScreen> {
 
   // ── Group filter row ─────────────────────────────────────────────────────
 
-  Widget _searchToggleChip({
-    required String label,
-    required IconData icon,
-    required bool active,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: active ? const Color(0xFF1B4F72) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: active ? const Color(0xFF1B4F72) : Colors.grey.shade400,
+  // Persistent search + filter bar — pinned under the tabs (see the
+  // NestedScrollView header). Search targets the active tab: All Design = design
+  // name (smart search), Stock = stockist name/ID. Quality now lives inside the
+  // filter sheet (below Size).
+  Widget _buildSearchRow() {
+    final hint = _viewDesigns
+        ? (smartSearch
+            ? 'Smart search: white = bianco, carrara…'
+            : 'Search design name…')
+        : 'Search stockist name or ID…';
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v),
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: hint,
+                hintStyle:
+                    TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _searchQuery.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        tooltip: 'Clear',
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          _dismissKeyboard();
+                          setState(() => _searchQuery = '');
+                        },
+                      ),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon,
-                size: 13,
-                color: active ? Colors.white : Colors.grey.shade600),
-            const SizedBox(width: 5),
-            Text(label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: active ? Colors.white : Colors.grey.shade700,
-                )),
+          // Smart-search toggle — only when searching designs by name.
+          if (_viewDesigns) ...[
+            const SizedBox(width: 8),
+            SmartSearchToggle(onChanged: () => setState(() {})),
           ],
-        ),
+          const SizedBox(width: 8),
+          // Filter button, with an active-facet count badge.
+          GestureDetector(
+            onTap: _showDesignFilterSheet,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: _designFilterCount > 0
+                        ? const Color(0xFF1B4F72)
+                        : const Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _designFilterCount > 0
+                          ? const Color(0xFF1B4F72)
+                          : Colors.grey.shade400,
+                    ),
+                  ),
+                  child: Icon(Icons.tune_rounded,
+                      size: 18,
+                      color: _designFilterCount > 0
+                          ? Colors.white
+                          : Colors.grey.shade600),
+                ),
+                if (_designFilterCount > 0)
+                  Positioned(
+                    right: -4,
+                    top: -4,
+                    child: Container(
+                      width: 15,
+                      height: 15,
+                      decoration: const BoxDecoration(
+                          color: Colors.red, shape: BoxShape.circle),
+                      child: Center(
+                        child: Text('$_designFilterCount',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2118,7 +2228,8 @@ class _State extends State<StockistsOverviewScreen> {
         child: OutlinedButton.icon(
           onPressed: _showAddCatalogDialog,
           icon: const Icon(Icons.add_link, size: 18),
-          label: const Text('Add supplier'),
+          label: const Text('Add supplier WhatsApp link to see live stock',
+              textAlign: TextAlign.center),
           style: OutlinedButton.styleFrom(
             foregroundColor: brand,
             side: BorderSide(color: brand.withValues(alpha: 0.5)),
@@ -2151,10 +2262,10 @@ class _State extends State<StockistsOverviewScreen> {
             tooltip: 'Dismiss',
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.close, size: 18),
-            onPressed: () => setState(() {
-              _dismissedClipboard.add(_clipboardToken!);
-              _clipboardToken = null;
-            }),
+            onPressed: () {
+              ClaimedLinkStore.addDismissed(_clipboardToken!);
+              setState(() => _clipboardToken = null);
+            },
           ),
         ],
       ),
@@ -2329,7 +2440,7 @@ class _State extends State<StockistsOverviewScreen> {
     try {
       final res = await _service.claimCatalog(token);
       final name = (res['catalog_name'] ?? 'Supplier').toString();
-      _dismissedClipboard.add(token); // don't re-prompt for what we just added
+      await ClaimedLinkStore.addClaimed(token); // don't re-prompt for what we just added
       if (!mounted) return;
       await _load(); // refresh My Suppliers + cards
       if (!mounted) return;
@@ -2347,247 +2458,6 @@ class _State extends State<StockistsOverviewScreen> {
     }
   }
 
-  // ── Quality filter row + inline search toggle ────────────────────────────
-
-  Widget _buildQualityRow() {
-    if (_searchActive) {
-      final hint = !_viewDesigns || !_searchByDesign
-          ? 'Search stockist name or ID...'
-          : (smartSearch
-              ? 'Smart: white = bianco, carrara…'
-              : 'Search design name…');
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Search field row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _searchCtrl,
-                    autofocus: true,
-                    onChanged: (v) => setState(() => _searchQuery = v),
-                    onSubmitted: (_) => _closeSearch(),
-                    decoration: InputDecoration(
-                      hintText: hint,
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      isDense: true,
-                      contentPadding:
-                          const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (_searchByDesign) ...[
-                  SmartSearchToggle(onChanged: () => setState(() {})),
-                  const SizedBox(width: 8),
-                ],
-                GestureDetector(
-                  onTap: _closeSearch,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child:
-                        const Icon(Icons.close, size: 20, color: Colors.grey),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Toggle chips — only in All Design view
-          if (_viewDesigns)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-              child: Row(
-                children: [
-                  _searchToggleChip(
-                    label: 'Design Name',
-                    icon: Icons.grid_view_rounded,
-                    active: _searchByDesign,
-                    onTap: () {
-                      if (!_searchByDesign) {
-                        _searchCtrl.clear();
-                        setState(() {
-                          _searchByDesign = true;
-                          _searchQuery    = '';
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 8),
-                  _searchToggleChip(
-                    label: 'Stockist',
-                    icon: Icons.storefront_outlined,
-                    active: !_searchByDesign,
-                    onTap: () {
-                      if (_searchByDesign) {
-                        _searchCtrl.clear();
-                        setState(() {
-                          _searchByDesign = false;
-                          _searchQuery    = '';
-                        });
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-        ],
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Row(
-        children: [
-          // Shorter, content-width quality buttons (no longer half-width each)
-          // so Search + Filter get proper room on the right.
-          ..._qualities.map((q) {
-            final m = _qualityMeta[q]!;
-            final selected = _selectedQualities.contains(q);
-            return GestureDetector(
-              onTap: () {
-                _dismissKeyboard();
-                setState(() {
-                  if (selected) { _selectedQualities.remove(q); } else { _selectedQualities.add(q); }
-                });
-              },
-              child: Container(
-                margin: const EdgeInsets.only(right: 6),
-                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                decoration: BoxDecoration(
-                  color: selected ? m.fg : m.bg,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: m.fg, width: selected ? 2 : 1),
-                  boxShadow: selected
-                      ? [BoxShadow(
-                          color: m.fg.withValues(alpha: 0.22),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2))]
-                      : [],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(m.icon, size: 12, color: selected ? Colors.white : m.fg),
-                    const SizedBox(width: 3),
-                    Text(q,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: selected ? Colors.white : m.fg,
-                        )),
-                  ],
-                ),
-              ),
-            );
-          }),
-          const Spacer(),
-          GestureDetector(
-            onTap: () => setState(() => _searchActive = true),
-            child: Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE3F2FD),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF1565C0), width: 1),
-              ),
-              child: const Icon(Icons.search, size: 16, color: Color(0xFF1565C0)),
-            ),
-          ),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: _showDesignFilterSheet,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: (_designFilterCount) > 0
-                        ? const Color(0xFF1B4F72)
-                        : const Color(0xFFF5F5F5),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: (_designFilterCount) > 0
-                          ? const Color(0xFF1B4F72)
-                          : Colors.grey.shade400,
-                    ),
-                  ),
-                  child: Icon(Icons.tune_rounded,
-                      size: 16,
-                      color: (_designFilterCount) > 0
-                          ? Colors.white
-                          : Colors.grey.shade600),
-                ),
-                if ((_designFilterCount) > 0)
-                  Positioned(
-                    right: -4,
-                    top: -4,
-                    child: Container(
-                      width: 14,
-                      height: 14,
-                      decoration: const BoxDecoration(
-                          color: Colors.red, shape: BoxShape.circle),
-                      child: Center(
-                        child: Text(
-                            '$_designFilterCount',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 8,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          if ((_designFilterCount) > 0) ...[
-            const SizedBox(width: 6),
-            GestureDetector(
-              onTap: () => setState(() {
-                _selectedSizes.clear();
-                _selectedSurfaces.clear();
-                _selectedTypes.clear();
-                _selectedThickness.clear();
-                _selectedQualities.clear();
-                _selectedStockTypes.clear();
-                _minQtyCtrl.clear();
-                _maxQtyCtrl.clear();
-              }),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade300),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.close, size: 12, color: Colors.red.shade700),
-                    const SizedBox(width: 3),
-                    Text('Clear',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.red.shade700)),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   // ── Legend ────────────────────────────────────────────────────────────────
 
@@ -2630,6 +2500,35 @@ class _State extends State<StockistsOverviewScreen> {
           Text(label, style: TextStyle(fontSize: 11, color: fg)),
         ],
       );
+}
+
+// ── Pinned search-bar header ──────────────────────────────────────────────────
+
+/// Fixed-height pinned header hosting the persistent search + filter row. Stays
+/// frozen under the tabs while the header rows above it (and the grid below)
+/// scroll.
+class _PinnedSearchHeader extends SliverPersistentHeaderDelegate {
+  _PinnedSearchHeader({required this.child});
+
+  final Widget child;
+  static const double _height = 62;
+
+  @override
+  double get minExtent => _height;
+  @override
+  double get maxExtent => _height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
+    return Material(
+      elevation: overlaps ? 2 : 0,
+      color: Colors.white,
+      child: SizedBox(height: _height, child: child),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _PinnedSearchHeader old) => true;
 }
 
 // ── Stockist card ─────────────────────────────────────────────────────────────

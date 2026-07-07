@@ -79,6 +79,18 @@ class _State extends State<DispatchInquiryScreen> {
   // (project_dispatch_order_redesign · Phase D)
   late bool _reduceStock;
 
+  // What happens to the leftover (ordered − dispatched) after this dispatch:
+  // true  = CLOSE the order, release the remaining hold → buyer re-orders the
+  //         rest if they still want it.
+  // false = KEEP the order open (Part-N), remaining stays reserved → buyer waits.
+  // null  = not chosen yet — REQUIRED before dispatch whenever a remaining exists
+  //         (no silent default). (project_order_remaining_model)
+  bool? _close;
+
+  // Boxes still un-dispatched after the quantities currently entered.
+  int get _remainingAfter => _lines.fold(
+      0, (s, l) => s + (l.ordered - l.dispatchedAlready - l.dispatchNow).clamp(0, 1 << 30));
+
   // Dispatch-note metadata (sent to the buyer in the WhatsApp report).
   final _invoiceCtrl = TextEditingController();
   final _vehicleCtrl = TextEditingController();
@@ -195,6 +207,15 @@ class _State extends State<DispatchInquiryScreen> {
   }
 
   Future<void> _submit() async {
+    // A leftover exists → the stockist MUST choose Close vs Keep-open first.
+    if (_remainingAfter > 0 && _close == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              '$_remainingAfter boxes will be left over — choose "Close order" '
+              'or "Keep open" first.'),
+          backgroundColor: const Color(0xFFE65100)));
+      return;
+    }
     // Over-stock + booking warnings only matter when we actually reduce system
     // stock; in "release holding only" mode P_Stock is left untouched.
     if (_reduceStock) {
@@ -272,6 +293,8 @@ class _State extends State<DispatchInquiryScreen> {
         note: _noteCtrl.text.trim(),
         date: _date,
         reduceStock: _reduceStock,
+        // Full dispatch always closes; a partial uses the required choice.
+        close: _remainingAfter == 0 ? true : _close!,
       );
       if (!mounted) return;
       _dirty = false;
@@ -279,8 +302,8 @@ class _State extends State<DispatchInquiryScreen> {
       final outstanding = (res['outstanding'] as num?)?.toInt() ?? 0;
       final dispatchNo = (res['dispatch_no'] ?? '').toString();
       if (totalNow > 0) {
-        final report =
-            _buildReport(dispatchNo, dispatchedLines, totalNow, outstanding);
+        final report = _buildReport(
+            dispatchNo, dispatchedLines, totalNow, outstanding, status);
         await _showReportSheet(report, status);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -399,8 +422,8 @@ class _State extends State<DispatchInquiryScreen> {
   }
 
   // Builds the WhatsApp dispatch-report text (no rates, by design).
-  String _buildReport(
-      String dispatchNo, List<_Line> lines, int total, int outstanding) {
+  String _buildReport(String dispatchNo, List<_Line> lines, int total,
+      int outstanding, String status) {
     final b = StringBuffer();
     b.writeln('Dispatch update — Order $_token');
     if (dispatchNo.isNotEmpty) b.writeln('Dispatch No: $dispatchNo');
@@ -422,7 +445,14 @@ class _State extends State<DispatchInquiryScreen> {
           '${i + 1}. ${l.name} (${l.size.replaceAll(' mm', '')}) — ${l.dispatchNow} boxes');
     }
     b.writeln('Total dispatched: $total boxes');
-    if (outstanding > 0) b.writeln('Balance pending: $outstanding boxes');
+    if (outstanding > 0) {
+      // Closed short vs kept open — say what the leftover actually means.
+      b.writeln(status == 'completed'
+          ? 'Remaining $outstanding boxes: not included — please place a new '
+              'order if you still need them.'
+          : 'Balance $outstanding boxes: reserved for you, coming in a later '
+              'dispatch.');
+    }
     if (_noteCtrl.text.trim().isNotEmpty) {
       b.writeln();
       b.writeln('Note: ${_noteCtrl.text.trim()}');
@@ -577,6 +607,7 @@ class _State extends State<DispatchInquiryScreen> {
                       children: [
                         _modeSelector(),
                         const SizedBox(height: 12),
+                        _closeSelector(),
                         _metaSection(),
                         const SizedBox(height: 12),
                         if (_lines.isEmpty)
@@ -647,6 +678,87 @@ class _State extends State<DispatchInquiryScreen> {
                   : 'Your system stock is NOT changed — only the held boxes are '
                       'released. Update your own count afterwards.',
               style: TextStyle(fontSize: 11, color: color),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // When this dispatch leaves a remaining, the stockist MUST decide its fate:
+  // close the order (release the rest) or keep it open (hold the rest, Part-N).
+  // Prominent, unselected by default (required), hidden only on a full dispatch.
+  Widget _closeSelector() {
+    final rem = _remainingAfter;
+    if (rem <= 0) return const SizedBox.shrink();
+    final chosen = _close != null;
+    // Amber while undecided, then green (close) / deep-orange (keep).
+    final accent = !chosen
+        ? const Color(0xFFE65100)
+        : (_close! ? const Color(0xFF2E7D32) : const Color(0xFFE65100));
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: accent, width: chosen ? 1 : 2),
+        ),
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.inventory_outlined, size: 18, color: accent),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text('$rem box${rem == 1 ? '' : 'es'} will be left over',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          color: accent)),
+                ),
+                if (!chosen)
+                  Text('Choose one',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: accent)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SegmentedButton<bool>(
+              showSelectedIcon: true,
+              emptySelectionAllowed: true,
+              style: ButtonStyle(
+                textStyle:
+                    WidgetStateProperty.all(const TextStyle(fontSize: 12.5)),
+                padding: WidgetStateProperty.all(
+                    const EdgeInsets.symmetric(vertical: 10, horizontal: 8)),
+              ),
+              segments: const [
+                ButtonSegment(
+                    value: true,
+                    label: Text('Close order'),
+                    icon: Icon(Icons.check_circle_outline, size: 16)),
+                ButtonSegment(
+                    value: false,
+                    label: Text('Keep open'),
+                    icon: Icon(Icons.pending_outlined, size: 16)),
+              ],
+              selected: chosen ? {_close!} : <bool>{},
+              onSelectionChanged: (s) =>
+                  setState(() => _close = s.isEmpty ? null : s.first),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              !chosen
+                  ? 'Pick what happens to the $rem left-over boxes before you record the dispatch.'
+                  : (_close!
+                      ? 'Order CLOSES. The $rem are released back to stock — the buyer re-orders them if still needed.'
+                      : 'Order STAYS OPEN (Part-N). The $rem stay reserved for this buyer — dispatch them later on this same order.'),
+              style: TextStyle(fontSize: 11.5, color: accent),
             ),
           ],
         ),
