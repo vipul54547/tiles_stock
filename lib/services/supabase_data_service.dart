@@ -2216,18 +2216,6 @@ class SupabaseDataService {
 
   /// For the logged-in stockist: a flat list of every buyer interest (My Choice)
   /// in their designs — one row per (buyer, design) with company/contact/phone/
-  /// city, design name/size, boxes and updated_at. The Inquiries screen groups
-  /// these by buyer / date / design. Empty unless the caller is a stockist.
-  Future<List<Map<String, dynamic>>> getMyInquiryList() async {
-    try {
-      final res = await supabase.rpc('my_inquiry_list');
-      final list = (res as List?) ?? const [];
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (e, st) {
-      debugPrint('getMyInquiryList failed: $e\n$st');
-      return [];
-    }
-  }
 
   // ── tokenised orders (inquiries) ────────────────────────────────────────────
 
@@ -2310,15 +2298,6 @@ class SupabaseDataService {
     return (Map<String, dynamic>.from(res as Map)['token'])?.toString();
   }
 
-  /// Buyer marks their inquiry as Sent when they send it to the stockist
-  /// (draft -> sent; re-send just bumps Modified). Fire-and-forget.
-  Future<void> markInquirySent(String id) async {
-    try {
-      await supabase.rpc('mark_inquiry_sent', params: {'p_id': id});
-    } catch (e, st) {
-      debugPrint('markInquirySent failed ($id): $e\n$st');
-    }
-  }
 
   /// Stockist HOLDS a whole order: every line's held_qty = its ordered quantity.
   /// Held boxes (H_Quantity) drop off the buyer-facing F_Stock and stay held until

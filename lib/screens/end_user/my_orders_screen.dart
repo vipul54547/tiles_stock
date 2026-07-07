@@ -42,7 +42,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
   }
 
   (Color, Color) _statusColors(String status) => switch (status) {
-        'sent' || 'confirmed' => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
+        'sent' => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
         'locked' => (const Color(0xFF6A1B9A), const Color(0xFFF3E5F5)),
         'dispatching' => (const Color(0xFFE65100), const Color(0xFFFFF3E0)),
         'completed' => (const Color(0xFF2E7D32), const Color(0xFFE8F5E9)),

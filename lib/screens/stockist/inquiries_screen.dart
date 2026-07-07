@@ -30,7 +30,6 @@ const _months = [
 // status → (foreground, background) for the chip.
 (Color, Color) _statusColors(String s) => switch (s) {
       'sent'        => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
-      'confirmed'   => (const Color(0xFF1565C0), const Color(0xFFE3F2FD)),
       'locked'      => (const Color(0xFF6A1B9A), const Color(0xFFF3E5F5)),
       'dispatching' => (const Color(0xFFE65100), const Color(0xFFFFF3E0)),
       'completed'   => (const Color(0xFF2E7D32), const Color(0xFFE8F5E9)),
@@ -42,7 +41,6 @@ const _months = [
 // the stockist has HELD (boxes reserved off buyer-facing stock).
 String _statusName(String s) => switch (s) {
       'sent'        => 'Sent',
-      'confirmed'   => 'Sent',
       'locked'      => 'Held',
       'dispatching' => 'Dispatching',
       'completed'   => 'Completed',
@@ -824,7 +822,6 @@ class _State extends State<InquiriesScreen> {
     // Order link works while the order is still open (public_order gate).
     final canLink = o.status == 'draft' ||
         o.status == 'sent' ||
-        o.status == 'confirmed' ||
         o.status == 'locked';
     return Row(
       children: [
