@@ -59,6 +59,7 @@ import 'screens/end_user/stockist_group_screen.dart';
 import 'screens/end_user/my_choice_screen.dart';
 import 'screens/end_user/my_stock_lists_screen.dart';
 import 'screens/end_user/my_orders_screen.dart';
+import 'screens/end_user/my_dispatch_screen.dart';
 import 'screens/end_user/my_profile_screen.dart';
 import 'screens/end_user/dispatch_history_screen.dart';
 import 'screens/stockist/upload_stock_screen.dart';
@@ -237,6 +238,7 @@ final GoRouter _router = GoRouter(
     GoRoute(path: '/my-choices', builder: (_, __) => const MyChoiceScreen()),
     GoRoute(path: '/my-stock-lists', builder: (_, __) => const MyStockListsScreen()),
     GoRoute(path: '/my-orders', builder: (_, __) => const MyOrdersScreen()),
+    GoRoute(path: '/my-dispatch', builder: (_, __) => const MyDispatchScreen()),
     GoRoute(path: '/my-profile', builder: (_, __) => const MyProfileScreen()),
     GoRoute(
       path: '/my-dispatches',

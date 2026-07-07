@@ -21,6 +21,9 @@ class InquiryOrder {
   final DateTime createdAt;   // "Generated"
   final DateTime updatedAt;   // "Modified"
   final DateTime? lockedAt;
+  /// Set when the buyer finalized a closed-short order (Re-order or Close) →
+  /// the order leaves My Orders for the My Dispatch record.
+  final DateTime? buyerClosedAt;
 
   // H_Quantity (Hold model). Boxes the stockist has HELD for this order — they
   // drop off the buyer-facing F_Stock and stay held until un-held or dispatched.
@@ -61,6 +64,7 @@ class InquiryOrder {
     required this.createdAt,
     required this.updatedAt,
     this.lockedAt,
+    this.buyerClosedAt,
     this.heldBoxes = 0,
     this.stockistId = '',
     this.stockistKey = '',
@@ -94,6 +98,7 @@ class InquiryOrder {
         createdAt:    _dt(j['created_at']),
         updatedAt:    _dt(j['updated_at']),
         lockedAt:     _dtn(j['locked_at']),
+        buyerClosedAt: _dtn(j['buyer_closed_at']),
         heldBoxes:    (j['held_boxes'] as num?)?.toInt() ?? 0,
         stockistId:   (j['stockist_id'] ?? '').toString(),
         stockistKey:  (j['stockist_key'] ?? '').toString(),
@@ -135,6 +140,16 @@ class InquiryOrder {
   /// The buyer can still edit the basket only while it's an un-sent draft. Once
   /// sent, the lines are frozen (My Choice ↔ Order split).
   bool get buyerEditable => status == 'draft';
+
+  /// Finished from the buyer's side → lives in the My Dispatch record, not My
+  /// Orders: rejected, fully dispatched, or the buyer chose Re-order / Close.
+  bool get isFinalized =>
+      status == 'rejected' ||
+      (status == 'completed' && (remainingBoxes == 0 || buyerClosedAt != null));
+
+  /// A closed-short order the buyer still has to act on (Re-order or Close).
+  bool get awaitingBuyerDecision =>
+      status == 'completed' && remainingBoxes > 0 && buyerClosedAt == null;
 
   /// Short human label for the status chip. The buyer "sends" an inquiry; the
   /// stockist's lock is the real "Confirmed" (the supplier accepted it).

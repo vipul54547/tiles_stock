@@ -255,11 +255,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         ),
         title: const Text('My Choice'),
         actions: [
-          IconButton(
-            tooltip: 'Dispatch history',
-            icon: const Icon(Icons.local_shipping_outlined),
-            onPressed: () => context.push('/my-dispatches'),
-          ),
+          // Dispatch history moved to the ⋮ account menu as "My Dispatch".
           if (!_loading && _chosenDesigns.isNotEmpty)
             TextButton.icon(
               onPressed: _confirmClearAll,

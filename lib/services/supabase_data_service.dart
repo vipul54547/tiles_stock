@@ -2279,13 +2279,20 @@ class SupabaseDataService {
   }
 
   /// Buyer: push a finished order's leftover (ordered − dispatched) back into
-  /// their basket (my_choices) as a fresh selection, ready to send as a new
-  /// order. Returns how many leftover designs were added.
+  /// their basket (my_choices) as a fresh selection AND finalize the old order
+  /// (moves it to My Dispatch). Returns how many leftover designs were added.
   /// (project_order_remaining_model — Phase 3 re-order)
   Future<int> reorderRemaining(String inquiryId) async {
     final res = await supabase
         .rpc('reorder_remaining', params: {'p_inquiry': inquiryId});
     return (res as num?)?.toInt() ?? 0;
+  }
+
+  /// Buyer closes a completed-short order without re-ordering (they don't want
+  /// the rest) → finalizes it into the My Dispatch record.
+  Future<void> buyerCloseOrder(String inquiryId) async {
+    await supabase
+        .rpc('buyer_close_order', params: {'p_inquiry': inquiryId});
   }
 
   /// Buyer SENDS their basket to a supplier: freezes the order lines, marks it

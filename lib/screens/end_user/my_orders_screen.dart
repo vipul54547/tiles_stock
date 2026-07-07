@@ -35,8 +35,12 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     final orders = await _service.getMyOrders();
     if (!mounted) return;
     setState(() {
-      // Drafts are the un-sent basket — they live in My Choice, not here.
-      _orders = orders.where((o) => o.status != 'draft').toList();
+      // My Orders = live orders + closed-short orders awaiting the buyer's
+      // decision. Drafts (basket) live in My Choice; finalized orders (fully
+      // dispatched / rejected / buyer re-ordered or closed) live in My Dispatch.
+      _orders = orders
+          .where((o) => o.status != 'draft' && !o.isFinalized)
+          .toList();
       _loading = false;
     });
   }
@@ -62,6 +66,39 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
       ));
       if (n > 0) await context.push('/my-choices');
       if (mounted) _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _close(InquiryOrder o) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('Close this order?'),
+        content: Text(
+            'You won\'t re-order the ${o.remainingBoxes} leftover box'
+            '${o.remainingBoxes == 1 ? '' : 'es'}. The order moves to My Dispatch.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(dctx, true),
+              child: const Text('Close order')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    try {
+      await _service.buyerCloseOrder(o.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Order closed — moved to My Dispatch.'),
+          backgroundColor: Color(0xFF2E7D32)));
+      _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -121,7 +158,8 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
 
   Widget _card(InquiryOrder o) {
     final (fg, bg) = _statusColors(o.status);
-    final canReorder = o.status == 'completed' && o.remainingBoxes > 0;
+    // A closed-short order the buyer must resolve (Re-order or Close).
+    final decide = o.awaitingBuyerDecision;
     final kept = o.status == 'dispatching' && o.remainingBoxes > 0;
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -193,36 +231,57 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                       fontStyle: FontStyle.italic,
                       color: Colors.grey.shade700)),
             ),
-          if (canReorder || o.dispatchedBoxes > 0) ...[
-            const SizedBox(height: 6),
+          if (decide) ...[
+            const SizedBox(height: 8),
+            Text(
+                'This order was closed with ${o.remainingBoxes} box'
+                '${o.remainingBoxes == 1 ? '' : 'es'} not dispatched — re-order the '
+                'rest or close it.',
+                style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+            const SizedBox(height: 8),
             Row(
               children: [
-                if (canReorder)
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => _reorder(o),
-                      icon: const Icon(Icons.replay, size: 16),
-                      label: Text('Re-order ${o.remainingBoxes} left'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFE65100),
-                        side: const BorderSide(color: Color(0xFFE65100)),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                      ),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _reorder(o),
+                    icon: const Icon(Icons.replay, size: 16),
+                    label: Text('Re-order ${o.remainingBoxes}'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFFE65100),
+                      side: const BorderSide(color: Color(0xFFE65100)),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                     ),
                   ),
-                if (canReorder && o.dispatchedBoxes > 0)
-                  const SizedBox(width: 8),
-                if (o.dispatchedBoxes > 0)
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: () =>
-                          context.push('/my-dispatches?token=${o.token}'),
-                      icon: const Icon(Icons.local_shipping_outlined, size: 16),
-                      label: const Text('Dispatches'),
-                      style: TextButton.styleFrom(foregroundColor: _navy),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _close(o),
+                    icon: const Icon(Icons.check_circle_outline, size: 16),
+                    label: const Text('Close order'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF2E7D32),
+                      side: const BorderSide(color: Color(0xFF2E7D32)),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                     ),
                   ),
+                ),
               ],
+            ),
+          ],
+          if (o.dispatchedBoxes > 0) ...[
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () =>
+                    context.push('/my-dispatches?token=${o.token}'),
+                icon: const Icon(Icons.local_shipping_outlined, size: 16),
+                label: const Text('View dispatches'),
+                style: TextButton.styleFrom(
+                    foregroundColor: _navy,
+                    padding: const EdgeInsets.symmetric(horizontal: 4)),
+              ),
             ),
           ],
         ],

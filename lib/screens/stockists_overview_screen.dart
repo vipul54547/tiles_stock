@@ -1559,6 +1559,8 @@ class _State extends State<StockistsOverviewScreen> {
               } else if (v == 'orders') {
                 await context.push('/my-orders');
                 if (mounted) _load();
+              } else if (v == 'dispatch') {
+                await context.push('/my-dispatch');
               } else if (v == 'lists') {
                 // Manage claimed stock lists; refresh home on return so any
                 // removals reflect immediately (system-back may not carry a
@@ -1591,6 +1593,14 @@ class _State extends State<StockistsOverviewScreen> {
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.receipt_long_outlined),
                     title: Text('My Orders'),
+                  )),
+              PopupMenuItem(
+                  value: 'dispatch',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.local_shipping_outlined),
+                    title: Text('My Dispatch'),
                   )),
               PopupMenuItem(
                   value: 'lists',
