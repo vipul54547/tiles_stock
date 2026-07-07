@@ -57,17 +57,6 @@ class Stockist {
   /// Default false — public catalogs are always allowed.
   final bool canCreatePrivateCatalog;
 
-  /// Public anonymity (admin-controlled). When true, public surfaces show
-  /// [publicDisplayName] + [publicCode] instead of the real [name] / [id].
-  final bool isAnonymous;
-
-  /// Trade/duplicate name shown publicly when anonymous. Empty when not set.
-  final String publicDisplayName;
-
-  /// Masked opaque public code (e.g. 7kp4m) shown publicly instead of the
-  /// orderly sequential id. Empty when the stockist was never anonymized.
-  final String publicCode;
-
   /// Max number of devices this login may be active on at once (admin-set,
   /// editable). Default 1. 0 = unlimited.
   final int deviceLimit;
@@ -139,12 +128,6 @@ class Stockist {
 
     this.canCreatePrivateCatalog = false,
 
-    this.isAnonymous = false,
-
-    this.publicDisplayName = '',
-
-    this.publicCode = '',
-
     this.deviceLimit = 1,
 
     this.deviceCount = 0,
@@ -210,12 +193,6 @@ class Stockist {
     shareToken: json['share_token'] ?? '',
 
     canCreatePrivateCatalog: json['can_create_private_catalog'] ?? false,
-
-    isAnonymous: json['is_anonymous'] ?? false,
-
-    publicDisplayName: json['public_display_name'] ?? '',
-
-    publicCode: json['public_code'] ?? '',
 
     deviceLimit: json['device_limit'] ?? 1,
 

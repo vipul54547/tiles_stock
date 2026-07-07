@@ -415,14 +415,8 @@ class _StockListsScreenState extends State<StockListsScreen> {
       if (mounted) setState(() => _busy = false);
     }
     if (entries.isEmpty) return;
-    // Header: the masked trade name when anonymous, else the real company name.
-    final header = currentStockistIsAnonymous &&
-            currentStockistDisplayName.isNotEmpty
-        ? currentStockistDisplayName
-        : '';
     final body = entries.join('\n');
-    final text =
-        '${header.isEmpty ? '' : '$header\n'}$body\n\nPowered by Tiles Stock';
+    final text = '$body\n\nPowered by Tiles Stock';
     await launchUrl(
         Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}'),
         mode: LaunchMode.externalApplication);

@@ -36,11 +36,6 @@ class StockCatalog {
   final bool isActive;
   /// The brand this catalogue belongs to (multi-brand). Null for legacy rows.
   final String? brandId;
-  /// Per-list anonymity: when this Discover list is shown publicly, wear the
-  /// stockist's masked identity instead of the real name. Only effective when
-  /// the stockist is admin-eligible, the list is in Discover, and the market is
-  /// live (enforced server-side). Private/non-Discover lists ignore it.
-  final bool isAnonymous;
 
   /// Stockist hid this list from buyers (they still see + manage it).
   final bool hiddenByStockist;
@@ -89,7 +84,6 @@ class StockCatalog {
     required this.sortOrder,
     required this.isActive,
     this.brandId,
-    this.isAnonymous = false,
     this.hiddenByStockist = false,
     this.deleteScheduledAt,
     this.listType = 'permanent',
@@ -138,7 +132,6 @@ class StockCatalog {
         sortOrder: j['sort_order'] as int? ?? 0,
         isActive: j['is_active'] as bool? ?? true,
         brandId: j['brand_id'] as String?,
-        isAnonymous: j['is_anonymous'] as bool? ?? false,
         hiddenByStockist: j['hidden_by_stockist'] as bool? ?? false,
         deleteScheduledAt: j['delete_scheduled_at'] == null
             ? null

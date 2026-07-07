@@ -1078,15 +1078,6 @@ class SupabaseDataService {
         .update({'show_in_marketplace': show}).eq('id', id);
   }
 
-  /// Per-list anonymity: when this Discover list is shown publicly, wear the
-  /// stockist's masked identity instead of the real name. Only meaningful for
-  /// admin-eligible stockists' Discover lists (server enforces the full rule).
-  Future<void> setCatalogAnonymous(String id, bool anonymous) async {
-    await supabase
-        .from('stock_catalogs')
-        .update({'is_anonymous': anonymous}).eq('id', id);
-  }
-
   // ── Catalog banners (admin-controlled) ──────────────────────────────────────
   /// Admin: the generic/anonymous banner pool (shown on anonymous lists + as the
   /// fallback, daily-rotated). Newest first.
@@ -1677,19 +1668,6 @@ class SupabaseDataService {
         params: {'p_seq': sequentialId, 'p_allowed': allowed});
   }
 
-  /// Admin: turn public anonymity on/off for a stockist. When on, a trade name
-  /// is required and a masked public code is minted on first enable. Returns
-  /// the live public code (or null when turned off).
-  Future<String?> setStockistAnonymous(
-      String sequentialId, bool on, String displayName) async {
-    final res = await supabase.rpc('admin_set_anonymous', params: {
-      'p_seq': sequentialId,
-      'p_on': on,
-      'p_display_name': displayName,
-    });
-    return res as String?;
-  }
-
   /// Admin: set a stockist's catalogue accent colour + Google-Maps link for the
   /// public catalog page. Logo/banner/tagline editing was retired — the
   /// share-link banner is admin-controlled via the Catalog Banners screen
@@ -1783,13 +1761,6 @@ class SupabaseDataService {
         params: {'p_seq': sequentialId, 'p_mode': mode});
   }
 
-  /// Admin: mint a fresh masked public code (retires the old one to history).
-  Future<String?> regeneratePublicCode(String sequentialId) async {
-    final res = await supabase
-        .rpc('admin_regenerate_public_code', params: {'p_seq': sequentialId});
-    return res as String?;
-  }
-
   /// Admin: set a user's concurrent-device limit. [role] is 'stockist' (key =
   /// sequential id) or 'end_user' (key = end-user UUID). 0 = unlimited.
   Future<void> setDeviceLimit(String role, String key, int limit) async {
@@ -1816,19 +1787,6 @@ class SupabaseDataService {
     }
   }
 
-  /// Admin: reverse-lookup a (live or retired) public code → real stockist(s).
-  Future<List<Map<String, dynamic>>> resolvePublicCode(String code) async {
-    try {
-      final res = await supabase
-          .rpc('admin_resolve_public_code', params: {'p_code': code});
-      return (res as List?)
-              ?.map((e) => Map<String, dynamic>.from(e as Map))
-              .toList() ??
-          [];
-    } catch (_) {
-      return [];
-    }
-  }
 
   /// The stockist UUID for a sequential id (catalogs are keyed by UUID, but
   /// admin screens work in sequential ids).
@@ -2110,9 +2068,6 @@ class SupabaseDataService {
         isListed:  s['is_listed'] ?? true,
         shareToken: s['share_token'] ?? '',
         canCreatePrivateCatalog: s['can_create_private_catalog'] ?? false,
-        isAnonymous: s['is_anonymous'] ?? false,
-        publicDisplayName: s['public_display_name'] ?? '',
-        publicCode: s['public_code'] ?? '',
         deviceLimit: s['device_limit'] ?? 1,
         deviceCount: s['device_count'] ?? 0,
         brandLimit: s['brand_limit'] ?? 1,

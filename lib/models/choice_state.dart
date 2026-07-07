@@ -19,18 +19,9 @@ String currentStockistUUID = '';  // Supabase UUID  (DB query use)
 // regardless of the stored per-stockist flag. One switch gates both (see the
 // design note on [publicMarketLive]). The setter stores the raw DB value; the
 // getter applies the gate at read time, so it can never go stale on load order.
-bool _currentStockistIsAnonymousRaw = false;
-bool get currentStockistIsAnonymous =>
-    publicMarketLive && _currentStockistIsAnonymousRaw;
-set currentStockistIsAnonymous(bool v) => _currentStockistIsAnonymousRaw = v;
-
-/// Whether the admin has provisioned this stockist a masked identity (the raw
-/// account flag, NOT gated by the market switch). The stockist needs this to
-/// manage per-list anonymity even while the market is dormant — so it drives
-/// whether the per-list "anonymous name" toggle is offered. Display/masking
-/// still goes through [currentStockistIsAnonymous] / the server gate.
-bool get currentStockistAnonymityEligible => _currentStockistIsAnonymousRaw;
-String currentStockistDisplayName = ''; // public_display_name (masked trade name)
+// Anonymity removed 2026-07-07 — real names everywhere. currentStockistDisplayName
+// kept only as a harmless empty holder for legacy resets.
+String currentStockistDisplayName = '';
 
 /// The logged-in stockist's business / actor type: 'M' (Manufacturer/Author),
 /// 'T' (Trader) or 'W' (Wholesaler). Loaded at login. Drives which upload path
