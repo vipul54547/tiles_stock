@@ -63,11 +63,10 @@ class _State extends State<InquiriesScreen> {
   DateTime? _to;
   final _searchCtrl = TextEditingController();
 
-  // Completed (fully dispatched) orders leave the inquiry list → they live in
-  // Records. 'draft' dropped: web/stockist orders start at 'sent', so nothing is
-  // ever a draft here.
+  // Completed orders are kept only under the dedicated "Completed" tab (a record),
+  // and hidden from every other tab.
   static const _statuses = [
-    'all', 'sent', 'locked', 'dispatching', 'rejected'
+    'all', 'sent', 'locked', 'dispatching', 'completed', 'rejected'
   ];
 
   @override
@@ -110,9 +109,14 @@ class _State extends State<InquiriesScreen> {
   }
 
   List<InquiryOrder> get _filtered {
-    // Completed orders are moved to Records — never shown in the inquiry list.
-    var list = _orders.where((o) => o.status != 'completed').toList();
-    if (_status != 'all') list = list.where((o) => o.status == _status).toList();
+    // Completed orders are hidden from every tab EXCEPT the dedicated "Completed"
+    // tab, where they're kept as a record.
+    var list = _orders.where((o) {
+      if (_status == 'completed') return o.status == 'completed';
+      if (o.status == 'completed') return false;
+      if (_status != 'all') return o.status == _status;
+      return true;
+    }).toList();
     if (_buyerId != null) {
       list = list.where((o) => o.endUserId == _buyerId).toList();
     }
