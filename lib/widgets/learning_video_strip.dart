@@ -1,53 +1,137 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
-/// A SLIM one-line bar (not a big thumbnail strip) that opens a small sheet
-/// listing the videos — keeps the feature discoverable without eating a third
-/// of the screen. Used on the buyer home and the in-app supplier portfolio.
-/// Empty list = renders nothing.
-class LearningVideoStrip extends StatelessWidget {
+/// A slim, single-line "Gemini-style" glowing bar that cycles the video TITLES
+/// one at a time (no list). Each title slides in right→left, holds, slides out,
+/// and the next takes its place every ~6 seconds. Tapping the bar plays the
+/// video whose title is currently showing.
+///
+/// The border is an animated 4-colour gradient ring whose hue sweeps around the
+/// rounded rectangle with a soft outer glow. Background is a low-saturation tint
+/// so the title text stays crisp.
+///
+/// Used on the buyer home (admin learning videos) and the supplier portfolio
+/// (that supplier's videos + admin). Empty list = renders nothing.
+class LearningVideoStrip extends StatefulWidget {
   const LearningVideoStrip({
     super.key,
     required this.videos,
     required this.onPlay,
-    this.title = 'Learn how to use this',
+    // Kept for call-site compatibility; the ticker shows per-video titles now,
+    // so this is only a fallback if a video has no title.
+    this.title = 'Watch',
   });
 
   final List<Map<String, dynamic>> videos;
   final void Function(Map<String, dynamic> video) onPlay;
-
-  /// Bar label (buyer home = "Learn how to use this"; a portfolio = "Videos").
   final String title;
 
+  @override
+  State<LearningVideoStrip> createState() => _LearningVideoStripState();
+}
+
+class _LearningVideoStripState extends State<LearningVideoStrip>
+    with TickerProviderStateMixin {
+  // Drives the hue sweep + glow of the animated border (continuous loop).
+  late final AnimationController _glow;
+
+  // Drives one 6s title cycle: slide-in (1.5s) → hold (3.5s) → slide-out (1s).
+  late final AnimationController _cycle;
+
+  int _index = 0;
+
   static const _navy = Color(0xFF1B4F72);
+  static const _bg = Color(0xFFF5F7FC);
+  static const _cycleMs = 6000;
+
+  @override
+  void initState() {
+    super.initState();
+    _glow = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 5),
+    )..repeat();
+    _cycle = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: _cycleMs),
+    )..addStatusListener(_onCycleDone);
+    if (widget.videos.isNotEmpty) _cycle.forward();
+  }
+
+  void _onCycleDone(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    // Only advance / re-run when there's more than one title to rotate.
+    if (widget.videos.length > 1 && mounted) {
+      setState(() => _index = (_index + 1) % widget.videos.length);
+      _cycle.forward(from: 0);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant LearningVideoStrip old) {
+    super.didUpdateWidget(old);
+    // Video set changed (loaded / switched supplier) — restart the ticker.
+    if (old.videos.length != widget.videos.length) {
+      _index = 0;
+      if (widget.videos.isEmpty) {
+        _cycle.stop();
+      } else {
+        _cycle.forward(from: 0);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _glow.dispose();
+    _cycle.dispose();
+    super.dispose();
+  }
+
+  void _playCurrent() {
+    if (widget.videos.isEmpty) return;
+    final i = _index.clamp(0, widget.videos.length - 1);
+    widget.onPlay(widget.videos[i]);
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (videos.isEmpty) return const SizedBox.shrink();
+    if (widget.videos.isEmpty) return const SizedBox.shrink();
+    final multi = widget.videos.length > 1;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
-      child: Material(
-        color: _navy.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: () => _openList(context),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                const Icon(Icons.play_circle_outline, size: 20, color: _navy),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text('$title · ${videos.length}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
-                          color: _navy)),
+      // Extra outer room so the glow can bleed past the bar.
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: SizedBox(
+        height: 46,
+        child: AnimatedBuilder(
+          animation: _glow,
+          builder: (_, child) => CustomPaint(
+            foregroundPainter: _GlowBorderPainter(_glow.value),
+            child: child,
+          ),
+          child: Material(
+            color: _bg,
+            borderRadius: BorderRadius.circular(14),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: _playCurrent,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  children: [
+                    const Icon(Icons.play_circle_fill_rounded,
+                        size: 22, color: _navy),
+                    const SizedBox(width: 10),
+                    Expanded(child: _ticker(multi)),
+                    if (multi) ...[
+                      const SizedBox(width: 8),
+                      _dots(),
+                    ],
+                  ],
                 ),
-                const Icon(Icons.chevron_right, size: 20, color: _navy),
-              ],
+              ),
             ),
           ),
         ),
@@ -55,92 +139,123 @@ class LearningVideoStrip extends StatelessWidget {
     );
   }
 
-  void _openList(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-      builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.play_circle_outline, size: 20, color: _navy),
-                  const SizedBox(width: 8),
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: _navy)),
-                ],
+  // The scrolling title. Slides in from the right, holds, then slides out left
+  // (only when there are multiple titles to rotate through).
+  Widget _ticker(bool multi) {
+    final v = widget.videos[_index.clamp(0, widget.videos.length - 1)];
+    var title = (v['title'] ?? '').toString().trim();
+    if (title.isEmpty) title = widget.title;
+
+    return ClipRect(
+      child: AnimatedBuilder(
+        animation: _cycle,
+        builder: (_, __) {
+          final t = _cycle.value;
+          double dx, opacity;
+          // Slide in: 0.00–0.25  (~1.5s)
+          if (t < 0.25) {
+            final p = Curves.easeOut.transform(t / 0.25);
+            dx = 1.0 - p;
+            opacity = (t / 0.2).clamp(0.0, 1.0);
+          } else if (t < 0.83 || !multi) {
+            // Hold: 0.25–0.83 (~3.5s) — single video stays here forever.
+            dx = 0.0;
+            opacity = 1.0;
+          } else {
+            // Slide out: 0.83–1.00 (~1s)
+            final p = Curves.easeIn.transform((t - 0.83) / 0.17);
+            dx = -p;
+            opacity = (1.0 - (t - 0.83) / 0.15).clamp(0.0, 1.0);
+          }
+          return FractionalTranslation(
+            translation: Offset(dx, 0),
+            child: Opacity(
+              opacity: opacity,
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: _navy,
+                  letterSpacing: 0.1,
+                ),
               ),
             ),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: const EdgeInsets.only(bottom: 8),
-                itemCount: videos.length,
-                itemBuilder: (_, i) => _row(sheetCtx, videos[i]),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
 
-  Widget _row(BuildContext sheetCtx, Map<String, dynamic> v) {
-    final thumb = (v['thumbnail'] ?? '').toString();
-    final title = (v['title'] ?? '').toString().trim();
-    final subtitle = (v['subtitle'] ?? '').toString().trim();
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: SizedBox(
-          width: 72,
-          height: 44,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              thumb.isEmpty
-                  ? Container(color: Colors.grey.shade300)
-                  : Image.network(thumb,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          Container(color: Colors.grey.shade300)),
-              const Center(
-                child: Icon(Icons.play_arrow_rounded,
-                    color: Colors.white, size: 22),
-              ),
-            ],
+  // Tiny position dots so the buyer senses there are several videos.
+  Widget _dots() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(widget.videos.length.clamp(0, 6), (i) {
+        final active = i == _index % widget.videos.length;
+        return Container(
+          width: active ? 7 : 5,
+          height: active ? 7 : 5,
+          margin: const EdgeInsets.symmetric(horizontal: 1.5),
+          decoration: BoxDecoration(
+            color: active ? _navy : _navy.withValues(alpha: 0.28),
+            shape: BoxShape.circle,
           ),
-        ),
-      ),
-      title: Text(title.isEmpty ? 'Watch' : title,
-          maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: subtitle.isEmpty
-          ? null
-          : Text(subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12)),
-      onTap: () {
-        Navigator.of(sheetCtx).pop();
-        onPlay(v);
-      },
+        );
+      }),
     );
   }
+}
+
+/// Paints the animated 4-colour gradient border with a soft outer glow.
+/// [t] is the sweep phase in [0,1) — rotating it sweeps the colours around the
+/// rounded rectangle (the "Gemini" shimmer).
+class _GlowBorderPainter extends CustomPainter {
+  _GlowBorderPainter(this.t);
+
+  final double t;
+
+  static const _radius = 14.0;
+  // Gemini-ish 4-stop palette (blue → purple → pink → cyan), wrapped for a
+  // seamless sweep.
+  static const _colors = [
+    Color(0xFF4285F4), // blue
+    Color(0xFF9B72F8), // purple
+    Color(0xFFEA4C89), // pink
+    Color(0xFF00C6FB), // cyan
+    Color(0xFF4285F4), // wrap back to blue
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = RRect.fromRectAndRadius(
+      rect.deflate(1.2),
+      const Radius.circular(_radius),
+    );
+    final shader = SweepGradient(
+      colors: _colors,
+      transform: GradientRotation(t * 2 * math.pi),
+    ).createShader(rect);
+
+    // Soft glow underneath the crisp ring.
+    final glow = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5
+      ..shader = shader
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawRRect(rrect, glow);
+
+    // Crisp animated border.
+    final border = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..shader = shader;
+    canvas.drawRRect(rrect, border);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GlowBorderPainter old) => old.t != t;
 }
