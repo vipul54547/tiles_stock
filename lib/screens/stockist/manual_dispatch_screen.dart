@@ -100,23 +100,11 @@ class _State extends State<ManualDispatchScreen> {
     return m.isEmpty ? '' : m.first.name;
   }
 
-  // ── Surface (project_per_brand_surface_mode) ─────────────────────────────
-  // Shown only for brands that treat surface as an attribute; in-name brands
-  // already carry it in the design name.
-
-  Brand? _brandById(String? id) {
-    if (id == null || id.isEmpty) return null;
-    final m = _brands.where((b) => b.id == id).toList();
-    return m.isEmpty ? null : m.first;
-  }
-
-  /// The surface to display for this holding, or '' when it has none / the
-  /// brand keeps surface in the name.
-  String _surfaceOf(TileDesign d) {
-    if (!(_brandById(d.brandId)?.usesSurface ?? false)) return '';
-    final s = d.surfaceType.trim();
-    return s.isEmpty || s.toLowerCase() == 'none' ? '' : s;
-  }
+  /// The glaze this holding was made on, or '' when it has none. No brand-mode
+  /// lookup needed: a holding stores the surface it was actually stocked with,
+  /// and in-name brands store 'None' (the glaze is inside the design name).
+  /// (project_per_brand_surface_mode)
+  String _surfaceOf(TileDesign d) => d.displaySurface;
 
   String _holdingLabel(TileDesign d) {
     final b = _brandName(d.brandId);

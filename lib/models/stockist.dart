@@ -94,6 +94,17 @@ class Stockist {
   /// (project_unified_dispatch_customers)
   final bool customersEnabled;
 
+  /// How this stockist's own factory names tiles: 'attribute' (glaze picked
+  /// separately when stock is added) or 'in_name' (glaze written into the design
+  /// name). Only meaningful for M — an M IS the factory, so the convention is
+  /// company-wide and its brands are just alternate names for the same print.
+  /// T/W stockists carry other factories' brands and use `Brand.surfaceMode`.
+  /// (project_per_brand_surface_mode)
+  final String surfaceMode;
+
+  /// Stock entry must ask for a real glaze (M only — see [surfaceMode]).
+  bool get usesSurface => surfaceMode == 'attribute';
+
   final DateTime createdAt;
 
 
@@ -156,6 +167,7 @@ class Stockist {
 
     this.tdShow = false,
     this.customersEnabled = false,
+    this.surfaceMode = 'in_name',
 
     required this.createdAt,
 
@@ -223,6 +235,7 @@ class Stockist {
 
     tdShow: json['td_show'] ?? false,
     customersEnabled: json['customers_enabled'] ?? false,
+    surfaceMode: (json['surface_mode'] ?? 'in_name').toString(),
 
     createdAt: DateTime.parse(json['created_at']),
 

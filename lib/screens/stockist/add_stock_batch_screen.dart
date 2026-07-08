@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/library_entry.dart';
 import '../../models/brand.dart';
 import '../../models/choice_state.dart';
+import '../../utils/finishes.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/save_bar.dart';
@@ -30,16 +31,24 @@ class _Entry {
   final String? brandId;   // M only; null → the master's own brand
   final String? brandName;
   final String quality;
+
+  /// The GLAZE this run was printed on. Chosen here, not read off the design:
+  /// the library holds the print ("Satva White"), the factory runs it on Matt or
+  /// Glossy or Carving. (project_per_brand_surface_mode)
+  final String surface;
   int qty;
   _Entry({
     required this.master,
     required this.brandId,
     required this.brandName,
     required this.quality,
+    required this.surface,
     required this.qty,
   });
-  // Same design + brand + quality = the same holding.
-  String get key => '${master.id}|${brandId ?? ''}|$quality';
+
+  /// Same design + brand + quality + SURFACE = the same holding. Must match
+  /// stock_add_holding's lookup, or two glazes of one print merge into one row.
+  String get key => '${master.id}|${brandId ?? ''}|$quality|$surface';
 }
 
 class _State extends State<AddStockBatchScreen> {
@@ -55,7 +64,14 @@ class _State extends State<AddStockBatchScreen> {
   LibraryEntry? _selMaster;
   String? _selBrandId;
   String _selQuality = 'Premium';
+  String _selSurface = '';
   final _qtyCtrl = TextEditingController();
+
+  /// Admin's live finish list, 'None' excluded — a tile always has a glaze.
+  List<String> _surfaces = const [];
+
+  /// M only: the factory's own convention (its brands share it).
+  bool _stockistUsesSurface = false;
 
   // Top brand filter — narrows the Design picker (M).
   String? _brandFilter;
@@ -82,12 +98,29 @@ class _State extends State<AddStockBatchScreen> {
   Future<void> _load() async {
     final masters = await _svc.getMyLibrary();
     final brands = await _svc.getMyBrands();
+    final profile = await _svc.getMyProfile();
+    final surfaces = await _loadSurfaceNames();
     if (!mounted) return;
     setState(() {
       _masters = masters;
       _brands = brands;
+      _stockistUsesSurface =
+          (profile?['surface_mode'] ?? 'in_name').toString() == 'attribute';
+      _surfaces = surfaces;
       _loading = false;
     });
+  }
+
+  Future<List<String>> _loadSurfaceNames() async {
+    try {
+      final types = await _svc.getSurfaceTypes(activeOnly: true);
+      return types
+          .map((t) => t.name)
+          .where((n) => n.trim().isNotEmpty && n.toLowerCase() != 'none')
+          .toList();
+    } catch (_) {
+      return kFinishes.where((f) => f.toLowerCase() != 'none').toList();
+    }
   }
 
   String _brandNameOf(String? id) {
@@ -96,9 +129,12 @@ class _State extends State<AddStockBatchScreen> {
     return m.isEmpty ? '' : m.first.name;
   }
 
-  // ── Surface (project_per_brand_surface_mode) ─────────────────────────────
-  // Surface is shown only for brands that treat it as an attribute; in-name
-  // brands carry it inside the design name, so repeating it would be noise.
+  // ── Surface / glaze (project_per_brand_surface_mode) ──────────────────────
+  // The library holds the PRINT; the glaze is chosen HERE, when the tile is
+  // made. Whether we ask for it is the FACTORY's convention:
+  //   M   → the stockist IS the factory; its brands are alternate names for the
+  //         same print, so one setting covers them all.
+  //   T/W → each carried brand IS a different factory → per-brand.
 
   Brand? _brandById(String? id) {
     if (id == null || id.isEmpty) return null;
@@ -107,21 +143,31 @@ class _State extends State<AddStockBatchScreen> {
   }
 
   bool _usesSurface(LibraryEntry m, String? brandId) {
+    if (_isM) return _stockistUsesSurface;
     final id = (brandId != null && brandId.isNotEmpty) ? brandId : m.brandId;
     return _brandById(id)?.usesSurface ?? false;
   }
 
-  /// The surface to display for this design, or '' when it has none / the brand
-  /// keeps surface in the name.
-  String _surfaceOf(LibraryEntry m, String? brandId) {
-    if (!_usesSurface(m, brandId)) return '';
-    final s = m.surfaceType.trim();
-    return s.isEmpty || s.toLowerCase() == 'none' ? '' : s;
+  /// Whether the CURRENT selection needs a glaze picked.
+  bool get _selNeedsSurface =>
+      _selMaster != null && _usesSurface(_selMaster!, _isM ? _selBrandId : null);
+
+  /// What goes on the holding. Attribute → the stockist's pick. In-name → the
+  /// glaze is inside the design name, so fall back to whatever the importer put
+  /// on the print (unchanged behaviour; 'None' when it never had one).
+  String get _surfaceForEntry {
+    if (_selNeedsSurface) return _selSurface.trim();
+    final legacy = _selMaster?.surfaceType.trim() ?? '';
+    return legacy.isEmpty ? 'None' : legacy;
   }
 
-  /// Any row in the running list carries a surface → show the SURFACE column.
-  bool get _showSurfaceCol =>
-      _entries.any((e) => _surfaceOf(e.master, e.brandId).isNotEmpty);
+  static String _shown(String s) {
+    final t = s.trim();
+    return t.isEmpty || t.toLowerCase() == 'none' ? '' : t;
+  }
+
+  /// Any row in the running list carries a real glaze → show the SURFACE column.
+  bool get _showSurfaceCol => _entries.any((e) => _shown(e.surface).isNotEmpty);
 
   // A master's name under a brand (alias) when present, else its master name.
   String _displayName(LibraryEntry m, String? brandId) {
@@ -220,14 +266,8 @@ class _State extends State<AddStockBatchScreen> {
                                                         Colors.grey.shade200)),
                                   ),
                                   title: Text(m.masterName),
-                                  // Size · surface — for attribute brands the
-                                  // surface is what tells two same-named
-                                  // designs apart, so it must be visible here.
-                                  subtitle: Text([
-                                    m.size.replaceAll(' mm', ''),
-                                    if (_surfaceOf(m, _brandFilter).isNotEmpty)
-                                      _surfaceOf(m, _brandFilter),
-                                  ].join(' · ')),
+                                  // A print has no glaze — size only.
+                                  subtitle: Text(m.size.replaceAll(' mm', '')),
                                   onTap: () => Navigator.pop(ctx, m),
                                 );
                               },
@@ -315,7 +355,7 @@ class _State extends State<AddStockBatchScreen> {
   void _resetRow() {
     _selMaster = null;
     _qtyCtrl.clear();
-    // brand + quality kept for faster repeated entry.
+    // brand + quality + surface kept for faster repeated entry.
   }
 
   void _addEntry() {
@@ -325,6 +365,11 @@ class _State extends State<AddStockBatchScreen> {
     }
     if (_isM && _selBrandId == null) {
       _snack('Pick a brand.', Colors.red);
+      return;
+    }
+    // The glaze is what this run was printed on — it can't be guessed.
+    if (_selNeedsSurface && _selSurface.trim().isEmpty) {
+      _snack('Pick a surface.', Colors.red);
       return;
     }
     final qty = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
@@ -337,6 +382,7 @@ class _State extends State<AddStockBatchScreen> {
       brandId: _isM ? _selBrandId : null,
       brandName: _isM ? _brandNameOf(_selBrandId) : null,
       quality: _selQuality,
+      surface: _surfaceForEntry,
       qty: qty,
     );
     final idx = _entries.indexWhere((x) => x.key == e.key);
@@ -356,6 +402,7 @@ class _State extends State<AddStockBatchScreen> {
     final existing = _entries[existingIdx];
     final label =
         '${_displayName(existing.master, existing.brandId)} · '
+        '${_shown(existing.surface).isNotEmpty ? '${_shown(existing.surface)} · ' : ''}'
         '${existing.brandName?.isNotEmpty == true ? '${existing.brandName} · ' : ''}'
         '${existing.quality}';
     final choice = await showDialog<String>(
@@ -449,7 +496,7 @@ class _State extends State<AddStockBatchScreen> {
                 'quality': e.quality,
                 'quantity': e.qty,
                 'brand_id': e.brandId,
-                'surface': e.master.surfaceType,
+                'surface': e.surface,
               })
           .toList();
       final res = await _svc.addInventoryBatch(payload);
@@ -497,7 +544,7 @@ class _State extends State<AddStockBatchScreen> {
                               Expanded(
                                 child: Text(
                                   '${_displayName(e.master, e.brandId)}'
-                                  '${_surfaceOf(e.master, e.brandId).isNotEmpty ? ' · ${_surfaceOf(e.master, e.brandId)}' : ''}'
+                                  '${_shown(e.surface).isNotEmpty ? ' · ${_shown(e.surface)}' : ''}'
                                   '${e.brandName?.isNotEmpty == true ? ' · ${e.brandName}' : ''}'
                                   ' · ${e.quality}',
                                   maxLines: 1,
@@ -622,9 +669,6 @@ class _State extends State<AddStockBatchScreen> {
   Widget _desktopEntryBar() {
     final sizeText =
         _selMaster == null ? '—' : _selMaster!.size.replaceAll(' mm', '');
-    final surfaceText = _selMaster == null
-        ? ''
-        : _surfaceOf(_selMaster!, _isM ? _selBrandId : null);
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -656,8 +700,8 @@ class _State extends State<AddStockBatchScreen> {
             const SizedBox(width: 12),
             _hField('Size (auto)', _hReadonly(sizeText), width: 110),
             const SizedBox(width: 12),
-            if (surfaceText.isNotEmpty) ...[
-              _hField('Surface (auto)', _hReadonly(surfaceText), width: 120),
+            if (_selNeedsSurface) ...[
+              _hField('Surface *', _surfaceDropdown(), width: 150),
               const SizedBox(width: 12),
             ],
             _hField('Quality', _qualityDropdown(), width: 140),
@@ -750,6 +794,32 @@ class _State extends State<AddStockBatchScreen> {
                 color: Colors.grey.shade700)),
       );
 
+  // Required, never auto-filled — the glaze is a fact about the production run.
+  Widget _surfaceDropdown() => Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+            border: Border.all(
+                color: _selSurface.isEmpty
+                    ? Colors.red.shade300
+                    : Colors.grey.shade400),
+            borderRadius: BorderRadius.circular(8)),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _surfaces.contains(_selSurface) ? _selSurface : null,
+            hint: Text('Select',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+            isExpanded: true,
+            isDense: true,
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
+            items: _surfaces
+                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                .toList(),
+            onChanged: (v) => setState(() => _selSurface = v ?? _selSurface),
+          ),
+        ),
+      );
+
   Widget _qualityDropdown() => Container(
         height: 44,
         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -833,9 +903,7 @@ class _State extends State<AddStockBatchScreen> {
         design: _displayName(e.master, e.brandId),
         brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
         size: e.master.size.replaceAll(' mm', ''),
-        surface: _surfaceOf(e.master, e.brandId).isEmpty
-            ? '—'
-            : _surfaceOf(e.master, e.brandId),
+        surface: _shown(e.surface).isEmpty ? '—' : _shown(e.surface),
         quality: e.quality,
         qty: '${e.qty}',
         onQty: () => _editQty(e),
@@ -976,21 +1044,25 @@ class _State extends State<AddStockBatchScreen> {
               onTap: _pickDesign,
               placeholder: _selMaster == null,
             ),
-            // Size + surface come from the design itself — shown, never typed.
+            // Size belongs to the print — shown, never typed.
             if (_selMaster != null) ...[
               const SizedBox(height: 8),
-              Row(
+              Row(children: [
+                _autoChip(
+                    Icons.straighten, _selMaster!.size.replaceAll(' mm', '')),
+              ]),
+            ],
+            // The glaze is chosen here, when the tile is made.
+            if (_selNeedsSurface) ...[
+              const SizedBox(height: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _autoChip(Icons.straighten,
-                      _selMaster!.size.replaceAll(' mm', '')),
-                  if (_surfaceOf(_selMaster!, _isM ? _selBrandId : null)
-                      .isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    _autoChip(
-                        Icons.texture,
-                        _surfaceOf(
-                            _selMaster!, _isM ? _selBrandId : null)),
-                  ],
+                  const Text('Surface *',
+                      style:
+                          TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  _surfaceDropdown(),
                 ],
               ),
             ],
@@ -1175,8 +1247,7 @@ class _State extends State<AddStockBatchScreen> {
                   Text(
                     [
                       e.master.size.replaceAll(' mm', ''),
-                      if (_surfaceOf(e.master, e.brandId).isNotEmpty)
-                        _surfaceOf(e.master, e.brandId),
+                      if (_shown(e.surface).isNotEmpty) _shown(e.surface),
                       if (e.brandName?.isNotEmpty == true) e.brandName!,
                       e.quality,
                     ].join(' · '),

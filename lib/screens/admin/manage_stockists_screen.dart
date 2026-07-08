@@ -458,6 +458,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   bool _canPrivate = false; // may create private (Most Exclusive) catalogs
   bool _tdShow = false; // show the TilesDesign mark on this stockist's banners
   bool _customersEnabled = false; // may save customers on dispatch (opt-in)
+  String _surfaceMode = 'in_name'; // M only: company-wide glaze convention
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   // Per-stockist cap on brand-free stock lists (v2 — lists are no longer under a
@@ -501,6 +502,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _canPrivate = s.canCreatePrivateCatalog;
       _tdShow = s.tdShow;
       _customersEnabled = s.customersEnabled;
+      _surfaceMode = s.surfaceMode;
       _deviceLimit.text = '${s.deviceLimit}';
       _stockLists.text = '${s.stockListLimit}';
       _brandColor = s.brandColor;
@@ -656,11 +658,74 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => StockistBrandListsScreen(
                     seq: widget.existing!.id,
-                    stockistName: widget.existing!.name))),
+                    stockistName: widget.existing!.name,
+                    businessType: _businessType))),
           ),
         ),
         const SizedBox(height: 16),
       ],
+    );
+  }
+
+  // M only. The library stores the PRINT ("Satva White"); the glaze is chosen
+  // when stock is added. This decides whether Add Stock asks for the glaze.
+  // (project_per_brand_surface_mode)
+  Widget _surfaceModeControl() {
+    var mode = ['attribute', 'in_name'].contains(_surfaceMode)
+        ? _surfaceMode
+        : 'in_name';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.texture, size: 16, color: Colors.grey.shade600),
+              const SizedBox(width: 6),
+              Text('Surface convention',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade800)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<String>(
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                textStyle:
+                    WidgetStateProperty.all(const TextStyle(fontSize: 12)),
+              ),
+              segments: const [
+                ButtonSegment(
+                    value: 'attribute',
+                    label: Text('Attribute'),
+                    icon: Icon(Icons.tune, size: 15)),
+                ButtonSegment(
+                    value: 'in_name',
+                    label: Text('In name'),
+                    icon: Icon(Icons.text_fields, size: 15)),
+              ],
+              selected: {mode},
+              onSelectionChanged: (sel) =>
+                  setState(() => _surfaceMode = sel.first),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+              'Attribute: the design name is the print ("Satva White") and the '
+              'glaze (Glossy / Matt / Carving) is picked when stock is added.\n'
+              'In name: the glaze is already written into the design name '
+              '("m.satva white") — stock never asks for it.\n'
+              'Applies to all of this manufacturer\'s brands — they are just '
+              'different names for the same print.',
+              style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
+        ],
+      ),
     );
   }
 
@@ -778,6 +843,9 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
         await _dataSvc.setStockistTd(widget.existing!.id, _tdShow);
         await _dataSvc.setStockistCustomers(
             widget.existing!.id, _customersEnabled);
+        if (_businessType == 'M') {
+          await _dataSvc.setStockistSurfaceMode(widget.existing!.id, _surfaceMode);
+        }
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -998,6 +1066,11 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                     onChanged: (v) => setState(() => _tdShow = v),
                   ),
                 ),
+              // An M stockist IS the factory, so the glaze convention is
+              // company-wide: one setting, not one per brand (its brands are
+              // just alternate names for the same print). T/W sets it per brand
+              // on the Brands screen. (project_per_brand_surface_mode)
+              if (_isEdit && _businessType == 'M') _surfaceModeControl(),
               // Opt-in, trust-first: the platform never depends on customer
               // contact data. (project_unified_dispatch_customers)
               if (_isEdit)

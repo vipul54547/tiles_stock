@@ -8,8 +8,18 @@ import '../../services/supabase_data_service.dart';
 class StockistBrandListsScreen extends StatefulWidget {
   final String seq; // stockist sequential id
   final String stockistName;
+
+  /// 'M' | 'T' | 'W'. The per-brand SURFACE control is shown only for T/W, where
+  /// each brand is a different factory with its own naming convention. An M IS
+  /// the factory: its brands are alternate names for the same print, so the
+  /// convention is one setting on the stockist edit form.
+  /// (project_per_brand_surface_mode)
+  final String businessType;
   const StockistBrandListsScreen(
-      {super.key, required this.seq, required this.stockistName});
+      {super.key,
+      required this.seq,
+      required this.stockistName,
+      this.businessType = 'M'});
   @override
   State<StockistBrandListsScreen> createState() => _State();
 }
@@ -228,8 +238,10 @@ class _State extends State<StockistBrandListsScreen> {
             ),
             const SizedBox(height: 10),
             _statusControl(b),
-            const Divider(height: 22),
-            _surfaceModeControl(b),
+            if (widget.businessType != 'M') ...[
+              const Divider(height: 22),
+              _surfaceModeControl(b),
+            ],
           ],
         ),
       ),
@@ -281,11 +293,10 @@ class _State extends State<StockistBrandListsScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-            'Attribute: surface is picked separately and is required '
-            '(e.g. "Satva White" + Glossy/Matt) — it is part of the design\'s '
-            'identity and is shown with the name.\n'
-            'In name: surface is already written into the design name '
-            '(e.g. "cr satva white") — no separate surface field.',
+            'Attribute: the design name is the print ("Satva White") and the '
+            'glaze (Glossy / Matt / Carving) is picked when stock is added.\n'
+            'In name: the glaze is already written into the design name '
+            '("m.satva white") — stock never asks for it.',
             style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
       ],
     );
@@ -294,17 +305,14 @@ class _State extends State<StockistBrandListsScreen> {
   Future<void> _setSurfaceMode(Map<String, dynamic> b, String mode) async {
     final current = (b['surface_mode'] ?? 'in_name').toString();
     if (mode == current) return;
-    final hasDesigns = ((b['list_count'] as num?)?.toInt() ?? 0) > 0;
     final ok = await _confirm(
-      mode == 'attribute' ? 'Use surface as an attribute?' : 'Put surface in the name?',
+      mode == 'attribute' ? 'Pick the glaze when adding stock?' : 'Glaze is in the name?',
       mode == 'attribute'
-          ? 'Designs in "${b['name']}" will need a surface, and two designs with '
-              'the same name + size but different surfaces become different '
-              'designs.'
-              '${hasDesigns ? '\n\nThis brand already has stock lists — existing designs keep their current surface until edited.' : ''}'
-          : 'The surface field will be hidden for "${b['name']}". Designs are '
-              'identified by name + size only.'
-              '${hasDesigns ? '\n\nThis brand already has stock lists — surfaces already saved stay on the records but are no longer shown or asked for.' : ''}',
+          ? 'Adding stock for "${b['name']}" will ask for a surface '
+              '(Glossy / Matt / Carving). The design itself stays the print — '
+              'one design, one photo, one entry per glaze in stock.'
+          : 'Adding stock for "${b['name']}" will not ask for a surface. The '
+              'glaze must already be written into the design name.',
     );
     if (!ok) return;
     setState(() => _saving = true);

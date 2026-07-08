@@ -518,7 +518,7 @@ class SupabaseDataService {
       return await supabase
           .from('stockists')
           .select(
-              'name, logo_url, brand_color, tagline, pincode, state, district, city, customers_enabled')
+              'name, logo_url, brand_color, tagline, pincode, state, district, city, customers_enabled, surface_mode')
           .eq('user_id', uid)
           .maybeSingle();
     } catch (e, st) {
@@ -1798,6 +1798,18 @@ class SupabaseDataService {
   Future<void> setStockistCustomers(String sequentialId, bool enabled) async {
     await supabase.rpc('admin_set_stockist_customers',
         params: {'p_seq': sequentialId, 'p_enabled': enabled});
+  }
+
+  /// Admin: an M stockist's surface convention ('attribute' | 'in_name'). M IS
+  /// the factory, so the convention is company-wide; T/W keeps it per brand
+  /// (`setBrandSurfaceMode`). (project_per_brand_surface_mode)
+  Future<void> setStockistSurfaceMode(String sequentialId, String mode) async {
+    try {
+      await supabase.rpc('admin_set_stockist_surface_mode',
+          params: {'p_seq': sequentialId, 'p_mode': mode});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
   }
 
   // ─── Banner Video (admin) ───────────────────────────────────────────────
