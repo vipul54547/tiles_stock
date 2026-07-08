@@ -70,6 +70,10 @@ import 'screens/stockist/import_mapping_excel_screen.dart';
 import 'screens/stockist/import_excel_stock_screen.dart';
 import 'screens/stockist/add_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
+import 'screens/stockist/stock_lists_screen.dart';
+import 'screens/stockist/stockist_profile_screen.dart';
+import 'screens/stockist/stockist_my_videos_screen.dart';
+import 'widgets/stockist_shell.dart';
 import 'screens/stockist/stock_history_screen.dart';
 
 
@@ -169,49 +173,96 @@ final GoRouter _router = GoRouter(
 
     ),
 
-    GoRoute(
-
-        path: '/stockist/dashboard',
-
-        builder: (_, __) => const StockistDashboardScreen()),
-
-    GoRoute(
-        path: '/stockist/inquiries',
-        builder: (_, __) => const InquiriesScreen()),
-
-    GoRoute(
-      path: '/stockist/inquiry/dispatch',
-      builder: (_, state) {
-        final e = (state.extra as Map?) ?? const {};
-        return DispatchInquiryScreen(
-          inquiryId: (e['id'] ?? '').toString(),
-          token: e['token']?.toString(),
-          company: e['company']?.toString(),
-          phone: e['phone']?.toString(),
-          countryCode: e['country_code']?.toString(),
-          reduceStock: e['reduce_stock'] as bool?,
-        );
-      },
-    ),
-
-    // "+ Add → Stock" — batch manual stock entry (many designs at once, P_Stock
-    // only, no list). Old single-design add form retired from this path.
-    GoRoute(
-        path: '/stockist/stock/add',
-        builder: (_, state) {
-          final e = state.extra;
-          final brandId = e is Map ? e['brandId'] as String? : null;
-          return AddStockBatchScreen(initialBrandId: brandId);
-        }),
-
-    GoRoute(
-
-      path: '/stockist/stock/edit/:id',
-
-      builder: (_, state) =>
-
-          AddEditStockScreen(designId: state.pathParameters['id']),
-
+    // Stockist section — wrapped in a ShellRoute so the desktop/web sidebar
+    // persists across EVERY stockist page (including deep pages like edit /
+    // dispatch / import), because those routes render inside this shell's own
+    // navigator. On phones the shell adds nothing. (StockistShell)
+    ShellRoute(
+      builder: (context, state, child) =>
+          StockistShell(location: state.matchedLocation, child: child),
+      routes: [
+        GoRoute(
+            path: '/stockist/dashboard',
+            builder: (_, __) => const StockistDashboardScreen()),
+        GoRoute(
+            path: '/stockist/inquiries',
+            builder: (_, __) => const InquiriesScreen()),
+        GoRoute(
+          path: '/stockist/inquiry/dispatch',
+          builder: (_, state) {
+            final e = (state.extra as Map?) ?? const {};
+            return DispatchInquiryScreen(
+              inquiryId: (e['id'] ?? '').toString(),
+              token: e['token']?.toString(),
+              company: e['company']?.toString(),
+              phone: e['phone']?.toString(),
+              countryCode: e['country_code']?.toString(),
+              reduceStock: e['reduce_stock'] as bool?,
+            );
+          },
+        ),
+        // "+ Add → Stock" — batch manual stock entry (P_Stock only, no list).
+        GoRoute(
+            path: '/stockist/stock/add',
+            builder: (_, state) {
+              final e = state.extra;
+              final brandId = e is Map ? e['brandId'] as String? : null;
+              return AddStockBatchScreen(initialBrandId: brandId);
+            }),
+        GoRoute(
+          path: '/stockist/stock/edit/:id',
+          builder: (_, state) =>
+              AddEditStockScreen(designId: state.pathParameters['id']),
+        ),
+        GoRoute(
+          path: '/stockist/stock/upload',
+          builder: (_, state) =>
+              UploadStockScreen(initialCatalogId: state.extra as String?),
+        ),
+        GoRoute(
+          path: '/stockist/stock/import-supplier-pdf',
+          builder: (_, state) =>
+              ImportSupplierPdfScreen(initialBrandId: state.extra as String?),
+        ),
+        GoRoute(
+          path: '/stockist/library',
+          builder: (_, __) => const MyDesignLibraryScreen(),
+        ),
+        GoRoute(
+          path: '/stockist/library/import-mapping',
+          builder: (_, __) => const ImportMappingExcelScreen(),
+        ),
+        GoRoute(
+          path: '/stockist/stock/import-excel',
+          builder: (_, state) =>
+              ImportExcelStockScreen(initialBrandId: state.extra as String?),
+        ),
+        GoRoute(
+          path: '/stockist/stock/dispatch',
+          builder: (_, state) =>
+              AddDispatchScreen(initialDesignId: state.extra as String?),
+        ),
+        GoRoute(
+          path: '/stockist/dispatches',
+          builder: (_, __) => const AllDispatchesScreen(),
+        ),
+        GoRoute(
+          path: '/stockist/stock/history/:designId/:designName',
+          builder: (_, state) => StockHistoryScreen(
+            designId: state.pathParameters['designId']!,
+            designName: state.pathParameters['designName']!,
+          ),
+        ),
+        GoRoute(
+            path: '/stockist/lists',
+            builder: (_, __) => const StockListsScreen()),
+        GoRoute(
+            path: '/stockist/profile',
+            builder: (_, __) => const StockistProfileScreen()),
+        GoRoute(
+            path: '/stockist/videos',
+            builder: (_, __) => const StockistMyVideosScreen()),
+      ],
     ),
 
 
@@ -241,46 +292,6 @@ final GoRouter _router = GoRouter(
       path: '/my-dispatches',
       builder: (_, state) =>
           DispatchHistoryScreen(filterToken: state.uri.queryParameters['token']),
-    ),
-
-    GoRoute(
-      path: '/stockist/stock/upload',
-      builder: (_, state) =>
-          UploadStockScreen(initialCatalogId: state.extra as String?),
-    ),
-    GoRoute(
-      path: '/stockist/stock/import-supplier-pdf',
-      builder: (_, state) =>
-          ImportSupplierPdfScreen(initialBrandId: state.extra as String?),
-    ),
-    GoRoute(
-      path: '/stockist/library',
-      builder: (_, __) => const MyDesignLibraryScreen(),
-    ),
-    GoRoute(
-      path: '/stockist/library/import-mapping',
-      builder: (_, __) => const ImportMappingExcelScreen(),
-    ),
-    GoRoute(
-      path: '/stockist/stock/import-excel',
-      builder: (_, state) =>
-          ImportExcelStockScreen(initialBrandId: state.extra as String?),
-    ),
-    GoRoute(
-      path: '/stockist/stock/dispatch',
-      builder: (_, state) =>
-          AddDispatchScreen(initialDesignId: state.extra as String?),
-    ),
-    GoRoute(
-      path: '/stockist/dispatches',
-      builder: (_, __) => const AllDispatchesScreen(),
-    ),
-    GoRoute(
-      path: '/stockist/stock/history/:designId/:designName',
-      builder: (_, state) => StockHistoryScreen(
-        designId:   state.pathParameters['designId']!,
-        designName: state.pathParameters['designName']!,
-      ),
     ),
 
   ],

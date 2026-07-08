@@ -24,7 +24,6 @@ import 'stock_lists_screen.dart';
 import 'stockist_profile_screen.dart';
 import 'stockist_my_videos_screen.dart';
 import '../../utils/tile_types.dart';
-import '../../utils/responsive.dart';
 
 class StockistDashboardScreen extends StatefulWidget {
   const StockistDashboardScreen({super.key});
@@ -379,17 +378,27 @@ class _State extends State<StockistDashboardScreen> {
     ];
   }
 
-  // A run of standalone cards → a non-scrolling 2-col masonry (StaggeredGrid).
+  // Columns for the stock grid, computed from the grid's ACTUAL width (robust to
+  // Windows display scaling / the sidebar width). Phone stays 2; desktop fills
+  // the space with ~180px tiles (≈6 on a normal desktop, up to 8 on wide ones).
+  int _colsForWidth(double w) {
+    if (MediaQuery.sizeOf(context).width < 700) return 2; // phone
+    return (w / 180).floor().clamp(3, 8);
+  }
+
+  // A run of standalone cards → a non-scrolling masonry (StaggeredGrid).
   Widget _staggeredRun(List<Widget> items) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: StaggeredGrid.count(
-          crossAxisCount: gridColumnsFor(MediaQuery.sizeOf(context).width),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          children: [
-            for (final w in items)
-              StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
-          ],
+        child: LayoutBuilder(
+          builder: (context, c) => StaggeredGrid.count(
+            crossAxisCount: _colsForWidth(c.maxWidth),
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            children: [
+              for (final w in items)
+                StaggeredGridTile.fit(crossAxisCellCount: 1, child: w),
+            ],
+          ),
         ),
       );
 
@@ -409,14 +418,16 @@ class _State extends State<StockistDashboardScreen> {
         // StaggeredGrid is a NON-scrolling widget (unlike MasonryGridView), so it
         // never nests a scrollable inside the outer CustomScrollView. .fit tiles
         // size to their own height → masonry look without a scroll-extent fight.
-        child: StaggeredGrid.count(
-          crossAxisCount: gridColumnsFor(MediaQuery.sizeOf(context).width),
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          children: [
-            for (final m in members)
-              StaggeredGridTile.fit(crossAxisCellCount: 1, child: m),
-          ],
+        child: LayoutBuilder(
+          builder: (context, c) => StaggeredGrid.count(
+            crossAxisCount: _colsForWidth(c.maxWidth),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            children: [
+              for (final m in members)
+                StaggeredGridTile.fit(crossAxisCellCount: 1, child: m),
+            ],
+          ),
         ),
       ),
     );
@@ -848,6 +859,19 @@ class _State extends State<StockistDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 1000;
+    // Desktop/web: the persistent sidebar comes from StockistShell; this page
+    // renders only its own content. Phone: the full mobile Scaffold.
+    if (wide) {
+      return _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _desktopContent();
+    }
+    return _mobileScaffold();
+  }
+
+  Widget _mobileScaffold() {
+    final wide = MediaQuery.sizeOf(context).width >= 1000;
     return Scaffold(
       appBar: _selectMode
           ? AppBar(
@@ -881,6 +905,8 @@ class _State extends State<StockistDashboardScreen> {
           : AppBar(
               title: const Text('My Dashboard'),
               actions: [
+                // On desktop these live in the left sidebar, so drop them here.
+                if (!wide) ...[
                 // Single "Share" entry → the catalog screen (public + private
                 // links live there). Replaces the old separate catalogs + share
                 // icons (stockists understand "share" best).
@@ -901,6 +927,7 @@ class _State extends State<StockistDashboardScreen> {
                     _load();
                   },
                 ),
+                ],
                 const NotificationBell(),
                 PopupMenuButton<String>(
                   tooltip: 'Account',
@@ -972,6 +999,246 @@ class _State extends State<StockistDashboardScreen> {
             ),
     );
   }
+
+  // Desktop content that matches the layout proposal: a toolbar (title + primary
+  // actions), a KPI strip, then the search/filter bar and the card grid. Reuses
+  // the existing filter/search/grid logic + data (nothing forked). (Phase 3)
+  Widget _desktopContent() {
+    final designs = _filteredAndSorted;
+    return Column(
+      children: [
+        _selectMode ? _desktopSelectBar() : _desktopToolbar(),
+        const Divider(height: 1),
+        if (_brands.length > 1) _buildBrandFilterRow(),
+        Expanded(
+          child: CustomScrollView(
+            slivers: [
+              // Stat row scrolls away → maximum designs once you start scrolling.
+              if (!_selectMode)
+                SliverToBoxAdapter(child: _desktopKpiStrip()),
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _PinnedHeaderDelegate(
+                  height: 86,
+                  child: Material(
+                    color: const Color(0xFFF7F9FA),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [_buildSearchFilterRow(), _buildCountLine()],
+                    ),
+                  ),
+                ),
+              ),
+              if (_pendingBoxes > 0)
+                SliverToBoxAdapter(child: _buildPendingBanner()),
+              if (designs.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                      child: Text('No designs found',
+                          style: TextStyle(color: Colors.grey))),
+                )
+              else
+                ..._gridSlivers(designs),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Toolbar for the My Stock page. Uses the same navy as every other page's app
+  // bar so the top strip is ONE colour across the whole app (no colour "blink"
+  // when switching pages). (desktop)
+  Widget _desktopToolbar() {
+    final empty = _isLibraryEmpty;
+    ButtonStyle filled(Color c) => ElevatedButton.styleFrom(
+        backgroundColor: c,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        minimumSize: const Size(0, 38),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600));
+    return Container(
+      color: const Color(0xFF1B4F72),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      child: Row(
+        children: [
+          const Text('My Stock',
+              style: TextStyle(
+                  fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
+          const Spacer(),
+          ElevatedButton.icon(
+            onPressed: empty
+                ? _showLibraryActivation
+                : () async {
+                    await context.push('/stockist/stock/add', extra: {
+                      'brandId': _brandFilter == 'all' ? null : _brandFilter,
+                    });
+                    _load();
+                  },
+            icon: const Icon(Icons.add, size: 17),
+            label: const Text('Add Stock'),
+            style: filled(const Color(0xFF2E7D32)),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton.icon(
+            onPressed: () async {
+              await context.push('/stockist/library');
+              _load();
+            },
+            icon: const Icon(Icons.add, size: 17),
+            label: const Text('Add Design'),
+            style: filled(const Color(0xFF2F78A8)),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: empty ? null : _showStockMgmtSheet,
+            icon: const Icon(Icons.download_outlined, size: 17),
+            label: const Text('Import'),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.5)),
+                minimumSize: const Size(0, 38),
+                textStyle:
+                    const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton.icon(
+            onPressed: empty ? null : _showDispatchSheet,
+            icon: const Icon(Icons.local_shipping_outlined, size: 17),
+            label: const Text('Dispatch'),
+            style: filled(const Color(0xFF8E44AD)),
+          ),
+          const SizedBox(width: 10),
+          Theme(
+            data: Theme.of(context).copyWith(
+                iconTheme: const IconThemeData(color: Colors.white)),
+            child: const NotificationBell(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _desktopSelectBar() {
+    return Container(
+      color: const Color(0xFF1B4F72),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            onPressed: () => setState(() {
+              _selectMode = false;
+              _selectedIds.clear();
+            }),
+          ),
+          Text(
+              _selectedIds.isEmpty
+                  ? 'Select designs'
+                  : '${_selectedIds.length} selected',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold)),
+          const Spacer(),
+          if (_selectedIds.length < _filteredAndSorted.length)
+            TextButton(
+              onPressed: () => setState(() =>
+                  _selectedIds.addAll(_filteredAndSorted.map((d) => d.id))),
+              child: const Text('All', style: TextStyle(color: Colors.white)),
+            ),
+          IconButton(
+            icon: Icon(Icons.delete_outline, color: Colors.red.shade200),
+            onPressed: _selectedIds.isEmpty ? null : _confirmDeleteSelected,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fmtNum(int n) {
+    final s = n.toString();
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
+      b.write(s[i]);
+    }
+    return b.toString();
+  }
+
+  // Stat bar: four equal square-cornered boxes filling the width (accent stripe +
+  // value + label). Scrolls away with the page so designs get the full screen.
+  Widget _desktopKpiStrip() {
+    final inStock = _inStockDesigns;
+    final totalP = inStock.fold<int>(0, (s, d) => s + d.boxQuantity);
+    final totalF = inStock.fold<int>(0, (s, d) => s + d.fStock);
+    final held = inStock.fold<int>(0, (s, d) => s + d.heldQuantity);
+    final low = inStock.where((d) => d.boxQuantity > 0 && d.boxQuantity < 25).length;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Row(
+        children: [
+          _statBox(const Color(0xFF1B4F72), '${inStock.length}', 'In stock'),
+          const SizedBox(width: 10),
+          _statBox(const Color(0xFFB26206), _fmtNum(totalP), 'P Stock',
+              sub: '${_fmtNum(totalF)} free'),
+          const SizedBox(width: 10),
+          _statBox(const Color(0xFFC62828), '$low', 'Low stock'),
+          const SizedBox(width: 10),
+          _statBox(const Color(0xFF6A1B9A), _fmtNum(held), 'Held',
+              sub: '$_newOrders order${_newOrders == 1 ? '' : 's'}'),
+        ],
+      ),
+    );
+  }
+
+  Widget _statBox(Color c, String value, String label, {String? sub}) =>
+      Expanded(
+        child: Container(
+          height: 54,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
+            children: [
+              Container(width: 4, color: c),
+              const SizedBox(width: 11),
+              Text(value,
+                  style: TextStyle(
+                      fontSize: 21, fontWeight: FontWeight.bold, color: c)),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade800)),
+                    if (sub != null)
+                      Text(sub,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 10.5, color: Colors.grey.shade500)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+          ),
+        ),
+      );
 
   // ── Public / Private / Both filter row (pinned) ───────────────────────────
   // Brand switcher (multi-brand) — All + one chip per brand. Filters the whole

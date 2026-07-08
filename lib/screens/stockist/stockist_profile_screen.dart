@@ -161,7 +161,10 @@ class _State extends State<StockistProfileScreen> {
       );
       if (!mounted) return;
       _snack('Profile saved.');
-      Navigator.pop(context, true);
+      // Only pop when this screen was pushed (phone). In the desktop shell it's
+      // shown via the sidebar as the sole page, so popping would blank the pane —
+      // stay put instead (the sidebar handles moving away).
+      if (Navigator.of(context).canPop()) Navigator.pop(context, true);
     } catch (e) {
       _snack('Save failed: $e', error: true);
     } finally {
