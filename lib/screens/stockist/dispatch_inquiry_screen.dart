@@ -11,12 +11,13 @@ import '../../widgets/unsaved_changes.dart';
 import 'stockist_add_order_screen.dart' show DesignPicker;
 
 /// Dispatch a locked order by token: every line shows buyer-ordered vs your
-/// stock, with an editable "Dispatch now" box per line. The stockist can add or
-/// remove designs and dispatch MORE than current stock (with a warning) when
-/// physical stock differs — but never more than the buyer ORDERED on a line
-/// (ordered lines cap at their remaining → no over-dispatch, no negative
-/// remaining). Submitting reduces stock, logs each dispatch, and moves the order
-/// to Dispatching / Completed.
+/// stock, with an editable "Dispatch now" box per line. Dispatch is the final
+/// physical truth — the stockist can add/remove designs and ship MORE than the
+/// buyer ordered (they bumped the qty, or the stockist clears the last few boxes
+/// rather than leave them in the godown) and MORE than current system stock. No
+/// block; remaining just floors at 0 so nothing ever goes negative. Submitting
+/// reduces stock, logs each dispatch, and moves the order to Dispatching /
+/// Completed.
 class DispatchInquiryScreen extends StatefulWidget {
   final String inquiryId;
   final String? token;
@@ -63,10 +64,6 @@ class _Line {
   });
   int get remaining => (ordered - dispatchedAlready).clamp(0, 1 << 30);
   int get dispatchNow => int.tryParse(ctrl.text.trim()) ?? 0;
-  // An ordered line can't ship more than the order (no over-dispatch → never a
-  // negative remaining). Designs the stockist ADDS to the dispatch (ordered 0)
-  // aren't order-bound, so they stay uncapped.
-  bool get isOrdered => ordered > 0;
   // Boxes committed to OTHER orders = total H minus THIS order's own hold.
   int get otherHeld => (held - lineHeld).clamp(0, 1 << 30);
 }
@@ -213,18 +210,6 @@ class _State extends State<DispatchInquiryScreen> {
   }
 
   Future<void> _submit() async {
-    // Safety net (the per-line field already clamps): never let an ordered line
-    // ship more than the order — that's the only way remaining could go negative.
-    final overOrder =
-        _lines.where((l) => l.isOrdered && l.dispatchNow > l.remaining).toList();
-    if (overOrder.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          backgroundColor: const Color(0xFFC62828),
-          content: Text(
-              '${overOrder.first.name}: you can send at most '
-              '${overOrder.first.remaining} — that\'s the full order.')));
-      return;
-    }
     // A leftover exists → the stockist MUST choose Close vs Keep-open first.
     if (_remainingAfter > 0 && _close == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -945,25 +930,7 @@ class _State extends State<DispatchInquiryScreen> {
                     controller: l.ctrl,
                     keyboardType: TextInputType.number,
                     textAlign: TextAlign.center,
-                    onChanged: (v) {
-                      // Block over-dispatch as you type: an ordered line snaps
-                      // back to its remaining and tells the stockist that's the
-                      // full order ("it's enough").
-                      final n = int.tryParse(v.trim()) ?? 0;
-                      if (l.isOrdered && n > l.remaining) {
-                        l.ctrl.text = '${l.remaining}';
-                        l.ctrl.selection = TextSelection.collapsed(
-                            offset: l.ctrl.text.length);
-                        ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(SnackBar(
-                              duration: const Duration(milliseconds: 1800),
-                              backgroundColor: const Color(0xFF1565C0),
-                              content: Text(
-                                  'That\'s the whole order — ${l.remaining} '
-                                  'box${l.remaining == 1 ? '' : 'es'} is enough '
-                                  'for ${l.name}.')));
-                      }
+                    onChanged: (_) {
                       _markDirty();
                       setState(() {});
                     },
