@@ -24,6 +24,7 @@ import 'stock_lists_screen.dart';
 import 'stockist_profile_screen.dart';
 import 'stockist_my_videos_screen.dart';
 import '../../utils/tile_types.dart';
+import '../../utils/responsive.dart';
 
 class StockistDashboardScreen extends StatefulWidget {
   const StockistDashboardScreen({super.key});
@@ -382,7 +383,7 @@ class _State extends State<StockistDashboardScreen> {
   Widget _staggeredRun(List<Widget> items) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: StaggeredGrid.count(
-          crossAxisCount: 2,
+          crossAxisCount: gridColumnsFor(MediaQuery.sizeOf(context).width),
           mainAxisSpacing: 12,
           crossAxisSpacing: 12,
           children: [
@@ -409,7 +410,7 @@ class _State extends State<StockistDashboardScreen> {
         // never nests a scrollable inside the outer CustomScrollView. .fit tiles
         // size to their own height → masonry look without a scroll-extent fight.
         child: StaggeredGrid.count(
-          crossAxisCount: 2,
+          crossAxisCount: gridColumnsFor(MediaQuery.sizeOf(context).width),
           mainAxisSpacing: 10,
           crossAxisSpacing: 10,
           children: [
