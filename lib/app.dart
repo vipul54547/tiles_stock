@@ -94,9 +94,16 @@ final GoRouter _router = GoRouter(
   // a minimal landing so login / admin / the buyer+stockist app never appear on
   // the public domain. The mobile app is unaffected (kIsWeb is false there).
   redirect: (context, state) {
-    gRouteLocation.value = state.matchedLocation; // drives the desktop sidebar shell
-    if (!kIsWeb || kWebFullApp) return null;
+    // Drives the desktop sidebar shell. redirect runs DURING build, so writing
+    // the notifier here synchronously would make the shell's
+    // ValueListenableBuilder call setState mid-build (asserts in debug, and
+    // rebuilt the shell out from under the router). Publish it after the frame.
     final loc = state.matchedLocation;
+    if (gRouteLocation.value != loc) {
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => gRouteLocation.value = loc);
+    }
+    if (!kIsWeb || kWebFullApp) return null;
     final allowed = loc.startsWith('/s/') ||
         loc == '/reset-password' ||
         loc == '/web';

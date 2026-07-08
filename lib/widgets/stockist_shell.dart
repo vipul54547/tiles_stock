@@ -31,6 +31,21 @@ class _StockistShellState extends State<StockistShell> {
   int _newOrders = 0;
   String _lastBadgeLoc = '';
 
+  /// Pins the navigator's element identity across the two shapes below.
+  ///
+  /// [widget.child] is the app's single navigator. Without a key it sits at a
+  /// DIFFERENT position in the element tree depending on whether the sidebar is
+  /// drawn (bare child vs Scaffold > Row > Expanded > child), so every time we
+  /// crossed that boundary — landing on a stockist page, or resizing past the
+  /// wide breakpoint — Flutter deactivated the whole navigator subtree and
+  /// re-inflated it, throwing away every page's State. That is what blanked
+  /// pages after a dialog, and what made in-flight async work (e.g. the splash
+  /// screen's context.go) explode with "deactivated widget's ancestor".
+  ///
+  /// A GlobalKey makes Flutter MOVE the existing element instead of rebuilding
+  /// it, so the navigator survives the shape change intact.
+  final GlobalKey _navigatorKey = GlobalKey(debugLabel: 'shell-child');
+
   Future<void> _loadBadge() async {
     try {
       final orders = await SupabaseDataService().getMyInquiries();
@@ -60,14 +75,16 @@ class _StockistShellState extends State<StockistShell> {
           _lastBadgeLoc = loc;
           WidgetsBinding.instance.addPostFrameCallback((_) => _loadBadge());
         }
-        if (!(wide && isStockist)) return widget.child; // phone / non-stockist
+        // Same element, both shapes — see _navigatorKey.
+        final page = KeyedSubtree(key: _navigatorKey, child: widget.child);
+        if (!(wide && isStockist)) return page; // phone / non-stockist
         return Scaffold(
           body: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _sidebar(),
               const VerticalDivider(width: 1, thickness: 1),
-              Expanded(child: widget.child),
+              Expanded(child: page),
             ],
           ),
         );
