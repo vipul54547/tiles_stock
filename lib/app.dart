@@ -68,12 +68,13 @@ import 'screens/stockist/import_supplier_pdf_screen.dart';
 import 'screens/stockist/my_design_library_screen.dart';
 import 'screens/stockist/import_mapping_excel_screen.dart';
 import 'screens/stockist/import_excel_stock_screen.dart';
-import 'screens/stockist/add_dispatch_screen.dart';
+import 'screens/stockist/manual_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
 import 'screens/stockist/stock_lists_screen.dart';
 import 'screens/stockist/stockist_profile_screen.dart';
 import 'screens/stockist/stockist_my_videos_screen.dart';
 import 'widgets/stockist_shell.dart';
+import 'services/supabase_auth_service.dart';
 import 'screens/stockist/stock_history_screen.dart';
 
 
@@ -93,6 +94,7 @@ final GoRouter _router = GoRouter(
   // a minimal landing so login / admin / the buyer+stockist app never appear on
   // the public domain. The mobile app is unaffected (kIsWeb is false there).
   redirect: (context, state) {
+    gRouteLocation.value = state.matchedLocation; // drives the desktop sidebar shell
     if (!kIsWeb || kWebFullApp) return null;
     final loc = state.matchedLocation;
     final allowed = loc.startsWith('/s/') ||
@@ -173,17 +175,12 @@ final GoRouter _router = GoRouter(
 
     ),
 
-    // Stockist section — wrapped in a ShellRoute so the desktop/web sidebar
-    // persists across EVERY stockist page (including deep pages like edit /
-    // dispatch / import), because those routes render inside this shell's own
-    // navigator. On phones the shell adds nothing. (StockistShell)
-    ShellRoute(
-      builder: (context, state, child) =>
-          StockistShell(location: state.matchedLocation, child: child),
-      routes: [
-        GoRoute(
-            path: '/stockist/dashboard',
-            builder: (_, __) => const StockistDashboardScreen()),
+    // Stockist section — plain top-level routes. The desktop/web sidebar is
+    // provided app-wide by StockistShell (MaterialApp.router builder), beside the
+    // single navigator so dialogs / pops never blank the page.
+    GoRoute(
+        path: '/stockist/dashboard',
+        builder: (_, __) => const StockistDashboardScreen()),
         GoRoute(
             path: '/stockist/inquiries',
             builder: (_, __) => const InquiriesScreen()),
@@ -238,9 +235,8 @@ final GoRouter _router = GoRouter(
               ImportExcelStockScreen(initialBrandId: state.extra as String?),
         ),
         GoRoute(
-          path: '/stockist/stock/dispatch',
-          builder: (_, state) =>
-              AddDispatchScreen(initialDesignId: state.extra as String?),
+          path: '/stockist/dispatch/manual',
+          builder: (_, __) => const ManualDispatchScreen(),
         ),
         GoRoute(
           path: '/stockist/dispatches',
@@ -262,8 +258,6 @@ final GoRouter _router = GoRouter(
         GoRoute(
             path: '/stockist/videos',
             builder: (_, __) => const StockistMyVideosScreen()),
-      ],
-    ),
 
 
     GoRoute(path: '/admin', builder: (_, __) => const AdminPanelScreen()),
@@ -363,6 +357,18 @@ class _TilesStockAppState extends State<TilesStockApp> {
       ),
 
       routerConfig: _router,
+
+      // Desktop/web sidebar shell — sits BESIDE the single navigator (not a
+      // nested ShellRoute), so dialogs/back/pops always target the one navigator
+      // and never blank the page. No-op on phones / non-stockist routes.
+      builder: (context, child) => StockistShell(
+        onNavigate: (path) => _router.go(path),
+        onLogout: () async {
+          await SupabaseAuthService().logout();
+          _router.go('/login');
+        },
+        child: child ?? const SizedBox.shrink(),
+      ),
 
     );
 

@@ -272,6 +272,82 @@ class SupabaseDataService {
   /// Adds stock for a Library design: upserts the holding by
   /// (stockist, library_id, quality), publishes it into [catalogId] (membership),
   /// and logs the stock-in. Identity lives on the master. (stocklist-output)
+  // ── Unified dispatch (order-less "walk-in") + opt-in customers ──────────────
+
+  /// Order-less dispatch: reduces stock, makes one dispatch note (optionally tied
+  /// to a saved customer), logs dispatches. Each line: {design_id, dispatch}.
+  /// Returns {dispatch_no, total}. (project_unified_dispatch_customers)
+  Future<Map<String, dynamic>> dispatchWalkin(
+    List<Map<String, dynamic>> lines, {
+    String? customerId,
+    String customerName = '',
+    String invoice = '',
+    String vehicle = '',
+    String transporter = '',
+    String note = '',
+    DateTime? date,
+    bool reduceStock = true,
+  }) async {
+    try {
+      final res = await supabase.rpc('dispatch_walkin', params: {
+        'p_lines': lines,
+        'p_customer_id': customerId,
+        'p_customer_name': customerName,
+        'p_invoice': invoice,
+        'p_vehicle': vehicle,
+        'p_transporter': transporter,
+        'p_note': note,
+        'p_date': (date ?? DateTime.now()).toIso8601String().split('T').first,
+        'p_reduce_stock': reduceStock,
+      });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// The stockist's saved customers (empty when the feature is off / none saved).
+  Future<List<Map<String, dynamic>>> listCustomers() async {
+    try {
+      final res = await supabase.rpc('list_customers');
+      return (res as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('listCustomers failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Save (or reuse) a customer — only works when the stockist is customers_enabled.
+  /// Returns its id.
+  Future<String?> upsertCustomer({
+    String? id,
+    required String name,
+    String? phone,
+    String countryCode = '+91',
+    String? state,
+    String? district,
+    String? pincode,
+    String? city,
+  }) async {
+    try {
+      final res = await supabase.rpc('upsert_customer', params: {
+        'p_id': id,
+        'p_name': name,
+        'p_phone': phone,
+        'p_country_code': countryCode,
+        'p_state': state,
+        'p_district': district,
+        'p_pincode': pincode,
+        'p_city': city,
+      });
+      return res?.toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Commit a batch of manual-stock entries in one atomic call. Each entry:
   /// {library_id, quality, quantity, brand_id?, surface}. Adds to P_Stock only
   /// (no stock list). Returns {count, boxes}.
@@ -442,7 +518,7 @@ class SupabaseDataService {
       return await supabase
           .from('stockists')
           .select(
-              'name, logo_url, brand_color, tagline, pincode, state, district, city')
+              'name, logo_url, brand_color, tagline, pincode, state, district, city, customers_enabled')
           .eq('user_id', uid)
           .maybeSingle();
     } catch (e, st) {

@@ -1069,16 +1069,9 @@ class _State extends State<StockistDashboardScreen> {
                   fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
           const Spacer(),
           ElevatedButton.icon(
-            onPressed: empty
-                ? _showLibraryActivation
-                : () async {
-                    await context.push('/stockist/stock/add', extra: {
-                      'brandId': _brandFilter == 'all' ? null : _brandFilter,
-                    });
-                    _load();
-                  },
-            icon: const Icon(Icons.add, size: 17),
-            label: const Text('Add Stock'),
+            onPressed: empty ? _showLibraryActivation : _showAddIntentSheet,
+            icon: const Icon(Icons.swap_vert, size: 18),
+            label: const Text('+/− Manually'),
             style: filled(const Color(0xFF2E7D32)),
           ),
           const SizedBox(width: 8),
@@ -1102,13 +1095,6 @@ class _State extends State<StockistDashboardScreen> {
                 minimumSize: const Size(0, 38),
                 textStyle:
                     const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton.icon(
-            onPressed: empty ? null : _showDispatchSheet,
-            icon: const Icon(Icons.local_shipping_outlined, size: 17),
-            label: const Text('Dispatch'),
-            style: filled(const Color(0xFF8E44AD)),
           ),
           const SizedBox(width: 10),
           Theme(
@@ -1934,6 +1920,10 @@ class _State extends State<StockistDashboardScreen> {
   // "+ Add" splits the two real intents BEFORE anything else, so the stockist
   // never lands on a screen that conflates them: STOCK = how many boxes (qty);
   // DESIGN = the tile's identity (name, brands, photo) in the Library.
+  // "+/− Manually" — the two manual stock movements: Add Stock (in) or Dispatch
+  // (out). One entry, no double path. Add Design lives inside Add Stock (its
+  // "+ New design" button) and Design Library — not here. Order dispatch is
+  // reached from Inquiries. (project_unified_dispatch_customers)
   void _showAddIntentSheet() {
     showModalBottomSheet<void>(
       context: context,
@@ -1946,15 +1936,15 @@ class _State extends State<StockistDashboardScreen> {
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text('What do you want to add?',
+              child: Text('Manual stock change',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             ListTile(
-              leading: const Icon(Icons.inventory_2_outlined,
+              leading: const Icon(Icons.add_circle_outline,
                   color: Color(0xFF2E7D32), size: 28),
-              title: const Text('Stock',
+              title: const Text('Add Stock',
                   style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-              subtitle: const Text('Add boxes for many designs at once'),
+              subtitle: const Text('Add boxes in — many designs at once'),
               onTap: () async {
                 Navigator.pop(ctx);
                 await context.push('/stockist/stock/add', extra: {
@@ -1965,15 +1955,14 @@ class _State extends State<StockistDashboardScreen> {
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.collections_bookmark_outlined,
-                  color: Color(0xFF1B4F72), size: 28),
-              title: const Text('Design',
+              leading: const Icon(Icons.remove_circle_outline,
+                  color: Color(0xFFC62828), size: 28),
+              title: const Text('Dispatch',
                   style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-              subtitle:
-                  const Text('Add or edit a design — its name, brands and photo'),
+              subtitle: const Text('Send boxes out — pick designs + customer'),
               onTap: () async {
                 Navigator.pop(ctx);
-                await context.push('/stockist/library');
+                await context.push('/stockist/dispatch/manual');
                 _load();
               },
             ),
@@ -2062,23 +2051,19 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Row 3: Dispatch · Stock Mgmt · Add · Records (compact buttons).
-  // When the library slice for the current brand is empty, only Add is active —
-  // the stockist must add at least one design before they can do anything else.
+  // Row 3: +/− Manually · Stock Mgmt · Records. "+/− Manually" = Add Stock in /
+  // Dispatch out (one entry, no double path). Order dispatch is via Inquiries.
   Widget _buildActionButtonRow() {
     final empty = _isLibraryEmpty;
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 2),
       child: Row(
         children: [
-          _actionBtn('Dispatch', Icons.remove_circle_outline, Colors.red[700]!,
-              empty ? null : _showDispatchSheet),
+          _actionBtn('+/− Manually', Icons.swap_vert, const Color(0xFF2E7D32),
+              empty ? _showLibraryActivation : _showAddIntentSheet),
           const SizedBox(width: 6),
           _actionBtn('Stock Mgmt', Icons.inventory_2_outlined, const Color(0xFF1B4F72),
               empty ? null : _showStockMgmtSheet),
-          const SizedBox(width: 6),
-          _actionBtn('Add', Icons.add, const Color(0xFF2E7D32),
-              empty ? _showLibraryActivation : _showAddIntentSheet),
           const SizedBox(width: 6),
           _actionBtn('Records', Icons.receipt_long_outlined,
               const Color(0xFF6A1B9A), empty ? null : () async {
@@ -2086,56 +2071,6 @@ class _State extends State<StockistDashboardScreen> {
                 _load();
               }),
         ],
-      ),
-    );
-  }
-
-  // Dispatch hub: dispatch against a confirmed order (the orders hub) or a quick
-  // walk-in dispatch (a customer with no app/web order). (project_dispatch_order_redesign)
-  void _showDispatchSheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Dispatch',
-                    style:
-                        TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.inventory_2_outlined,
-                  color: Color(0xFF00695C)),
-              title: const Text('Dispatch an order'),
-              subtitle:
-                  const Text('Confirmed / dispatching orders, with reserved stock'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await context.push('/stockist/inquiries');
-                _load();
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.directions_walk, color: Color(0xFFC62828)),
-              title: const Text('Quick walk-in dispatch'),
-              subtitle: const Text('A customer with no order — pick design + qty'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await context.push('/stockist/stock/dispatch');
-                _load();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
       ),
     );
   }

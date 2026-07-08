@@ -1,62 +1,77 @@
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import '../services/supabase_data_service.dart';
-import '../services/supabase_auth_service.dart';
 
-/// Desktop/web shell for the stockist section. On wide windows it renders a
-/// persistent left navigation sidebar and puts the routed page in the content
-/// area — so the sidebar stays on EVERY page, including deep ones (edit,
-/// dispatch, import), because those routes live inside this shell's navigator.
-/// On phones it adds nothing (returns the page as-is). (nested-navigator shell)
+/// The router's current location, set at the top of the app's redirect (runs on
+/// every navigation, all platforms). Drives the desktop sidebar shell — which
+/// page is active and whether to show the sidebar at all.
+final ValueNotifier<String> gRouteLocation = ValueNotifier<String>('/');
+
+/// Desktop/web shell rendered in MaterialApp.router's `builder`, i.e. BESIDE the
+/// app's single navigator (NOT a nested ShellRoute navigator). On wide windows
+/// while on a stockist page it draws the persistent left sidebar around the page;
+/// otherwise it returns the page untouched. Because there's only one navigator,
+/// dialogs / back / pops all target it correctly — no blank panes.
+/// Navigation is done through callbacks wired to the global router (context.go
+/// isn't reachable from inside the app builder).
 class StockistShell extends StatefulWidget {
   final Widget child;
-  final String location;
-  const StockistShell({super.key, required this.child, required this.location});
+  final void Function(String path) onNavigate;
+  final Future<void> Function() onLogout;
+  const StockistShell({
+    super.key,
+    required this.child,
+    required this.onNavigate,
+    required this.onLogout,
+  });
   @override
   State<StockistShell> createState() => _StockistShellState();
 }
 
 class _StockistShellState extends State<StockistShell> {
   int _newOrders = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadBadge();
-  }
-
-  @override
-  void didUpdateWidget(covariant StockistShell old) {
-    super.didUpdateWidget(old);
-    // Refresh the "new orders" badge whenever the page changes.
-    if (old.location != widget.location) _loadBadge();
-  }
+  String _lastBadgeLoc = '';
 
   Future<void> _loadBadge() async {
     try {
       final orders = await SupabaseDataService().getMyInquiries();
       if (!mounted) return;
-      setState(() =>
-          _newOrders = orders.where((o) => o.status == 'sent').length);
-    } catch (_) {/* badge is best-effort */}
+      final n = orders.where((o) => o.status == 'sent').length;
+      if (n != _newOrders) setState(() => _newOrders = n);
+    } catch (_) {/* best-effort */}
   }
 
-  bool _active(String path) =>
-      widget.location == path || widget.location.startsWith('$path/');
+  bool _active(String path) {
+    final loc = gRouteLocation.value;
+    return loc == path || loc.startsWith('$path/');
+  }
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 1000;
-    if (!wide) return widget.child; // phone: page as-is, no sidebar
-    return Scaffold(
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _sidebar(),
-          const VerticalDivider(width: 1, thickness: 1),
-          Expanded(child: widget.child),
-        ],
-      ),
+    // The app builder doesn't rebuild on navigation, so we rebuild the frame
+    // ourselves whenever the location changes.
+    return ValueListenableBuilder<String>(
+      valueListenable: gRouteLocation,
+      builder: (context, loc, _) {
+        final wide = MediaQuery.sizeOf(context).width >= 1000;
+        final isStockist = loc.startsWith('/stockist');
+        // Refresh the "new orders" badge on landing a new stockist page (deferred
+        // so we never call setState during a build).
+        if (isStockist && loc != _lastBadgeLoc) {
+          _lastBadgeLoc = loc;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _loadBadge());
+        }
+        if (!(wide && isStockist)) return widget.child; // phone / non-stockist
+        return Scaffold(
+          body: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _sidebar(),
+              const VerticalDivider(width: 1, thickness: 1),
+              Expanded(child: widget.child),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -111,10 +126,8 @@ class _StockistShellState extends State<StockistShell> {
             const Divider(
                 color: Colors.white24, height: 8, indent: 14, endIndent: 14),
             _item(Icons.person_outline, 'Profile', '/stockist/profile'),
-            _navRow(Icons.logout, 'Logout', active: false, onTap: () async {
-              await SupabaseAuthService().logout();
-              if (mounted) context.go('/login');
-            }),
+            _navRow(Icons.logout, 'Logout',
+                active: false, onTap: () => widget.onLogout()),
             const SizedBox(height: 6),
           ],
         ),
@@ -126,7 +139,7 @@ class _StockistShellState extends State<StockistShell> {
       _navRow(icon, label,
           active: _active(path),
           badge: badge,
-          onTap: () => context.go(path));
+          onTap: () => widget.onNavigate(path));
 
   Widget _navRow(IconData icon, String label,
       {required bool active, int badge = 0, VoidCallback? onTap}) {
