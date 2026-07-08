@@ -895,8 +895,15 @@ class _State extends State<DispatchInquiryScreen> {
                   Text(l.name,
                       style: const TextStyle(
                           fontWeight: FontWeight.w600, fontSize: 13)),
+                  // 'None' is never a surface — in-name brands keep it in the
+                  // design name. (project_per_brand_surface_mode)
                   Text(
-                      '${l.size.replaceAll(' mm', '')} · ${l.surface}',
+                      [
+                        l.size.replaceAll(' mm', ''),
+                        if (l.surface.trim().isNotEmpty &&
+                            l.surface.trim().toLowerCase() != 'none')
+                          l.surface.trim(),
+                      ].join(' · '),
                       style:
                           TextStyle(fontSize: 11, color: Colors.grey.shade600)),
                   const SizedBox(height: 4),

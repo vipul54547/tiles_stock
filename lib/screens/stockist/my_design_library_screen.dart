@@ -290,11 +290,6 @@ class _State extends State<MyDesignLibraryScreen> {
   List<LibraryEntry> _sameSizeSiblings(LibraryEntry keep) =>
       _entries.where((o) => o.id != keep.id && o.size == keep.size).toList();
 
-  static String _normSurface(String s) {
-    final t = s.trim().toLowerCase();
-    return t.isEmpty ? 'none' : t;
-  }
-
   // Likely-duplicate groups: 2+ M boxes sharing the SAME identity key
   // (master name + size), brand-agnostic. Surface is intentionally excluded:
   // the same tile often arrives from different suppliers with different surface
@@ -1564,10 +1559,11 @@ class _EditorState extends State<_LibraryEditorScreen> {
   final _weightCtrl = TextEditingController();
   final _colourCtrl = TextEditingController();
   final _finishCtrl = TextEditingController();
-  String _surface = 'None';
+  String _surface = '';
   String _tileType = kTileTypes.first;
   String _stockType = 'Uncertain';
-  List<String> _surfaces = const ['None'];
+  /// Real surfaces only — 'None' is never an option (project_per_brand_surface_mode).
+  List<String> _surfaces = const [];
   static const _stockTypes = ['Continuous', 'One Time', 'Uncertain'];
   // True once the user edits the master name by hand — until then it mirrors the
   // default brand's name (locked rule: first upload master name = brand-1 name).
@@ -1584,23 +1580,47 @@ class _EditorState extends State<_LibraryEditorScreen> {
       .firstWhere((id) => _aliasCtrls[id]?.text.trim().isNotEmpty ?? false,
           orElse: () => _defaultBrand.id);
 
-  // The SAME tile already in the library, or null. M: brand-AGNOSTIC — one tile
-  // is one box across all brands, keyed by name+size+SURFACE. T/W: brand silo.
+  /// The brand this design belongs to — its surface_mode decides whether surface
+  /// is a required identity attribute or baked into the name.
+  /// (project_per_brand_surface_mode)
+  Brand get _targetBrand => widget.brands
+      .firstWhere((b) => b.id == _targetBrandId, orElse: () => _defaultBrand);
+
+  bool get _usesSurface => _targetBrand.usesSurface;
+
+  /// 'None'/blank both mean "no surface set".
+  static bool _isNoSurface(String s) {
+    final t = s.trim().toLowerCase();
+    return t.isEmpty || t == 'none';
+  }
+
+  static String _surfaceKey(String s) =>
+      _isNoSurface(s) ? 'none' : s.trim().toLowerCase();
+
+  /// What lands on the record. In-name brands never show the field, so an edit
+  /// must not wipe a surface the design already carries (e.g. the brand was
+  /// switched from attribute to in-name).
+  String get _surfaceToSave =>
+      _usesSurface ? _surface.trim() : (widget.existing?.surfaceType ?? '');
+
+  // The SAME tile already in the library, or null.
+  //   scope:    M = brand-AGNOSTIC (one tile is one box across brands);
+  //             T/W = brand silo.
+  //   key:      name + size, plus SURFACE when the brand uses surface as an
+  //             attribute. (M's brands all share one surface mode, so reading it
+  //             off the target brand is safe even for the brand-agnostic sweep.)
   LibraryEntry? get _dupMatch {
     final name = _master.text.trim().toLowerCase();
     if (name.isEmpty || _size.isEmpty) return null;
     final isM = currentStockistBusinessType == 'M';
-    final surf = _surface.trim().isEmpty ? 'none' : _surface.trim().toLowerCase();
+    final usesSurface = _usesSurface;
+    final surf = _surfaceKey(_surface);
     for (final e in widget.all) {
       if (e.id == widget.existing?.id) continue;
       if (e.masterName.trim().toLowerCase() != name || e.size != _size) continue;
-      final hit = isM
-          ? (e.surfaceType.trim().isEmpty
-                  ? 'none'
-                  : e.surfaceType.trim().toLowerCase()) ==
-              surf
-          : e.brandId == _targetBrandId;
-      if (hit) return e;
+      if (!isM && e.brandId != _targetBrandId) continue; // T/W: stay in the silo
+      if (usesSurface && _surfaceKey(e.surfaceType) != surf) continue;
+      return e;
     }
     return null;
   }
@@ -1622,7 +1642,9 @@ class _EditorState extends State<_LibraryEditorScreen> {
       e.aliases.forEach((bid, name) {
         _aliasCtrls[bid]?.text = name;
       });
-      _surface = e.surfaceType.isEmpty ? 'None' : e.surfaceType;
+      // 'None' is no longer a surface — treat it as unset so an attribute brand
+      // forces a real pick.
+      _surface = _isNoSurface(e.surfaceType) ? '' : e.surfaceType;
       _tileType = kTileTypes.contains(e.tileType) ? e.tileType : kTileTypes.first;
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
       if (e.piecesPerBox > 0) _piecesCtrl.text = '${e.piecesPerBox}';
@@ -1653,24 +1675,23 @@ class _EditorState extends State<_LibraryEditorScreen> {
   static String _trimNum(double v) =>
       v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
 
-  // Admin's live finish list (matches what stockists align PDFs to); 'None'
-  // first. Falls back to the built-in list if the fetch fails.
+  // Admin's live finish list (matches what stockists align PDFs to). 'None' is
+  // dropped: a surface is either a real value (attribute brands) or the field
+  // isn't shown at all (in-name brands). Falls back to the built-in list if the
+  // fetch fails. Never auto-selects — the stockist must pick.
   Future<void> _loadSurfaces() async {
+    List<String> names;
     try {
       final types = await _data.getSurfaceTypes(activeOnly: true);
-      final names = types.map((t) => t.name).toList();
-      final all = ['None', ...names.where((n) => n != 'None')];
-      if (mounted && all.isNotEmpty) {
-        setState(() {
-          _surfaces = all;
-          if (!_surfaces.contains(_surface)) _surface = _surfaces.first;
-        });
-      }
+      names = types.map((t) => t.name).where((n) => !_isNoSurface(n)).toList();
     } catch (_) {
-      if (mounted) {
-        setState(() => _surfaces = ['None', ...kFinishes.where((f) => f != 'None')]);
-      }
+      names = kFinishes.where((f) => !_isNoSurface(f)).toList();
     }
+    if (!mounted || names.isEmpty) return;
+    setState(() {
+      _surfaces = names;
+      if (_surface.isNotEmpty && !_surfaces.contains(_surface)) _surface = '';
+    });
   }
 
   @override
@@ -1823,6 +1844,14 @@ class _EditorState extends State<_LibraryEditorScreen> {
       setState(() => _error = 'Pick a size.');
       return;
     }
+    // Attribute brands: surface is part of the design's identity, so it must be
+    // a real value. (project_per_brand_surface_mode)
+    if (_usesSurface && _isNoSurface(_surface)) {
+      setState(() => _error =
+          'Pick a surface — ${_targetBrand.name} designs are identified by '
+          'name, size and surface.');
+      return;
+    }
     final dup = _dupMatch;
     if (dup != null) {
       // M, adding: the same tile already exists — offer to ADD this brand's
@@ -1832,8 +1861,9 @@ class _EditorState extends State<_LibraryEditorScreen> {
         return;
       }
       // T/W silo, or renaming onto another tile while editing → a real clash.
+      final at = _usesSurface ? 'size $_size in $_surface' : 'size $_size';
       setState(() =>
-          _error = 'You already have "$master" at size $_size in your library.');
+          _error = 'You already have "$master" at $at in your library.');
       return;
     }
     setState(() {
@@ -1855,7 +1885,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
         imageUrl: _imageUrl,
         brandId: _targetBrandId,
         aliases: aliases,
-        surfaceType: _surface,
+        surfaceType: _surfaceToSave,
         stockType: _stockType,
         tileType: _tileType,
         piecesPerBox: pieces,
@@ -2065,12 +2095,12 @@ class _EditorState extends State<_LibraryEditorScreen> {
             'ask for quality and quantity.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         const SizedBox(height: 10),
-        _dropdown('Surface / finish', _surfaces, _surface,
-            (v) => setState(() {
-                  _surface = v ?? _surface;
-                  _dirty = true;
-                })),
-        const SizedBox(height: 12),
+        // Surface only exists for brands that treat it as an attribute; in-name
+        // brands carry it inside the design name. (project_per_brand_surface_mode)
+        if (_usesSurface) ...[
+          _surfaceDropdown(),
+          const SizedBox(height: 12),
+        ],
         _dropdown('Tile type', kTileTypes, _tileType,
             (v) => setState(() {
                   _tileType = v ?? _tileType;
@@ -2140,6 +2170,32 @@ class _EditorState extends State<_LibraryEditorScreen> {
               border: OutlineInputBorder()),
         ),
       ],
+    );
+  }
+
+  // Required, never auto-filled: an attribute brand's surface is part of the
+  // design's identity, so the stockist must choose it deliberately.
+  Widget _surfaceDropdown() {
+    final v = _surfaces.contains(_surface) ? _surface : null;
+    return DropdownButtonFormField<String>(
+      initialValue: v,
+      isExpanded: true,
+      hint: const Text('Select surface'),
+      decoration: InputDecoration(
+        labelText: 'Surface / finish *',
+        helperText: '${_targetBrand.name} identifies designs by name, size and '
+            'surface.',
+        helperMaxLines: 2,
+        isDense: true,
+        border: const OutlineInputBorder(),
+      ),
+      items: _surfaces
+          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+          .toList(),
+      onChanged: (s) => setState(() {
+        _surface = s ?? _surface;
+        _dirty = true;
+      }),
     );
   }
 

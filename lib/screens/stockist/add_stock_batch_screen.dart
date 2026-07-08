@@ -96,6 +96,33 @@ class _State extends State<AddStockBatchScreen> {
     return m.isEmpty ? '' : m.first.name;
   }
 
+  // ── Surface (project_per_brand_surface_mode) ─────────────────────────────
+  // Surface is shown only for brands that treat it as an attribute; in-name
+  // brands carry it inside the design name, so repeating it would be noise.
+
+  Brand? _brandById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    final m = _brands.where((b) => b.id == id).toList();
+    return m.isEmpty ? null : m.first;
+  }
+
+  bool _usesSurface(LibraryEntry m, String? brandId) {
+    final id = (brandId != null && brandId.isNotEmpty) ? brandId : m.brandId;
+    return _brandById(id)?.usesSurface ?? false;
+  }
+
+  /// The surface to display for this design, or '' when it has none / the brand
+  /// keeps surface in the name.
+  String _surfaceOf(LibraryEntry m, String? brandId) {
+    if (!_usesSurface(m, brandId)) return '';
+    final s = m.surfaceType.trim();
+    return s.isEmpty || s.toLowerCase() == 'none' ? '' : s;
+  }
+
+  /// Any row in the running list carries a surface → show the SURFACE column.
+  bool get _showSurfaceCol =>
+      _entries.any((e) => _surfaceOf(e.master, e.brandId).isNotEmpty);
+
   // A master's name under a brand (alias) when present, else its master name.
   String _displayName(LibraryEntry m, String? brandId) {
     final alias = brandId == null ? null : m.aliases[brandId];
@@ -193,7 +220,14 @@ class _State extends State<AddStockBatchScreen> {
                                                         Colors.grey.shade200)),
                                   ),
                                   title: Text(m.masterName),
-                                  subtitle: Text(m.size.replaceAll(' mm', '')),
+                                  // Size · surface — for attribute brands the
+                                  // surface is what tells two same-named
+                                  // designs apart, so it must be visible here.
+                                  subtitle: Text([
+                                    m.size.replaceAll(' mm', ''),
+                                    if (_surfaceOf(m, _brandFilter).isNotEmpty)
+                                      _surfaceOf(m, _brandFilter),
+                                  ].join(' · ')),
                                   onTap: () => Navigator.pop(ctx, m),
                                 );
                               },
@@ -463,6 +497,7 @@ class _State extends State<AddStockBatchScreen> {
                               Expanded(
                                 child: Text(
                                   '${_displayName(e.master, e.brandId)}'
+                                  '${_surfaceOf(e.master, e.brandId).isNotEmpty ? ' · ${_surfaceOf(e.master, e.brandId)}' : ''}'
                                   '${e.brandName?.isNotEmpty == true ? ' · ${e.brandName}' : ''}'
                                   ' · ${e.quality}',
                                   maxLines: 1,
@@ -587,6 +622,9 @@ class _State extends State<AddStockBatchScreen> {
   Widget _desktopEntryBar() {
     final sizeText =
         _selMaster == null ? '—' : _selMaster!.size.replaceAll(' mm', '');
+    final surfaceText = _selMaster == null
+        ? ''
+        : _surfaceOf(_selMaster!, _isM ? _selBrandId : null);
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -618,6 +656,10 @@ class _State extends State<AddStockBatchScreen> {
             const SizedBox(width: 12),
             _hField('Size (auto)', _hReadonly(sizeText), width: 110),
             const SizedBox(width: 12),
+            if (surfaceText.isNotEmpty) ...[
+              _hField('Surface (auto)', _hReadonly(surfaceText), width: 120),
+              const SizedBox(width: 12),
+            ],
             _hField('Quality', _qualityDropdown(), width: 140),
             const SizedBox(width: 12),
             _hField('Qty (boxes)', _qtyField(), width: 100),
@@ -758,6 +800,7 @@ class _State extends State<AddStockBatchScreen> {
               design: 'DESIGN',
               brand: 'BRAND',
               size: 'SIZE',
+              surface: 'SURFACE',
               quality: 'QUALITY',
               qty: 'QTY (BOXES)',
               header: true,
@@ -790,6 +833,9 @@ class _State extends State<AddStockBatchScreen> {
         design: _displayName(e.master, e.brandId),
         brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
         size: e.master.size.replaceAll(' mm', ''),
+        surface: _surfaceOf(e.master, e.brandId).isEmpty
+            ? '—'
+            : _surfaceOf(e.master, e.brandId),
         quality: e.quality,
         qty: '${e.qty}',
         onQty: () => _editQty(e),
@@ -802,6 +848,7 @@ class _State extends State<AddStockBatchScreen> {
     required String design,
     required String brand,
     required String size,
+    required String surface,
     required String quality,
     required String qty,
     bool header = false,
@@ -851,6 +898,13 @@ class _State extends State<AddStockBatchScreen> {
         SizedBox(
             width: 90,
             child: Text(size, style: header ? labelStyle : cellStyle)),
+        if (_showSurfaceCol)
+          SizedBox(
+              width: 110,
+              child: Text(surface,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: header ? labelStyle : cellStyle)),
         SizedBox(width: 120, child: qualityCell()),
         SizedBox(
           width: 90,
@@ -922,6 +976,24 @@ class _State extends State<AddStockBatchScreen> {
               onTap: _pickDesign,
               placeholder: _selMaster == null,
             ),
+            // Size + surface come from the design itself — shown, never typed.
+            if (_selMaster != null) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  _autoChip(Icons.straighten,
+                      _selMaster!.size.replaceAll(' mm', '')),
+                  if (_surfaceOf(_selMaster!, _isM ? _selBrandId : null)
+                      .isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    _autoChip(
+                        Icons.texture,
+                        _surfaceOf(
+                            _selMaster!, _isM ? _selBrandId : null)),
+                  ],
+                ],
+              ),
+            ],
             const SizedBox(height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -1015,6 +1087,28 @@ class _State extends State<AddStockBatchScreen> {
     );
   }
 
+  // A read-only fact about the chosen design (size, surface) — phone layout.
+  Widget _autoChip(IconData icon, String text) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: Colors.grey.shade600),
+            const SizedBox(width: 5),
+            Text(text,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey.shade700)),
+          ],
+        ),
+      );
+
   Widget _selectField({
     required String label,
     required String value,
@@ -1081,6 +1175,8 @@ class _State extends State<AddStockBatchScreen> {
                   Text(
                     [
                       e.master.size.replaceAll(' mm', ''),
+                      if (_surfaceOf(e.master, e.brandId).isNotEmpty)
+                        _surfaceOf(e.master, e.brandId),
                       if (e.brandName?.isNotEmpty == true) e.brandName!,
                       e.quality,
                     ].join(' · '),

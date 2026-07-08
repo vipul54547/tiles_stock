@@ -100,10 +100,30 @@ class _State extends State<ManualDispatchScreen> {
     return m.isEmpty ? '' : m.first.name;
   }
 
+  // ── Surface (project_per_brand_surface_mode) ─────────────────────────────
+  // Shown only for brands that treat surface as an attribute; in-name brands
+  // already carry it in the design name.
+
+  Brand? _brandById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    final m = _brands.where((b) => b.id == id).toList();
+    return m.isEmpty ? null : m.first;
+  }
+
+  /// The surface to display for this holding, or '' when it has none / the
+  /// brand keeps surface in the name.
+  String _surfaceOf(TileDesign d) {
+    if (!(_brandById(d.brandId)?.usesSurface ?? false)) return '';
+    final s = d.surfaceType.trim();
+    return s.isEmpty || s.toLowerCase() == 'none' ? '' : s;
+  }
+
   String _holdingLabel(TileDesign d) {
     final b = _brandName(d.brandId);
+    final surf = _surfaceOf(d);
     return [
       d.size.replaceAll(' mm', ''),
+      if (surf.isNotEmpty) surf,
       if (b.isNotEmpty) b,
       d.quality,
     ].join(' · ');
@@ -130,7 +150,8 @@ class _State extends State<ManualDispatchScreen> {
             if (ql.isEmpty) return true;
             return d.name.toLowerCase().contains(ql) ||
                 _brandName(d.brandId).toLowerCase().contains(ql) ||
-                d.size.toLowerCase().contains(ql);
+                d.size.toLowerCase().contains(ql) ||
+                _surfaceOf(d).toLowerCase().contains(ql);
           }).toList();
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
