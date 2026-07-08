@@ -37,6 +37,9 @@ class MergedFamilyGrid extends StatelessWidget {
 
   final EdgeInsets padding;
 
+  /// Tiles per row. Responsive callers pass gridColumnsFor(width); defaults to 2.
+  final int columns;
+
   const MergedFamilyGrid({
     super.key,
     required this.cards,
@@ -48,6 +51,7 @@ class MergedFamilyGrid extends StatelessWidget {
     this.expandedDnaId,
     this.onToggleDnaExpand,
     this.padding = const EdgeInsets.fromLTRB(12, 4, 12, 12),
+    this.columns = 2,
   });
 
   static const List<Color> _familyColors = [
@@ -167,7 +171,7 @@ class MergedFamilyGrid extends StatelessWidget {
   }
 
   Widget _staggeredRun(List<Widget> items) => StaggeredGrid.count(
-        crossAxisCount: 2,
+        crossAxisCount: columns,
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
         children: [
@@ -186,7 +190,7 @@ class MergedFamilyGrid extends StatelessWidget {
       ),
       padding: const EdgeInsets.all(8),
       child: StaggeredGrid.count(
-        crossAxisCount: 2,
+        crossAxisCount: columns,
         mainAxisSpacing: 10,
         crossAxisSpacing: 10,
         children: [

@@ -6,7 +6,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../models/inquiry_order.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
-import '../../config/app_config.dart';
 import '../../utils/order_message.dart';
 import 'stockist_add_order_screen.dart';
 
@@ -823,10 +822,6 @@ class _State extends State<InquiriesScreen> {
         (o.status == 'draft' || o.status == 'sent') && o.endUserId.isEmpty;
     final canReject = o.status != 'completed' && o.status != 'rejected';
     final canDelete = o.status == 'rejected';
-    // Order link works while the order is still open (public_order gate).
-    final canLink = o.status == 'draft' ||
-        o.status == 'sent' ||
-        o.status == 'locked';
     return Row(
       children: [
         for (final w in quick)
@@ -840,8 +835,6 @@ class _State extends State<InquiriesScreen> {
                 _showItems(o);
               case 'share':
                 _shareOrder(o);
-              case 'link':
-                _orderLink(o);
               case 'edit':
                 _editOrder(o);
               case 'reject':
@@ -853,8 +846,6 @@ class _State extends State<InquiriesScreen> {
           itemBuilder: (_) => [
             _menuItem('items', 'Items', Icons.list_alt_outlined, _navy),
             _menuItem('share', 'Send order', Icons.ios_share, _navy),
-            if (canLink)
-              _menuItem('link', 'Order link', Icons.link, _navy),
             if (canEdit) _menuItem('edit', 'Edit', Icons.edit_outlined, _navy),
             if (canReject)
               _menuItem('reject', 'Reject', Icons.block_outlined,
@@ -1046,23 +1037,6 @@ class _State extends State<InquiriesScreen> {
         ),
       ),
     );
-  }
-
-  // Create an order link the buyer opens on the web to review/adjust + confirm,
-  // then offer Copy/WhatsApp. No expiry.
-  Future<void> _orderLink(InquiryOrder o) async {
-    try {
-      final token = await _data.createOrderLink(o.id);
-      if (!mounted || token == null || token.isEmpty) return;
-      final url = '${AppConfig.shareBaseUrl}/o/$token';
-      final code = o.connectionCode.isNotEmpty ? ' [${o.connectionCode}]' : '';
-      final msg = 'Please review & confirm your order ${o.token}$code:\n$url';
-      await _shareSheet(msg, digits: _waDigits(o));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
-    }
   }
 
   // Share the order — Copy and/or WhatsApp (both offered).

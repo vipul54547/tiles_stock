@@ -15,7 +15,7 @@ import 'screens/login_screen.dart';
 
 import 'screens/notifications_screen.dart';
 import 'screens/share_link_handler_screen.dart';
-import 'screens/order_link_screen.dart';
+import 'screens/dispatch_link_screen.dart';
 import 'screens/web_landing_screen.dart';
 
 import 'screens/reset_password_screen.dart';
@@ -37,6 +37,7 @@ import 'screens/stockist/inquiries_screen.dart';
 import 'screens/stockist/dispatch_inquiry_screen.dart';
 
 import 'screens/stockist/add_edit_stock_screen.dart';
+import 'screens/stockist/add_stock_batch_screen.dart';
 
 
 import 'screens/admin/admin_panel_screen.dart';
@@ -116,11 +117,11 @@ final GoRouter _router = GoRouter(
           ShareLinkHandlerScreen(token: state.pathParameters['token']!),
     ),
 
-    // Order link — buyer confirms a stockist-made order (login-free).
+    // Dispatch link — buyer views a dispatch receipt (login-free, read-only).
     GoRoute(
-      path: '/o/:token',
+      path: '/d/:token',
       builder: (_, state) =>
-          OrderLinkScreen(token: state.pathParameters['token']!),
+          DispatchLinkScreen(token: state.pathParameters['token']!),
     ),
 
     GoRoute(path: '/register', builder: (_, __) => const RegisterScreen()),
@@ -193,18 +194,14 @@ final GoRouter _router = GoRouter(
       },
     ),
 
+    // "+ Add → Stock" — batch manual stock entry (many designs at once, P_Stock
+    // only, no list). Old single-design add form retired from this path.
     GoRoute(
-
         path: '/stockist/stock/add',
-
         builder: (_, state) {
           final e = state.extra;
-          if (e is Map) {
-            return AddEditStockScreen(
-                initialCatalogId: e['catalogId'] as String?,
-                initialBrandId: e['brandId'] as String?);
-          }
-          return AddEditStockScreen(initialCatalogId: e as String?);
+          final brandId = e is Map ? e['brandId'] as String? : null;
+          return AddStockBatchScreen(initialBrandId: brandId);
         }),
 
     GoRoute(

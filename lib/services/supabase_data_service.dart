@@ -272,6 +272,20 @@ class SupabaseDataService {
   /// Adds stock for a Library design: upserts the holding by
   /// (stockist, library_id, quality), publishes it into [catalogId] (membership),
   /// and logs the stock-in. Identity lives on the master. (stocklist-output)
+  /// Commit a batch of manual-stock entries in one atomic call. Each entry:
+  /// {library_id, quality, quantity, brand_id?, surface}. Adds to P_Stock only
+  /// (no stock list). Returns {count, boxes}.
+  Future<Map<String, dynamic>> addInventoryBatch(
+      List<Map<String, dynamic>> entries) async {
+    try {
+      final res = await supabase
+          .rpc('add_inventory_batch', params: {'p_entries': entries});
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   Future<String?> addDesign({
     required String libraryId,
     required String quality,
@@ -2426,41 +2440,29 @@ class SupabaseDataService {
     }
   }
 
-  // ── Order link (customer confirms a pre-made order on the web) ──────────────
+  // ── Dispatch link (login-free, read-only dispatch receipt on the web) ───────
 
-  /// Stockist creates an order-scoped share link; returns its token. Build the
-  /// URL as `<shareBaseUrl>/o/<token>`. [days] null = no expiry.
-  Future<String?> createOrderLink(String inquiryId, {int? days}) async {
+  /// Stockist mints (or reuses) a share link for one dispatch note; returns its
+  /// token. Build the URL as `<shareBaseUrl>/d/<token>`. [days] null = no expiry.
+  Future<String?> createDispatchLink(String dispatchNoteId, {int? days}) async {
     try {
-      final res = await supabase.rpc('create_order_link',
-          params: {'p_inquiry': inquiryId, 'p_days': days});
+      final res = await supabase.rpc('create_dispatch_link',
+          params: {'p_note': dispatchNoteId, 'p_days': days});
       return (Map<String, dynamic>.from(res as Map)['token'])?.toString();
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  /// Login-free view of an order behind an order-link token (buyer-facing).
-  Future<Map<String, dynamic>?> publicOrder(String token) async {
+  /// Login-free, read-only view of a dispatch behind a dispatch-link token.
+  Future<Map<String, dynamic>?> publicDispatch(String token) async {
     try {
-      final res = await supabase.rpc('public_order', params: {'p_token': token});
+      final res =
+          await supabase.rpc('public_dispatch', params: {'p_token': token});
       return res == null ? null : Map<String, dynamic>.from(res as Map);
     } catch (e, st) {
-      debugPrint('publicOrder failed ($token): $e\n$st');
+      debugPrint('publicDispatch failed ($token): $e\n$st');
       return null;
-    }
-  }
-
-  /// Buyer confirms the order via the link with adjusted quantities (0 drops a
-  /// line). Marks it confirmed + notifies the stockist. Returns {token, code}.
-  Future<Map<String, dynamic>> confirmOrderLink(
-      String token, List<Map<String, dynamic>> lines) async {
-    try {
-      final res = await supabase.rpc('confirm_order_link',
-          params: {'p_token': token, 'p_lines': lines});
-      return Map<String, dynamic>.from(res as Map);
-    } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 

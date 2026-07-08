@@ -1656,12 +1656,10 @@ class _State extends State<StockistDashboardScreen> {
                   color: Color(0xFF2E7D32), size: 28),
               title: const Text('Stock',
                   style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-              subtitle: const Text('Add or update how many boxes you have'),
+              subtitle: const Text('Add boxes for many designs at once'),
               onTap: () async {
                 Navigator.pop(ctx);
-                final lists = _filterLists;
                 await context.push('/stockist/stock/add', extra: {
-                  'catalogId': lists.isEmpty ? null : lists.first.id,
                   'brandId': _brandFilter == 'all' ? null : _brandFilter,
                 });
                 _load();

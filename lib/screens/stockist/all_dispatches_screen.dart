@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../config/app_config.dart';
 import '../../services/supabase_data_service.dart';
 
 /// A flat, newest-first log of every dispatch this stockist has recorded —
@@ -587,8 +590,139 @@ class _State extends State<AllDispatchesScreen> {
             Text(meta,
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
           ],
+          // A dispatch link + PDF are per-dispatch-note actions. Note-less
+          // walk-in rows (no dispatch_note_id) can't be linked.
+          if ((first['dispatch_note_id'] ?? '').toString().isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _dispatchLink(
+                        first['dispatch_note_id'].toString()),
+                    icon: const Icon(Icons.link, size: 17),
+                    label: const Text('Dispatch link',
+                        style: TextStyle(fontSize: 12.5)),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF6A1B9A),
+                        padding: const EdgeInsets.symmetric(vertical: 9)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _createPdfStub,
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 17),
+                    label: const Text('Create PDF',
+                        style: TextStyle(fontSize: 12.5)),
+                    style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.grey.shade700,
+                        padding: const EdgeInsets.symmetric(vertical: 9)),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  // Mint (or reuse) a login-free dispatch link and offer to share it. There's no
+  // buyer phone in this flat log, so we lead with Copy (per the no-phone rule)
+  // and offer a generic WhatsApp share the stockist can aim at any contact.
+  Future<void> _dispatchLink(String noteId) async {
+    try {
+      final token = await _dataSvc.createDispatchLink(noteId);
+      if (!mounted || token == null || token.isEmpty) return;
+      final url = '${AppConfig.shareBaseUrl}/d/$token';
+      final msg = 'Dispatch details:\n$url';
+      await _shareLinkSheet(url, msg);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _shareLinkSheet(String url, String msg) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Share dispatch link',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(url,
+                    style: const TextStyle(fontSize: 12.5)),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: url));
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Link copied.'),
+                                  backgroundColor: Color(0xFF2E7D32)));
+                        }
+                      },
+                      icon: const Icon(Icons.copy, size: 18),
+                      label: const Text('Copy link'),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 13)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final uri = Uri.parse(
+                            'https://wa.me/?text=${Uri.encodeComponent(msg)}');
+                        await launchUrl(uri,
+                            mode: LaunchMode.externalApplication);
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      },
+                      icon: const Icon(Icons.chat_rounded, size: 18),
+                      label: const Text('WhatsApp'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF25D366),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Placeholder for a future dispatch-note PDF export.
+  void _createPdfStub() {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('PDF export is coming soon.'),
+        backgroundColor: Color(0xFF6A1B9A)));
   }
 }

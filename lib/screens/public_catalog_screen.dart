@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
+import '../utils/responsive.dart';
 import '../services/cloudinary_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
@@ -1486,7 +1487,7 @@ class _State extends State<PublicCatalogScreen> {
   }
 
   Widget _staggeredRun(List<Widget> items) => StaggeredGrid.count(
-        crossAxisCount: 2,
+        crossAxisCount: gridColumnsFor(MediaQuery.sizeOf(context).width),
         mainAxisSpacing: 12,
         crossAxisSpacing: 12,
         children: [
@@ -1505,7 +1506,7 @@ class _State extends State<PublicCatalogScreen> {
       ),
       padding: const EdgeInsets.all(8),
       child: StaggeredGrid.count(
-        crossAxisCount: 2,
+        crossAxisCount: gridColumnsFor(MediaQuery.sizeOf(context).width),
         mainAxisSpacing: 10,
         crossAxisSpacing: 10,
         children: [

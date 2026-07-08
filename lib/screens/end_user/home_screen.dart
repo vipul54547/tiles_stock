@@ -6,6 +6,7 @@ import '../../services/supabase_auth_service.dart';
 import '../../widgets/tile_card.dart';
 import '../../widgets/merged_family_grid.dart';
 import '../../utils/quality_merge.dart';
+import '../../utils/responsive.dart';
 import '../../widgets/quality_choice_sheet.dart';
 import 'stockist_group_screen.dart'
     show stockistGroups, loadStockistGroupsFromDb, confirmToggleStockistInGroup;
@@ -1467,6 +1468,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       : SingleChildScrollView(
                           child: MergedFamilyGrid(
                             cards: _mergedFiltered,
+                            columns: gridColumnsFor(
+                                MediaQuery.sizeOf(context).width),
                             onOpenDetail: _openDesign,
                             isChosen: (m) => m.holdings.any((h) =>
                                 myChoiceQuantities.containsKey(h.id)),

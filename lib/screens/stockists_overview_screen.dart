@@ -10,6 +10,7 @@ import '../services/supabase_auth_service.dart';
 import '../widgets/merged_family_grid.dart';
 import '../widgets/quality_choice_sheet.dart';
 import '../utils/quality_merge.dart';
+import '../utils/responsive.dart';
 import '../services/cloudinary_service.dart';
 import 'end_user/stockist_group_screen.dart'
     show stockistGroups, loadStockistGroupsFromDb, confirmToggleStockistInGroup;
@@ -1742,6 +1743,7 @@ class _State extends State<StockistsOverviewScreen> {
                 : SingleChildScrollView(
                     child: MergedFamilyGrid(
                       cards: mergedDesigns,
+                      columns: gridColumnsFor(MediaQuery.sizeOf(context).width),
                       padding:
                           EdgeInsets.fromLTRB(12, 8, 12, 12 + bottomInset),
                       onOpenDetail: (i) => _openDesignSheet(i, mergedReps),

@@ -8,6 +8,7 @@ import '../../services/supabase_data_service.dart';
 import '../../widgets/merged_family_grid.dart';
 import '../../widgets/quality_choice_sheet.dart';
 import '../../utils/quality_merge.dart';
+import '../../utils/responsive.dart';
 import '../../utils/order_message.dart';
 import '../../utils/buyer_dna.dart';
 import '../../services/cloudinary_service.dart';
@@ -1353,6 +1354,7 @@ class _State extends State<StockistPortfolioScreen> {
   Widget _familyGridSliver() => SliverToBoxAdapter(
         child: MergedFamilyGrid(
           cards: _mergedFiltered,
+          columns: gridColumnsFor(MediaQuery.sizeOf(context).width),
           onOpenDetail: _openDesign,
           isChosen: (m) =>
               m.holdings.any((h) => myChoiceQuantities.containsKey(h.id)),
