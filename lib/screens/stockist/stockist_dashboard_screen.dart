@@ -625,10 +625,40 @@ class _State extends State<StockistDashboardScreen> {
                 _pfCluster('F', prem?.fStock, std?.fStock, showTotal: true),
               ],
             ),
+            // Control (hidden) + Held (booked) — shown only when there's something
+            // to show, so plain in-stock tiles stay clean. (desktop detail set)
+            if (((prem?.controlQuantity ?? 0) + (std?.controlQuantity ?? 0) +
+                    (prem?.heldQuantity ?? 0) + (std?.heldQuantity ?? 0)) >
+                0) ...[
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  _chCluster('Ctrl', prem?.controlQuantity, std?.controlQuantity,
+                      Colors.grey.shade600),
+                  const SizedBox(width: 12),
+                  _chCluster('Held', prem?.heldQuantity, std?.heldQuantity,
+                      const Color(0xFF6A1B9A)),
+                ],
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  // Secondary figures (Control / Held) — one muted colour, premium+standard summed
+  // (these rarely split and don't need the amber/blue coding P/F carry).
+  Widget _chCluster(String label, int? prem, int? std, Color color) {
+    final total = (prem ?? 0) + (std ?? 0);
+    final gray = TextStyle(fontSize: 10, color: Colors.grey.shade500);
+    return Text.rich(TextSpan(children: [
+      TextSpan(text: '$label ', style: gray),
+      TextSpan(
+          text: '$total',
+          style: TextStyle(
+              fontSize: 10.5, fontWeight: FontWeight.bold, color: color)),
+    ]));
   }
 
   // "P(8+2)" / "F(6+2=8)" — premium amber, standard blue; frame + total in gray.

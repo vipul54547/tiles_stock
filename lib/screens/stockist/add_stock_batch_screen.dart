@@ -516,10 +516,15 @@ class _State extends State<AddStockBatchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Wide windows (desktop) get the software-style horizontal entry bar + table;
+    // phones keep the stacked card layout. (project_batch_stock_and_grids)
+    final wide = MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
       appBar: AppBar(title: const Text('Add Stock')),
       bottomNavigationBar: SaveBar(
-        label: 'Save ($_totalBoxes boxes)',
+        label: _entries.isEmpty
+            ? 'Save'
+            : 'Save ${_entries.length} design${_entries.length == 1 ? '' : 's'} · $_totalBoxes boxes',
         icon: Icons.check,
         color: _green,
         onPressed: _save,
@@ -528,34 +533,362 @@ class _State extends State<AddStockBatchScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-              children: [
-                _entryBuilder(),
-                const SizedBox(height: 14),
-                if (_entries.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Center(
-                      child: Text('No entries yet — add designs above.',
-                          style: TextStyle(color: Colors.grey.shade500)),
-                    ),
-                  )
-                else ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(
-                        '${_entries.length} to add · $_totalBoxes boxes',
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: Colors.grey.shade700)),
-                  ),
-                  const SizedBox(height: 8),
-                  ..._entries.asMap().entries.map((me) => _entryTile(me.key)),
-                ],
-              ],
+          : (wide ? _desktopBody() : _mobileBody()),
+    );
+  }
+
+  Widget _mobileBody() => ListView(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        children: [
+          _entryBuilder(),
+          const SizedBox(height: 14),
+          if (_entries.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: Text('No entries yet — add designs above.',
+                    style: TextStyle(color: Colors.grey.shade500)),
+              ),
+            )
+          else ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text('${_entries.length} to add · $_totalBoxes boxes',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: Colors.grey.shade700)),
             ),
+            const SizedBox(height: 8),
+            ..._entries.asMap().entries.map((me) => _entryTile(me.key)),
+          ],
+        ],
+      );
+
+  // ── Desktop: horizontal entry bar + table (matches the stockist's sketch) ────
+
+  Widget _desktopBody() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: _desktopEntryBar(),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: _desktopTable(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _desktopEntryBar() {
+    final sizeText =
+        _selMaster == null ? '—' : _selMaster!.size.replaceAll(' mm', '');
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (_isM) ...[
+              _hField('Brand',
+                  _hSelect(
+                      _selBrandId == null
+                          ? 'Select brand'
+                          : _brandNameOf(_selBrandId),
+                      _pickBrand,
+                      _selBrandId == null),
+                  width: 150),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              child: _hField(
+                  'Design',
+                  _hSelect(
+                      _selMaster == null
+                          ? 'Search & select design'
+                          : _displayName(_selMaster!, _isM ? _selBrandId : null),
+                      _pickDesign,
+                      _selMaster == null)),
+            ),
+            const SizedBox(width: 12),
+            _hField('Size (auto)', _hReadonly(sizeText), width: 110),
+            const SizedBox(width: 12),
+            _hField('Quality', _qualityDropdown(), width: 140),
+            const SizedBox(width: 12),
+            _hField('Qty (boxes)', _qtyField(), width: 100),
+            const SizedBox(width: 12),
+            SizedBox(
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: _addEntry,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add'),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: _green, foregroundColor: Colors.white),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: _addNewDesign,
+                icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
+                label: const Text('New design'),
+                style: OutlinedButton.styleFrom(foregroundColor: _navy),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _hField(String label, Widget child, {double? width}) {
+    final col = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade600)),
+        const SizedBox(height: 5),
+        child,
+      ],
+    );
+    return width == null ? col : SizedBox(width: width, child: col);
+  }
+
+  Widget _hSelect(String value, VoidCallback onTap, bool placeholder) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade400),
+            borderRadius: BorderRadius.circular(8)),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 13,
+                      color:
+                          placeholder ? Colors.grey.shade500 : Colors.black87)),
+            ),
+            Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _hReadonly(String value) => Container(
+        height: 44,
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8)),
+        child: Text(value,
+            style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade700)),
+      );
+
+  Widget _qualityDropdown() => Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade400),
+            borderRadius: BorderRadius.circular(8)),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _selQuality,
+            isExpanded: true,
+            isDense: true,
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
+            items: const [
+              DropdownMenuItem(value: 'Premium', child: Text('Premium')),
+              DropdownMenuItem(value: 'Standard', child: Text('Standard')),
+            ],
+            onChanged: (v) => setState(() => _selQuality = v ?? _selQuality),
+          ),
+        ),
+      );
+
+  Widget _qtyField() => SizedBox(
+        height: 44,
+        child: TextField(
+          controller: _qtyCtrl,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: InputDecoration(
+            hintText: '0',
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      );
+
+  Widget _desktopTable() {
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Container(
+            color: const Color(0xFFF3F5F8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: _tableRow(
+              design: 'DESIGN',
+              brand: 'BRAND',
+              size: 'SIZE',
+              quality: 'QUALITY',
+              qty: 'QTY (BOXES)',
+              header: true,
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _entries.isEmpty
+                ? Center(
+                    child: Text(
+                        'No entries yet — pick a design above and press Add.',
+                        style: TextStyle(color: Colors.grey.shade500)),
+                  )
+                : ListView.separated(
+                    itemCount: _entries.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) => _desktopRow(i),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _desktopRow(int i) {
+    final e = _entries[i];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      child: _tableRow(
+        design: _displayName(e.master, e.brandId),
+        brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
+        size: e.master.size.replaceAll(' mm', ''),
+        quality: e.quality,
+        qty: '${e.qty}',
+        onQty: () => _editQty(e),
+        onRemove: () => setState(() => _entries.removeAt(i)),
+      ),
+    );
+  }
+
+  Widget _tableRow({
+    required String design,
+    required String brand,
+    required String size,
+    required String quality,
+    required String qty,
+    bool header = false,
+    VoidCallback? onQty,
+    VoidCallback? onRemove,
+  }) {
+    final labelStyle = TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+        color: Colors.grey.shade600,
+        letterSpacing: 0.4);
+    const cellStyle = TextStyle(fontSize: 13);
+    Widget qualityCell() {
+      if (header) return Text(quality, style: labelStyle);
+      final amber = quality == 'Premium';
+      final c = amber ? const Color(0xFFB26206) : const Color(0xFF1565C0);
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
+          decoration: BoxDecoration(
+              color: c.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999)),
+          child: Text(quality,
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w700, color: c)),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(
+            flex: 3,
+            child: Text(design,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: header
+                    ? labelStyle
+                    : cellStyle.copyWith(fontWeight: FontWeight.w600))),
+        Expanded(
+            flex: 2,
+            child: Text(brand,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: header ? labelStyle : cellStyle)),
+        SizedBox(
+            width: 90,
+            child: Text(size, style: header ? labelStyle : cellStyle)),
+        SizedBox(width: 120, child: qualityCell()),
+        SizedBox(
+          width: 90,
+          child: header
+              ? Text(qty, style: labelStyle, textAlign: TextAlign.right)
+              : Align(
+                  alignment: Alignment.centerRight,
+                  child: InkWell(
+                    onTap: onQty,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                          color: _navy.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(6)),
+                      child: Text(qty,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: _navy)),
+                    ),
+                  ),
+                ),
+        ),
+        SizedBox(
+          width: 40,
+          child: header
+              ? const SizedBox()
+              : IconButton(
+                  icon: Icon(Icons.delete_outline,
+                      size: 20, color: Colors.red.shade400),
+                  onPressed: onRemove,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+        ),
+      ],
     );
   }
 
