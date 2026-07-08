@@ -26,6 +26,12 @@ class Brand {
   /// (the stockist can cancel until then).
   final DateTime? deleteScheduledAt;
 
+  /// How this brand handles surface (project_per_brand_surface_mode):
+  /// 'attribute' → surface is a real, required attribute shown with the name and
+  /// part of identity; 'in_name' → surface is baked into the design name, no
+  /// separate surface field (default).
+  final String surfaceMode;
+
   const Brand({
     required this.id,
     required this.name,
@@ -37,7 +43,11 @@ class Brand {
     this.status = 'live',
     this.hiddenByStockist = false,
     this.deleteScheduledAt,
+    this.surfaceMode = 'in_name',
   });
+
+  /// Surface is a required attribute for this brand (shown with the name).
+  bool get usesSurface => surfaceMode == 'attribute';
 
   /// Admin flagged this brand: buyers can't see it until corrected.
   bool get inCorrection => status == 'correction';
@@ -58,5 +68,6 @@ class Brand {
         deleteScheduledAt: j['delete_scheduled_at'] == null
             ? null
             : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
+        surfaceMode: (j['surface_mode'] ?? 'in_name').toString(),
       );
 }

@@ -762,6 +762,17 @@ class SupabaseDataService {
     }
   }
 
+  /// Admin sets a brand's surface mode ('attribute' | 'in_name').
+  /// (project_per_brand_surface_mode)
+  Future<void> setBrandSurfaceMode(String brandId, String mode) async {
+    try {
+      await supabase.rpc('admin_set_brand_surface_mode',
+          params: {'p_brand_id': brandId, 'p_mode': mode});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   Future<void> renameBrand(String id, String name) async {
     try {
       await supabase.rpc('rename_brand', params: {'p_id': id, 'p_name': name});
