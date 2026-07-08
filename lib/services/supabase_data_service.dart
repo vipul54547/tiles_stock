@@ -1792,6 +1792,14 @@ class SupabaseDataService {
         params: {'p_seq': sequentialId, 'p_show': show});
   }
 
+  /// Admin: opt a stockist into saving customers on dispatch. OFF (default) =
+  /// the Customer field is plain text and nothing is stored.
+  /// (project_unified_dispatch_customers)
+  Future<void> setStockistCustomers(String sequentialId, bool enabled) async {
+    await supabase.rpc('admin_set_stockist_customers',
+        params: {'p_seq': sequentialId, 'p_enabled': enabled});
+  }
+
   // ─── Banner Video (admin) ───────────────────────────────────────────────
   // A "▶ Watch" video system shown in the top banner of a stockist's /s/ page.
   // Admin manages GLOBAL learning videos + sets each stockist's 4-step display

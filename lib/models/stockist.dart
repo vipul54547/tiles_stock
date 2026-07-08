@@ -88,6 +88,12 @@ class Stockist {
   /// banners (the stockist only chooses its position). Default off.
   final bool tdShow;
 
+  /// Admin-controlled opt-in: whether this stockist saves customers. OFF (the
+  /// default) means the dispatch Customer field is plain optional text and
+  /// nothing is stored — the platform never depends on customer contact data.
+  /// (project_unified_dispatch_customers)
+  final bool customersEnabled;
+
   final DateTime createdAt;
 
 
@@ -149,6 +155,7 @@ class Stockist {
     this.mapUrl = '',
 
     this.tdShow = false,
+    this.customersEnabled = false,
 
     required this.createdAt,
 
@@ -215,6 +222,7 @@ class Stockist {
     mapUrl: json['map_url'] ?? '',
 
     tdShow: json['td_show'] ?? false,
+    customersEnabled: json['customers_enabled'] ?? false,
 
     createdAt: DateTime.parse(json['created_at']),
 

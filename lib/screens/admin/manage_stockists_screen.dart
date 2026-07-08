@@ -457,6 +457,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   bool _listed = true; // shown in the public market (false = link-only)
   bool _canPrivate = false; // may create private (Most Exclusive) catalogs
   bool _tdShow = false; // show the TilesDesign mark on this stockist's banners
+  bool _customersEnabled = false; // may save customers on dispatch (opt-in)
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   // Per-stockist cap on brand-free stock lists (v2 — lists are no longer under a
@@ -499,6 +500,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _listed = s.isListed;
       _canPrivate = s.canCreatePrivateCatalog;
       _tdShow = s.tdShow;
+      _customersEnabled = s.customersEnabled;
       _deviceLimit.text = '${s.deviceLimit}';
       _stockLists.text = '${s.stockListLimit}';
       _brandColor = s.brandColor;
@@ -774,6 +776,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           mapUrl: _mapUrl.text.trim(),
         );
         await _dataSvc.setStockistTd(widget.existing!.id, _tdShow);
+        await _dataSvc.setStockistCustomers(
+            widget.existing!.id, _customersEnabled);
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -992,6 +996,24 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                             : 'Off — no TilesDesign mark on this stockist\'s banners.',
                         style: const TextStyle(fontSize: 11)),
                     onChanged: (v) => setState(() => _tdShow = v),
+                  ),
+                ),
+              // Opt-in, trust-first: the platform never depends on customer
+              // contact data. (project_unified_dispatch_customers)
+              if (_isEdit)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _customersEnabled,
+                    activeThumbColor: const Color(0xFF2E7D32),
+                    title: const Text('Save customers on dispatch'),
+                    subtitle: Text(
+                        _customersEnabled
+                            ? 'Dispatch shows a pick-or-add Customer field; saved customers (name, optional phone, place) can be reused.'
+                            : 'Off — the Customer field on dispatch is plain optional text and nothing is stored.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _customersEnabled = v),
                   ),
                 ),
               if (_isEdit) _brandingSection(),
