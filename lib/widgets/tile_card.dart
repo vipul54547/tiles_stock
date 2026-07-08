@@ -153,29 +153,36 @@ class TileCard extends StatelessWidget {
                     thumbWidth: 600,
                   ),
                 ),
-                // Finish chip over the image on every card: the standard finish
-                // (surface_type), plus the stockist's own wording (finish_label,
-                // e.g. "Punch Ghr", "Lustra") when the design has one.
-                Positioned(
-                  left: 6,
-                  bottom: 6,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.62),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: Text(
-                      design.finishLabel != null && design.finishLabel!.isNotEmpty
-                          ? '${design.surfaceType} · ${design.finishLabel}'
-                          : design.surfaceType,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600),
+                // Finish chip over the image: the standard finish (surface_type),
+                // plus the stockist's own wording (finish_label, e.g. "Punch Ghr",
+                // "Lustra") when the design has one. Omitted entirely when the
+                // design has neither — in-name brands keep the surface in the
+                // name. (project_per_brand_surface_mode)
+                if (design.hasSurface ||
+                    (design.finishLabel?.isNotEmpty ?? false))
+                  Positioned(
+                    left: 6,
+                    bottom: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.62),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        [
+                          if (design.hasSurface) design.displaySurface,
+                          if (design.finishLabel?.isNotEmpty ?? false)
+                            design.finishLabel!,
+                        ].join(' · '),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ),
-                ),
                 if (onChoiceTap != null)
                   Positioned(
                     top: 6,

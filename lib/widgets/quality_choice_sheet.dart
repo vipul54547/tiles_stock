@@ -109,8 +109,11 @@ class _QualityChoiceSheetState extends State<_QualityChoiceSheet> {
                 overflow: TextOverflow.ellipsis),
             const SizedBox(height: 2),
             Text(
-                '${rep.size.replaceAll(' mm', '')} · ${rep.surfaceType}'
-                '${rep.brandName.isNotEmpty ? ' · ${rep.brandName}' : ''}',
+                [
+                  rep.size.replaceAll(' mm', ''),
+                  if (rep.hasSurface) rep.displaySurface,
+                  if (rep.brandName.isNotEmpty) rep.brandName,
+                ].join(' · '),
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
             const SizedBox(height: 16),
             if (widget.card.premium != null)

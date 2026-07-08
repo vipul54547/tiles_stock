@@ -352,8 +352,8 @@ class _StockControlScreenState extends State<StockControlScreen> {
   Future<void> _openFilterSheet() async {
     final sizes = _designs.map((d) => d.size).toSet().toList()..sort();
     final surfaces = _designs
-        .map((d) => d.surfaceType)
-        .where((s) => s.trim().isNotEmpty && s != 'None')
+        .where((d) => d.hasSurface)
+        .map((d) => d.displaySurface)
         .toSet()
         .toList()
       ..sort();
@@ -617,9 +617,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
                       [
                         d.size.replaceAll(' mm', ''),
                         d.quality,
-                        if (d.surfaceType.trim().isNotEmpty &&
-                            d.surfaceType != 'None')
-                          d.surfaceType,
+                        if (d.hasSurface) d.displaySurface,
                         if (d.brandName.trim().isNotEmpty) d.brandName,
                       ].join(' · '),
                       maxLines: 1,

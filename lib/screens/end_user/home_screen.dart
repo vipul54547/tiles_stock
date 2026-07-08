@@ -834,7 +834,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             runSpacing: 6,
                             children: [
                               _infoChip(d.size.replaceAll(' mm', '')),
-                              _infoChip(d.surfaceType),
+                              if (d.hasSurface) _infoChip(d.displaySurface),
                               _infoChip(d.quality),
                               if (d.finishLabel != null &&
                                   d.finishLabel!.trim().isNotEmpty &&

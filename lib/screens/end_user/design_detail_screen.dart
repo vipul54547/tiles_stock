@@ -232,7 +232,7 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                           fontSize: 22, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
 
-                  // ── Size & Surface chips ─────────────────────────────────
+                  // ── Size · Surface · Brand · Quality chips ───────────────
                   Wrap(
                     spacing: 8,
                     runSpacing: 6,
@@ -243,12 +243,32 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                         bg: const Color(0xFFE3F2FD),
                         fg: const Color(0xFF1565C0),
                       ),
-                      _Chip(
-                        icon: Icons.texture_rounded,
-                        label: design.surfaceType,
-                        bg: const Color(0xFFF3E5F5),
-                        fg: const Color(0xFF6A1B9A),
-                      ),
+                      // Only attribute brands carry a surface of their own.
+                      if (design.hasSurface)
+                        _Chip(
+                          icon: Icons.texture_rounded,
+                          label: design.displaySurface,
+                          bg: const Color(0xFFF3E5F5),
+                          fg: const Color(0xFF6A1B9A),
+                        ),
+                      if (design.brandName.isNotEmpty)
+                        _Chip(
+                          icon: Icons.sell_outlined,
+                          label: design.brandName,
+                          bg: const Color(0xFFE0F2F1),
+                          fg: const Color(0xFF00695C),
+                        ),
+                      if (design.quality.isNotEmpty)
+                        _Chip(
+                          icon: Icons.workspace_premium_outlined,
+                          label: design.quality,
+                          bg: design.quality == 'Premium'
+                              ? const Color(0xFFFFF8E1)
+                              : const Color(0xFFE3F2FD),
+                          fg: design.quality == 'Premium'
+                              ? const Color(0xFFB26206)
+                              : const Color(0xFF1565C0),
+                        ),
                       if (design.tileType.isNotEmpty)
                         _Chip(
                           icon: Icons.category_outlined,
@@ -311,7 +331,7 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                       _Spec(Icons.category_outlined, 'Tile Type',
                           design.tileType.isNotEmpty ? design.tileType : '—'),
                       _Spec(Icons.texture_rounded, 'Finish',
-                          design.surfaceType),
+                          design.hasSurface ? design.displaySurface : '—'),
                       _Spec(Icons.palette_outlined, 'Colour',
                           design.colour.isNotEmpty ? design.colour : '—'),
                     ];

@@ -179,6 +179,19 @@ class TileDesign {
         'quality': quality,
         'stock_type': stockType,
       };
+
+  /// The surface to show, or '' when this design has none.
+  ///
+  /// "None" is not a surface: brands whose `surface_mode` is 'in_name' keep the
+  /// surface inside the design name, so there is nothing separate to display.
+  /// Brands in 'attribute' mode always carry a real value.
+  /// (project_per_brand_surface_mode)
+  String get displaySurface {
+    final t = surfaceType.trim();
+    return t.isEmpty || t.toLowerCase() == 'none' ? '' : t;
+  }
+
+  bool get hasSurface => displaySurface.isNotEmpty;
 }
 
 /// Search-synonym taxonomy for SMART search: typing any term matches designs

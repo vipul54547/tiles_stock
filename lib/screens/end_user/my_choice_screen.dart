@@ -639,7 +639,11 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                     overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 3),
                 Text(
-                    '${d.size.replaceAll(' mm', '')} · ${d.surfaceType} · ${d.quality}',
+                    [
+                      d.size.replaceAll(' mm', ''),
+                      if (d.hasSurface) d.displaySurface,
+                      d.quality,
+                    ].join(' · '),
                     style: const TextStyle(
                         fontSize: 11, color: Colors.grey)),
                 const SizedBox(height: 4),
