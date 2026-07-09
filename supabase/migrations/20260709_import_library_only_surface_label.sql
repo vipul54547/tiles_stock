@@ -1,0 +1,13 @@
+-- #3: PDF import for M = library-only; importers capture surface_label.
+--
+-- Applied via MCP (migration 'import_library_only_and_surface_label'):
+--   import_stock_batch(..., p_library_only boolean default false):
+--     • when p_library_only → build the library (+ images), create NO stock rows
+--       (M PDF: the PDF is only for pictures; stock comes from Excel/Add Stock).
+--     • capture surface_label from each row (the stockist's own word) alongside
+--       surface_type (canonical); holding key includes surface_label.
+--
+-- public_catalog (migration 'surface_label_public_catalog') and
+-- my_private_designs (migration 'surface_label_my_private_designs') carry
+-- surface_label and match filter_surfaces on surface_type OR surface_label.
+-- (project_per_brand_surface_mode)

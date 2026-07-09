@@ -1767,6 +1767,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         'size': r.size,
         'quality': r.quality,
         'surface': r.surface,
+        'surface_label':
+            r.surfaceRaw.trim().isNotEmpty ? r.surfaceRaw.trim() : r.surface,
         'colour': r.colour,
         'qty': r.qty,
         'stock_type': 'Uncertain',
@@ -1780,7 +1782,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     : kTileTypes.first) ??
             0,
         if (libUrl != null) 'image_url': libUrl,
-        if (r.surfaceRaw.trim().isNotEmpty) 'finish_label': r.surfaceRaw.trim(),
+        // surface_label now carries the stockist's word; no separate finish_label.
       };
       final hasDna = r.dna.isNotEmpty;
       if (isCombined) {

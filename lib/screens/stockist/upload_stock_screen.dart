@@ -115,6 +115,8 @@ class _State extends State<UploadStockScreen> {
   // allowed there, so we show a "use Excel" block instead of the picker.
   bool _brandBlocked = false;
   bool _configLoaded = false;
+  // M stockists: a PDF builds the picture library only (no stock rows).
+  bool _isM = false;
 
   // Brand the current upload writes to: the chosen list's brand, else default.
   String? get _uploadBrandId {
@@ -151,7 +153,9 @@ class _State extends State<UploadStockScreen> {
       final library = currentStockistUUID.isEmpty
           ? <LibraryEntry>[]
           : await _dataSvc.getMyLibrary();
+      final profile = await _dataSvc.getMyProfile();
       if (!mounted) return;
+      _isM = (profile?['business_type'] ?? '').toString() == 'M';
       final defaultBrand = brands.where((b) => b.isDefault).toList();
       final defaultBrandId = defaultBrand.isEmpty ? null : defaultBrand.first.id;
       final active = catalogs.where((c) => c.isActive).toList();
@@ -894,6 +898,10 @@ class _State extends State<UploadStockScreen> {
         'size': _size,
         'quality': _quality,
         'surface': r.row.surface,
+        'surface_label': (r.row.surfaceRaw != null &&
+                r.row.surfaceRaw!.trim().isNotEmpty)
+            ? r.row.surfaceRaw!.trim()
+            : r.row.surface,
         'qty': r.row.quantity,
         'stock_type': _stockType,
         'tile_type': _tileType,
@@ -916,6 +924,7 @@ class _State extends State<UploadStockScreen> {
         brandId: brandId,
         pdfFilename: _filename,
         rows: rows,
+        libraryOnly: _isM, // M PDF = build the picture library only, no stock
       );
       created = (res['created'] as num?)?.toInt() ?? 0;
       updated = (res['updated'] as num?)?.toInt() ?? 0;

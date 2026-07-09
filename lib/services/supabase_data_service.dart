@@ -521,7 +521,7 @@ class SupabaseDataService {
       return await supabase
           .from('stockists')
           .select(
-              'name, logo_url, brand_color, tagline, pincode, state, district, city, customers_enabled, surface_mode')
+              'name, logo_url, brand_color, tagline, pincode, state, district, city, customers_enabled, surface_mode, business_type')
           .eq('user_id', uid)
           .maybeSingle();
     } catch (e, st) {
@@ -1781,6 +1781,8 @@ class SupabaseDataService {
     // (single-brand upload).
     bool wipeAllBrands = false,
     List<String>? wipeBrandIds,
+    // M PDF import: build the library (+ images) only, create NO stock rows.
+    bool libraryOnly = false,
   }) async {
     try {
       final res = await supabase.rpc('import_stock_batch', params: {
@@ -1792,6 +1794,7 @@ class SupabaseDataService {
         'p_mode': mode,
         'p_wipe_all_brands': wipeAllBrands,
         'p_wipe_brand_ids': wipeBrandIds,
+        'p_library_only': libraryOnly,
       });
       return res is Map
           ? Map<String, dynamic>.from(res)
