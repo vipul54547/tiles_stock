@@ -73,6 +73,25 @@ class BuyerDna {
     return true;
   }
 
+  /// Value NAMES a design carries for the attribute whose name (lowercased)
+  /// equals [attrLower]. Used to fold the "Surface" DNA attribute (in_name
+  /// mode) into the single buyer Surface filter. (project_per_brand_surface_mode)
+  Set<String> valuesForAttr(String designId, String attrLower) {
+    final vals = _byDesign[designId];
+    if (vals == null || vals.isEmpty) return const {};
+    for (final a in facets) {
+      if ((a['name'] ?? '').toString().toLowerCase() != attrLower) continue;
+      final out = <String>{};
+      for (final v in (a['values'] as List? ?? const [])) {
+        if (vals.contains((v['id'] ?? '').toString())) {
+          out.add((v['name'] ?? '').toString());
+        }
+      }
+      return out;
+    }
+    return const {};
+  }
+
   /// All DNA value names for a design, space-joined — for DNA-aware search.
   String words(String designId) {
     final vals = _byDesign[designId];

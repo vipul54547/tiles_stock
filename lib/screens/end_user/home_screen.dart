@@ -165,7 +165,13 @@ class _HomeScreenState extends State<HomeScreen> {
       result = result.where((d) => _selectedSizes.contains(d.size)).toList();
     }
     if (_selectedSurfaces.isNotEmpty) {
-      result = result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
+      // One Surface filter across both modes: attribute → surfaceType on the
+      // holding; in_name → the print's Surface DNA value.
+      result = result
+          .where((d) =>
+              _selectedSurfaces.contains(d.surfaceType) ||
+              _dna.valuesForAttr(d.id, 'surface').any(_selectedSurfaces.contains))
+          .toList();
     }
     if (_selectedTypes.isNotEmpty) {
       result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
@@ -314,6 +320,9 @@ class _HomeScreenState extends State<HomeScreen> {
           Widget dnaSection() {
             final blocks = <Widget>[];
             for (final a in _dna.facets) {
+              // Surface has its own dedicated filter (folds attribute + in_name);
+              // skip it here so it never renders as a second Surface facet.
+              if ((a['name'] ?? '').toString().toLowerCase() == 'surface') continue;
               final values = ((a['values'] as List?) ?? const [])
                   .where((v) => dnaInUse.contains((v['id'] ?? '').toString()))
                   .toList();
@@ -365,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
               r = r.where((d) => _selectedQualities.contains(d.quality)).toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
-            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
+            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType) || _dna.valuesForAttr(d.id, 'surface').any(localSurfaces.contains)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
