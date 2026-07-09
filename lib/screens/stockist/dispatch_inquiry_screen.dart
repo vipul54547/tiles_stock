@@ -197,7 +197,7 @@ class _State extends State<DispatchInquiryScreen> {
           designId: d.id,
           name: d.name,
           size: d.size,
-          surface: d.surfaceType,
+          surface: d.surfaceCardLabel,
           image: d.faceImageUrls.isNotEmpty ? d.faceImageUrls.first : '',
           ordered: 0,
           dispatchedAlready: 0,

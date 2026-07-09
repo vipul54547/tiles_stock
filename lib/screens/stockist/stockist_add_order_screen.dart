@@ -345,8 +345,8 @@ class _State extends State<StockistAddOrderScreen> {
                   child: Icon(Icons.close, size: 18, color: Colors.grey.shade500),
                 ),
                 const SizedBox(height: 2),
-                if (d.surfaceWord.isNotEmpty)
-                  Text(d.surfaceWord,
+                if (d.hasSurface)
+                  Text(d.surfaceCardLabel,
                       style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
@@ -700,8 +700,8 @@ class DesignPickerState extends State<DesignPicker> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                if (d.surfaceWord.isNotEmpty)
-                  Text(d.surfaceWord,
+                if (d.hasSurface)
+                  Text(d.surfaceCardLabel,
                       style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,

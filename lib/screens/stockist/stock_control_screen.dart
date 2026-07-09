@@ -617,7 +617,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
                       [
                         d.size.replaceAll(' mm', ''),
                         d.quality,
-                        if (d.hasSurface) d.displaySurface,
+                        if (d.hasSurface) d.surfaceCardLabel,
                         if (d.brandName.trim().isNotEmpty) d.brandName,
                       ].join(' · '),
                       maxLines: 1,
