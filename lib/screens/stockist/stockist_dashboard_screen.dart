@@ -7,6 +7,7 @@ import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
+import '../../utils/surface_labels.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../services/cloudinary_service.dart';
@@ -205,6 +206,7 @@ class _State extends State<StockistDashboardScreen> {
   }
 
   Future<void> _load() async {
+    await surfaceLabels.load(); // resolve each surface to the stockist's own word
     final data = await _service.getDesignsByStockist(_myStockistId);
     final inquiries = await _service.getMyDesignInquiries();
     final orders = await _service.getMyInquiries();

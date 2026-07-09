@@ -3,6 +3,7 @@ import '../models/tile_design.dart';
 import '../models/choice_state.dart';
 import '../utils/my_choice.dart';
 import '../utils/quality_merge.dart';
+import '../utils/surface_labels.dart';
 
 /// Scenario-2 buyer merge (step 3). Bottom sheet opened from a merged buyer card:
 /// pick how many boxes of each grade (Premium / Standard) to add to My Choice.
@@ -111,7 +112,8 @@ class _QualityChoiceSheetState extends State<_QualityChoiceSheet> {
             Text(
                 [
                   rep.size.replaceAll(' mm', ''),
-                  if (rep.hasSurface) rep.displaySurface,
+                  if (rep.hasSurface)
+                    surfaceLabels.label(rep.stockistId, rep.surfaceType),
                   if (rep.brandName.isNotEmpty) rep.brandName,
                 ].join(' · '),
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),

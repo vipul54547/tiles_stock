@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../models/tile_design.dart';
 import '../utils/tile_sizes.dart';
+import '../utils/surface_labels.dart';
 import '../services/supabase_auth_service.dart';
 import '../services/cloudinary_service.dart';
 import 'dna_tag_expander.dart';
@@ -172,7 +173,9 @@ class TileCard extends StatelessWidget {
                       ),
                       child: Text(
                         [
-                          if (design.hasSurface) design.displaySurface,
+                          if (design.hasSurface)
+                            surfaceLabels.label(
+                                design.stockistId, design.surfaceType),
                           if (design.finishLabel?.isNotEmpty ?? false)
                             design.finishLabel!,
                         ].join(' · '),
