@@ -168,12 +168,32 @@ class _State extends State<StockistsOverviewScreen> {
   Set<String> get _dnaValuesInUse =>
       _dnaValues.values.expand((s) => s).toSet();
 
-  // DNA attributes that have at least one value present in the pool.
+  // DNA attributes that have at least one value present in the pool. "Surface"
+  // is excluded — it has its own dedicated Finish filter (folds attribute +
+  // in_name), so it must not also render as a second facet.
+  // (project_per_brand_surface_mode)
   List<DnaAttribute> get _dnaFacetAttrs {
     final inUse = _dnaValuesInUse;
     return _dnaAttrs
-        .where((a) => a.values.any((v) => inUse.contains(v.id)))
+        .where((a) =>
+            a.name.toLowerCase() != 'surface' &&
+            a.values.any((v) => inUse.contains(v.id)))
         .toList();
+  }
+
+  // Value names a design carries under the "Surface" DNA attribute (in_name
+  // mode) so the single Finish filter also catches DNA-tagged surfaces.
+  Set<String> _surfaceDnaNames(String designId) {
+    final vals = _dnaValues[designId];
+    if (vals == null || vals.isEmpty) return const {};
+    for (final a in _dnaAttrs) {
+      if (a.name.toLowerCase() != 'surface') continue;
+      return a.values
+          .where((v) => vals.contains(v.id))
+          .map((v) => v.name)
+          .toSet();
+    }
+    return const {};
   }
 
   String _dnaValueName(String valueId) {
@@ -223,7 +243,8 @@ class _State extends State<StockistsOverviewScreen> {
     }
     if (_selectedSizes.isNotEmpty && !_selectedSizes.contains(t.size)) return false;
     if (_selectedSurfaces.isNotEmpty &&
-        !_selectedSurfaces.contains(t.surfaceType)) {
+        !_selectedSurfaces.contains(t.surfaceType) &&
+        !_surfaceDnaNames(t.id).any(_selectedSurfaces.contains)) {
       return false;
     }
     if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(t.tileType)) {
@@ -480,6 +501,22 @@ class _State extends State<StockistsOverviewScreen> {
     final dnaValues = await _service.designsDnaValues(dnaIds);
     if (!mounted) return;
 
+    // Finish options = in-use holding surfaces (attribute mode) ∪ in-use
+    // "Surface" DNA value names (in_name mode), so one Finish filter covers both.
+    final usedDnaIds = dnaValues.values.expand((s) => s).toSet();
+    final surfAttr = dnaAttrs.where((a) => a.name.toLowerCase() == 'surface');
+    final dnaSurfaceNames = surfAttr.isEmpty
+        ? const <String>[]
+        : surfAttr.first.values
+            .where((v) => usedDnaIds.contains(v.id))
+            .map((v) => v.name)
+            .toList();
+    final allSurfaces = <String>{...surfaces, ...dnaSurfaceNames}.toList()
+      ..sort((a, b) {
+        final r = rankIn(finishOrder, a).compareTo(rankIn(finishOrder, b));
+        return r != 0 ? r : a.compareTo(b);
+      });
+
     setState(() {
       _allData = data;
       // Blended catalog ranking (fresh per-session seed) for the All-Design grid.
@@ -489,7 +526,7 @@ class _State extends State<StockistsOverviewScreen> {
       _privateData = privateData;
       _claimedCatalogs = claimedCatalogs;
       _allSizes = sizes;
-      _allSurfaces = surfaces;
+      _allSurfaces = allSurfaces;
       _dnaAttrs =
           dnaAttrs.where((a) => !a.isFreeText || a.showInFacets).toList();
       _dnaValues = dnaValues;
@@ -678,7 +715,11 @@ class _State extends State<StockistsOverviewScreen> {
       result = result.where((d) => _selectedSizes.contains(d.size)).toList();
     }
     if (_selectedSurfaces.isNotEmpty) {
-      result = result.where((d) => _selectedSurfaces.contains(d.surfaceType)).toList();
+      result = result
+          .where((d) =>
+              _selectedSurfaces.contains(d.surfaceType) ||
+              _surfaceDnaNames(d.id).any(_selectedSurfaces.contains))
+          .toList();
     }
     if (_selectedTypes.isNotEmpty) {
       result = result.where((d) => _selectedTypes.contains(d.tileType)).toList();
@@ -836,7 +877,7 @@ class _State extends State<StockistsOverviewScreen> {
               r = r.where((d) => localQualities.contains(d.quality)).toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
-            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
+            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType) || _surfaceDnaNames(d.id).any(localSurfaces.contains)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
