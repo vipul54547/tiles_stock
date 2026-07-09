@@ -148,17 +148,37 @@ class _State extends State<AddStockBatchScreen> {
     return _brandById(id)?.usesSurface ?? false;
   }
 
-  /// Whether the CURRENT selection needs a glaze picked.
+  /// Whether the CURRENT selection REQUIRES a surface (attribute mode only).
   bool get _selNeedsSurface =>
       _selMaster != null && _usesSurface(_selMaster!, _isM ? _selBrandId : null);
 
-  /// What goes on the holding. Attribute → the stockist's pick. In-name → the
-  /// glaze is inside the design name, so fall back to whatever the importer put
-  /// on the print (unchanged behaviour; 'None' when it never had one).
+  /// Whether to SHOW the surface picker at all. Attribute → required. in_name →
+  /// optional (with a 'None' choice): the stockist may tag a surface, which the
+  /// server stores as the print's Surface DNA value so buyers can still filter
+  /// it — the verbatim name is never touched.
+  /// (project_per_brand_surface_mode / project_design_name_is_verbatim_truth)
+  bool get _selShowSurface => _selMaster != null;
+
+  /// The surface the stockist picked (or 'None'). For attribute it lands on the
+  /// holding; for in_name the server routes it to the print's Surface DNA.
   String get _surfaceForEntry {
-    if (_selNeedsSurface) return _selSurface.trim();
-    final legacy = _selMaster?.surfaceType.trim() ?? '';
-    return legacy.isEmpty ? 'None' : legacy;
+    final s = _selSurface.trim();
+    return s.isEmpty ? 'None' : s;
+  }
+
+  /// Best surface word found inside a design name (longest match wins), or ''
+  /// when none — pre-fills the optional in_name picker on the rare name that
+  /// carries a surface word. Never alters the name itself.
+  String _surfaceInName(String name) {
+    final n = name.toLowerCase();
+    var best = '';
+    for (final s in _surfaces) {
+      final t = s.toLowerCase();
+      if (t.isEmpty) continue;
+      final re = RegExp('(^|[^a-z])${RegExp.escape(t)}([^a-z]|\$)');
+      if (re.hasMatch(n) && s.length > best.length) best = s;
+    }
+    return best;
   }
 
   static String _shown(String s) {
@@ -287,6 +307,13 @@ class _State extends State<AddStockBatchScreen> {
         // For M, default the brand to the master's own brand if none picked.
         if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
           _selBrandId = chosen.brandId;
+        }
+        // in_name: pre-fill the OPTIONAL surface if the verbatim name carries a
+        // surface word; else default to 'None'. Attribute keeps the last pick.
+        if (!_usesSurface(chosen, _isM ? _selBrandId : null)) {
+          final parsed =
+              _surfaceInName(_displayName(chosen, _isM ? _selBrandId : null));
+          _selSurface = parsed.isEmpty ? 'None' : parsed;
         }
       });
     }
@@ -700,8 +727,10 @@ class _State extends State<AddStockBatchScreen> {
             const SizedBox(width: 12),
             _hField('Size (auto)', _hReadonly(sizeText), width: 110),
             const SizedBox(width: 12),
-            if (_selNeedsSurface) ...[
-              _hField('Surface *', _surfaceDropdown(), width: 150),
+            if (_selShowSurface) ...[
+              _hField(_selNeedsSurface ? 'Surface *' : 'Surface',
+                  _surfaceDropdown(),
+                  width: 150),
               const SizedBox(width: 12),
             ],
             _hField('Quality', _qualityDropdown(), width: 140),
@@ -794,31 +823,37 @@ class _State extends State<AddStockBatchScreen> {
                 color: Colors.grey.shade700)),
       );
 
-  // Required, never auto-filled — the glaze is a fact about the production run.
-  Widget _surfaceDropdown() => Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-            border: Border.all(
-                color: _selSurface.isEmpty
-                    ? Colors.red.shade300
-                    : Colors.grey.shade400),
-            borderRadius: BorderRadius.circular(8)),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            value: _surfaces.contains(_selSurface) ? _selSurface : null,
-            hint: Text('Select',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-            isExpanded: true,
-            isDense: true,
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
-            items: _surfaces
-                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                .toList(),
-            onChanged: (v) => setState(() => _selSurface = v ?? _selSurface),
-          ),
+  // Attribute → required (must pick, no 'None'). in_name → optional ('None'
+  // first, default). The picked value the server routes to holding vs DNA.
+  Widget _surfaceDropdown() {
+    final opts = _selNeedsSurface ? _surfaces : <String>['None', ..._surfaces];
+    final missing = _selNeedsSurface && _selSurface.trim().isEmpty;
+    final current = opts.contains(_selSurface)
+        ? _selSurface
+        : (_selNeedsSurface ? null : 'None');
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+          border: Border.all(
+              color: missing ? Colors.red.shade300 : Colors.grey.shade400),
+          borderRadius: BorderRadius.circular(8)),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: current,
+          hint: Text('Select',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+          isExpanded: true,
+          isDense: true,
+          style: const TextStyle(fontSize: 13, color: Colors.black87),
+          items: opts
+              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+              .toList(),
+          onChanged: (v) => setState(() => _selSurface = v ?? _selSurface),
         ),
-      );
+      ),
+    );
+  }
 
   Widget _qualityDropdown() => Container(
         height: 44,
@@ -1052,15 +1087,15 @@ class _State extends State<AddStockBatchScreen> {
                     Icons.straighten, _selMaster!.size.replaceAll(' mm', '')),
               ]),
             ],
-            // The glaze is chosen here, when the tile is made.
-            if (_selNeedsSurface) ...[
+            // Attribute → required pick; in_name → optional (may tag a surface).
+            if (_selShowSurface) ...[
               const SizedBox(height: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Surface *',
-                      style:
-                          TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(_selNeedsSurface ? 'Surface *' : 'Surface',
+                      style: const TextStyle(
+                          fontSize: 12, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
                   _surfaceDropdown(),
                 ],
