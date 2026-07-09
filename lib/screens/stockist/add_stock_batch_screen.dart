@@ -308,12 +308,18 @@ class _State extends State<AddStockBatchScreen> {
         if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
           _selBrandId = chosen.brandId;
         }
-        // in_name: pre-fill the OPTIONAL surface if the verbatim name carries a
-        // surface word; else default to 'None'. Attribute keeps the last pick.
+        // in_name: auto-fill the OPTIONAL surface from the design's SAVED map
+        // (set the first time stock was added → remembered on the print), else
+        // try the verbatim name, else 'None'. Attribute keeps the last pick.
         if (!_usesSurface(chosen, _isM ? _selBrandId : null)) {
-          final parsed =
-              _surfaceInName(_displayName(chosen, _isM ? _selBrandId : null));
-          _selSurface = parsed.isEmpty ? 'None' : parsed;
+          final mapped = chosen.surfaceType.trim();
+          if (mapped.isNotEmpty && mapped.toLowerCase() != 'none') {
+            _selSurface = mapped;
+          } else {
+            final parsed =
+                _surfaceInName(_displayName(chosen, _isM ? _selBrandId : null));
+            _selSurface = parsed.isEmpty ? 'None' : parsed;
+          }
         }
       });
     }

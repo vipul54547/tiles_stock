@@ -101,9 +101,9 @@ class _State extends State<ManualDispatchScreen> {
   }
 
   /// The glaze this holding was made on, or '' when it has none. No brand-mode
-  /// lookup needed: a holding stores the surface it was actually stocked with,
-  /// and in-name brands store 'None' (the glaze is inside the design name).
-  /// (project_per_brand_surface_mode)
+  /// lookup needed: every holding stores the surface it was stocked with —
+  /// attribute picks it per run; in_name inherits the design's saved surface
+  /// (the map-once value). 'None' shows nothing. (project_per_brand_surface_mode)
   String _surfaceOf(TileDesign d) => d.displaySurface;
 
   String _holdingLabel(TileDesign d) {
