@@ -2200,6 +2200,8 @@ class SupabaseDataService {
         brandColor: s['brand_color'] ?? '',
         mapUrl:     s['map_url'] ?? '',
         tdShow:     s['td_show'] ?? false,
+        customersEnabled: s['customers_enabled'] ?? false,
+        surfaceMode: (s['surface_mode'] ?? 'in_name').toString(),
         createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
             DateTime.now(),
       );
