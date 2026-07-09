@@ -3384,15 +3384,29 @@ class SupabaseDataService {
   /// where each admin finish shows the stockist's own words mapped to it.
   Future<Map<String, List<String>>> getSurfaceWordsByFinish(
       String stockistUUID) async {
-    final flat = await getSurfaceAliases(stockistUUID); // {raw : finish}
-    final out = <String, List<String>>{};
-    flat.forEach((raw, finish) {
-      (out[finish] ??= <String>[]).add(raw);
-    });
-    for (final list in out.values) {
-      list.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    try {
+      final data = await supabase
+          .from('surface_aliases')
+          .select('raw_text, display_text, surface_types(name)')
+          .eq('stockist_id', stockistUUID);
+      final out = <String, List<String>>{};
+      for (final row in data) {
+        final st = row['surface_types'];
+        if (st == null || st['name'] == null) continue;
+        final disp = (row['display_text'] as String?)?.trim();
+        final word = (disp != null && disp.isNotEmpty)
+            ? disp
+            : (row['raw_text'] as String);
+        (out[st['name'] as String] ??= <String>[]).add(word);
+      }
+      for (final list in out.values) {
+        list.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      }
+      return out;
+    } catch (e, st) {
+      debugPrint('getSurfaceWordsByFinish failed ($stockistUUID): $e\n$st');
+      return {};
     }
-    return out;
   }
 
   /// Replace this stockist's surface words for one admin finish [surfaceName]:
@@ -3409,10 +3423,11 @@ class SupabaseDataService {
           .maybeSingle();
       if (st == null) return;
       final stId = st['id'];
-      final keys = <String>{};
+      // raw_text (normalised, for import matching) → original word (for display).
+      final byKey = <String, String>{};
       for (final w in words) {
         final k = normalizeSurfaceRaw(w);
-        if (k.isNotEmpty) keys.add(k);
+        if (k.isNotEmpty) byKey.putIfAbsent(k, () => w.trim());
       }
       // Drop this stockist's existing words for this finish that are gone now.
       final existing = await supabase
@@ -3421,16 +3436,18 @@ class SupabaseDataService {
           .eq('stockist_id', stockistUUID)
           .eq('surface_type_id', stId);
       for (final row in existing) {
-        if (!keys.contains(row['raw_text'] as String)) {
+        if (!byKey.containsKey(row['raw_text'] as String)) {
           await supabase.from('surface_aliases').delete().eq('id', row['id']);
         }
       }
       // Upsert each remaining word → this finish (repoints if it sat elsewhere).
-      for (final k in keys) {
+      // display_text keeps the original casing/spacing buyers + the picker show.
+      for (final entry in byKey.entries) {
         await supabase.from('surface_aliases').upsert({
           'stockist_id': stockistUUID,
-          'raw_text': k,
+          'raw_text': entry.key,
           'surface_type_id': stId,
+          'display_text': entry.value,
         }, onConflict: 'stockist_id,raw_text');
       }
     } catch (e, stk) {
@@ -3479,6 +3496,7 @@ class SupabaseDataService {
       await supabase.from('surface_aliases').upsert({
         'stockist_id':     stockistUUID,
         'raw_text':        key,
+        'display_text':    rawText.trim(),
         'surface_type_id': st['id'],
       }, onConflict: 'stockist_id,raw_text');
     } catch (e, stk) {

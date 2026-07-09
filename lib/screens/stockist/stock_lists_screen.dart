@@ -1319,8 +1319,8 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
       if (d.libraryId.isEmpty) continue;
       fSum[d.libraryId] = (fSum[d.libraryId] ?? 0) + d.fStock;
       (quals[d.libraryId] ??= <String>{}).add(d.quality);
-      if (d.surfaceType.trim().isNotEmpty && d.surfaceType != 'None') {
-        (surfs[d.libraryId] ??= <String>{}).add(d.surfaceType);
+      if (d.surfaceWord.trim().isNotEmpty && d.surfaceWord != 'None') {
+        (surfs[d.libraryId] ??= <String>{}).add(d.surfaceWord);
       }
       byLib.putIfAbsent(
           d.libraryId,
@@ -1867,7 +1867,10 @@ class _PermanentListEditorScreenState
   bool _saving = false;
 
   static const _qualities = ['Standard', 'Premium'];
-  static const _surfaces = ['Glossy', 'Matt', 'Rustic', 'P.Glossy', 'Sugar', 'Carving'];
+  // Canonical finishes (the value stored in filter_surfaces); chips are LABELLED
+  // with the stockist's own word via _mySurfLabels. (project_per_brand_surface_mode)
+  List<String> _surfaces = const ['Glossy', 'Matt', 'Rustic', 'P.Glossy', 'Sugar', 'Carving'];
+  Map<String, String> _mySurfLabels = const {}; // canonical → stockist's word
   static const _tileTypes = ['Ceramic', 'PGVT & GVT', 'Porcelain'];
   static const _stockTypeOptions = ['Uncertain', 'One Time'];
 
@@ -1893,9 +1896,16 @@ class _PermanentListEditorScreenState
   Future<void> _loadSizes() async {
     final designs = await _data.getDesignsByStockist(currentStockistUUID);
     final sizes = designs.map((d) => d.size).toSet().toList()..sort();
+    final finishes = await _data.getActiveFinishNames();
+    final labels = await _data.getMySurfaceLabels();
     if (!mounted) return;
     setState(() {
       _sizes = sizes;
+      if (finishes.isNotEmpty) {
+        _surfaces =
+            finishes.where((f) => f.toLowerCase() != 'none').toList();
+      }
+      _mySurfLabels = labels;
       _loadingSizes = false;
     });
   }
@@ -2109,7 +2119,7 @@ class _PermanentListEditorScreenState
                       (q) => q),
                   const Divider(height: 22),
                   _multiChipGroup('Surface', _surfaces, _filterSurfaces,
-                      (s) => s),
+                      (s) => _mySurfLabels[s] ?? s),
                   const Divider(height: 22),
                   _multiChipGroup('Tile type', _tileTypes, _filterTileTypes,
                       (t) => t),
