@@ -485,7 +485,7 @@ class _State extends State<StockistDashboardScreen> {
     final img = first.faceImageUrls.isNotEmpty ? first.faceImageUrls.first : '';
     // Total boxes across all this master's brands + qualities (full P_Stock).
     final totalP = group.fold<int>(0, (s, d) => s + d.boxQuantity);
-    final surface = first.surfaceType;
+    final surface = surfaceLabels.label(first.stockistId, first.surfaceType);
     final showSurface = surface.isNotEmpty && surface.toLowerCase() != 'none';
 
     // Sub-group the holdings by brand (keeping first-seen order); within a brand
@@ -1720,7 +1720,7 @@ class _State extends State<StockistDashboardScreen> {
     final first = group.first;
     final ratio = aspectRatioFromSize(first.size);
     final img = first.faceImageUrls.isNotEmpty ? first.faceImageUrls.first : '';
-    final surface = first.surfaceType;
+    final surface = surfaceLabels.label(first.stockistId, first.surfaceType);
     final showSurface = surface.isNotEmpty && surface.toLowerCase() != 'none';
 
     TileDesign? prem, std;
