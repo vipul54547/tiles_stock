@@ -70,6 +70,22 @@ class _State extends State<AddStockBatchScreen> {
   /// Admin's live finish list, 'None' excluded — a tile always has a glaze.
   List<String> _surfaces = const [];
 
+  /// The stockist's OWN word per canonical finish ({canonical: word}). The
+  /// picker SHOWS these words but STORES the canonical, so filter/dispatch/buyer
+  /// resolution stay on the admin canonical. (project_per_brand_surface_mode)
+  Map<String, String> _myLabels = const {};
+  String _surfDisplay(String canonical) {
+    final w = _myLabels[canonical]?.trim() ?? '';
+    return w.isEmpty ? canonical : w;
+  }
+
+  /// The stockist's word for an entry's surface, or '' when None — for the
+  /// running list and confirm sheet.
+  String _surfShown(String s) {
+    final t = s.trim();
+    return t.isEmpty || t.toLowerCase() == 'none' ? '' : _surfDisplay(t);
+  }
+
   /// M only: the factory's own convention (its brands share it).
   bool _stockistUsesSurface = false;
 
@@ -100,6 +116,7 @@ class _State extends State<AddStockBatchScreen> {
     final brands = await _svc.getMyBrands();
     final profile = await _svc.getMyProfile();
     final surfaces = await _loadSurfaceNames();
+    final myLabels = await _svc.getMySurfaceLabels();
     if (!mounted) return;
     setState(() {
       _masters = masters;
@@ -107,6 +124,7 @@ class _State extends State<AddStockBatchScreen> {
       _stockistUsesSurface =
           (profile?['surface_mode'] ?? 'in_name').toString() == 'attribute';
       _surfaces = surfaces;
+      _myLabels = myLabels;
       _loading = false;
     });
   }
@@ -435,7 +453,7 @@ class _State extends State<AddStockBatchScreen> {
     final existing = _entries[existingIdx];
     final label =
         '${_displayName(existing.master, existing.brandId)} · '
-        '${_shown(existing.surface).isNotEmpty ? '${_shown(existing.surface)} · ' : ''}'
+        '${_surfShown(existing.surface).isNotEmpty ? '${_surfShown(existing.surface)} · ' : ''}'
         '${existing.brandName?.isNotEmpty == true ? '${existing.brandName} · ' : ''}'
         '${existing.quality}';
     final choice = await showDialog<String>(
@@ -577,7 +595,7 @@ class _State extends State<AddStockBatchScreen> {
                               Expanded(
                                 child: Text(
                                   '${_displayName(e.master, e.brandId)}'
-                                  '${_shown(e.surface).isNotEmpty ? ' · ${_shown(e.surface)}' : ''}'
+                                  '${_surfShown(e.surface).isNotEmpty ? ' · ${_surfShown(e.surface)}' : ''}'
                                   '${e.brandName?.isNotEmpty == true ? ' · ${e.brandName}' : ''}'
                                   ' · ${e.quality}',
                                   maxLines: 1,
@@ -830,7 +848,8 @@ class _State extends State<AddStockBatchScreen> {
       );
 
   // Attribute → required (must pick, no 'None'). in_name → optional ('None'
-  // first, default). The picked value the server routes to holding vs DNA.
+  // first, default). Options are SHOWN as the stockist's own word but the VALUE
+  // stored stays the admin canonical (_surfDisplay maps canonical → word).
   Widget _surfaceDropdown() {
     final opts = _selNeedsSurface ? _surfaces : <String>['None', ..._surfaces];
     final missing = _selNeedsSurface && _selSurface.trim().isEmpty;
@@ -853,7 +872,9 @@ class _State extends State<AddStockBatchScreen> {
           isDense: true,
           style: const TextStyle(fontSize: 13, color: Colors.black87),
           items: opts
-              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+              .map((s) => DropdownMenuItem(
+                  value: s,
+                  child: Text(s.toLowerCase() == 'none' ? 'None' : _surfDisplay(s))))
               .toList(),
           onChanged: (v) => setState(() => _selSurface = v ?? _selSurface),
         ),
@@ -944,7 +965,7 @@ class _State extends State<AddStockBatchScreen> {
         design: _displayName(e.master, e.brandId),
         brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
         size: e.master.size.replaceAll(' mm', ''),
-        surface: _shown(e.surface).isEmpty ? '—' : _shown(e.surface),
+        surface: _surfShown(e.surface).isEmpty ? '—' : _surfShown(e.surface),
         quality: e.quality,
         qty: '${e.qty}',
         onQty: () => _editQty(e),
@@ -1288,7 +1309,7 @@ class _State extends State<AddStockBatchScreen> {
                   Text(
                     [
                       e.master.size.replaceAll(' mm', ''),
-                      if (_shown(e.surface).isNotEmpty) _shown(e.surface),
+                      if (_surfShown(e.surface).isNotEmpty) _surfShown(e.surface),
                       if (e.brandName?.isNotEmpty == true) e.brandName!,
                       e.quality,
                     ].join(' · '),
