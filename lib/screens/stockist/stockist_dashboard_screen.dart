@@ -130,21 +130,6 @@ class _State extends State<StockistDashboardScreen> {
         .toList();
   }
 
-  // Value names a design carries under the "Surface" DNA attribute (in_name),
-  // so the single surface filter also catches DNA-tagged surfaces.
-  Set<String> _surfaceDnaNames(String designId) {
-    final vals = _dnaValues[designId];
-    if (vals == null || vals.isEmpty) return const {};
-    for (final a in _dnaAttrs) {
-      if (a.name.toLowerCase() != 'surface') continue;
-      return a.values
-          .where((v) => vals.contains(v.id))
-          .map((v) => v.name)
-          .toSet();
-    }
-    return const {};
-  }
-
   // Faceted DNA match: within an attribute picks are OR'd, across attributes
   // AND'd. Empty selection matches everything. (mirrors the market overview)
   bool _matchesDna(TileDesign d, Set<String> selected) {
@@ -826,11 +811,9 @@ class _State extends State<StockistDashboardScreen> {
       result = result.where((d) => _selectedSizes.contains(d.size)).toList();
     }
     if (_selectedSurfaces.isNotEmpty) {
-      result = result
-          .where((d) =>
-              _selectedSurfaces.contains(d.surfaceType) ||
-              _surfaceDnaNames(d.id).any(_selectedSurfaces.contains))
-          .toList();
+      // Stockist side: filter by THEIR OWN word (surface_label), not admin.
+      result =
+          result.where((d) => _selectedSurfaces.contains(d.surfaceWord)).toList();
     }
     if (_selectedColours.isNotEmpty) {
       result = result.where((d) => _selectedColours.contains(d.colour)).toList();
@@ -2228,10 +2211,11 @@ class _State extends State<StockistDashboardScreen> {
     FocusManager.instance.primaryFocus?.unfocus();
     final inStock = _inStockDesigns;
     final sizes    = inStock.map((d) => d.size).toSet().toList()..sort();
-    // Surface chips = holding surfaces (attribute) ∪ Surface DNA names (in_name).
+    // Surface chips = the stockist's OWN words present in stock (surface_label).
     final surfaces = <String>{
-      ...inStock.map((d) => d.surfaceType),
-      for (final d in inStock) ..._surfaceDnaNames(d.id),
+      for (final d in inStock)
+        if (d.surfaceWord.isNotEmpty && d.surfaceWord.toLowerCase() != 'none')
+          d.surfaceWord,
     }.toList()
       ..sort();
     final colours  = inStock
@@ -2325,7 +2309,7 @@ class _State extends State<StockistDashboardScreen> {
                   .toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
-            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType) || _surfaceDnaNames(d.id).any(localSurfaces.contains)).toList();
+            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceWord)).toList();
             if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
             if (localThickness.isNotEmpty) {

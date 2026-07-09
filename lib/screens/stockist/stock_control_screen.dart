@@ -124,7 +124,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
       if (_brandFilter != 'all' && d.brandId != _brandFilter) return false;
       if (_sizes.isNotEmpty && !_sizes.contains(d.size)) return false;
       if (_qualities.isNotEmpty && !_qualities.contains(d.quality)) return false;
-      if (_surfaces.isNotEmpty && !_surfaces.contains(d.surfaceType)) return false;
+      if (_surfaces.isNotEmpty && !_surfaces.contains(d.surfaceWord)) return false;
       if (_colours.isNotEmpty && !_colours.contains(d.colour)) return false;
       if (_types.isNotEmpty && !_types.contains(d.tileType)) return false;
       final f = _fOf(d); // range filters on F_Stock (what dealers see)
@@ -353,7 +353,7 @@ class _StockControlScreenState extends State<StockControlScreen> {
     final sizes = _designs.map((d) => d.size).toSet().toList()..sort();
     final surfaces = _designs
         .where((d) => d.hasSurface)
-        .map((d) => d.displaySurface)
+        .map((d) => d.surfaceWord) // the stockist's own word
         .toSet()
         .toList()
       ..sort();

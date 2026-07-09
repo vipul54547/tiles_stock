@@ -345,8 +345,8 @@ class _State extends State<StockistAddOrderScreen> {
                   child: Icon(Icons.close, size: 18, color: Colors.grey.shade500),
                 ),
                 const SizedBox(height: 2),
-                if (d.surfaceType.isNotEmpty)
-                  Text(d.surfaceType,
+                if (d.surfaceWord.isNotEmpty)
+                  Text(d.surfaceWord,
                       style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
@@ -445,7 +445,7 @@ class DesignPickerState extends State<DesignPicker> {
     bool pass(TileDesign d) =>
         (_fSize.isEmpty || _fSize.contains(d.size)) &&
         (_fQual.isEmpty || _fQual.contains(d.quality)) &&
-        (_fSurf.isEmpty || _fSurf.contains(d.surfaceType)) &&
+        (_fSurf.isEmpty || _fSurf.contains(d.surfaceWord)) &&
         (_fBrand.isEmpty || _fBrand.contains(_brandOf(d)));
     final ql = _q.toLowerCase();
     // Chosen designs are always kept (even if they don't match search) so a
@@ -539,7 +539,7 @@ class DesignPickerState extends State<DesignPicker> {
                   section('Size', _distinct((d) => d.size), _fSize,
                       label: (s) => s.replaceAll(' mm', '')),
                   section('Quality', _distinct((d) => d.quality), _fQual),
-                  section('Surface', _distinct((d) => d.surfaceType), _fSurf),
+                  section('Surface', _distinct((d) => d.surfaceWord), _fSurf),
                   section('Brand', _distinct(_brandOf), _fBrand),
                   const SizedBox(height: 14),
                   SizedBox(
@@ -700,8 +700,8 @@ class DesignPickerState extends State<DesignPicker> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                if (d.surfaceType.isNotEmpty)
-                  Text(d.surfaceType,
+                if (d.surfaceWord.isNotEmpty)
+                  Text(d.surfaceWord,
                       style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
