@@ -71,6 +71,8 @@ class SupabaseDataService {
         boxQuantity:  d['box_quantity'] ?? 0,
         surfaceType:  (lib?['surface_type'] ?? d['surface_type'] ?? 'None')
             .toString(),
+        surfaceLabel: (d['surface_label'] ?? lib?['surface_label'] ?? '')
+            .toString(),
         finishLabel:  lib?['finish_label'] ?? d['finish_label'],
         piecesPerBox: (lib?['pieces_per_box'] ?? d['pieces_per_box'] ?? 0)
             as int,
@@ -197,6 +199,7 @@ class SupabaseDataService {
       heldQuantity: (d['held_quantity'] as num?)?.toInt() ?? 0,
       fStock:       (d['f_stock'] as num?)?.toInt(),
       surfaceType:  (d['surface_type'] ?? 'None').toString(),
+      surfaceLabel: (d['surface_label'] ?? '').toString(),
       finishLabel:  d['finish_label'] as String?,
       piecesPerBox: (d['pieces_per_box'] ?? 0) as int,
       boxWeightKg:  ((d['box_weight_kg'] ?? 0) as num).toDouble(),
@@ -1632,6 +1635,28 @@ class SupabaseDataService {
           .toList();
     } catch (e) {
       debugPrint('publicDnaCatalog failed: $e');
+      return [];
+    }
+  }
+
+  /// The logged-in stockist's pickable surface options for the Add Stock picker:
+  /// each alias word with its admin canonical, plus admin finishes they have no
+  /// word for. The picker shows the word, stores word + canonical. (surface_label)
+  Future<List<({String label, String canonical})>> getMySurfaceOptions() async {
+    try {
+      final res = await supabase.rpc('my_surface_options');
+      return ((res as List?) ?? const [])
+          .map((e) {
+            final m = Map<String, dynamic>.from(e as Map);
+            return (
+              label: (m['label'] ?? '').toString(),
+              canonical: (m['canonical'] ?? '').toString(),
+            );
+          })
+          .where((o) => o.label.isNotEmpty && o.canonical.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('getMySurfaceOptions failed: $e');
       return [];
     }
   }

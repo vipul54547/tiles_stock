@@ -18,7 +18,6 @@ import '../models/choice_state.dart';
 import '../widgets/smart_search_toggle.dart';
 import '../utils/design_ranking.dart';
 import '../utils/my_choice.dart';
-import '../utils/surface_labels.dart';
 import '../utils/tile_types.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/learning_video_strip.dart';
@@ -500,7 +499,6 @@ class _State extends State<StockistsOverviewScreen> {
       ...privateDesigns.map((d) => d.id),
     }.toList();
     final dnaValues = await _service.designsDnaValues(dnaIds);
-    await surfaceLabels.load(); // stockists' own surface words (once)
     if (!mounted) return;
 
     // Finish options = in-use holding surfaces (attribute mode) ∪ in-use
@@ -1319,9 +1317,7 @@ class _State extends State<StockistsOverviewScreen> {
                             runSpacing: 6,
                             children: [
                               _infoChip(d.size.replaceAll(' mm', '')),
-                              if (d.hasSurface)
-                                _infoChip(surfaceLabels.label(
-                                    d.stockistId, d.surfaceType)),
+                              if (d.hasSurface) _infoChip(d.surfaceCardLabel),
                               _infoChip(d.quality),
                               if (d.finishLabel != null &&
                                   d.finishLabel!.trim().isNotEmpty &&

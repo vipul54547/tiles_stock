@@ -8,7 +8,6 @@ import '../config/app_config.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../services/supabase_data_service.dart';
 import '../utils/responsive.dart';
-import '../utils/surface_labels.dart';
 import '../services/cloudinary_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
@@ -94,7 +93,6 @@ class _State extends State<PublicCatalogScreen> {
       _svc.getPublicCatalog(widget.token),
       _svc.getPublicVideos(widget.token),
     ]);
-    await surfaceLabels.load(); // stockist's own surface words
     final data = results[0] as Map<String, dynamic>?;
     final videos = results[1] as List<Map<String, dynamic>>;
     if (!mounted) return;
@@ -191,6 +189,16 @@ class _State extends State<PublicCatalogScreen> {
       used.addAll(_dnaOf(d));
     }
     return used;
+  }
+
+  // The card surface label: "Word (Canonical)" from the payload, or just the
+  // canonical when the stockist's word equals it / is unset. (surface_label)
+  String _surfaceCard(Map<String, dynamic> d) {
+    final c = (d['surface'] ?? '').toString().trim();
+    if (c.isEmpty || c.toLowerCase() == 'none') return '';
+    final w = (d['surface_label'] ?? '').toString().trim();
+    if (w.isEmpty || w.toLowerCase() == c.toLowerCase()) return c;
+    return '$w ($c)';
   }
 
   // Value names a design carries under the "Surface" DNA attribute (in_name
@@ -695,8 +703,7 @@ class _State extends State<PublicCatalogScreen> {
     final sqft = sqftPerBox(size, pieces);
     final band = _bandOf(d);
     // The stockist's own word for the surface, e.g. "Raindrops (Sugar)".
-    final surface = surfaceLabels.label(
-        (_stockist['id'] ?? '').toString(), (d['surface'] ?? '').toString());
+    final surface = _surfaceCard(d);
     final finish = (d['finish'] ?? '').toString();
     final finishText = finish.isNotEmpty ? '$surface · $finish' : surface;
     final images = (d['images'] as List?) ?? const [];

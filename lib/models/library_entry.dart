@@ -23,6 +23,8 @@ class LibraryEntry {
   // ── Identity attributes (describe the DESIGN; set once, here in the Library).
   // The stock row (designs) carries only quality + quantity. (identity split)
   final String surfaceType;
+  /// in_name: the design's remembered surface word (auto-fills Add Stock).
+  final String surfaceLabel;
   /// Base restocking nature {Continuous, One Time, Uncertain}. The effective
   /// value shown to buyers is clamped by the stock listing's quality.
   final String stockType;
@@ -42,6 +44,7 @@ class LibraryEntry {
     this.brandName = '',
     this.aliases = const {},
     this.surfaceType = 'None',
+    this.surfaceLabel = '',
     this.stockType = 'Uncertain',
     this.tileType = '',
     this.piecesPerBox = 0,
@@ -73,6 +76,7 @@ class LibraryEntry {
       brandName: (j['brand_name'] ?? '').toString(),
       aliases: aliases,
       surfaceType: (j['surface_type'] ?? 'None').toString(),
+      surfaceLabel: (j['surface_label'] ?? '').toString(),
       stockType: (j['stock_type'] ?? 'Uncertain').toString(),
       tileType: (j['tile_type'] ?? '').toString(),
       piecesPerBox: (j['pieces_per_box'] as num?)?.toInt() ?? 0,

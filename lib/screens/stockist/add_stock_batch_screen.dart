@@ -5,7 +5,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/library_entry.dart';
 import '../../models/brand.dart';
 import '../../models/choice_state.dart';
-import '../../utils/finishes.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/save_bar.dart';
@@ -32,10 +31,12 @@ class _Entry {
   final String? brandName;
   final String quality;
 
-  /// The GLAZE this run was printed on. Chosen here, not read off the design:
-  /// the library holds the print ("Satva White"), the factory runs it on Matt or
-  /// Glossy or Carving. (project_per_brand_surface_mode)
+  /// The admin canonical surface stored on the holding (for filter/dispatch).
   final String surface;
+
+  /// The stockist's OWN word they picked for it (shown; stored as surface_label).
+  /// (project_per_brand_surface_mode)
+  final String surfaceLabel;
   int qty;
   _Entry({
     required this.master,
@@ -43,12 +44,13 @@ class _Entry {
     required this.brandName,
     required this.quality,
     required this.surface,
+    this.surfaceLabel = '',
     required this.qty,
   });
 
-  /// Same design + brand + quality + SURFACE = the same holding. Must match
-  /// stock_add_holding's lookup, or two glazes of one print merge into one row.
-  String get key => '${master.id}|${brandId ?? ''}|$quality|$surface';
+  /// Same design + brand + quality + SURFACE + WORD = the same holding. Includes
+  /// the word so two aliases of one finish stay separate rows.
+  String get key => '${master.id}|${brandId ?? ''}|$quality|$surface|$surfaceLabel';
 }
 
 class _State extends State<AddStockBatchScreen> {
@@ -64,26 +66,40 @@ class _State extends State<AddStockBatchScreen> {
   LibraryEntry? _selMaster;
   String? _selBrandId;
   String _selQuality = 'Premium';
-  String _selSurface = '';
+  /// The stockist's picked WORD (their alias) — the dropdown value. Stored as
+  /// surface_label; its admin canonical (via _canonicalOf) is stored as
+  /// surface_type. (project_per_brand_surface_mode)
+  String _selSurfaceLabel = '';
   final _qtyCtrl = TextEditingController();
 
-  /// Admin's live finish list, 'None' excluded — a tile always has a glaze.
-  List<String> _surfaces = const [];
+  /// The stockist's pickable surface options: each alias word with its admin
+  /// finish, plus admin finishes they have no word for yet.
+  List<({String label, String canonical})> _surfOptions = const [];
 
-  /// The stockist's OWN word per canonical finish ({canonical: word}). The
-  /// picker SHOWS these words but STORES the canonical, so filter/dispatch/buyer
-  /// resolution stay on the admin canonical. (project_per_brand_surface_mode)
-  Map<String, String> _myLabels = const {};
-  String _surfDisplay(String canonical) {
-    final w = _myLabels[canonical]?.trim() ?? '';
-    return w.isEmpty ? canonical : w;
+  /// Distinct labels for the dropdown (first wins on a repeat).
+  List<String> get _surfLabels {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final o in _surfOptions) {
+      if (seen.add(o.label)) out.add(o.label);
+    }
+    return out;
   }
 
-  /// The stockist's word for an entry's surface, or '' when None — for the
-  /// running list and confirm sheet.
-  String _surfShown(String s) {
-    final t = s.trim();
-    return t.isEmpty || t.toLowerCase() == 'none' ? '' : _surfDisplay(t);
+  /// The admin canonical for a picked word ('None' when None/empty).
+  String _canonicalOf(String label) {
+    final l = label.trim();
+    if (l.isEmpty || l.toLowerCase() == 'none') return 'None';
+    for (final o in _surfOptions) {
+      if (o.label == l) return o.canonical;
+    }
+    return l;
+  }
+
+  /// The word to show for an entry, '' when None.
+  String _surfShown(String label) {
+    final t = label.trim();
+    return t.isEmpty || t.toLowerCase() == 'none' ? '' : t;
   }
 
   /// M only: the factory's own convention (its brands share it).
@@ -115,30 +131,16 @@ class _State extends State<AddStockBatchScreen> {
     final masters = await _svc.getMyLibrary();
     final brands = await _svc.getMyBrands();
     final profile = await _svc.getMyProfile();
-    final surfaces = await _loadSurfaceNames();
-    final myLabels = await _svc.getMySurfaceLabels();
+    final options = await _svc.getMySurfaceOptions();
     if (!mounted) return;
     setState(() {
       _masters = masters;
       _brands = brands;
       _stockistUsesSurface =
           (profile?['surface_mode'] ?? 'in_name').toString() == 'attribute';
-      _surfaces = surfaces;
-      _myLabels = myLabels;
+      _surfOptions = options;
       _loading = false;
     });
-  }
-
-  Future<List<String>> _loadSurfaceNames() async {
-    try {
-      final types = await _svc.getSurfaceTypes(activeOnly: true);
-      return types
-          .map((t) => t.name)
-          .where((n) => n.trim().isNotEmpty && n.toLowerCase() != 'none')
-          .toList();
-    } catch (_) {
-      return kFinishes.where((f) => f.toLowerCase() != 'none').toList();
-    }
   }
 
   String _brandNameOf(String? id) {
@@ -177,35 +179,18 @@ class _State extends State<AddStockBatchScreen> {
   /// (project_per_brand_surface_mode / project_design_name_is_verbatim_truth)
   bool get _selShowSurface => _selMaster != null;
 
-  /// The surface the stockist picked (or 'None'). For attribute it lands on the
-  /// holding; for in_name the server routes it to the print's Surface DNA.
-  String get _surfaceForEntry {
-    final s = _selSurface.trim();
-    return s.isEmpty ? 'None' : s;
+  /// The admin canonical to store on the holding for the current pick.
+  String get _surfaceForEntry => _canonicalOf(_selSurfaceLabel);
+
+  /// The stockist's word to store as surface_label ('' when None).
+  String get _labelForEntry {
+    final l = _selSurfaceLabel.trim();
+    return (l.isEmpty || l.toLowerCase() == 'none') ? '' : l;
   }
 
-  /// Best surface word found inside a design name (longest match wins), or ''
-  /// when none — pre-fills the optional in_name picker on the rare name that
-  /// carries a surface word. Never alters the name itself.
-  String _surfaceInName(String name) {
-    final n = name.toLowerCase();
-    var best = '';
-    for (final s in _surfaces) {
-      final t = s.toLowerCase();
-      if (t.isEmpty) continue;
-      final re = RegExp('(^|[^a-z])${RegExp.escape(t)}([^a-z]|\$)');
-      if (re.hasMatch(n) && s.length > best.length) best = s;
-    }
-    return best;
-  }
-
-  static String _shown(String s) {
-    final t = s.trim();
-    return t.isEmpty || t.toLowerCase() == 'none' ? '' : t;
-  }
-
-  /// Any row in the running list carries a real glaze → show the SURFACE column.
-  bool get _showSurfaceCol => _entries.any((e) => _shown(e.surface).isNotEmpty);
+  /// Any row in the running list carries a real surface → show the SURFACE column.
+  bool get _showSurfaceCol => _entries
+      .any((e) => e.surface.isNotEmpty && e.surface.toLowerCase() != 'none');
 
   // A master's name under a brand (alias) when present, else its master name.
   String _displayName(LibraryEntry m, String? brandId) {
@@ -326,18 +311,11 @@ class _State extends State<AddStockBatchScreen> {
         if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
           _selBrandId = chosen.brandId;
         }
-        // in_name: auto-fill the OPTIONAL surface from the design's SAVED map
-        // (set the first time stock was added → remembered on the print), else
-        // try the verbatim name, else 'None'. Attribute keeps the last pick.
+        // in_name: auto-fill from the design's remembered word (map once), else
+        // 'None'. Attribute keeps the last pick.
         if (!_usesSurface(chosen, _isM ? _selBrandId : null)) {
-          final mapped = chosen.surfaceType.trim();
-          if (mapped.isNotEmpty && mapped.toLowerCase() != 'none') {
-            _selSurface = mapped;
-          } else {
-            final parsed =
-                _surfaceInName(_displayName(chosen, _isM ? _selBrandId : null));
-            _selSurface = parsed.isEmpty ? 'None' : parsed;
-          }
+          final w = chosen.surfaceLabel.trim();
+          _selSurfaceLabel = w.isNotEmpty ? w : 'None';
         }
       });
     }
@@ -418,8 +396,9 @@ class _State extends State<AddStockBatchScreen> {
       _snack('Pick a brand.', Colors.red);
       return;
     }
-    // The glaze is what this run was printed on — it can't be guessed.
-    if (_selNeedsSurface && _selSurface.trim().isEmpty) {
+    if (_selNeedsSurface &&
+        (_selSurfaceLabel.trim().isEmpty ||
+            _selSurfaceLabel.toLowerCase() == 'none')) {
       _snack('Pick a surface.', Colors.red);
       return;
     }
@@ -434,6 +413,7 @@ class _State extends State<AddStockBatchScreen> {
       brandName: _isM ? _brandNameOf(_selBrandId) : null,
       quality: _selQuality,
       surface: _surfaceForEntry,
+      surfaceLabel: _labelForEntry,
       qty: qty,
     );
     final idx = _entries.indexWhere((x) => x.key == e.key);
@@ -453,7 +433,7 @@ class _State extends State<AddStockBatchScreen> {
     final existing = _entries[existingIdx];
     final label =
         '${_displayName(existing.master, existing.brandId)} · '
-        '${_surfShown(existing.surface).isNotEmpty ? '${_surfShown(existing.surface)} · ' : ''}'
+        '${_surfShown(existing.surfaceLabel).isNotEmpty ? '${_surfShown(existing.surfaceLabel)} · ' : ''}'
         '${existing.brandName?.isNotEmpty == true ? '${existing.brandName} · ' : ''}'
         '${existing.quality}';
     final choice = await showDialog<String>(
@@ -548,6 +528,7 @@ class _State extends State<AddStockBatchScreen> {
                 'quantity': e.qty,
                 'brand_id': e.brandId,
                 'surface': e.surface,
+                'surface_label': e.surfaceLabel,
               })
           .toList();
       final res = await _svc.addInventoryBatch(payload);
@@ -595,7 +576,7 @@ class _State extends State<AddStockBatchScreen> {
                               Expanded(
                                 child: Text(
                                   '${_displayName(e.master, e.brandId)}'
-                                  '${_surfShown(e.surface).isNotEmpty ? ' · ${_surfShown(e.surface)}' : ''}'
+                                  '${_surfShown(e.surfaceLabel).isNotEmpty ? ' · ${_surfShown(e.surfaceLabel)}' : ''}'
                                   '${e.brandName?.isNotEmpty == true ? ' · ${e.brandName}' : ''}'
                                   ' · ${e.quality}',
                                   maxLines: 1,
@@ -847,14 +828,17 @@ class _State extends State<AddStockBatchScreen> {
                 color: Colors.grey.shade700)),
       );
 
-  // Attribute → required (must pick, no 'None'). in_name → optional ('None'
-  // first, default). Options are SHOWN as the stockist's own word but the VALUE
-  // stored stays the admin canonical (_surfDisplay maps canonical → word).
+  // The picker lists the stockist's OWN words (their aliases). Attribute →
+  // required (no 'None'); in_name → optional ('None' first). We store the picked
+  // word as surface_label and its admin canonical as surface_type.
   Widget _surfaceDropdown() {
-    final opts = _selNeedsSurface ? _surfaces : <String>['None', ..._surfaces];
-    final missing = _selNeedsSurface && _selSurface.trim().isEmpty;
-    final current = opts.contains(_selSurface)
-        ? _selSurface
+    final labels = _surfLabels;
+    final opts = _selNeedsSurface ? labels : <String>['None', ...labels];
+    final missing = _selNeedsSurface &&
+        (_selSurfaceLabel.trim().isEmpty ||
+            _selSurfaceLabel.toLowerCase() == 'none');
+    final current = opts.contains(_selSurfaceLabel)
+        ? _selSurfaceLabel
         : (_selNeedsSurface ? null : 'None');
     return Container(
       height: 44,
@@ -872,11 +856,9 @@ class _State extends State<AddStockBatchScreen> {
           isDense: true,
           style: const TextStyle(fontSize: 13, color: Colors.black87),
           items: opts
-              .map((s) => DropdownMenuItem(
-                  value: s,
-                  child: Text(s.toLowerCase() == 'none' ? 'None' : _surfDisplay(s))))
+              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
               .toList(),
-          onChanged: (v) => setState(() => _selSurface = v ?? _selSurface),
+          onChanged: (v) => setState(() => _selSurfaceLabel = v ?? _selSurfaceLabel),
         ),
       ),
     );
@@ -965,7 +947,7 @@ class _State extends State<AddStockBatchScreen> {
         design: _displayName(e.master, e.brandId),
         brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
         size: e.master.size.replaceAll(' mm', ''),
-        surface: _surfShown(e.surface).isEmpty ? '—' : _surfShown(e.surface),
+        surface: _surfShown(e.surfaceLabel).isEmpty ? '—' : _surfShown(e.surfaceLabel),
         quality: e.quality,
         qty: '${e.qty}',
         onQty: () => _editQty(e),
@@ -1309,7 +1291,7 @@ class _State extends State<AddStockBatchScreen> {
                   Text(
                     [
                       e.master.size.replaceAll(' mm', ''),
-                      if (_surfShown(e.surface).isNotEmpty) _surfShown(e.surface),
+                      if (_surfShown(e.surfaceLabel).isNotEmpty) _surfShown(e.surfaceLabel),
                       if (e.brandName?.isNotEmpty == true) e.brandName!,
                       e.quality,
                     ].join(' · '),

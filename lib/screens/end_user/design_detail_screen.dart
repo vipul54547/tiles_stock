@@ -4,7 +4,6 @@ import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../utils/tile_types.dart';
-import '../../utils/surface_labels.dart';
 import '../../widgets/tile_card.dart';
 
 class DesignDetailScreen extends StatefulWidget {
@@ -28,7 +27,6 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
   }
 
   Future<void> _load() async {
-    await surfaceLabels.load(); // stockists' own surface words (once)
     final data = await _service.getAllDesigns();
     // Include the buyer's private (claimed) designs: getAllDesigns() returns only
     // the PUBLIC market (empty when the public market is off), so a private-only
@@ -249,8 +247,7 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                       if (design.hasSurface)
                         _Chip(
                           icon: Icons.texture_rounded,
-                          label: surfaceLabels.label(
-                              design.stockistId, design.surfaceType),
+                          label: design.surfaceCardLabel,
                           bg: const Color(0xFFF3E5F5),
                           fg: const Color(0xFF6A1B9A),
                         ),
@@ -334,10 +331,7 @@ class _DesignDetailScreenState extends State<DesignDetailScreen> {
                       _Spec(Icons.category_outlined, 'Tile Type',
                           design.tileType.isNotEmpty ? design.tileType : '—'),
                       _Spec(Icons.texture_rounded, 'Finish',
-                          design.hasSurface
-                              ? surfaceLabels.label(
-                                  design.stockistId, design.surfaceType)
-                              : '—'),
+                          design.hasSurface ? design.surfaceCardLabel : '—'),
                       _Spec(Icons.palette_outlined, 'Colour',
                           design.colour.isNotEmpty ? design.colour : '—'),
                     ];

@@ -7,7 +7,6 @@ import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
-import '../../utils/surface_labels.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../services/cloudinary_service.dart';
@@ -206,7 +205,6 @@ class _State extends State<StockistDashboardScreen> {
   }
 
   Future<void> _load() async {
-    await surfaceLabels.load(); // resolve each surface to the stockist's own word
     final data = await _service.getDesignsByStockist(_myStockistId);
     final inquiries = await _service.getMyDesignInquiries();
     final orders = await _service.getMyInquiries();
@@ -485,7 +483,7 @@ class _State extends State<StockistDashboardScreen> {
     final img = first.faceImageUrls.isNotEmpty ? first.faceImageUrls.first : '';
     // Total boxes across all this master's brands + qualities (full P_Stock).
     final totalP = group.fold<int>(0, (s, d) => s + d.boxQuantity);
-    final surface = surfaceLabels.label(first.stockistId, first.surfaceType);
+    final surface = first.surfaceCardLabel;
     final showSurface = surface.isNotEmpty && surface.toLowerCase() != 'none';
 
     // Sub-group the holdings by brand (keeping first-seen order); within a brand
@@ -1720,7 +1718,7 @@ class _State extends State<StockistDashboardScreen> {
     final first = group.first;
     final ratio = aspectRatioFromSize(first.size);
     final img = first.faceImageUrls.isNotEmpty ? first.faceImageUrls.first : '';
-    final surface = surfaceLabels.label(first.stockistId, first.surfaceType);
+    final surface = first.surfaceCardLabel;
     final showSurface = surface.isNotEmpty && surface.toLowerCase() != 'none';
 
     TileDesign? prem, std;

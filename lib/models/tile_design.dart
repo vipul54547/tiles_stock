@@ -24,6 +24,12 @@ class TileDesign {
   /// P + C + H + F; dealer screens already receive F as their quantity.
   final int fStock;
   final String surfaceType;
+
+  /// The stockist's OWN word for this holding's surface (their picked alias),
+  /// e.g. "Golden Series", "Raindrops". '' when none. surface_type stays the
+  /// admin canonical for filter/dispatch/search. (project_per_brand_surface_mode)
+  final String surfaceLabel;
+
   /// Original finish text from the PDF when it isn't one of [kFinishes]
   /// (e.g. "Punch Ghr", "Lustra"). Null for standard finishes. Shown as a badge.
   final String? finishLabel;
@@ -85,6 +91,7 @@ class TileDesign {
     this.heldQuantity = 0,
     int? fStock,
     required this.surfaceType,
+    this.surfaceLabel = '',
     this.finishLabel,
     required this.piecesPerBox,
     required this.boxWeightKg,
@@ -121,6 +128,7 @@ class TileDesign {
         heldQuantity: (json['held_quantity'] as num?)?.toInt() ?? 0,
         fStock: (json['f_stock'] as num?)?.toInt(),
         surfaceType: json['surface_type'],
+        surfaceLabel: (json['surface_label'] ?? '').toString(),
         finishLabel: json['finish_label'],
         piecesPerBox: json['pieces_per_box'],
         boxWeightKg: (json['box_weight_kg'] as num).toDouble(),
@@ -148,7 +156,8 @@ class TileDesign {
   TileDesign withFaceImage(String url) => TileDesign(
         id: id, name: name, size: size, boxQuantity: boxQuantity,
         controlQuantity: controlQuantity, heldQuantity: heldQuantity, fStock: fStock,
-        surfaceType: surfaceType, finishLabel: finishLabel,
+        surfaceType: surfaceType, surfaceLabel: surfaceLabel,
+        finishLabel: finishLabel,
         piecesPerBox: piecesPerBox, boxWeightKg: boxWeightKg,
         thicknessMm: thicknessMm, colour: colour, tileType: tileType,
         faceImageUrls: [url],
@@ -167,6 +176,7 @@ class TileDesign {
         'size': size,
         'box_quantity': boxQuantity,
         'surface_type': surfaceType,
+        'surface_label': surfaceLabel,
         'finish_label': finishLabel,
         'pieces_per_box': piecesPerBox,
         'box_weight_kg': boxWeightKg,
@@ -192,6 +202,24 @@ class TileDesign {
   }
 
   bool get hasSurface => displaySurface.isNotEmpty;
+
+  /// The stockist's OWN word for the surface, or the canonical when no word was
+  /// stored (older rows / no alias). '' when None. Used on stockist-side lists
+  /// where only the word is wanted.
+  String get surfaceWord {
+    final l = surfaceLabel.trim();
+    return l.isNotEmpty ? l : displaySurface;
+  }
+
+  /// The card label everyone sees: "Word (Canonical)", or just the canonical
+  /// when the word equals it or none is set. (project_per_brand_surface_mode)
+  String get surfaceCardLabel {
+    final c = displaySurface; // canonical, '' when None
+    if (c.isEmpty) return '';
+    final w = surfaceLabel.trim();
+    if (w.isEmpty || w.toLowerCase() == c.toLowerCase()) return c;
+    return '$w ($c)';
+  }
 }
 
 /// Search-synonym taxonomy for SMART search: typing any term matches designs
