@@ -731,6 +731,12 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // Edit/dedupe resolved → Step 2 wizard. A mixed-size PDF is no longer punted to
   // library-only — Step 2 asks packing per size so it can add stock too.
   void _proceedAfterEdit() {
+    // M + all designs already exist → nothing to ask (surface isn't captured on
+    // an M PDF); build the library and save now.
+    if (_isM && !_hasNewDesigns) {
+      _enterStock();
+      return;
+    }
     setState(() {
       // Identity wizard (LIBRARY build). Quality is no longer asked here — it
       // moved to the stock branch. Start at the first identity question.
@@ -898,7 +904,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
               error: true);
           return;
         }
-        setState(() => _askStep = _AskStep.surfaceInPdf);
+        _toSurfaceStep();
       case _AskStep.tilePick:
         if (_tileType == null) {
           _toast('Pick one tile type to continue.', error: true);
@@ -916,7 +922,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
           _toast('Enter the box weight in kg.', error: true);
           return;
         }
-        setState(() => _askStep = _AskStep.surfaceInPdf);
+        _toSurfaceStep();
       case _AskStep.surfaceChoice:
         _enterStock();
       case _AskStep.tileSame:
@@ -946,6 +952,16 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     }
   }
 
+  // Advance to the surface question — or, for M, skip it: an M PDF is library-
+  // only, so surface is never captured here (it's picked at Add Stock).
+  void _toSurfaceStep() {
+    if (_isM) {
+      _enterStock();
+    } else {
+      setState(() => _askStep = _AskStep.surfaceInPdf);
+    }
+  }
+
   // Wizard done → Step 3 (Quantities). Re-checks the compulsory gates defensively
   // and resolves the document-wide surface for the "not in PDF" branch.
   Future<void> _enterStock() async {
@@ -972,6 +988,12 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         }
       }
     }
+    // M: PDF builds the picture library ONLY — surface isn't captured here (it's
+    // picked at Add Stock). Skip the surface mapping and save immediately.
+    if (_isM) {
+      _save(libraryOnly: true);
+      return;
+    }
     if (!_surfacePresent) {
       final s = _singleSurface ? _singleSurfaceValue : 'None';
       for (final r in _rows) {
@@ -983,13 +1005,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       final ok = await _mapSurfacesStep();
       if (!ok) return;
     }
-    // M: PDF is library-only — skip the stock gate and save immediately.
-    // T/W: ask whether to also add stock now.
-    if (_isM) {
-      _save(libraryOnly: true);
-    } else {
-      setState(() => _phase = _Phase.stockGate);
-    }
+    setState(() => _phase = _Phase.stockGate);
   }
 
   // Map each distinct scraped surface to one of the admin finishes (like the Excel
@@ -2759,7 +2775,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // Identity questions only (quality moved to the stock branch): 1 when all
   // designs exist (surface), 2 for a mixed-size new batch (per-size packing +
   // surface), else 4 (tile type + pieces + weight + surface).
-  int get _askTotal => !_hasNewDesigns ? 1 : (_isMultiSize ? 2 : 4);
+  // M skips the surface question (PDF is library-only), so one fewer step.
+  int get _askTotal => !_hasNewDesigns
+      ? (_isM ? 0 : 1)
+      : (_isMultiSize ? (_isM ? 1 : 2) : (_isM ? 3 : 4));
 
   int _askPhaseNum(_AskStep s) {
     switch (s) {
