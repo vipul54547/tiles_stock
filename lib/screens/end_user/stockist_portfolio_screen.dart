@@ -11,6 +11,7 @@ import '../../utils/quality_merge.dart';
 import '../../utils/responsive.dart';
 import '../../utils/order_message.dart';
 import '../../utils/buyer_dna.dart';
+import '../../utils/surface_labels.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/smart_search_toggle.dart';
 import '../../models/choice_state.dart';
@@ -226,6 +227,7 @@ class _State extends State<StockistPortfolioScreen> {
     final finishes = await _service.getActiveFinishNames();
     final sizes = await _service.getActiveSizeNames();
     // Design DNA: global catalog (once) + this portfolio's designs' tags.
+    await surfaceLabels.load(); // stockists' own surface words (once)
     if (!_dna.hasCatalog) await _dna.loadCatalog();
     await _dna.loadDesigns(designs.map((d) => d.id).toList());
     if (!mounted) return;
@@ -653,7 +655,9 @@ class _State extends State<StockistPortfolioScreen> {
                             runSpacing: 6,
                             children: [
                               _infoChip(d.size.replaceAll(' mm', '')),
-                              if (d.hasSurface) _infoChip(d.displaySurface),
+                              if (d.hasSurface)
+                                _infoChip(surfaceLabels.label(
+                                    d.stockistId, d.surfaceType)),
                               _infoChip(d.quality),
                               if (d.finishLabel != null &&
                                   d.finishLabel!.trim().isNotEmpty &&

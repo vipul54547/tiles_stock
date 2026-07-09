@@ -16,6 +16,7 @@ import '../../utils/guest_gate.dart';
 import '../../utils/design_ranking.dart';
 import '../../utils/my_choice.dart';
 import '../../utils/buyer_dna.dart';
+import '../../utils/surface_labels.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/account_actions.dart';
 import '../../widgets/filter_section.dart';
@@ -110,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // Stockist seq-id → name (for the group confirm dialog). Empty for guests.
     // Masked: anonymized stockists surface as trade name + public code.
     final stockists = await _service.getMarketStockists();
+    await surfaceLabels.load(); // stockists' own surface words (once)
     // Design DNA: global catalog (once) + DNA tags for both pools' designs.
     if (!_dna.hasCatalog) await _dna.loadCatalog();
     await _dna.loadDesigns([
@@ -843,7 +845,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             runSpacing: 6,
                             children: [
                               _infoChip(d.size.replaceAll(' mm', '')),
-                              if (d.hasSurface) _infoChip(d.displaySurface),
+                              if (d.hasSurface)
+                                _infoChip(surfaceLabels.label(
+                                    d.stockistId, d.surfaceType)),
                               _infoChip(d.quality),
                               if (d.finishLabel != null &&
                                   d.finishLabel!.trim().isNotEmpty &&

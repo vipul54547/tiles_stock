@@ -1636,6 +1636,21 @@ class SupabaseDataService {
     }
   }
 
+  /// Each stockist's OWN word per canonical surface, for buyer-card display.
+  /// One row per (stockist sequential_id, canonical finish):
+  /// [{stockist, surface, raw, display}]. Anon-callable. (SurfaceLabels)
+  Future<List<Map<String, dynamic>>> publicSurfaceLabels() async {
+    try {
+      final res = await supabase.rpc('public_surface_labels');
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      debugPrint('publicSurfaceLabels failed: $e');
+      return [];
+    }
+  }
+
   /// The buyer-facing DNA catalog as typed [DnaAttribute]s, for buyer screens
   /// still built around the DnaAttribute model (My Suppliers). Same buyer-wide
   /// source as [publicDnaCatalog]: it returns free-text facet values (Series,

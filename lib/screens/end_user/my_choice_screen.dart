@@ -11,6 +11,7 @@ import '../../models/inquiry_order.dart';
 import '../../utils/guest_gate.dart';
 import '../../utils/my_choice.dart';
 import '../../utils/order_message.dart';
+import '../../utils/surface_labels.dart';
 
 class MyChoiceScreen extends StatefulWidget {
   const MyChoiceScreen({super.key});
@@ -39,6 +40,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
       _service.getMyPrivateDesigns(),
     ]);
     await loadMyChoices(); // restore saved selections
+    await surfaceLabels.load(); // stockists' own surface words (once)
     final orders = await _service.getMyOrders();
     if (!mounted) return;
     // Choices can be saved from PRIVATE (My-Suppliers) stock too, so the design
@@ -641,7 +643,8 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                 Text(
                     [
                       d.size.replaceAll(' mm', ''),
-                      if (d.hasSurface) d.displaySurface,
+                      if (d.hasSurface)
+                        surfaceLabels.label(d.stockistId, d.surfaceType),
                       d.quality,
                     ].join(' · '),
                     style: const TextStyle(
