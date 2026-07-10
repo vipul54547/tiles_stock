@@ -52,3 +52,9 @@ _*.png
 
 # Local DB snapshots — contain SECURITY DEFINER function bodies; do not publish
 supabase/snapshots/
+
+# Supabase CLI binaries (219MB, not source)
+tool/bin/
+
+# Temp DB password hand-off file (read + deleted by dump_full_backup.py)
+tool/db_password.txt
