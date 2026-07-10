@@ -1661,9 +1661,9 @@ class SupabaseDataService {
     }
   }
 
-  /// The logged-in stockist's OWN word per canonical finish, for the Add Stock
-  /// picker: { canonicalFinishName : displayWord }. The picker shows the word
-  /// but stores the canonical. (SurfaceLabels)
+  /// The logged-in stockist's OWN word per canonical finish, for the stock-list
+  /// "Edit conditions" chips: { canonicalFinishName : displayWord }. The chips
+  /// show the word but store the canonical. (project_per_brand_surface_mode)
   Future<Map<String, String>> getMySurfaceLabels() async {
     try {
       final res = await supabase.rpc('my_surface_labels');
@@ -1672,21 +1672,6 @@ class SupabaseDataService {
     } catch (e) {
       debugPrint('getMySurfaceLabels failed: $e');
       return {};
-    }
-  }
-
-  /// Each stockist's OWN word per canonical surface, for buyer-card display.
-  /// One row per (stockist sequential_id, canonical finish):
-  /// [{stockist, surface, raw, display}]. Anon-callable. (SurfaceLabels)
-  Future<List<Map<String, dynamic>>> publicSurfaceLabels() async {
-    try {
-      final res = await supabase.rpc('public_surface_labels');
-      return ((res as List?) ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-    } catch (e) {
-      debugPrint('publicSurfaceLabels failed: $e');
-      return [];
     }
   }
 

@@ -201,40 +201,8 @@ class _State extends State<PublicCatalogScreen> {
     return '$w ($c)';
   }
 
-  // Value names a design carries under the "Surface" DNA attribute (in_name
-  // mode) so the single Finish filter also catches DNA-tagged surfaces.
-  Set<String> _surfaceDnaNames(Map<String, dynamic> d) {
-    final vals = _dnaOf(d);
-    if (vals.isEmpty) return const {};
-    for (final attr in _dnaFacets) {
-      if ((attr['name'] ?? '').toString().toLowerCase() != 'surface') continue;
-      final out = <String>{};
-      for (final v in ((attr['values'] as List?) ?? const [])) {
-        final m = v as Map;
-        if (vals.contains(m['id'].toString())) {
-          out.add((m['name'] ?? '').toString());
-        }
-      }
-      return out;
-    }
-    return const {};
-  }
-
-  // Finish chip options: in-use holding surfaces (attribute) ∪ in-use "Surface"
-  // DNA value names (in_name), so one Finish filter covers both.
-  List<String> _surfaceOptions() {
-    final out = _distinct('surface').toSet();
-    for (final attr in _dnaFacets) {
-      if ((attr['name'] ?? '').toString().toLowerCase() != 'surface') continue;
-      for (final v in ((attr['values'] as List?) ?? const [])) {
-        final m = v as Map;
-        final nm = (m['name'] ?? '').toString();
-        if (nm.toLowerCase() == 'none') continue;
-        if (_dnaInUse.contains(m['id'].toString())) out.add(nm);
-      }
-    }
-    return out.toList()..sort();
-  }
+  // Finish chip options: the surfaces actually present in the holding.
+  List<String> _surfaceOptions() => _distinct('surface').toSet().toList()..sort();
 
   // Faceted DNA match: within an attribute picks OR, across attributes AND.
   bool _matchesDna(Map<String, dynamic> d) {
@@ -286,9 +254,7 @@ class _State extends State<PublicCatalogScreen> {
     }
     if (_fSizes.isNotEmpty) r = r.where((d) => _fSizes.contains('${d['size']}'));
     if (_fFinishes.isNotEmpty) {
-      r = r.where((d) =>
-          _fFinishes.contains('${d['surface']}') ||
-          _surfaceDnaNames(d).any(_fFinishes.contains));
+      r = r.where((d) => _fFinishes.contains('${d['surface']}'));
     }
     if (_fQualities.isNotEmpty) {
       r = r.where((d) => _fQualities.contains('${d['quality']}'));

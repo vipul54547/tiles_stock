@@ -101,12 +101,8 @@ class _State extends State<StockistPortfolioScreen> {
       result = result.where((d) => _selectedSizes.contains(d.size)).toList();
     }
     if (_selectedSurfaces.isNotEmpty) {
-      // One Surface filter across both modes: attribute → surfaceType on the
-      // holding; in_name → the print's Surface DNA value.
       result = result
-          .where((d) =>
-              _selectedSurfaces.contains(d.surfaceType) ||
-              _dna.valuesForAttr(d.id, 'surface').any(_selectedSurfaces.contains))
+          .where((d) => _selectedSurfaces.contains(d.surfaceType))
           .toList();
     }
     if (_selectedTypes.isNotEmpty) {
@@ -1098,7 +1094,7 @@ class _State extends State<StockistPortfolioScreen> {
               r = r.where((d) => d.matchesSearch(q, smart: smartSearch)).toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
-            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType) || _dna.valuesForAttr(d.id, 'surface').any(localSurfaces.contains)).toList();
+            if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceType)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
             if (localThickness.isNotEmpty) {
               r = r.where((d) => localThickness.contains(thicknessBandOf(d))).toList();
