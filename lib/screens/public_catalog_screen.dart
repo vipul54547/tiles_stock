@@ -1584,10 +1584,15 @@ class _State extends State<PublicCatalogScreen> {
         hasBoth ? _showQualityChoicePublic(d) : _toggle(id);
     final images = (d['images'] as List?) ?? const [];
     final img = images.isNotEmpty ? images.first.toString() : '';
+    // Show the stockist's own surface word, with the admin canonical in brackets
+    // — "Raindrop (Sugar)" — collapsing to one word when they match (_surfaceCard).
+    // Matches the detail row and the surface_label model, instead of the bare
+    // canonical the badge used to show. (project_per_brand_surface_mode)
     final finish = (d['finish'] ?? '').toString();
-    final surface = (d['surface'] ?? '').toString();
-    final finishChip =
-        finish.isNotEmpty ? '$surface · $finish' : surface;
+    final surface = _surfaceCard(d);
+    final finishChip = surface.isEmpty
+        ? finish
+        : (finish.isNotEmpty ? '$surface · $finish' : surface);
     // Match the in-app card: image follows the tile's real shape (e.g. 800x1600
     // -> 1:2 portrait, 1200x1800 -> 2:3), computed from the size, not a square.
     final ratio = aspectRatioFromSize((d['size'] ?? '').toString());
