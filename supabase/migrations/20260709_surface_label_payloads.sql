@@ -27,5 +27,6 @@ create or replace view public.market_designs as
             AND (c.visibility = 'public'::text) AND (c.show_in_marketplace = true)
             AND (c.is_active = true)))));
 
--- my_stock + my_library also carry surface_label (see the applied migration
--- 'surface_label_my_stock_library' for their full bodies).
+-- my_stock + my_library also carry surface_label. Their full bodies live in
+-- 20260710_surface_label_my_stock_library_catalog.sql, which backfills the RPCs
+-- that were applied straight to the live database and never written down here.

@@ -1,9 +1,10 @@
 -- Expose surface_label to the remaining buyer payload: my_private_designs (the
--- claimed-catalog path). Signature change → drop + recreate. See the applied
--- migration 'surface_label_my_private_designs' for the full body (adds
--- surface_label after surface_type in both the RETURNS TABLE and the select).
+-- claimed-catalog path). Signature change → drop + recreate; surface_label goes
+-- after surface_type in both the RETURNS TABLE and the select.
 -- (project_per_brand_surface_mode)
 --
--- my_stock + my_library also carry surface_label (applied migration
--- 'surface_label_my_stock_library'); the market_designs view carries it via
+-- The full body, along with my_stock / my_library / public_catalog, lives in
+-- 20260710_surface_label_my_stock_library_catalog.sql -- these four RPCs were
+-- applied straight to the live database and only written down later.
+-- The market_designs view carries surface_label via
 -- 20260709_surface_label_payloads.sql.
