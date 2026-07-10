@@ -574,9 +574,12 @@ class DesignPickerState extends State<DesignPicker> {
           ),
         ],
       ),
+      // Same keyboard rule as SaveBar: a bottomNavigationBar is not lifted above
+      // the keyboard, and this page's rows are quantity fields.
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+          padding: EdgeInsets.fromLTRB(
+              16, 6, 16, 10 + MediaQuery.viewInsetsOf(context).bottom),
           child: SizedBox(
             width: double.infinity,
             height: 48,

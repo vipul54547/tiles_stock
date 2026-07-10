@@ -6,6 +6,12 @@ import 'package:flutter/material.dart';
 /// The button is emphasised (brand colour) when there are unsaved changes
 /// ([dirty]) and muted otherwise, and shows a spinner while [saving]. Place it
 /// in `Scaffold.bottomNavigationBar`.
+///
+/// A Scaffold does NOT lift its bottomNavigationBar above the keyboard —
+/// `resizeToAvoidBottomInset` only shrinks the body — so the bar would sit
+/// behind an open number-pad, hiding Save exactly when the last quantity has
+/// just been typed. Padding the bar by the keyboard's height lifts the button
+/// to rest on top of it instead.
 class SaveBar extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
@@ -28,9 +34,13 @@ class SaveBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    // With the keyboard up, the gesture bar is behind it — pad for one or the
+    // other, never both.
+    final safeArea =
+        keyboard > 0 ? 0.0 : MediaQuery.viewPaddingOf(context).bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-          16, 10, 16, 10 + MediaQuery.of(context).viewPadding.bottom),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, 10 + safeArea + keyboard),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
