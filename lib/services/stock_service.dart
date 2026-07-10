@@ -1,55 +1,12 @@
 import 'package:flutter/foundation.dart'; // debugPrint
 import '../main.dart';
 
+// Stock recount + history. The atomic add/dispatch helpers that used to live
+// here (add_stock / dispatch_stock RPCs) were removed 2026-07-10: they were
+// unused, and those RPCs took a stockist id with no ownership check, so their
+// anon grant was revoked. The live add/dispatch paths are add_inventory_batch,
+// dispatch_walkin and dispatch_inquiry in SupabaseDataService.
 class StockService {
-  // Atomic add via DB function — prevents race conditions
-  Future<bool> addStock({
-    required String designId,
-    required String stockistUUID,
-    required int    quantity,
-    required String pdfFilename,
-    required String size,
-    required String quality,
-  }) async {
-    try {
-      await supabase.rpc('add_stock', params: {
-        'p_design_id':    designId,
-        'p_stockist_id':  stockistUUID,
-        'p_quantity':     quantity,
-        'p_pdf_filename': pdfFilename,
-        'p_size':         size,
-        'p_quality':      quality,
-      });
-      return true;
-    } catch (e, st) {
-      debugPrint('StockService.addStock failed (design $designId): $e\n$st');
-      return false;
-    }
-  }
-
-  // Atomic dispatch via DB function — checks stock before subtracting
-  Future<bool> dispatchStock({
-    required String designId,
-    required String stockistUUID,
-    required int    quantity,
-    required String buyerName,
-    required String notes,
-  }) async {
-    try {
-      final result = await supabase.rpc('dispatch_stock', params: {
-        'p_design_id':   designId,
-        'p_stockist_id': stockistUUID,
-        'p_quantity':    quantity,
-        'p_buyer_name':  buyerName,
-        'p_notes':       notes,
-      });
-      return result as bool? ?? false;
-    } catch (e, st) {
-      debugPrint('StockService.dispatchStock failed (design $designId): $e\n$st');
-      return false;
-    }
-  }
-
   // Recount: set a design's stock to the physically-counted value, logged as an
   // adjustment. Returns TRUE on success, FALSE if not the owner.
   Future<bool> adjustStock({
