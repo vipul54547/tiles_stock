@@ -98,14 +98,17 @@ class _State extends State<ManualDispatchScreen> {
 
   /// Fate of the boxes that don't go on this truck. false = keep the order open
   /// and the remaining reserved; true = close it and release them.
-  bool _close = false;
+  /// null = not chosen. NO DEFAULT: both fates are consequential, so the
+  /// stockist picks rather than inherits one by reflex.
+  bool? _close;
 
   /// What this dispatch does to stock. true = reduce P_Stock by the dispatched
   /// boxes. false = release the order's holding only and leave P_Stock alone,
   /// for a stockist who keeps their real count in other software. Only offered
   /// with an order attached — a walk-in has no holding to release.
+  /// null = not chosen, same no-default rule as [_close].
   /// (project_dispatch_order_redesign · Phase D)
-  bool _reduceStock = true;
+  bool? _reduceStock;
 
   // Entry being built.
   TileDesign? _sel;
@@ -351,10 +354,11 @@ class _State extends State<ManualDispatchScreen> {
     final idx = _lines.indexWhere((l) => l.d.id == _sel!.id);
     if (idx >= 0) {
       // An order row waiting at 0 boxes isn't a duplicate — it's the line the
-      // stockist is filling in. Just set it.
+      // stockist is filling in. Set it, and lift it like any other add.
       if (_lines[idx].qty == 0) {
         setState(() {
           _lines[idx].qty = qty;
+          _lift(idx);
           _resetRow();
         });
         return;
@@ -363,9 +367,20 @@ class _State extends State<ManualDispatchScreen> {
       return;
     }
     setState(() {
-      _lines.add(_Line(_sel!, qty));
+      // Newest on top: the design-selection bar is pinned above the list, so the
+      // row you just added lands right under it instead of off-screen below the
+      // order's pre-filled rows.
+      _lines.insert(0, _Line(_sel!, qty));
       _resetRow();
     });
+  }
+
+  /// Move the row you just put boxes on to the top, under the selection bar.
+  /// Whether the row was new or an order line you filled in, "what I just
+  /// touched" belongs where you can see it.
+  void _lift(int idx) {
+    if (idx <= 0) return;
+    _lines.insert(0, _lines.removeAt(idx));
   }
 
   Future<void> _resolveDuplicate(int idx, int newQty) async {
@@ -402,6 +417,9 @@ class _State extends State<ManualDispatchScreen> {
     if (choice == 'both') {
       setState(() {
         l.qty += newQty;
+        // The dialog was open while the list could not change, so idx still
+        // points at this row.
+        _lift(idx);
         _resetRow();
       });
     } else if (choice == 'one') {
@@ -593,8 +611,8 @@ class _State extends State<ManualDispatchScreen> {
   /// Detaching keeps whatever is already on the truck, as plain walk-in rows.
   void _detachOrder() => setState(() {
         _order = null;
-        _close = false;
-        _reduceStock = true; // no holding to release without an order
+        _close = null;
+        _reduceStock = null; // no holding to release without an order
         _lines.removeWhere((l) => l.onOrder && l.qty == 0);
         for (var i = 0; i < _lines.length; i++) {
           if (_lines[i].onOrder) _lines[i] = _Line(_lines[i].d, _lines[i].qty);
@@ -838,12 +856,25 @@ class _State extends State<ManualDispatchScreen> {
       return;
     }
 
+    // With an order attached, neither fate is assumed. Say what's missing and
+    // send the stockist straight back to the chips.
+    if (_order != null) {
+      final missing = <String>[
+        if (_reduceStock == null) 'stock',
+        if (_remainingAfter > 0 && _close == null) 'leftovers',
+      ];
+      if (missing.isNotEmpty) {
+        await _explainMissing(missing);
+        return;
+      }
+    }
+
     // Both warnings only matter when stock actually moves. In "release holding
     // only" mode P_Stock is untouched, so neither can happen.
-    final over = _reduceStock
+    final over = _reduceStock == true
         ? _lines.where((l) => l.qty > 0 && l.qty > l.d.boxQuantity).toList()
         : const <_Line>[];
-    final breaks = _reduceStock
+    final breaks = _reduceStock == true
         ? _lines
             .where((l) =>
                 l.qty > 0 &&
@@ -874,9 +905,9 @@ class _State extends State<ManualDispatchScreen> {
           transporter: _transporterCtrl.text.trim(),
           note: _noteCtrl.text.trim(),
           date: _date,
-          reduceStock: _reduceStock,
+          reduceStock: _reduceStock!,
           // A full dispatch always closes; a partial uses the chosen fate.
-          close: _remainingAfter == 0 ? true : _close,
+          close: _remainingAfter == 0 ? true : _close!,
           prune: false, // these rows are the truck, not the whole order
         );
       } else {
@@ -907,8 +938,8 @@ class _State extends State<ManualDispatchScreen> {
         setState(() {
           _lines.clear();
           _order = null;
-          _close = false;
-          _reduceStock = true;
+          _close = null;
+          _reduceStock = null;
           _saving = false;
         });
       }
@@ -919,20 +950,117 @@ class _State extends State<ManualDispatchScreen> {
     }
   }
 
+  /// Nothing was chosen, so nothing is assumed. Spell out each pending choice
+  /// and what its two options mean; Close drops the stockist back on the screen
+  /// with the chips waiting, nothing entered lost.
+  Future<void> _explainMissing(List<String> missing) async {
+    Widget block(String title, String a, String aSub, String b, String bSub,
+        Color ca, Color cb) {
+      Widget opt(String t, String s, Color c) => Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Icon(Icons.radio_button_off, size: 15, color: c),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(t,
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: c)),
+                    Text(s,
+                        style: TextStyle(
+                            fontSize: 11.5, color: Colors.grey.shade700)),
+                  ],
+                ),
+              ),
+            ]),
+          );
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 12),
+          Text(title,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey.shade600,
+                  letterSpacing: 0.3)),
+          opt(a, aSub, ca),
+          opt(b, bSub, cb),
+        ],
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Choose before recording'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  missing.length == 2
+                      ? 'Two choices are still empty. Nothing is picked for you '
+                          '— both change what this dispatch does.'
+                      : 'One choice is still empty. Nothing is picked for you '
+                          '— it changes what this dispatch does.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade800)),
+              if (missing.contains('stock'))
+                block(
+                    'WHAT THIS DOES TO STOCK',
+                    'Reduce stock',
+                    'Your system stock drops by the dispatched boxes.',
+                    'Release hold only',
+                    'Stock is unchanged; only the held boxes are freed. '
+                        'Update your own count afterwards.',
+                    _red,
+                    const Color(0xFF1565C0)),
+              if (missing.contains('leftovers'))
+                block(
+                    'BOXES LEFT ON THE ORDER ($_remainingAfter)',
+                    'Keep open',
+                    'The order stays open and the $_remainingAfter boxes stay '
+                        'reserved for the buyer.',
+                    'Close order',
+                    'The order is completed now and the $_remainingAfter boxes '
+                        'are released — the buyer must re-order them.',
+                    _navy,
+                    _red),
+            ],
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navy, foregroundColor: Colors.white),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// One confirmation for everything: what's leaving, what it does to the order,
   /// the over-stock and booking warnings, and — when an order is attached and a
   /// stock mode was therefore chosen — a blinking notice of what that mode does,
   /// with Record gated behind a 3-second countdown so it can't be hit by reflex.
   Future<bool> _confirmSheet(List<_Line> over, List<_Line> breaks) async {
     final attached = _order != null;
-    final modeMsg = _reduceStock
+    final reduce = _reduceStock == true; // guarded above when attached
+    final modeMsg = reduce
         ? 'Quantity is reduced from Stock'
         : 'Release quantity from Holding';
-    final modeDetail = _reduceStock
+    final modeDetail = reduce
         ? 'Your system stock will drop by the dispatched boxes.'
         : 'Your system stock is NOT changed — only the held boxes are released. '
             'Update your own stock count afterwards.';
-    final modeColor = _reduceStock ? _red : const Color(0xFF1565C0);
+    final modeColor = reduce ? _red : const Color(0xFF1565C0);
 
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -988,7 +1116,7 @@ class _State extends State<ManualDispatchScreen> {
                       Text(
                           _remainingAfter == 0
                               ? 'Nothing left on the order — it will be completed.'
-                              : _close
+                              : _close == true
                                   ? '$_remainingAfter box${_remainingAfter == 1 ? '' : 'es'} left over — '
                                       'the order will be CLOSED and they are released.'
                                   : '$_remainingAfter box${_remainingAfter == 1 ? '' : 'es'} left over — '
@@ -1388,7 +1516,7 @@ class _State extends State<ManualDispatchScreen> {
                   child: _fateChip(
                       label: 'Reduce stock',
                       sub: 'P drops by the boxes',
-                      selected: _reduceStock,
+                      selected: _reduceStock == true,
                       color: _red,
                       onTap: () => setState(() => _reduceStock = true)),
                 ),
@@ -1397,37 +1525,40 @@ class _State extends State<ManualDispatchScreen> {
                   child: _fateChip(
                       label: 'Release hold only',
                       sub: 'stock unchanged',
-                      selected: !_reduceStock,
+                      selected: _reduceStock == false,
                       color: const Color(0xFF1565C0),
                       onTap: () => setState(() => _reduceStock = false)),
                 ),
               ]),
-              const SizedBox(height: 14),
-              Text('Boxes left on the order',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.grey.shade600)),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(
-                  child: _fateChip(
-                      label: 'Keep open',
-                      sub: 'stay reserved',
-                      selected: !_close,
-                      color: _navy,
-                      onTap: () => setState(() => _close = false)),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _fateChip(
-                      label: 'Close order',
-                      sub: 'released',
-                      selected: _close,
-                      color: _red,
-                      onTap: () => setState(() => _close = true)),
-                ),
-              ]),
+              // Only asked when boxes would actually be left over.
+              if (_remainingAfter > 0) ...[
+                const SizedBox(height: 14),
+                Text('Boxes left on the order ($_remainingAfter)',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey.shade600)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Expanded(
+                    child: _fateChip(
+                        label: 'Keep open',
+                        sub: 'stay reserved',
+                        selected: _close == false,
+                        color: _navy,
+                        onTap: () => setState(() => _close = false)),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _fateChip(
+                        label: 'Close order',
+                        sub: 'released',
+                        selected: _close == true,
+                        color: _red,
+                        onTap: () => setState(() => _close = true)),
+                  ),
+                ]),
+              ],
             ],
           ],
         ),
@@ -1617,14 +1748,88 @@ class _State extends State<ManualDispatchScreen> {
         ],
       );
 
-  /// Second line of a row: the holding, what the order expects of it, and how
-  /// many boxes are already promised to OTHER buyers.
-  String _detailsFor(_Line l) {
-    final base = '${_holdingLabel(l.d)} · ${l.d.boxQuantity} stock';
-    final booked = l.otherHeld > 0 ? ' · ${l.otherHeld} booked' : '';
-    if (!l.onOrder) return '$base$booked';
-    final sent = l.done > 0 ? ', ${l.done} sent' : '';
-    return '$base · ordered ${l.ordered}$sent · ${l.remainingAfter} left$booked';
+  // ── Attribute chips ──────────────────────────────────────────────────────────
+  //
+  // A holding used to read as one grey run-on line. Each attribute now gets its
+  // own chip, in the order brand · size · quality · surface. Quality keeps the
+  // app-wide badge colours (TileCard's _QualityBadge): Premium amber, Standard
+  // blue, Both green — so a Premium box looks the same here as on a buyer card.
+
+  static Widget _chip(String text,
+      {required Color bg, required Color fg, IconData? icon}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 10, color: fg),
+            const SizedBox(width: 3),
+          ],
+          Text(text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 10, color: fg, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  static Widget _qualityChip(String quality) {
+    switch (quality.toLowerCase()) {
+      case 'premium':
+        return _chip(quality,
+            bg: const Color(0xFFFFF8E1),
+            fg: const Color(0xFFF9A825),
+            icon: Icons.star_rounded);
+      case 'both':
+        return _chip(quality,
+            bg: const Color(0xFFE8F5E9),
+            fg: const Color(0xFF2E7D32),
+            icon: Icons.layers_outlined);
+      default:
+        return _chip(quality,
+            bg: const Color(0xFFE3F2FD),
+            fg: const Color(0xFF1565C0),
+            icon: Icons.verified_outlined);
+    }
+  }
+
+  static final _greyChipBg = Colors.grey.shade100;
+  static final _greyChipFg = Colors.grey.shade700;
+
+  /// brand · size · quality · surface, in that order.
+  List<Widget> _attrChips(TileDesign d) {
+    final brand = _brandName(d.brandId);
+    final surface = _surfaceOf(d);
+    return [
+      if (brand.isNotEmpty)
+        _chip(brand,
+            bg: const Color(0xFFE3F2FD),
+            fg: const Color(0xFF1565C0),
+            icon: Icons.business_outlined),
+      _chip(d.size.replaceAll(' mm', ''),
+          bg: _greyChipBg, fg: _greyChipFg, icon: Icons.straighten),
+      _qualityChip(d.quality),
+      if (surface.isNotEmpty)
+        _chip(surface, bg: _greyChipBg, fg: _greyChipFg),
+    ];
+  }
+
+  /// The numbers, kept apart from the attributes: stock, what the order expects,
+  /// and boxes already promised to OTHER buyers.
+  String _numbersFor(_Line l) {
+    final parts = <String>['${l.d.boxQuantity} stock'];
+    if (l.onOrder) {
+      parts.add('ordered ${l.ordered}');
+      if (l.done > 0) parts.add('${l.done} sent');
+      parts.add('${l.remainingAfter} left');
+    }
+    if (l.otherHeld > 0) parts.add('${l.otherHeld} booked');
+    return parts.join('  ·  ');
   }
 
   Widget _lineTile(int i) {
@@ -1653,8 +1858,14 @@ class _State extends State<ManualDispatchScreen> {
                         fontWeight: FontWeight.w600,
                         fontSize: 14,
                         color: idle ? Colors.grey.shade500 : Colors.black87)),
-                const SizedBox(height: 2),
-                Text('${_detailsFor(l)}${over ? ' · over!' : ''}',
+                const SizedBox(height: 5),
+                Opacity(
+                  opacity: idle ? 0.55 : 1,
+                  child: Wrap(
+                      spacing: 5, runSpacing: 4, children: _attrChips(l.d)),
+                ),
+                const SizedBox(height: 5),
+                Text('${_numbersFor(l)}${over ? '  ·  over!' : ''}',
                     style: TextStyle(
                         fontSize: 11.5,
                         color: over ? _red : Colors.grey.shade600)),
@@ -1850,15 +2061,23 @@ class _State extends State<ManualDispatchScreen> {
                       fontWeight: FontWeight.w600,
                       color: idle ? Colors.grey.shade500 : Colors.black87))),
       Expanded(
-          flex: 4,
-          child: Text(
-              header
-                  ? 'DETAILS'
-                  : '${_holdingLabel(l!.d)}'
-                      '${l.otherHeld > 0 ? ' · ${l.otherHeld} booked' : ''}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: header ? lab : dim)),
+        flex: 4,
+        child: header
+            ? Text('DETAILS', style: lab)
+            : Opacity(
+                opacity: idle ? 0.55 : 1,
+                child: Wrap(
+                    spacing: 5,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ..._attrChips(l!.d),
+                      if (l.otherHeld > 0)
+                        Text('${l.otherHeld} booked',
+                            style: dim.copyWith(fontSize: 11)),
+                    ]),
+              ),
+      ),
       if (attached) ...[
         numCell(header ? 'ORD' : '${l!.ordered ?? '—'}'),
         numCell(header ? 'SENT' : '${l!.done}'),

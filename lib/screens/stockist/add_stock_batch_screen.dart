@@ -422,7 +422,8 @@ class _State extends State<AddStockBatchScreen> {
       return;
     }
     setState(() {
-      _entries.add(e);
+      // Newest on top — the row you just added is the one you want to check.
+      _entries.insert(0, e);
       _resetRow();
     });
   }
@@ -1110,6 +1111,9 @@ class _State extends State<AddStockBatchScreen> {
                 ],
               ),
             ],
+            // Each control sits beside the button it belongs with: pick the
+            // quality of a design you may still need to create, then type the
+            // boxes and Add.
             const SizedBox(height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -1144,6 +1148,28 @@ class _State extends State<AddStockBatchScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   flex: 2,
+                  child: SizedBox(
+                    height: 44,
+                    child: OutlinedButton.icon(
+                      onPressed: _addNewDesign,
+                      icon: const Icon(Icons.add_photo_alternate_outlined,
+                          size: 18),
+                      label: const Text('New design',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      style: OutlinedButton.styleFrom(
+                          foregroundColor: _navy,
+                          padding: const EdgeInsets.symmetric(horizontal: 8)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  flex: 3,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1151,49 +1177,43 @@ class _State extends State<AddStockBatchScreen> {
                           style: TextStyle(
                               fontSize: 12, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
-                      TextField(
-                        controller: _qtyCtrl,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
-                        ],
-                        decoration: InputDecoration(
-                          isDense: true,
-                          hintText: 'Boxes',
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 12),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8)),
+                      SizedBox(
+                        height: 44,
+                        child: TextField(
+                          controller: _qtyCtrl,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly
+                          ],
+                          decoration: InputDecoration(
+                            isDense: true,
+                            hintText: 'Boxes',
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 12),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _addEntry,
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add'),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: _navy,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12)),
-                  ),
-                ),
                 const SizedBox(width: 10),
-                OutlinedButton.icon(
-                  onPressed: _addNewDesign,
-                  icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-                  label: const Text('New design'),
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: _navy,
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 12, horizontal: 10)),
+                Expanded(
+                  flex: 2,
+                  child: SizedBox(
+                    height: 44,
+                    child: ElevatedButton.icon(
+                      onPressed: _addEntry,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text('Add',
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: _navy,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 8)),
+                    ),
+                  ),
                 ),
               ],
             ),
