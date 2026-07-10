@@ -1,23 +1,43 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/brand.dart';
 import '../../models/choice_state.dart';
+import '../../models/inquiry_order.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../utils/india_geo.dart';
 import '../../widgets/save_bar.dart';
 
-/// Order-less ("manual"/walk-in) dispatch, in the same batch shape as Add Stock:
-/// pick designs → set boxes → Add to a running list, fill dispatch details +
-/// customer, then Record. No order/remaining tracking (that's the order-linked
-/// dispatch). Over-dispatch is allowed — dispatch is the final truth.
-/// Customer is a plain optional name UNLESS the admin turned on "My Customers"
-/// (customers_enabled), in which case it's a save-and-reuse picker.
-/// (project_unified_dispatch_customers)
+/// Manual dispatch, in the same batch shape as Add Stock: pick designs → set
+/// boxes → Add to a running list, fill dispatch details, then Record. Over-
+/// dispatch is allowed — dispatch is the final truth.
+///
+/// An ORDER is optional. Without one this is the walk-in case (dispatch_walkin):
+/// no remaining, and Customer is a plain optional name unless the admin turned
+/// on "My Customers" (customers_enabled), which makes it a save-and-reuse picker.
+///
+/// Attach an order and it becomes the order-linked case (dispatch_inquiry, with
+/// prune=false): the order's lines pre-fill at 0 boxes, remaining is tracked,
+/// and Close/Keep decides the fate of what doesn't go on this truck. The rows
+/// here are "what's on the truck", never "the whole order" — so removing an
+/// order row only takes it off the truck, and prune=false stops the server from
+/// deleting it. Designs that aren't on the order may still be added; they join
+/// it fully-dispatched. Customer is hidden while attached (the order names the
+/// buyer, and dispatch_inquiry ignores customer_id).
+/// (project_unified_dispatch_customers — attach-order)
 class ManualDispatchScreen extends StatefulWidget {
-  const ManualDispatchScreen({super.key});
+  /// Arrive with an order already attached (Inquiries → Dispatch). Null = the
+  /// screen opens empty and the order, if any, is attached by hand.
+  final String? orderId;
+
+  /// Stock mode chosen by the caller, if it wants to preselect one.
+  final bool? reduceStock;
+
+  const ManualDispatchScreen({super.key, this.orderId, this.reduceStock});
   @override
   State<ManualDispatchScreen> createState() => _State();
 }
@@ -28,7 +48,33 @@ const _red = Color(0xFFC62828);
 class _Line {
   final TileDesign d;
   int qty;
-  _Line(this.d, this.qty);
+
+  /// Boxes ordered, when this row came from the attached order. null = the row
+  /// is not on the order (a walk-in row, or an extra loaded on top of an order).
+  final int? ordered;
+
+  /// Boxes already sent against this order line by earlier dispatches.
+  final int done;
+
+  /// Boxes of this design held (H_Quantity) across ALL orders.
+  final int held;
+
+  /// Boxes held by THIS order alone.
+  final int lineHeld;
+
+  _Line(this.d, this.qty,
+      {this.ordered, this.done = 0, this.held = 0, this.lineHeld = 0});
+
+  bool get onOrder => ordered != null;
+
+  /// Boxes promised to OTHER buyers' orders. Dispatching past what's left over
+  /// after these is allowed, but the stockist is warned.
+  int get otherHeld => (held - lineHeld).clamp(0, 1 << 30);
+
+  /// What stays on the order once this truck leaves. Over-dispatching floors it
+  /// at 0 rather than going negative.
+  int get remainingAfter =>
+      ordered == null ? 0 : (ordered! - done - qty).clamp(0, 1 << 30);
 }
 
 class _State extends State<ManualDispatchScreen> {
@@ -36,10 +82,30 @@ class _State extends State<ManualDispatchScreen> {
   bool _loading = true;
   bool _saving = false;
 
+  /// Every holding, in stock or not — an attached order can name a design that
+  /// has since run down to 0, and that row still has to render.
+  List<TileDesign> _all = [];
+
+  /// What the design picker offers: only what there is stock of.
   List<TileDesign> _designs = [];
   List<Brand> _brands = [];
   bool _customersEnabled = false;
   List<Map<String, dynamic>> _customers = [];
+
+  // Attached order (null = walk-in dispatch).
+  InquiryOrder? _order;
+  bool _busyOrder = false;
+
+  /// Fate of the boxes that don't go on this truck. false = keep the order open
+  /// and the remaining reserved; true = close it and release them.
+  bool _close = false;
+
+  /// What this dispatch does to stock. true = reduce P_Stock by the dispatched
+  /// boxes. false = release the order's holding only and leave P_Stock alone,
+  /// for a stockist who keeps their real count in other software. Only offered
+  /// with an order attached — a walk-in has no holding to release.
+  /// (project_dispatch_order_redesign · Phase D)
+  bool _reduceStock = true;
 
   // Entry being built.
   TileDesign? _sel;
@@ -83,6 +149,7 @@ class _State extends State<ManualDispatchScreen> {
     final customers = enabled ? await _svc.listCustomers() : <Map<String, dynamic>>[];
     if (!mounted) return;
     setState(() {
+      _all = all;
       _designs = all.where((d) => d.boxQuantity > 0).toList()
         ..sort((a, b) => a.name.compareTo(b.name));
       _brands = brands;
@@ -90,9 +157,56 @@ class _State extends State<ManualDispatchScreen> {
       _customers = customers;
       _loading = false;
     });
+
+    // Opened from Inquiries → Dispatch: the order is already decided. Needs the
+    // designs above to be loaded first, so it runs after the setState.
+    final id = widget.orderId;
+    if (id != null && _order == null) await _attachOrderById(id);
+  }
+
+  Future<void> _attachOrderById(String id) async {
+    setState(() => _busyOrder = true);
+    final all = await _svc.getMyInquiries();
+    if (!mounted) return;
+    final match = all.where((o) => o.id == id).toList();
+    if (match.isEmpty) {
+      setState(() => _busyOrder = false);
+      _snack('That order is no longer open.', _red);
+      return;
+    }
+    await _attachOrder(match.first);
+    if (!mounted) return;
+    if (widget.reduceStock != null) {
+      setState(() => _reduceStock = widget.reduceStock!);
+    }
   }
 
   int get _totalBoxes => _lines.fold(0, (s, l) => s + l.qty);
+
+  /// Rows actually going on the truck. Order rows sitting at 0 don't count.
+  int get _loadedCount => _lines.where((l) => l.qty > 0).length;
+
+  /// Boxes still on the order after this dispatch.
+  int get _remainingAfter =>
+      _lines.where((l) => l.onOrder).fold(0, (s, l) => s + l.remainingAfter);
+
+  TileDesign? _designById(String id) {
+    for (final d in _all) {
+      if (d.id == id) return d;
+    }
+    return null;
+  }
+
+  /// Who the dispatch is for. An attached order names its buyer; dispatch_inquiry
+  /// labels the dispatch from the company (falling back to the stockist's hint).
+  String get _buyerLabel {
+    final o = _order;
+    if (o == null) return '';
+    final c = o.company.trim();
+    if (c.isNotEmpty) return c;
+    final h = o.customerHint.trim();
+    return h.isNotEmpty ? h : 'Walk-in';
+  }
 
   String _brandName(String? id) {
     if (id == null) return '';
@@ -236,6 +350,15 @@ class _State extends State<ManualDispatchScreen> {
     }
     final idx = _lines.indexWhere((l) => l.d.id == _sel!.id);
     if (idx >= 0) {
+      // An order row waiting at 0 boxes isn't a duplicate — it's the line the
+      // stockist is filling in. Just set it.
+      if (_lines[idx].qty == 0) {
+        setState(() {
+          _lines[idx].qty = qty;
+          _resetRow();
+        });
+        return;
+      }
       _resolveDuplicate(idx, qty);
       return;
     }
@@ -311,6 +434,172 @@ class _State extends State<ManualDispatchScreen> {
     );
     if (v != null && v > 0) setState(() => l.qty = v);
   }
+
+  /// The ✕ means different things on the two kinds of row. An order row must
+  /// survive it — taking a design off the truck is not the same as taking it off
+  /// the order — so it drops to 0 boxes and stays visible with its remaining.
+  void _removeLine(int i) => setState(() {
+        if (_lines[i].onOrder) {
+          _lines[i].qty = 0;
+        } else {
+          _lines.removeAt(i);
+        }
+      });
+
+  // ── Attached order ───────────────────────────────────────────────────────────
+
+  Future<void> _pickOrder() async {
+    setState(() => _busyOrder = true);
+    final all = await _svc.getMyInquiries();
+    if (!mounted) return;
+    setState(() => _busyOrder = false);
+
+    // A closed or rejected order can't take a dispatch — dispatch_inquiry raises.
+    final open = all
+        .where((o) => !o.isCompleted && !o.isRejected)
+        .toList();
+
+    if (open.isEmpty) {
+      _snack('No open orders to attach.', _red);
+      return;
+    }
+
+    final chosen = await showModalBottomSheet<InquiryOrder>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) {
+        String q = '';
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          final ql = q.trim().toLowerCase();
+          final res = open.where((o) {
+            if (ql.isEmpty) return true;
+            return o.token.toLowerCase().contains(ql) ||
+                o.connectionCode.toLowerCase().contains(ql) ||
+                o.company.toLowerCase().contains(ql) ||
+                o.customerHint.toLowerCase().contains(ql);
+          }).toList();
+          return SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.7,
+            child: Column(
+              children: [
+                const SizedBox(height: 12),
+                const Text('Attach an order',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                  child: TextField(
+                    onChanged: (v) => setSheet(() => q = v),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      prefixIcon: const Icon(Icons.search),
+                      hintText: 'Search order no, C-code, buyer…',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: res.isEmpty
+                      ? const Center(child: Text('No orders match.'))
+                      : ListView.separated(
+                          itemCount: res.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, i) {
+                            final o = res[i];
+                            final who = o.company.trim().isNotEmpty
+                                ? o.company.trim()
+                                : (o.customerHint.trim().isNotEmpty
+                                    ? o.customerHint.trim()
+                                    : 'Walk-in');
+                            return ListTile(
+                              leading: const Icon(Icons.receipt_long_outlined,
+                                  color: _navy),
+                              title: Text(o.token,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600)),
+                              subtitle: Text([
+                                who,
+                                if (o.connectionCode.isNotEmpty) o.connectionCode,
+                                o.statusLabel,
+                              ].join(' · ')),
+                              trailing: Text('${o.totalBoxes} boxes',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade600)),
+                              onTap: () => Navigator.pop(ctx, o),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          );
+        });
+      },
+    );
+    if (chosen != null) await _attachOrder(chosen);
+  }
+
+  Future<void> _attachOrder(InquiryOrder o) async {
+    setState(() => _busyOrder = true);
+    final detail = await _svc.getInquiryDetail(o.id);
+    if (!mounted) return;
+    if (detail == null) {
+      setState(() => _busyOrder = false);
+      _snack('Could not load that order.', _red);
+      return;
+    }
+
+    final lines = (detail['lines'] as List?) ?? const [];
+    var missing = 0;
+    setState(() {
+      _order = o;
+      _busyOrder = false;
+      // The order names the buyer; a customer would be collected and dropped.
+      _custId = null;
+      _custNameCtrl.clear();
+
+      for (final raw in lines) {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final id = (m['design_id'] ?? '').toString();
+        final ordered = (m['quantity'] as num?)?.toInt() ?? 0;
+        final done = (m['dispatched_qty'] as num?)?.toInt() ?? 0;
+        final held = (m['held'] as num?)?.toInt() ?? 0;
+        final lineHeld = (m['line_held'] as num?)?.toInt() ?? 0;
+        final d = _designById(id);
+        if (d == null) {
+          missing++;
+          continue;
+        }
+        final idx = _lines.indexWhere((l) => l.d.id == id);
+        if (idx >= 0) {
+          // Already loaded by hand — keep the boxes, adopt the order's numbers.
+          _lines[idx] = _Line(d, _lines[idx].qty,
+              ordered: ordered, done: done, held: held, lineHeld: lineHeld);
+        } else {
+          _lines.add(_Line(d, 0,
+              ordered: ordered, done: done, held: held, lineHeld: lineHeld));
+        }
+      }
+    });
+    if (missing > 0) {
+      _snack('$missing order line${missing == 1 ? '' : 's'} skipped — design no longer exists.',
+          Colors.orange.shade800);
+    }
+  }
+
+  /// Detaching keeps whatever is already on the truck, as plain walk-in rows.
+  void _detachOrder() => setState(() {
+        _order = null;
+        _close = false;
+        _reduceStock = true; // no holding to release without an order
+        _lines.removeWhere((l) => l.onOrder && l.qty == 0);
+        for (var i = 0; i < _lines.length; i++) {
+          if (_lines[i].onOrder) _lines[i] = _Line(_lines[i].d, _lines[i].qty);
+        }
+      });
 
   // ── Customer (opt-in) ────────────────────────────────────────────────────────
 
@@ -542,79 +831,84 @@ class _State extends State<ManualDispatchScreen> {
       _snack('Add at least one design.', _red);
       return;
     }
-    final over = _lines.where((l) => l.qty > l.d.boxQuantity).toList();
-    final ok = await showModalBottomSheet<bool>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                  'Dispatch ${_lines.length} design${_lines.length == 1 ? '' : 's'} · '
-                  '$_totalBoxes boxes'
-                  '${_custNameCtrl.text.trim().isNotEmpty ? ' to ${_custNameCtrl.text.trim()}' : ''}?',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16)),
-              if (over.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                    '${over.length} line${over.length == 1 ? '' : 's'} exceed current stock — '
-                    'allowed (stock will floor at 0).',
-                    style: TextStyle(fontSize: 12, color: Colors.orange.shade800)),
-              ],
-              const SizedBox(height: 14),
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Back'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: _red, foregroundColor: Colors.white),
-                    child: const Text('Record Dispatch'),
-                  ),
-                ),
-              ]),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (ok != true) return;
+    // With an order attached the rows start at 0 boxes, so a non-empty list is
+    // not yet a dispatch.
+    if (_totalBoxes <= 0) {
+      _snack('Enter boxes on at least one line.', _red);
+      return;
+    }
+
+    // Both warnings only matter when stock actually moves. In "release holding
+    // only" mode P_Stock is untouched, so neither can happen.
+    final over = _reduceStock
+        ? _lines.where((l) => l.qty > 0 && l.qty > l.d.boxQuantity).toList()
+        : const <_Line>[];
+    final breaks = _reduceStock
+        ? _lines
+            .where((l) =>
+                l.qty > 0 &&
+                l.otherHeld > 0 &&
+                (l.d.boxQuantity - l.qty) < l.otherHeld)
+            .toList()
+        : const <_Line>[];
+
+    if (!await _confirmSheet(over, breaks)) return;
 
     setState(() => _saving = true);
     try {
-      final lines = _lines
-          .map((l) => {'design_id': l.d.id, 'dispatch': l.qty})
-          .toList();
-      final res = await _svc.dispatchWalkin(
-        lines,
-        customerId: _customersEnabled ? _custId : null,
-        customerName: _custNameCtrl.text.trim(),
-        invoice: _invoiceCtrl.text.trim(),
-        vehicle: _vehicleCtrl.text.trim(),
-        transporter: _transporterCtrl.text.trim(),
-        note: _noteCtrl.text.trim(),
-        date: _date,
-      );
+      // Only what's actually on the truck. Order rows left at 0 are omitted —
+      // prune=false means the server leaves them, and their remaining, alone.
+      final sent = _lines.where((l) => l.qty > 0).toList();
+      final lines =
+          sent.map((l) => {'design_id': l.d.id, 'dispatch': l.qty}).toList();
+      final total = _totalBoxes;
+
+      final order = _order;
+      final Map<String, dynamic> res;
+      if (order != null) {
+        res = await _svc.dispatchInquiry(
+          order.id,
+          lines,
+          invoiceNo: _invoiceCtrl.text.trim(),
+          vehicleNo: _vehicleCtrl.text.trim(),
+          transporter: _transporterCtrl.text.trim(),
+          note: _noteCtrl.text.trim(),
+          date: _date,
+          reduceStock: _reduceStock,
+          // A full dispatch always closes; a partial uses the chosen fate.
+          close: _remainingAfter == 0 ? true : _close,
+          prune: false, // these rows are the truck, not the whole order
+        );
+      } else {
+        res = await _svc.dispatchWalkin(
+          lines,
+          customerId: _customersEnabled ? _custId : null,
+          customerName: _custNameCtrl.text.trim(),
+          invoice: _invoiceCtrl.text.trim(),
+          vehicle: _vehicleCtrl.text.trim(),
+          transporter: _transporterCtrl.text.trim(),
+          note: _noteCtrl.text.trim(),
+          date: _date,
+        );
+      }
       if (!mounted) return;
+
       final no = (res['dispatch_no'] ?? '').toString();
-      _snack('Dispatch recorded${no.isNotEmpty ? ' ($no)' : ''} · $_totalBoxes boxes.');
+      final status = (res['status'] ?? '').toString();
+      final outstanding = (res['outstanding'] as num?)?.toInt() ?? 0;
+
+      final report = _buildReport(no, sent, total, outstanding, status);
+      await _showReportSheet(report, status, outstanding: outstanding);
+      if (!mounted) return;
+
       if (Navigator.of(context).canPop()) {
         Navigator.pop(context, true);
       } else {
         setState(() {
           _lines.clear();
+          _order = null;
+          _close = false;
+          _reduceStock = true;
           _saving = false;
         });
       }
@@ -623,6 +917,329 @@ class _State extends State<ManualDispatchScreen> {
       setState(() => _saving = false);
       _snack('$e', _red);
     }
+  }
+
+  /// One confirmation for everything: what's leaving, what it does to the order,
+  /// the over-stock and booking warnings, and — when an order is attached and a
+  /// stock mode was therefore chosen — a blinking notice of what that mode does,
+  /// with Record gated behind a 3-second countdown so it can't be hit by reflex.
+  Future<bool> _confirmSheet(List<_Line> over, List<_Line> breaks) async {
+    final attached = _order != null;
+    final modeMsg = _reduceStock
+        ? 'Quantity is reduced from Stock'
+        : 'Release quantity from Holding';
+    final modeDetail = _reduceStock
+        ? 'Your system stock will drop by the dispatched boxes.'
+        : 'Your system stock is NOT changed — only the held boxes are released. '
+            'Update your own stock count afterwards.';
+    final modeColor = _reduceStock ? _red : const Color(0xFF1565C0);
+
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) {
+        int countdown = attached ? 3 : 0;
+        bool visible = true;
+        Timer? blink;
+        Timer? tick;
+        return StatefulBuilder(builder: (ctx, setD) {
+          if (attached) {
+            blink ??= Timer.periodic(const Duration(milliseconds: 450), (t) {
+              if (!ctx.mounted) return t.cancel();
+              setD(() => visible = !visible);
+            });
+            tick ??= Timer.periodic(const Duration(seconds: 1), (t) {
+              if (!ctx.mounted) return t.cancel();
+              if (countdown <= 1) {
+                t.cancel();
+                setD(() => countdown = 0);
+              } else {
+                setD(() => countdown--);
+              }
+            });
+          }
+          void close(bool v) {
+            blink?.cancel();
+            tick?.cancel();
+            Navigator.pop(ctx, v);
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        'Dispatch $_loadedCount design${_loadedCount == 1 ? '' : 's'} · '
+                        '$_totalBoxes boxes'
+                        '${attached ? ' for $_buyerLabel' : (_custNameCtrl.text.trim().isNotEmpty ? ' to ${_custNameCtrl.text.trim()}' : '')}?',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
+                    if (attached) ...[
+                      const SizedBox(height: 8),
+                      Text('Order ${_order!.token}',
+                          style: const TextStyle(fontSize: 12.5)),
+                      const SizedBox(height: 4),
+                      Text(
+                          _remainingAfter == 0
+                              ? 'Nothing left on the order — it will be completed.'
+                              : _close
+                                  ? '$_remainingAfter box${_remainingAfter == 1 ? '' : 'es'} left over — '
+                                      'the order will be CLOSED and they are released.'
+                                  : '$_remainingAfter box${_remainingAfter == 1 ? '' : 'es'} left over — '
+                                      'the order stays OPEN and they stay reserved.',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade700)),
+                      const SizedBox(height: 12),
+                      AnimatedOpacity(
+                        opacity: visible ? 1 : 0.15,
+                        duration: const Duration(milliseconds: 200),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: modeColor.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: modeColor),
+                          ),
+                          child: Text(modeMsg,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: modeColor)),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(modeDetail,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade700)),
+                    ],
+                    if (over.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                          '${over.length} line${over.length == 1 ? '' : 's'} exceed current stock — '
+                          'allowed, stock floors at 0:',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.orange.shade800)),
+                      for (final l in over)
+                        Text('• ${l.d.name}: ${l.qty} > ${l.d.boxQuantity}',
+                            style: TextStyle(
+                                fontSize: 11.5, color: Colors.orange.shade800)),
+                    ],
+                    if (breaks.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                          '${breaks.length} design${breaks.length == 1 ? '' : 's'} would be left '
+                          'short of boxes already committed to other buyers:',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.orange.shade800)),
+                      for (final l in breaks)
+                        Text(
+                            '• ${l.d.name}: ${(l.d.boxQuantity - l.qty).clamp(0, 1 << 30)} left '
+                            'vs ${l.otherHeld} booked',
+                            style: TextStyle(
+                                fontSize: 11.5, color: Colors.orange.shade800)),
+                    ],
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => close(false),
+                          child: const Text('Back'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: countdown > 0 ? null : () => close(true),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: _red,
+                              foregroundColor: Colors.white),
+                          child: Text(countdown > 0
+                              ? 'Record Dispatch ($countdown)'
+                              : 'Record Dispatch'),
+                        ),
+                      ),
+                    ]),
+                  ],
+                ),
+              ),
+            ),
+          );
+        });
+      },
+    );
+    return ok == true;
+  }
+
+  // ── Buyer report ─────────────────────────────────────────────────────────────
+
+  /// Phone to WhatsApp the report to: the order's buyer, else the saved customer.
+  /// Empty when neither has one — then Copy is the only option.
+  (String, String) get _reportPhone {
+    final o = _order;
+    if (o != null) return (o.countryCode, o.phone);
+    if (_customersEnabled && _custId != null) {
+      for (final c in _customers) {
+        if ((c['id'] ?? '').toString() == _custId) {
+          return (
+            (c['country_code'] ?? '').toString(),
+            (c['phone'] ?? '').toString()
+          );
+        }
+      }
+    }
+    return ('', '');
+  }
+
+  String _buildReport(String dispatchNo, List<_Line> sent, int total,
+      int outstanding, String status) {
+    final o = _order;
+    final b = StringBuffer();
+    if (o != null) {
+      b.writeln('Dispatch update — Order ${o.token}');
+    } else {
+      final who = _custNameCtrl.text.trim();
+      b.writeln('Dispatch${who.isEmpty ? '' : ' — $who'}');
+    }
+    if (dispatchNo.isNotEmpty) b.writeln('Dispatch No: $dispatchNo');
+    b.writeln('Date: ${_fmtDate(_date)}');
+    if (_invoiceCtrl.text.trim().isNotEmpty) {
+      b.writeln('Invoice No: ${_invoiceCtrl.text.trim()}');
+    }
+    if (_vehicleCtrl.text.trim().isNotEmpty) {
+      b.writeln('Vehicle No: ${_vehicleCtrl.text.trim()}');
+    }
+    if (_transporterCtrl.text.trim().isNotEmpty) {
+      b.writeln('Transporter: ${_transporterCtrl.text.trim()}');
+    }
+    b.writeln();
+    b.writeln('Dispatched now:');
+    for (var i = 0; i < sent.length; i++) {
+      final l = sent[i];
+      b.writeln(
+          '${i + 1}. ${l.d.name} (${l.d.size.replaceAll(' mm', '')}) — ${l.qty} boxes');
+    }
+    b.writeln('Total dispatched: $total boxes');
+    if (o != null && outstanding > 0) {
+      b.writeln(status == 'completed'
+          ? 'Remaining $outstanding boxes: not included — please place a new '
+              'order if you still need them.'
+          : 'Balance $outstanding boxes: reserved for you, coming in a later '
+              'dispatch.');
+    }
+    if (_noteCtrl.text.trim().isNotEmpty) {
+      b.writeln();
+      b.writeln('Note: ${_noteCtrl.text.trim()}');
+    }
+    return b.toString();
+  }
+
+  /// Preview the report, then Copy (always) or WhatsApp (only with a number).
+  /// ([[feedback_copy_when_no_whatsapp]])
+  ///
+  /// [outstanding] separates the two ways an order reaches 'completed': nothing
+  /// left (finished) versus closed short with boxes released.
+  Future<void> _showReportSheet(String report, String status,
+      {int outstanding = 0}) async {
+    final (code, phone) = _reportPhone;
+    final hasPhone = phone.trim().isNotEmpty;
+    final digits = '$code$phone'.replaceAll(RegExp(r'[^0-9]'), '');
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            16, 16, 16, 16 + MediaQuery.of(ctx).viewPadding.bottom),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+              const SizedBox(width: 8),
+              Text(
+                  status != 'completed'
+                      ? 'Dispatch recorded'
+                      : outstanding > 0
+                          ? 'Order closed · $outstanding released'
+                          : 'Order completed',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
+            ]),
+            const SizedBox(height: 10),
+            Text(
+                _order != null
+                    ? 'Dispatch report for the buyer:'
+                    : 'Dispatch report:',
+                style: const TextStyle(fontSize: 12.5)),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxHeight: 260),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: SingleChildScrollView(
+                child: Text(report,
+                    style: const TextStyle(fontSize: 12.5, height: 1.5)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: report));
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (mounted) _snack('Report copied — paste it into your chat.');
+                  },
+                  icon: const Icon(Icons.copy, size: 18),
+                  label: const Text('Copy report'),
+                  style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 13)),
+                ),
+              ),
+              if (hasPhone) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final uri = Uri.parse(
+                          'https://wa.me/$digits?text=${Uri.encodeComponent(report)}');
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                    icon: const Icon(Icons.chat_rounded, size: 18),
+                    label: const Text('WhatsApp'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF25D366),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                    ),
+                  ),
+                ),
+              ],
+            ]),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Done')),
+          ],
+        ),
+      ),
+    );
   }
 
   static const _months = [
@@ -664,6 +1281,7 @@ class _State extends State<ManualDispatchScreen> {
         labelText: l,
         isDense: true,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)));
+    final attached = _order != null;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -671,44 +1289,50 @@ class _State extends State<ManualDispatchScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Customer & dispatch details',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            Text(attached ? 'Order & dispatch details' : 'Customer & dispatch details',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
             const SizedBox(height: 10),
-            if (_customersEnabled)
-              InkWell(
-                onTap: _pickCustomer,
-                borderRadius: BorderRadius.circular(8),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-                  decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade400),
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Row(children: [
-                    const Icon(Icons.person_outline, size: 18, color: _navy),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                          _custNameCtrl.text.trim().isEmpty
-                              ? 'Select or add customer (optional)'
-                              : _custNameCtrl.text.trim(),
-                          style: TextStyle(
-                              fontSize: 14,
-                              color: _custNameCtrl.text.trim().isEmpty
-                                  ? Colors.grey.shade500
-                                  : Colors.black87)),
-                    ),
-                    Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
-                  ]),
+            _orderField(),
+            const SizedBox(height: 10),
+            // While attached the order names the buyer, and dispatch_inquiry
+            // ignores customer_id — so a Customer field here would lie.
+            if (!attached) ...[
+              if (_customersEnabled)
+                InkWell(
+                  onTap: _pickCustomer,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                    decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade400),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Row(children: [
+                      const Icon(Icons.person_outline, size: 18, color: _navy),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                            _custNameCtrl.text.trim().isEmpty
+                                ? 'Select or add customer (optional)'
+                                : _custNameCtrl.text.trim(),
+                            style: TextStyle(
+                                fontSize: 14,
+                                color: _custNameCtrl.text.trim().isEmpty
+                                    ? Colors.grey.shade500
+                                    : Colors.black87)),
+                      ),
+                      Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
+                    ]),
+                  ),
+                )
+              else
+                TextField(
+                  controller: _custNameCtrl,
+                  onChanged: (_) => setState(() {}),
+                  decoration: dec('Customer name (optional)'),
                 ),
-              )
-            else
-              TextField(
-                controller: _custNameCtrl,
-                onChanged: (_) => setState(() {}),
-                decoration: dec('Customer name (optional)'),
-              ),
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
+            ],
             Row(children: [
               Expanded(
                   child: TextField(
@@ -751,9 +1375,177 @@ class _State extends State<ManualDispatchScreen> {
                 controller: _noteCtrl,
                 maxLines: 2,
                 decoration: dec('Note (optional)')),
+            if (attached) ...[
+              const SizedBox(height: 14),
+              Text('What this does to stock',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey.shade600)),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: _fateChip(
+                      label: 'Reduce stock',
+                      sub: 'P drops by the boxes',
+                      selected: _reduceStock,
+                      color: _red,
+                      onTap: () => setState(() => _reduceStock = true)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _fateChip(
+                      label: 'Release hold only',
+                      sub: 'stock unchanged',
+                      selected: !_reduceStock,
+                      color: const Color(0xFF1565C0),
+                      onTap: () => setState(() => _reduceStock = false)),
+                ),
+              ]),
+              const SizedBox(height: 14),
+              Text('Boxes left on the order',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey.shade600)),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: _fateChip(
+                      label: 'Keep open',
+                      sub: 'stay reserved',
+                      selected: !_close,
+                      color: _navy,
+                      onTap: () => setState(() => _close = false)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _fateChip(
+                      label: 'Close order',
+                      sub: 'released',
+                      selected: _close,
+                      color: _red,
+                      onTap: () => setState(() => _close = true)),
+                ),
+              ]),
+            ],
           ],
         ),
       ),
+    );
+  }
+
+  Widget _fateChip({
+    required String label,
+    required String sub,
+    required bool selected,
+    required Color color,
+    required VoidCallback onTap,
+  }) =>
+      InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            color: selected ? color.withValues(alpha: 0.08) : null,
+            border: Border.all(
+                color: selected ? color : Colors.grey.shade400,
+                width: selected ? 1.6 : 1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(children: [
+            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                size: 16, color: selected ? color : Colors.grey.shade500),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(label,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: selected ? color : Colors.black87)),
+                  Text(sub,
+                      style: TextStyle(
+                          fontSize: 10.5, color: Colors.grey.shade600)),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      );
+
+  /// Attach / show / detach the order this dispatch is against.
+  Widget _orderField() {
+    if (_busyOrder) {
+      return Container(
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade400),
+            borderRadius: BorderRadius.circular(8)),
+        child: const SizedBox(
+            width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    final o = _order;
+    if (o == null) {
+      return InkWell(
+        onTap: _pickOrder,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+          decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade400),
+              borderRadius: BorderRadius.circular(8)),
+          child: Row(children: [
+            const Icon(Icons.link, size: 18, color: _navy),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('Attach an order (optional)',
+                  style: TextStyle(fontSize: 14, color: Colors.grey.shade500)),
+            ),
+            Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
+          ]),
+        ),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+      decoration: BoxDecoration(
+          color: _navy.withValues(alpha: 0.05),
+          border: Border.all(color: _navy.withValues(alpha: 0.5)),
+          borderRadius: BorderRadius.circular(8)),
+      child: Row(children: [
+        const Icon(Icons.receipt_long, size: 18, color: _navy),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                  [o.token, if (o.connectionCode.isNotEmpty) o.connectionCode]
+                      .join('  ·  '),
+                  style: const TextStyle(
+                      fontSize: 13.5, fontWeight: FontWeight.w700, color: _navy)),
+              const SizedBox(height: 1),
+              Text(_buyerLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: 'Detach order',
+          icon: Icon(Icons.link_off, size: 20, color: Colors.grey.shade600),
+          onPressed: _detachOrder,
+        ),
+      ]),
     );
   }
 
@@ -813,7 +1605,7 @@ class _State extends State<ManualDispatchScreen> {
           else ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text('${_lines.length} to dispatch · $_totalBoxes boxes',
+              child: Text('$_loadedCount to dispatch · $_totalBoxes boxes',
                   style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
@@ -825,14 +1617,31 @@ class _State extends State<ManualDispatchScreen> {
         ],
       );
 
+  /// Second line of a row: the holding, what the order expects of it, and how
+  /// many boxes are already promised to OTHER buyers.
+  String _detailsFor(_Line l) {
+    final base = '${_holdingLabel(l.d)} · ${l.d.boxQuantity} stock';
+    final booked = l.otherHeld > 0 ? ' · ${l.otherHeld} booked' : '';
+    if (!l.onOrder) return '$base$booked';
+    final sent = l.done > 0 ? ', ${l.done} sent' : '';
+    return '$base · ordered ${l.ordered}$sent · ${l.remainingAfter} left$booked';
+  }
+
   Widget _lineTile(int i) {
     final l = _lines[i];
     final over = l.qty > l.d.boxQuantity;
+    final idle = l.qty == 0; // an order row not on this truck
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
         child: Row(children: [
+          if (l.onOrder)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Icon(Icons.receipt_long,
+                  size: 15, color: _navy.withValues(alpha: idle ? 0.35 : 0.8)),
+            ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -840,12 +1649,12 @@ class _State extends State<ManualDispatchScreen> {
                 Text(l.d.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 14)),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: idle ? Colors.grey.shade500 : Colors.black87)),
                 const SizedBox(height: 2),
-                Text(
-                    '${_holdingLabel(l.d)} · ${l.d.boxQuantity} stock'
-                    '${over ? ' · over!' : ''}',
+                Text('${_detailsFor(l)}${over ? ' · over!' : ''}',
                     style: TextStyle(
                         fontSize: 11.5,
                         color: over ? _red : Colors.grey.shade600)),
@@ -858,16 +1667,22 @@ class _State extends State<ManualDispatchScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                  color: _red.withValues(alpha: 0.07),
+                  color: (idle ? Colors.grey : _red).withValues(alpha: 0.07),
                   borderRadius: BorderRadius.circular(6)),
               child: Text('${l.qty}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15, color: _red)),
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: idle ? Colors.grey.shade500 : _red)),
             ),
           ),
           IconButton(
-            icon: Icon(Icons.delete_outline, size: 20, color: Colors.red.shade400),
-            onPressed: () => setState(() => _lines.removeAt(i)),
+            tooltip: l.onOrder ? 'Take off this truck' : 'Remove',
+            icon: Icon(
+                l.onOrder ? Icons.remove_circle_outline : Icons.delete_outline,
+                size: 20,
+                color: idle ? Colors.grey.shade400 : Colors.red.shade400),
+            onPressed: idle ? null : () => _removeLine(i),
           ),
         ]),
       ),
@@ -875,145 +1690,202 @@ class _State extends State<ManualDispatchScreen> {
   }
 
   // ── Desktop layout ───────────────────────────────────────────────────────────
+  //
+  // Two panes. The left one is the work area and the table inside it takes every
+  // pixel left over, because that's what the stockist is actually reading. The
+  // right one is a fixed column of settings that scrolls on its own. Stacking
+  // them (as this screen used to) squeezed the table to nothing on a laptop.
 
-  Widget _desktopBody() => Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: _detailsCard(),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: _hField(
-                          'Design',
-                          _hSelect(
-                              _sel == null
-                                  ? 'Search & select design'
-                                  : '${_sel!.name}  ·  ${_holdingLabel(_sel!)}  ·  ${_sel!.boxQuantity} stock',
-                              _pickDesign,
-                              _sel == null)),
-                    ),
-                    const SizedBox(width: 12),
-                    _hField('Qty (boxes)', _qtyField(), width: 120),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      height: 44,
-                      child: ElevatedButton.icon(
-                        onPressed: _addLine,
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('Add'),
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: _navy,
-                            foregroundColor: Colors.white),
-                      ),
-                    ),
-                  ],
-                ),
+  static const double _panelWidth = 400;
+
+  Widget _desktopBody() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                children: [
+                  _addBar(),
+                  const SizedBox(height: 10),
+                  Expanded(child: _desktopTable()),
+                ],
               ),
             ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: _desktopTable(),
-            ),
-          ),
-        ],
-      );
-
-  Widget _desktopTable() => Card(
-        margin: EdgeInsets.zero,
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: [
-            Container(
-              color: const Color(0xFFF3F5F8),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: _row('DESIGN', 'DETAILS', 'STOCK', 'QTY', header: true),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: _lines.isEmpty
-                  ? Center(
-                      child: Text('No designs added — pick one above and Add.',
-                          style: TextStyle(color: Colors.grey.shade500)))
-                  : ListView.separated(
-                      itemCount: _lines.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final l = _lines[i];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 8),
-                          child: _row(l.d.name, _holdingLabel(l.d),
-                              '${l.d.boxQuantity}', '${l.qty}',
-                              over: l.qty > l.d.boxQuantity,
-                              onQty: () => _editQty(l),
-                              onRemove: () =>
-                                  setState(() => _lines.removeAt(i))),
-                        );
-                      },
-                    ),
+            const SizedBox(width: 16),
+            SizedBox(
+              width: _panelWidth,
+              child: SingleChildScrollView(child: _detailsCard()),
             ),
           ],
         ),
       );
 
-  Widget _row(String design, String details, String stock, String qty,
-      {bool header = false, bool over = false, VoidCallback? onQty, VoidCallback? onRemove}) {
+  Widget _addBar() => Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: _hField(
+                    'Design',
+                    _hSelect(
+                        _sel == null
+                            ? 'Search & select design'
+                            : '${_sel!.name}  ·  ${_holdingLabel(_sel!)}  ·  ${_sel!.boxQuantity} stock',
+                        _pickDesign,
+                        _sel == null)),
+              ),
+              const SizedBox(width: 12),
+              _hField('Qty (boxes)', _qtyField(), width: 120),
+              const SizedBox(width: 12),
+              SizedBox(
+                height: 44,
+                child: ElevatedButton.icon(
+                  onPressed: _addLine,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Add'),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: _navy, foregroundColor: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _desktopTable() {
+    final attached = _order != null;
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Container(
+            color: const Color(0xFFF3F5F8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: _tableRow(null, attached),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _lines.isEmpty
+                ? Center(
+                    child: Text(
+                        attached
+                            ? 'This order has no lines.'
+                            : 'No designs added — pick one above and Add.',
+                        style: TextStyle(color: Colors.grey.shade500)))
+                : ListView.separated(
+                    itemCount: _lines.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, i) => Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 8),
+                      child: _tableRow(i, attached),
+                    ),
+                  ),
+          ),
+          const Divider(height: 1),
+          Container(
+            color: const Color(0xFFF3F5F8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(children: [
+              Text(
+                  '$_loadedCount line${_loadedCount == 1 ? '' : 's'} · $_totalBoxes boxes',
+                  style: const TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w700)),
+              if (attached) ...[
+                Text(' · ', style: TextStyle(color: Colors.grey.shade500)),
+                Text('$_remainingAfter left on order',
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+              ],
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One table row. [i] null = the header. [attached] adds the ORD / SENT
+  /// columns, which mean nothing without an order.
+  Widget _tableRow(int? i, bool attached) {
+    final header = i == null;
+    final l = header ? null : _lines[i];
+    final idle = l != null && l.qty == 0;
+    final over = l != null && l.qty > l.d.boxQuantity;
+
     final lab = TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w700,
         color: Colors.grey.shade600,
         letterSpacing: 0.4);
     const cell = TextStyle(fontSize: 13);
+    final dim = cell.copyWith(color: Colors.grey.shade700);
+
+    Widget numCell(String s, {double w = 62, Color? color}) => SizedBox(
+        width: w,
+        child: Text(s,
+            style: header
+                ? lab
+                : cell.copyWith(color: color ?? Colors.grey.shade700)));
+
     return Row(children: [
-      Expanded(
-          flex: 3,
-          child: Text(design,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: header ? lab : cell.copyWith(fontWeight: FontWeight.w600))),
-      Expanded(
-          flex: 3,
-          child: Text(details,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: header ? lab : cell.copyWith(color: Colors.grey.shade700))),
       SizedBox(
-          width: 70,
-          child: Text(stock,
+        width: 22,
+        child: header || !l!.onOrder
+            ? const SizedBox()
+            : Icon(Icons.receipt_long,
+                size: 14, color: _navy.withValues(alpha: idle ? 0.35 : 0.8)),
+      ),
+      Expanded(
+          flex: 3,
+          child: Text(header ? 'DESIGN' : l!.d.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: header
                   ? lab
-                  : cell.copyWith(color: over ? _red : Colors.grey.shade700))),
+                  : cell.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: idle ? Colors.grey.shade500 : Colors.black87))),
+      Expanded(
+          flex: 4,
+          child: Text(
+              header
+                  ? 'DETAILS'
+                  : '${_holdingLabel(l!.d)}'
+                      '${l.otherHeld > 0 ? ' · ${l.otherHeld} booked' : ''}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: header ? lab : dim)),
+      if (attached) ...[
+        numCell(header ? 'ORD' : '${l!.ordered ?? '—'}'),
+        numCell(header ? 'SENT' : '${l!.done}'),
+      ],
+      numCell(header ? 'STOCK' : '${l!.d.boxQuantity}',
+          color: over ? _red : null),
       SizedBox(
-        width: 90,
+        width: 84,
         child: header
-            ? Text(qty, style: lab, textAlign: TextAlign.right)
+            ? Text('QTY', style: lab, textAlign: TextAlign.right)
             : Align(
                 alignment: Alignment.centerRight,
                 child: InkWell(
-                  onTap: onQty,
+                  onTap: () => _editQty(l),
                   borderRadius: BorderRadius.circular(6),
                   child: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                        color: _red.withValues(alpha: 0.07),
+                        color:
+                            (idle ? Colors.grey : _red).withValues(alpha: 0.07),
                         borderRadius: BorderRadius.circular(6)),
-                    child: Text(qty,
-                        style: const TextStyle(
+                    child: Text('${l!.qty}',
+                        style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
-                            color: _red)),
+                            color: idle ? Colors.grey.shade500 : _red)),
                   ),
                 ),
               ),
@@ -1023,9 +1895,14 @@ class _State extends State<ManualDispatchScreen> {
         child: header
             ? const SizedBox()
             : IconButton(
-                icon: Icon(Icons.delete_outline,
-                    size: 20, color: Colors.red.shade400),
-                onPressed: onRemove,
+                tooltip: l!.onOrder ? 'Take off this truck' : 'Remove',
+                icon: Icon(
+                    l.onOrder
+                        ? Icons.remove_circle_outline
+                        : Icons.delete_outline,
+                    size: 20,
+                    color: idle ? Colors.grey.shade400 : Colors.red.shade400),
+                onPressed: idle ? null : () => _removeLine(i),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints()),
       ),

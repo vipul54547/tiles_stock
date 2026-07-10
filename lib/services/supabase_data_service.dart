@@ -2551,6 +2551,17 @@ class SupabaseDataService {
   ///   false → keep the order open ('dispatching', a "Part-N"), the remaining
   ///           stays reserved/held → the buyer just waits for the next lot.
   /// (project_dispatch_order_redesign — "order remaining" model)
+  ///
+  /// [prune] says whether [lines] is the WHOLE order or just this truck.
+  ///   true  → lines is the complete order; anything missing from it is deleted
+  ///           from the order.
+  ///   false → lines is only what is being dispatched now; untouched order lines
+  ///           stay on the order with their remaining intact.
+  /// ManualDispatchScreen — the one dispatch screen — always passes false: its
+  /// rows are "what's on the truck", so true would silently delete the order's
+  /// un-dispatched lines. Order lines are edited in Inquiries, not here. No
+  /// caller passes true today; the default stays for safety.
+  /// (project_unified_dispatch_customers — attach-order)
   Future<Map<String, dynamic>> dispatchInquiry(
     String id,
     List<Map<String, dynamic>> lines, {
@@ -2561,6 +2572,7 @@ class SupabaseDataService {
     DateTime? date,
     bool reduceStock = true,
     bool close = true,
+    bool prune = true,
   }) async {
     try {
       final res = await supabase.rpc('dispatch_inquiry', params: {
@@ -2573,6 +2585,7 @@ class SupabaseDataService {
         'p_date': (date ?? DateTime.now()).toIso8601String().substring(0, 10),
         'p_reduce_stock': reduceStock,
         'p_close': close,
+        'p_prune': prune,
       });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {

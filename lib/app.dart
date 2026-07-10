@@ -34,7 +34,6 @@ import 'screens/end_user/inquiry_screen.dart';
 
 import 'screens/stockist/stockist_dashboard_screen.dart';
 import 'screens/stockist/inquiries_screen.dart';
-import 'screens/stockist/dispatch_inquiry_screen.dart';
 
 import 'screens/stockist/add_edit_stock_screen.dart';
 import 'screens/stockist/add_stock_batch_screen.dart';
@@ -191,20 +190,6 @@ final GoRouter _router = GoRouter(
         GoRoute(
             path: '/stockist/inquiries',
             builder: (_, __) => const InquiriesScreen()),
-        GoRoute(
-          path: '/stockist/inquiry/dispatch',
-          builder: (_, state) {
-            final e = (state.extra as Map?) ?? const {};
-            return DispatchInquiryScreen(
-              inquiryId: (e['id'] ?? '').toString(),
-              token: e['token']?.toString(),
-              company: e['company']?.toString(),
-              phone: e['phone']?.toString(),
-              countryCode: e['country_code']?.toString(),
-              reduceStock: e['reduce_stock'] as bool?,
-            );
-          },
-        ),
         // "+ Add → Stock" — batch manual stock entry (P_Stock only, no list).
         GoRoute(
             path: '/stockist/stock/add',
@@ -241,9 +226,17 @@ final GoRouter _router = GoRouter(
           builder: (_, state) =>
               ImportExcelStockScreen(initialBrandId: state.extra as String?),
         ),
+        // The ONE dispatch screen. Opened empty (walk-in) from the dashboard, or
+        // with an order pre-attached from Inquiries → Dispatch.
         GoRoute(
           path: '/stockist/dispatch/manual',
-          builder: (_, __) => const ManualDispatchScreen(),
+          builder: (_, state) {
+            final e = (state.extra as Map?) ?? const {};
+            return ManualDispatchScreen(
+              orderId: e['id']?.toString(),
+              reduceStock: e['reduce_stock'] as bool?,
+            );
+          },
         ),
         GoRoute(
           path: '/stockist/dispatches',

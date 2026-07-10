@@ -1094,89 +1094,16 @@ class _State extends State<InquiriesScreen> {
     await _run(() => _data.unholdOrder(o.id), '${o.token} released.');
   }
 
+  /// Opens the one dispatch screen with this order pre-attached. The stock mode
+  /// is no longer asked up-front — it's a radio pair on that screen, confirmed
+  /// there behind the blinking countdown. (project_unified_dispatch_customers)
   Future<void> _dispatch(InquiryOrder o) async {
-    // Ask the mode BEFORE opening the dispatch page — no silent default.
-    final reduce = await _askDispatchMode(o);
-    if (reduce == null || !mounted) return; // cancelled
-    final changed = await context.push<bool>('/stockist/inquiry/dispatch', extra: {
+    final changed = await context.push<bool>('/stockist/dispatch/manual', extra: {
       'id': o.id,
-      'token': o.token,
-      'company': o.company,
-      'phone': o.phone,
-      'country_code': o.countryCode,
-      'reduce_stock': reduce,
     });
     if (changed == true && mounted) _load();
   }
 
-  // Mode chooser shown on Dispatch tap. Returns true = reduce from stock, false =
-  // release holding only, null = cancelled. No option is pre-selected.
-  Future<bool?> _askDispatchMode(InquiryOrder o) {
-    Widget option(String title, String body, IconData icon, Color color,
-            bool reduce) =>
-        InkWell(
-          onTap: () => Navigator.pop(context, reduce),
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            width: double.infinity,
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              border: Border.all(color: color.withValues(alpha: 0.5)),
-              borderRadius: BorderRadius.circular(10),
-              color: color.withValues(alpha: 0.05),
-            ),
-            child: Row(children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: color)),
-                    const SizedBox(height: 2),
-                    Text(body,
-                        style: TextStyle(
-                            fontSize: 11.5, color: Colors.grey.shade700)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
-            ]),
-          ),
-        );
-    return showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Dispatch ${o.token}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('How should this dispatch affect stock?',
-                  style: TextStyle(fontSize: 13)),
-            ),
-            const SizedBox(height: 12),
-            option('Reduce from stock',
-                'Physical stock (P) drops by the dispatched boxes.',
-                Icons.inventory_2_outlined, const Color(0xFFC62828), true),
-            option('Release holding only',
-                'Your stock is unchanged — only the held boxes are freed. Update your own count.',
-                Icons.lock_open_outlined, const Color(0xFF1565C0), false),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-        ],
-      ),
-    );
-  }
 
   Future<void> _reject(InquiryOrder o) async {
     final ok = await _confirm('Reject ${o.token}?',
