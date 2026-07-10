@@ -294,8 +294,8 @@ class _State extends State<StockistBrandListsScreen> {
         const SizedBox(height: 4),
         Text(
             'Attribute: the design name is the print ("Satva White") and the '
-            'glaze (Glossy / Matt / Carving) is picked when stock is added.\n'
-            'In name: the glaze is already written into the design name '
+            'surface (Glossy / Matt / Carving) is picked when stock is added.\n'
+            'In name: the surface is already written into the design name '
             '("m.satva white") — stock never asks for it.',
             style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
       ],
@@ -306,13 +306,15 @@ class _State extends State<StockistBrandListsScreen> {
     final current = (b['surface_mode'] ?? 'in_name').toString();
     if (mode == current) return;
     final ok = await _confirm(
-      mode == 'attribute' ? 'Pick the glaze when adding stock?' : 'Glaze is in the name?',
+      mode == 'attribute'
+          ? 'Pick the surface when adding stock?'
+          : 'Surface is in the name?',
       mode == 'attribute'
           ? 'Adding stock for "${b['name']}" will ask for a surface '
               '(Glossy / Matt / Carving). The design itself stays the print — '
-              'one design, one photo, one entry per glaze in stock.'
+              'one design, one photo, one entry per surface in stock.'
           : 'Adding stock for "${b['name']}" will not ask for a surface. The '
-              'glaze must already be written into the design name.',
+              'surface must already be written into the design name.',
     );
     if (!ok) return;
     setState(() => _saving = true);

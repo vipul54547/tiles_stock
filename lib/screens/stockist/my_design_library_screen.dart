@@ -1056,7 +1056,7 @@ class _State extends State<MyDesignLibraryScreen> {
     final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
     final titleName = showBrandName ? brandAlias : e.masterName;
     final dnaTags = _dnaTags[e.id] ?? const <String>[];
-    // Size only — the library holds the print; the glaze lives on the stock.
+    // Size only — the library holds the print; the surface lives on the stock.
     final sizeLine = e.size.replaceAll(' mm', '');
     return Container(
       decoration: BoxDecoration(
@@ -1569,7 +1569,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
           orElse: () => _defaultBrand.id);
 
   /// The library stores the PRINT, not the finished tile: "Satva White" is one
-  /// artwork file, run onto whatever glaze the factory schedules. The glaze is
+  /// artwork file, run onto whatever surface the factory schedules. The surface is
   /// chosen when stock is made (see `stock_add_holding`, whose holding key is
   /// library_id + brand_id + quality + surface_type), so a print carries no
   /// surface and this editor never asks for one.
@@ -2033,8 +2033,8 @@ class _EditorState extends State<_LibraryEditorScreen> {
             'ask for quality and quantity.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         const SizedBox(height: 10),
-        // No surface here: the library holds the PRINT. The glaze is picked when
-        // stock is added. (project_per_brand_surface_mode)
+        // No surface here: the library holds the PRINT. The surface is picked
+        // when stock is added. (project_per_brand_surface_mode)
         _dropdown('Tile type', kTileTypes, _tileType,
             (v) => setState(() {
                   _tileType = v ?? _tileType;

@@ -27,9 +27,9 @@ class Brand {
   final DateTime? deleteScheduledAt;
 
   /// How this brand handles surface (project_per_brand_surface_mode):
-  /// 'attribute' → surface is a real, required attribute shown with the name and
-  /// part of identity; 'in_name' → surface is baked into the design name, no
-  /// separate surface field (default).
+  /// 'attribute' → surface is a real, required field on the stock row, picked
+  /// when stock is added; 'in_name' → surface is baked into the design name, no
+  /// separate surface field (default). Identity lives in the library, not here.
   final String surfaceMode;
 
   const Brand({

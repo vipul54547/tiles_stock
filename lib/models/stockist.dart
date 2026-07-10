@@ -94,15 +94,15 @@ class Stockist {
   /// (project_unified_dispatch_customers)
   final bool customersEnabled;
 
-  /// How this stockist's own factory names tiles: 'attribute' (glaze picked
-  /// separately when stock is added) or 'in_name' (glaze written into the design
-  /// name). Only meaningful for M — an M IS the factory, so the convention is
-  /// company-wide and its brands are just alternate names for the same print.
-  /// T/W stockists carry other factories' brands and use `Brand.surfaceMode`.
-  /// (project_per_brand_surface_mode)
+  /// How this stockist's own factory names tiles: 'attribute' (surface picked
+  /// separately when stock is added) or 'in_name' (surface written into the
+  /// design name). Only meaningful for M — an M IS the factory, so the
+  /// convention is company-wide and its brands are just alternate names for the
+  /// same print. T/W stockists carry other factories' brands and use
+  /// `Brand.surfaceMode`. (project_per_brand_surface_mode)
   final String surfaceMode;
 
-  /// Stock entry must ask for a real glaze (M only — see [surfaceMode]).
+  /// Stock entry must ask for a surface (M only — see [surfaceMode]).
   bool get usesSurface => surfaceMode == 'attribute';
 
   final DateTime createdAt;

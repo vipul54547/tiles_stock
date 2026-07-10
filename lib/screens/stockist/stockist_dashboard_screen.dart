@@ -80,7 +80,7 @@ class _State extends State<StockistDashboardScreen> {
 
   // Design DNA "special search" facets — admin canonical attribute/value catalog
   // (non-free-text) + each design's tagged value ids, so the filter can offer
-  // Punch/Glaze/Look/… chips alongside the structured facets. (project_design_dna_engine)
+  // Punch/Look/Colour/… chips alongside the structured facets. (project_design_dna_engine)
   List<DnaAttribute> _dnaAttrs = [];           // catalog, for facet chips
   Map<String, Set<String>> _dnaValues = {};    // designId → canonical value ids
   final Set<String> _selectedDna = {};         // selected canonical value ids
@@ -2507,7 +2507,7 @@ class _State extends State<StockistDashboardScreen> {
                             child: chipWrap(colours, localColours),
                           ),
                         // ── Design DNA "special search" facets ────────────────
-                        // One section per admin attribute (Punch/Glaze/Look/…),
+                        // One section per admin attribute (Punch/Look/Colour/…),
                         // showing only values tagged on the in-stock pool.
                         ...dnaFacets.map((attr) {
                           final vals = attr.values

@@ -56,7 +56,7 @@ class AdminPanelScreen extends StatelessWidget {
           _adminCard(
             Icons.science_outlined,
             'Manage Design DNA',
-            'Searchable attributes (Punch, Glaze, Colour…) + Finishes & Sizes',
+            'Searchable attributes (Punch, Look Type, Colour…) + Finishes & Sizes',
             const Color(0xFFB9770E),
             onTap: () => context.push('/admin/design-dna'),
           ),

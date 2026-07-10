@@ -217,7 +217,7 @@ class _State extends State<ManualDispatchScreen> {
     return m.isEmpty ? '' : m.first.name;
   }
 
-  /// The glaze this holding was made on, or '' when it has none. No brand-mode
+  /// The surface this holding was made on, or '' when it has none. No brand-mode
   /// The stockist's own word for the surface + admin canonical in brackets,
   /// e.g. "Goldenseries (Glossy)". '' when None. (project_per_brand_surface_mode)
   String _surfaceOf(TileDesign d) => d.surfaceCardLabel;

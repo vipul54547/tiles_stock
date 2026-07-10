@@ -458,7 +458,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   bool _canPrivate = false; // may create private (Most Exclusive) catalogs
   bool _tdShow = false; // show the TilesDesign mark on this stockist's banners
   bool _customersEnabled = false; // may save customers on dispatch (opt-in)
-  String _surfaceMode = 'in_name'; // M only: company-wide glaze convention
+  String _surfaceMode = 'in_name'; // M only: company-wide surface convention
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   // Per-stockist cap on brand-free stock lists (v2 — lists are no longer under a
@@ -667,8 +667,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     );
   }
 
-  // M only. The library stores the PRINT ("Satva White"); the glaze is chosen
-  // when stock is added. This decides whether Add Stock asks for the glaze.
+  // M only. The library stores the PRINT ("Satva White"); the surface is chosen
+  // when stock is added. This decides whether Add Stock asks for the surface.
   // (project_per_brand_surface_mode)
   Widget _surfaceModeControl() {
     var mode = ['attribute', 'in_name'].contains(_surfaceMode)
@@ -718,8 +718,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
           const SizedBox(height: 4),
           Text(
               'Attribute: the design name is the print ("Satva White") and the '
-              'glaze (Glossy / Matt / Carving) is picked when stock is added.\n'
-              'In name: the glaze is already written into the design name '
+              'surface (Glossy / Matt / Carving) is picked when stock is added.\n'
+              'In name: the surface is already written into the design name '
               '("m.satva white") — stock never asks for it.\n'
               'Applies to all of this manufacturer\'s brands — they are just '
               'different names for the same print.',
@@ -1066,7 +1066,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                     onChanged: (v) => setState(() => _tdShow = v),
                   ),
                 ),
-              // An M stockist IS the factory, so the glaze convention is
+              // An M stockist IS the factory, so the surface convention is
               // company-wide: one setting, not one per brand (its brands are
               // just alternate names for the same print). T/W sets it per brand
               // on the Brands screen. (project_per_brand_surface_mode)

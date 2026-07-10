@@ -149,8 +149,8 @@ class _State extends State<AddStockBatchScreen> {
     return m.isEmpty ? '' : m.first.name;
   }
 
-  // ── Surface / glaze (project_per_brand_surface_mode) ──────────────────────
-  // The library holds the PRINT; the glaze is chosen HERE, when the tile is
+  // ── Surface (project_per_brand_surface_mode) ──────────────────────────────
+  // The library holds the PRINT; the surface is chosen HERE, when the tile is
   // made. Whether we ask for it is the FACTORY's convention:
   //   M   → the stockist IS the factory; its brands are alternate names for the
   //         same print, so one setting covers them all.
@@ -173,9 +173,9 @@ class _State extends State<AddStockBatchScreen> {
       _selMaster != null && _usesSurface(_selMaster!, _isM ? _selBrandId : null);
 
   /// Whether to SHOW the surface picker at all. Attribute → required. in_name →
-  /// optional (with a 'None' choice): the stockist may tag a surface, which the
-  /// server stores as the print's Surface DNA value so buyers can still filter
-  /// it — the verbatim name is never touched.
+  /// optional (with a 'None' choice): the stockist may still tag a surface, and
+  /// it lands on the holding row like any other — surface_label (their word) +
+  /// surface_type (admin canonical). The verbatim design name is never touched.
   /// (project_per_brand_surface_mode / project_design_name_is_verbatim_truth)
   bool get _selShowSurface => _selMaster != null;
 
@@ -289,7 +289,7 @@ class _State extends State<AddStockBatchScreen> {
                                                         Colors.grey.shade200)),
                                   ),
                                   title: Text(m.masterName),
-                                  // A print has no glaze — size only.
+                                  // A print has no surface — size only.
                                   subtitle: Text(m.size.replaceAll(' mm', '')),
                                   onTap: () => Navigator.pop(ctx, m),
                                 );

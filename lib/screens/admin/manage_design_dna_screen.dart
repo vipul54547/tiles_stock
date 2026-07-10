@@ -4,7 +4,8 @@ import '../../models/dna.dart';
 import '../../services/supabase_data_service.dart';
 
 /// Admin master list of "Design DNA" — the searchable design attributes. Each
-/// attribute (Punch, Glaze, Look Type, Colour…) has its own canonical values.
+/// attribute (Punch, Look Type, Colour…) has its own canonical values. Surface
+/// is NOT a DNA attribute — it lives on the stock row (project_per_brand_surface_mode).
 /// Fully dynamic: add/edit/delete attributes AND values anytime. Stockists map
 /// their wording to these; buyers search on them. (project_design_dna_engine)
 class ManageDesignDnaScreen extends StatefulWidget {
@@ -413,7 +414,7 @@ class _AddAttributeDialogState extends State<_AddAttributeDialog> {
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(
                 labelText: 'Attribute name',
-                hintText: 'e.g. Punch, Glaze, Use Type',
+                hintText: 'e.g. Punch, Look Type, Use Type',
                 border: OutlineInputBorder()),
           ),
           const SizedBox(height: 6),
