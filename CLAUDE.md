@@ -40,8 +40,16 @@ Don't infer a function's signature from its call site.
 ## Vocabulary (these are load-bearing — the DB uses them)
 
 - **surface** — never "glaze". Every stock row carries both `surface_label` (the stockist's own
-  word, e.g. "Sugar") and `surface_type` (admin canonical). Stockist-facing UI shows their word;
-  buyer-facing filters use the canonical.
+  word, e.g. "Raindrop") and `surface_type` (admin canonical, e.g. "Sugar"). Cards everywhere read
+  `Raindrop (Sugar)`. Filters split by audience: stockist UI and the `/s/` link (one stockist)
+  filter on the **word**; the buyer app (many stockists) filters on the **canonical**.
+- **surface_mode** — only an **M** has one (`stockists.surface_mode`), because an M *is* the factory
+  and its brands are alternate names for one print. **T/W has none**: it carries other factories'
+  brands and records whatever the dispatch note said, so Add Stock always offers the picker with a
+  `None` choice. `brands.surface_mode` still exists but nothing reads it. A brand's convention is
+  read off that factory's dispatch note — surface in its own column vs. inside the name.
+  In `in_name` mode `add_inventory_batch` stamps the surface onto `stockist_library` (identity);
+  **that stamp is M-only** — for a T/W one print may sit on the shelf in several surfaces.
 - **Stockist_Library** = identity (a design exists). **P_Stock** / `holding` = quantity on hand.
   These are separate; changing one must not silently change the other.
 - **design_name** is verbatim truth — display the name as stored, never concatenate surface,
