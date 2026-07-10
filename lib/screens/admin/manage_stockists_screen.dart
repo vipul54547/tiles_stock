@@ -1068,8 +1068,10 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                 ),
               // An M stockist IS the factory, so the surface convention is
               // company-wide: one setting, not one per brand (its brands are
-              // just alternate names for the same print). T/W sets it per brand
-              // on the Brands screen. (project_per_brand_surface_mode)
+              // just alternate names for the same print). T/W has no setting —
+              // its Add Stock picker is always optional, because it records
+              // whatever the factory's dispatch note said.
+              // (project_per_brand_surface_mode)
               if (_isEdit && _businessType == 'M') _surfaceModeControl(),
               // Opt-in, trust-first: the platform never depends on customer
               // contact data. (project_unified_dispatch_customers)

@@ -76,6 +76,9 @@ class _State extends State<AddStockBatchScreen> {
   /// finish, plus admin finishes they have no word for yet.
   List<({String label, String canonical})> _surfOptions = const [];
 
+  /// libraryId → the surface this print was last stocked in, for prefill.
+  Map<String, ({String label, String canonical})> _lastSurfaces = const {};
+
   /// Distinct labels for the dropdown (first wins on a repeat).
   List<String> get _surfLabels {
     final seen = <String>{};
@@ -132,6 +135,7 @@ class _State extends State<AddStockBatchScreen> {
     final brands = await _svc.getMyBrands();
     final profile = await _svc.getMyProfile();
     final options = await _svc.getMySurfaceOptions();
+    final lastSurfaces = await _svc.getLastSurfaceByLibrary();
     if (!mounted) return;
     setState(() {
       _masters = masters;
@@ -139,6 +143,7 @@ class _State extends State<AddStockBatchScreen> {
       _stockistUsesSurface =
           (profile?['surface_mode'] ?? 'in_name').toString() == 'attribute';
       _surfOptions = options;
+      _lastSurfaces = lastSurfaces;
       _loading = false;
     });
   }
@@ -151,31 +156,21 @@ class _State extends State<AddStockBatchScreen> {
 
   // ── Surface (project_per_brand_surface_mode) ──────────────────────────────
   // The library holds the PRINT; the surface is chosen HERE, when the tile is
-  // made. Whether we ask for it is the FACTORY's convention:
-  //   M   → the stockist IS the factory; its brands are alternate names for the
-  //         same print, so one setting covers them all.
-  //   T/W → each carried brand IS a different factory → per-brand.
+  // made. Only an M has a convention worth enforcing: it IS the factory, so
+  // 'attribute' means every entry must name a surface.
+  //
+  // A T/W has NO mode. It carries other factories' brands and just records what
+  // the dispatch note said — a factory that ships "Satva White" + "Glossy" gets
+  // the word picked; one that ships "m.satva white" gets None. The picker,
+  // always shown and always offering None, serves both without a setting.
 
-  Brand? _brandById(String? id) {
-    if (id == null || id.isEmpty) return null;
-    final m = _brands.where((b) => b.id == id).toList();
-    return m.isEmpty ? null : m.first;
-  }
+  /// Whether the CURRENT selection REQUIRES a surface. M + attribute only.
+  bool get _selNeedsSurface => _selMaster != null && _isM && _stockistUsesSurface;
 
-  bool _usesSurface(LibraryEntry m, String? brandId) {
-    if (_isM) return _stockistUsesSurface;
-    final id = (brandId != null && brandId.isNotEmpty) ? brandId : m.brandId;
-    return _brandById(id)?.usesSurface ?? false;
-  }
-
-  /// Whether the CURRENT selection REQUIRES a surface (attribute mode only).
-  bool get _selNeedsSurface =>
-      _selMaster != null && _usesSurface(_selMaster!, _isM ? _selBrandId : null);
-
-  /// Whether to SHOW the surface picker at all. Attribute → required. in_name →
-  /// optional (with a 'None' choice): the stockist may still tag a surface, and
-  /// it lands on the holding row like any other — surface_label (their word) +
-  /// surface_type (admin canonical). The verbatim design name is never touched.
+  /// The surface picker is always shown once a design is picked. When it isn't
+  /// required, 'None' is a legitimate answer — not a failure to choose. Whatever
+  /// is picked lands on the holding as surface_label (their word) + surface_type
+  /// (admin canonical); the verbatim design name is never touched.
   /// (project_per_brand_surface_mode / project_design_name_is_verbatim_truth)
   bool get _selShowSurface => _selMaster != null;
 
@@ -311,14 +306,38 @@ class _State extends State<AddStockBatchScreen> {
         if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
           _selBrandId = chosen.brandId;
         }
-        // in_name: auto-fill from the design's remembered word (map once), else
-        // 'None'. Attribute keeps the last pick.
-        if (!_usesSurface(chosen, _isM ? _selBrandId : null)) {
-          final w = chosen.surfaceLabel.trim();
-          _selSurfaceLabel = w.isNotEmpty ? w : 'None';
+        // Prefill the surface this print was last stocked in, so restocking is
+        // one tap. Falls back to the library's own word (M + surface-in-name,
+        // where the surface really is part of the print), then 'None'. Always
+        // editable. When a surface is REQUIRED we leave the last pick standing.
+        if (!_selNeedsSurface) {
+          _selSurfaceLabel = _rememberedSurface(chosen);
         }
       });
     }
+  }
+
+  /// The surface to prefill for [m]: the one this print was last stocked in,
+  /// else the word on the library row (M + surface-in-name), else 'None'.
+  ///
+  /// Only ever returns something the picker can actually show. The dropdown
+  /// falls back to 'None' for a value it doesn't hold, which would leave the UI
+  /// saying "None" while the entry silently saved something else.
+  String _rememberedSurface(LibraryEntry m) {
+    final labels = _surfLabels;
+    final last = _lastSurfaces[m.id];
+    if (last != null) {
+      final w = last.label.trim();
+      if (labels.contains(w)) return w;
+      // Stock entered before this stockist had a word for that finish: prefill
+      // THEIR word for the same admin canonical, never the bare canonical.
+      final c = last.canonical.trim();
+      for (final o in _surfOptions) {
+        if (o.canonical == c && labels.contains(o.label)) return o.label;
+      }
+    }
+    final w = m.surfaceLabel.trim();
+    return labels.contains(w) ? w : 'None';
   }
 
   Future<void> _pickBrand() async {

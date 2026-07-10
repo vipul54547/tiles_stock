@@ -26,10 +26,11 @@ class Brand {
   /// (the stockist can cancel until then).
   final DateTime? deleteScheduledAt;
 
-  /// How this brand handles surface (project_per_brand_surface_mode):
-  /// 'attribute' → surface is a real, required field on the stock row, picked
-  /// when stock is added; 'in_name' → surface is baked into the design name, no
-  /// separate surface field (default). Identity lives in the library, not here.
+  /// Vestigial. A brand no longer has a surface convention — a T/W carries other
+  /// factories' brands and simply records whichever surface the dispatch note
+  /// carried, so Add Stock always offers the picker with a 'None' choice. Only an
+  /// M has a mode, on the stockist. Column and payload kept; nothing reads this.
+  /// (project_per_brand_surface_mode)
   final String surfaceMode;
 
   const Brand({
@@ -45,9 +46,6 @@ class Brand {
     this.deleteScheduledAt,
     this.surfaceMode = 'in_name',
   });
-
-  /// Surface is a required attribute for this brand (shown with the name).
-  bool get usesSurface => surfaceMode == 'attribute';
 
   /// Admin flagged this brand: buyers can't see it until corrected.
   bool get inCorrection => status == 'correction';

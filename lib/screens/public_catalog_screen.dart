@@ -201,8 +201,25 @@ class _State extends State<PublicCatalogScreen> {
     return '$w ($c)';
   }
 
-  // Finish chip options: the surfaces actually present in the holding.
-  List<String> _surfaceOptions() => _distinct('surface').toSet().toList()..sort();
+  // The value the Finish filter works on. A /s/ link is ONE stockist's catalog,
+  // so their own word is unambiguous here and is what a buyer reading this page
+  // sees on the card. Falls back to the admin canonical for stock entered before
+  // the stockist had a word for it. (The buyer APP spans many stockists, so it
+  // filters on the canonical instead.) (project_per_brand_surface_mode)
+  String _surfaceKey(Map<String, dynamic> d) {
+    final w = (d['surface_label'] ?? '').toString().trim();
+    if (w.isNotEmpty && w.toLowerCase() != 'none') return w;
+    final c = (d['surface'] ?? '').toString().trim();
+    return (c.toLowerCase() == 'none') ? '' : c;
+  }
+
+  // Finish chip options: the stockist's words actually present in the holding.
+  List<String> _surfaceOptions() => _all
+      .map(_surfaceKey)
+      .where((s) => s.isNotEmpty)
+      .toSet()
+      .toList()
+    ..sort();
 
   // Faceted DNA match: within an attribute picks OR, across attributes AND.
   bool _matchesDna(Map<String, dynamic> d) {
@@ -254,7 +271,7 @@ class _State extends State<PublicCatalogScreen> {
     }
     if (_fSizes.isNotEmpty) r = r.where((d) => _fSizes.contains('${d['size']}'));
     if (_fFinishes.isNotEmpty) {
-      r = r.where((d) => _fFinishes.contains('${d['surface']}'));
+      r = r.where((d) => _fFinishes.contains(_surfaceKey(d)));
     }
     if (_fQualities.isNotEmpty) {
       r = r.where((d) => _fQualities.contains('${d['quality']}'));

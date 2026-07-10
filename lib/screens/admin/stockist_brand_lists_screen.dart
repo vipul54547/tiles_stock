@@ -238,96 +238,18 @@ class _State extends State<StockistBrandListsScreen> {
             ),
             const SizedBox(height: 10),
             _statusControl(b),
-            if (widget.businessType != 'M') ...[
-              const Divider(height: 22),
-              _surfaceModeControl(b),
-            ],
           ],
         ),
       ),
     );
   }
 
-  // Attribute / In name — how THIS brand handles surface.
+  // No per-brand surface control here. A T/W carries other factories' brands and
+  // just records whichever surface arrived on the dispatch note: Add Stock always
+  // offers the surface picker with a 'None' choice, so one screen serves a brand
+  // that ships "Satva White" + "Glossy" and one that ships "m.satva white".
+  // Only an M has a convention to set, on the stockist itself.
   // (project_per_brand_surface_mode)
-  Widget _surfaceModeControl(Map<String, dynamic> b) {
-    var mode = (b['surface_mode'] ?? 'in_name').toString();
-    if (!['attribute', 'in_name'].contains(mode)) mode = 'in_name';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.texture, size: 15, color: Colors.grey.shade600),
-            const SizedBox(width: 6),
-            Text('Surface',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade700)),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: SegmentedButton<String>(
-            showSelectedIcon: false,
-            style: ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              textStyle: WidgetStateProperty.all(const TextStyle(fontSize: 12)),
-            ),
-            segments: const [
-              ButtonSegment(
-                  value: 'attribute',
-                  label: Text('Attribute'),
-                  icon: Icon(Icons.tune, size: 15)),
-              ButtonSegment(
-                  value: 'in_name',
-                  label: Text('In name'),
-                  icon: Icon(Icons.text_fields, size: 15)),
-            ],
-            selected: {mode},
-            onSelectionChanged:
-                _saving ? null : (sel) => _setSurfaceMode(b, sel.first),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-            'Attribute: the design name is the print ("Satva White") and the '
-            'surface (Glossy / Matt / Carving) is picked when stock is added.\n'
-            'In name: the surface is already written into the design name '
-            '("m.satva white") — stock never asks for it.',
-            style: TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
-      ],
-    );
-  }
-
-  Future<void> _setSurfaceMode(Map<String, dynamic> b, String mode) async {
-    final current = (b['surface_mode'] ?? 'in_name').toString();
-    if (mode == current) return;
-    final ok = await _confirm(
-      mode == 'attribute'
-          ? 'Pick the surface when adding stock?'
-          : 'Surface is in the name?',
-      mode == 'attribute'
-          ? 'Adding stock for "${b['name']}" will ask for a surface '
-              '(Glossy / Matt / Carving). The design itself stays the print — '
-              'one design, one photo, one entry per surface in stock.'
-          : 'Adding stock for "${b['name']}" will not ask for a surface. The '
-              'surface must already be written into the design name.',
-    );
-    if (!ok) return;
-    setState(() => _saving = true);
-    try {
-      await _data.setBrandSurfaceMode((b['id'] ?? '').toString(), mode);
-      if (!mounted) return;
-      setState(() => b['surface_mode'] = mode);
-    } catch (e) {
-      _snack('$e', error: true);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
 
   // Live / Correction / Off — the moderation control. Default brand omits "Off".
   Widget _statusControl(Map<String, dynamic> b) {

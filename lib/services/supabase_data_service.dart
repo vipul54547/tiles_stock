@@ -765,16 +765,9 @@ class SupabaseDataService {
     }
   }
 
-  /// Admin sets a brand's surface mode ('attribute' | 'in_name').
-  /// (project_per_brand_surface_mode)
-  Future<void> setBrandSurfaceMode(String brandId, String mode) async {
-    try {
-      await supabase.rpc('admin_set_brand_surface_mode',
-          params: {'p_brand_id': brandId, 'p_mode': mode});
-    } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
-    }
-  }
+  // setBrandSurfaceMode removed: a brand has no surface convention any more (see
+  // Brand.surfaceMode). The admin_set_brand_surface_mode RPC and the column are
+  // left in the database, unused. (project_per_brand_surface_mode)
 
   Future<void> renameBrand(String id, String name) async {
     try {
@@ -1661,6 +1654,28 @@ class SupabaseDataService {
     }
   }
 
+  /// The surface this stockist last used for each print, so Add Stock can
+  /// prefill it: libraryId → (word, canonical). Memory lives in stock HISTORY
+  /// (the newest holding), not on the library row — a print may sit on the
+  /// shelf in several surfaces at once. (project_per_brand_surface_mode)
+  Future<Map<String, ({String label, String canonical})>>
+      getLastSurfaceByLibrary() async {
+    try {
+      final res = await supabase.rpc('my_last_surface_by_library');
+      final m = res is Map ? Map<String, dynamic>.from(res) : {};
+      return m.map((k, v) {
+        final e = Map<String, dynamic>.from(v as Map);
+        return MapEntry(k.toString(), (
+          label: (e['surface_label'] ?? '').toString(),
+          canonical: (e['surface_type'] ?? '').toString(),
+        ));
+      });
+    } catch (e) {
+      debugPrint('getLastSurfaceByLibrary failed: $e');
+      return {};
+    }
+  }
+
   /// The logged-in stockist's OWN word per canonical finish, for the stock-list
   /// "Edit conditions" chips: { canonicalFinishName : displayWord }. The chips
   /// show the word but store the canonical. (project_per_brand_surface_mode)
@@ -1843,8 +1858,8 @@ class SupabaseDataService {
   }
 
   /// Admin: an M stockist's surface convention ('attribute' | 'in_name'). M IS
-  /// the factory, so the convention is company-wide; T/W keeps it per brand
-  /// (`setBrandSurfaceMode`). (project_per_brand_surface_mode)
+  /// the factory, so the convention is company-wide. T/W has no convention at
+  /// all — its Add Stock picker is always optional. (project_per_brand_surface_mode)
   Future<void> setStockistSurfaceMode(String sequentialId, String mode) async {
     try {
       await supabase.rpc('admin_set_stockist_surface_mode',
