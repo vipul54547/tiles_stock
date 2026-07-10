@@ -2619,13 +2619,28 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     );
   }
 
+  /// The surface as the STOCKIST reads it: their own word from the sheet, with
+  /// the admin canonical in brackets — "RAINDROP (Sugar)". Just the word when the
+  /// two match, so nothing reads "Matt (Matt)". Showing the bare canonical here
+  /// would tell a stockist their sheet said "Sugar" when it said "RAINDROP".
+  /// (project_per_brand_surface_mode)
+  String _surfaceShown(_XlsRow r) {
+    final word = r.surfaceRaw.trim();
+    final canonical = r.surface.trim();
+    if (canonical.isEmpty || canonical.toLowerCase() == 'none') return word;
+    if (word.isEmpty || word.toLowerCase() == canonical.toLowerCase()) {
+      return canonical;
+    }
+    return '$word ($canonical)';
+  }
+
   // One stock line (quality + surface + qty) inside a design group, with its own
   // include checkbox, NEW/UPDATE/SKIP tag and inline editor. Quality is shown
   // prominently so a multi-quality design never reads as a duplicate.
   Widget _qualityLine(_XlsRow r) {
     final st = _rowStyle(r);
     final rest = [
-      if (r.surfaceRaw.trim().isNotEmpty) r.surface,
+      if (r.surfaceRaw.trim().isNotEmpty) _surfaceShown(r),
       if (r.qty >= 0) '${r.qty} boxes',
     ].join('  ·  ');
     final quality = r.quality.isNotEmpty ? r.quality : r.qualityRaw;
