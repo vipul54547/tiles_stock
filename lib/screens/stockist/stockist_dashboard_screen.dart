@@ -21,6 +21,7 @@ import '../../models/dna.dart';
 import 'dna_editor_sheet.dart';
 import 'stock_control_screen.dart';
 import 'stock_lists_screen.dart';
+import 'stockist_add_order_screen.dart';
 import 'stockist_profile_screen.dart';
 import 'stockist_my_videos_screen.dart';
 import '../../utils/tile_types.dart';
@@ -32,11 +33,6 @@ class StockistDashboardScreen extends StatefulWidget {
 }
 
 const _qualities = ['Premium', 'Standard'];
-const _qualityMeta = {
-  'Premium': (icon: Icons.star_rounded,      bg: Color(0xFFFFF8E1), fg: Color(0xFFF9A825)),
-  'Standard': (icon: Icons.verified_outlined, bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0)),
-};
-
 
 // Design-Stock-Type options for the filter (multi-select; nothing selected =
 // show all; 'None' isn't a stored value any more). Matches the buyer filter.
@@ -96,9 +92,11 @@ class _State extends State<StockistDashboardScreen> {
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
-  // Count of active facets (quality has its own chips, so it's excluded here).
+  // Count of active facets. Quality is counted here now that it lives inside the
+  // filter rather than as its own header chips. (project_dashboard_ia)
   int get _filterCount =>
       _selectedSizes.length +
+      _selectedQualities.length +
       _selectedSurfaces.length +
       _selectedColours.length +
       _selectedTypes.length +
@@ -923,15 +921,8 @@ class _State extends State<StockistDashboardScreen> {
                     _load();
                   },
                 ),
-                IconButton(
-                  icon: const Icon(Icons.share_outlined),
-                  tooltip: 'Share my stock catalogue',
-                  onPressed: () async {
-                    await Navigator.of(context).push<bool>(MaterialPageRoute(
-                        builder: (_) => const StockListsScreen()));
-                    _load();
-                  },
-                ),
+                // Stock Lists used to hide behind an unlabelled share icon here.
+                // It's the labelled "Lists" pill now. (project_dashboard_ia)
                 ],
                 const NotificationBell(),
                 PopupMenuButton<String>(
@@ -1073,11 +1064,27 @@ class _State extends State<StockistDashboardScreen> {
               style: TextStyle(
                   fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
           const Spacer(),
+          // Desktop mirrors the phone's intent grouping. Records and Lists are
+          // already in the left sidebar, so the toolbar carries only the two
+          // menus + Add Design. (project_dashboard_ia)
           ElevatedButton.icon(
-            onPressed: empty ? _showLibraryActivation : _showAddIntentSheet,
-            icon: const Icon(Icons.swap_vert, size: 18),
-            label: const Text('+/− Manually'),
+            onPressed: empty ? _showLibraryActivation : _showStockSheet,
+            icon: const Icon(Icons.inventory_2_outlined, size: 18),
+            label: const Text('Stock'),
             style: filled(const Color(0xFF2E7D32)),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: empty ? null : _showOrdersSheet,
+            icon: const Icon(Icons.receipt_long_outlined, size: 17),
+            label: Text(
+                interestCount > 0 ? 'Orders ($interestCount)' : 'Orders'),
+            style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.5)),
+                minimumSize: const Size(0, 38),
+                textStyle:
+                    const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(width: 8),
           ElevatedButton.icon(
@@ -1088,18 +1095,6 @@ class _State extends State<StockistDashboardScreen> {
             icon: const Icon(Icons.add, size: 17),
             label: const Text('Add Design'),
             style: filled(const Color(0xFF2F78A8)),
-          ),
-          const SizedBox(width: 8),
-          OutlinedButton.icon(
-            onPressed: empty ? null : _showStockMgmtSheet,
-            icon: const Icon(Icons.download_outlined, size: 17),
-            label: const Text('Import'),
-            style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.5)),
-                minimumSize: const Size(0, 38),
-                textStyle:
-                    const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
           ),
           const SizedBox(width: 10),
           Theme(
@@ -1392,11 +1387,14 @@ class _State extends State<StockistDashboardScreen> {
 
   // Row 2 (pinned): My Stock / Buyer Interest tabs + quality chips in one
   // horizontally-scrollable row (All-Design chip style).
+  /// Badge = new orders awaiting action (includes web orders my_design_inquiries
+  /// can't see); falls back to buyer-interest designs if there are no new orders.
+  /// A getter, not a local: it now feeds the Orders pill and the desktop toolbar
+  /// as well as this row. (project_dashboard_ia)
+  int get interestCount =>
+      _newOrders > 0 ? _newOrders : _buyerInterestDesigns.length;
+
   Widget _buildChipRow() {
-    // Badge = new orders awaiting action (includes web orders my_design_inquiries
-    // can't see); fall back to buyer-interest designs if there are no new orders.
-    final interestCount =
-        _newOrders > 0 ? _newOrders : _buyerInterestDesigns.length;
     return Container(
       // Extra top padding leaves room for the Inquiry badge that sits above the
       // pill, so it isn't clipped by the header.
@@ -1416,55 +1414,29 @@ class _State extends State<StockistDashboardScreen> {
         clipBehavior: Clip.none,
         child: Row(
           children: [
-            _tabPill('Stock', Icons.inventory_2_outlined, true, () {}),
+            // These two say WHAT YOU'RE LOOKING AT. Doing-something lives in the
+            // action pills below; Inquiries moved under Orders, taking its
+            // unread badge with it. (project_dashboard_ia)
+            _tabPill('My Stock', Icons.inventory_2_outlined, true, () {}),
             const SizedBox(width: 6),
-            // The Inquiry pill opens the full inquiry hub (tokens, filters by
-            // status/date/buyer/design, lock/dispatch) — the single place for
-            // orders. Reloads the dashboard badge on return.
-            _tabPill('Inquiry', Icons.receipt_long_outlined, false, () async {
-              await context.push('/stockist/inquiries');
-              if (mounted) _load();
-            }, badge: interestCount),
-            // Gap kept clear of the Inquiry badge while staying compact enough
-            // that all four items fit one screen width without scrolling.
+            _tabPill('Catalogue', Icons.collections_bookmark_outlined, false,
+                () => ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(const SnackBar(
+                      content: Text('Catalogue is coming soon.'))),
+                soon: true),
             Container(
                 width: 1,
                 height: 22,
                 margin: const EdgeInsets.only(left: 9, right: 8),
                 color: Colors.grey.shade300),
-            ..._qualities.map((q) {
-              final m = _qualityMeta[q]!;
-              final sel = _selectedQualities.contains(q);
-              return Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: GestureDetector(
-                  onTap: () => setState(() {
-                    if (sel) {
-                      _selectedQualities.remove(q);
-                    } else {
-                      _selectedQualities.add(q);
-                    }
-                  }),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: sel ? m.fg : m.bg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: m.fg, width: sel ? 2 : 1),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(m.icon, size: 13, color: sel ? Colors.white : m.fg),
-                      const SizedBox(width: 4),
-                      Text(q,
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: sel ? Colors.white : m.fg)),
-                    ]),
-                  ),
-                ),
-              );
+            // Records is history, not an action — it sits at the end of this row
+            // rather than among the do-something pills. Quality moved into the
+            // Filter sheet, below Size. (project_dashboard_ia)
+            _tabPill('Records', Icons.history, false, () async {
+              if (_isLibraryEmpty) return;
+              await context.push('/stockist/dispatches');
+              if (mounted) _load();
             }),
           ],
         ),
@@ -1472,8 +1444,11 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
+  /// [soon] renders the pill visibly unbuilt — muted, with a "Soon" tag — so it
+  /// reads as a promise rather than a broken button.
   Widget _tabPill(String label, IconData icon, bool active, VoidCallback onTap,
-      {int badge = 0}) {
+      {int badge = 0, bool soon = false}) {
+    final fg = active ? Colors.white : Colors.grey.shade600;
     return GestureDetector(
       onTap: onTap,
       child: Stack(
@@ -1486,15 +1461,28 @@ class _State extends State<StockistDashboardScreen> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(icon,
-                  size: 15,
-                  color: active ? Colors.white : Colors.grey.shade600),
+              Icon(icon, size: 15, color: soon ? Colors.grey.shade400 : fg),
               const SizedBox(width: 6),
               Text(label,
                   style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: active ? Colors.white : Colors.grey.shade600)),
+                      color: soon ? Colors.grey.shade400 : fg)),
+              if (soon) ...[
+                const SizedBox(width: 5),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(3)),
+                  child: Text('Soon',
+                      style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey.shade700)),
+                ),
+              ],
             ]),
           ),
           if (badge > 0)
@@ -1925,52 +1913,68 @@ class _State extends State<StockistDashboardScreen> {
   // "+ Add" splits the two real intents BEFORE anything else, so the stockist
   // never lands on a screen that conflates them: STOCK = how many boxes (qty);
   // DESIGN = the tile's identity (name, brands, photo) in the Library.
-  // "+/− Manually" — the two manual stock movements: Add Stock (in) or Dispatch
-  // (out). One entry, no double path. Add Design lives inside Add Stock (its
-  // "+ New design" button) and Design Library — not here. Order dispatch is
-  // reached from Inquiries. (project_unified_dispatch_customers)
-  void _showAddIntentSheet() {
+  static const _sheetShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)));
+
+  Widget _sheetTitle(String t) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Text(t,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+      );
+
+  ListTile _sheetItem(BuildContext ctx, IconData icon, Color color, String title,
+          String subtitle, Future<void> Function() go) =>
+      ListTile(
+        leading: Icon(icon, color: color, size: 28),
+        title: Text(title,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+        subtitle: Text(subtitle),
+        onTap: () async {
+          Navigator.pop(ctx);
+          await go();
+          if (mounted) _load();
+        },
+      );
+
+  // "Stock" — everything that moves boxes in or out, plus how they're counted.
+  // Add Design is NOT here: it lives inside Add Stock ("+ New design") and the
+  // Design Library. Import Supplier PDF is NOT here either — its home is the
+  // Design Library, and it is deliberately unpromoted. (project_dashboard_ia)
+  void _showStockSheet() {
     showModalBottomSheet<void>(
       context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: _sheetShape,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text('Manual stock change',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-            ListTile(
-              leading: const Icon(Icons.add_circle_outline,
-                  color: Color(0xFF2E7D32), size: 28),
-              title: const Text('Add Stock',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-              subtitle: const Text('Add boxes in — many designs at once'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await context.push('/stockist/stock/add', extra: {
-                  'brandId': _brandFilter == 'all' ? null : _brandFilter,
-                });
-                _load();
-              },
-            ),
+            _sheetTitle('Stock'),
+            _sheetItem(ctx, Icons.add_circle_outline, const Color(0xFF2E7D32),
+                'Add Stock', 'Add boxes in — many designs at once', () async {
+              await context.push('/stockist/stock/add', extra: {
+                'brandId': _brandFilter == 'all' ? null : _brandFilter,
+              });
+            }),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.remove_circle_outline,
-                  color: Color(0xFFC62828), size: 28),
-              title: const Text('Dispatch',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-              subtitle: const Text('Send boxes out — pick designs + customer'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await context.push('/stockist/dispatch/manual');
-                _load();
-              },
-            ),
+            _sheetItem(ctx, Icons.remove_circle_outline, const Color(0xFFC62828),
+                'Dispatch', 'Send boxes out — order optional', () async {
+              await context.push('/stockist/dispatch/manual');
+            }),
+            const Divider(height: 1),
+            _sheetItem(ctx, Icons.table_view_rounded, const Color(0xFF2F78A8),
+                'Import from Excel', 'Add or update quantities from a sheet',
+                () async {
+              final brandId =
+                  _brands.any((b) => b.id == _brandFilter) ? _brandFilter : null;
+              await context.push('/stockist/stock/import-excel', extra: brandId);
+            }),
+            const Divider(height: 1),
+            _sheetItem(ctx, Icons.tune, const Color(0xFF00838F), 'Control Stock',
+                'Block quantity you don\'t want to show to dealers', () async {
+              await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(builder: (_) => const StockControlScreen()));
+            }),
             const SizedBox(height: 8),
           ],
         ),
@@ -1978,77 +1982,35 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  void _showStockMgmtSheet() {
+  // "Orders" — the order lifecycle. Dispatching AGAINST an order is reached by
+  // opening the order in Inquiries, which launches the same dispatch screen with
+  // the order pre-attached. (project_unified_dispatch_customers)
+  void _showOrdersSheet() {
     showModalBottomSheet<void>(
       context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      shape: _sheetShape,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
-              child: Text('Stock Management',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-            // T/W: supplier PDF is their primary stock source (library + stock together).
-            if (currentStockistIsImporter) ...[
-              ListTile(
-                leading: const Icon(Icons.picture_as_pdf,
-                    color: Color(0xFF1B4F72), size: 28),
-                title: const Text('Import Supplier PDF',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Builds your library and adds stock'),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  final brand = _brands.isEmpty
-                      ? null
-                      : (_brands.any((b) => b.id == _brandFilter)
-                          ? _brands.firstWhere((b) => b.id == _brandFilter)
-                          : _brands.first);
-                  if (brand == null) return;
-                  await context.push('/stockist/stock/import-supplier-pdf',
-                      extra: brand.id);
-                  _load();
-                },
-              ),
-              const Divider(height: 1),
-            ],
-            ListTile(
-              leading: const Icon(Icons.table_view_rounded,
-                  color: Color(0xFF2E7D32), size: 28),
-              title: const Text('Import Stock',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-              subtitle: const Text(
-                  'Add or update quantities from an Excel file'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final brandId = _brands.any((b) => b.id == _brandFilter)
-                    ? _brandFilter
-                    : null;
-                await context.push('/stockist/stock/import-excel',
-                    extra: brandId);
-                _load();
-              },
-            ),
+            _sheetTitle('Orders'),
+            _sheetItem(
+                ctx,
+                Icons.receipt_long_outlined,
+                const Color(0xFF1B4F72),
+                'Inquiries',
+                interestCount > 0
+                    ? '$interestCount new — orders placed with you'
+                    : 'Orders placed with you', () async {
+              await context.push('/stockist/inquiries');
+            }),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.tune,
-                  color: Color(0xFF00838F), size: 28),
-              title: const Text('Control Stock',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-              subtitle: const Text(
-                  'Block quantity you don\'t want to show to dealers'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final changed = await Navigator.of(context).push<bool>(
-                    MaterialPageRoute(
-                        builder: (_) => const StockControlScreen()));
-                if (changed == true) _load();
-              },
-            ),
+            _sheetItem(ctx, Icons.post_add_outlined, const Color(0xFF2E7D32),
+                'Add Order', 'Create an order yourself', () async {
+              await Navigator.of(context).push<bool>(MaterialPageRoute(
+                  builder: (_) => const StockistAddOrderScreen()));
+            }),
             const SizedBox(height: 8),
           ],
         ),
@@ -2056,25 +2018,34 @@ class _State extends State<StockistDashboardScreen> {
     );
   }
 
-  // Row 3: +/− Manually · Stock Mgmt · Records. "+/− Manually" = Add Stock in /
-  // Dispatch out (one entry, no double path). Order dispatch is via Inquiries.
+  // Row 3 — the DO-SOMETHING row, grouped by intent not mechanism: Stock (what
+  // moves in and out), Orders (the order lifecycle), Lists (what I share).
+  // Records is history, so it lives on the "My Stock" row above.
+  // (project_dashboard_ia)
   Widget _buildActionButtonRow() {
     final empty = _isLibraryEmpty;
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 2),
       child: Row(
         children: [
-          _actionBtn('+/− Manually', Icons.swap_vert, const Color(0xFF2E7D32),
-              empty ? _showLibraryActivation : _showAddIntentSheet),
+          // A brand-new stockist has nothing to add stock to — send them to
+          // library activation first, as the old "+/− Manually" button did.
+          _actionBtn('Stock', Icons.inventory_2_outlined,
+              const Color(0xFF2E7D32),
+              empty ? _showLibraryActivation : _showStockSheet,
+              menu: true),
           const SizedBox(width: 6),
-          _actionBtn('Stock Mgmt', Icons.inventory_2_outlined, const Color(0xFF1B4F72),
-              empty ? null : _showStockMgmtSheet),
+          _actionBtn('Orders', Icons.receipt_long_outlined,
+              const Color(0xFF1B4F72), empty ? null : _showOrdersSheet,
+              menu: true, badge: interestCount),
           const SizedBox(width: 6),
-          _actionBtn('Records', Icons.receipt_long_outlined,
-              const Color(0xFF6A1B9A), empty ? null : () async {
-                await context.push('/stockist/dispatches');
-                _load();
-              }),
+          _actionBtn('Lists', Icons.link, const Color(0xFF00838F), empty
+              ? null
+              : () async {
+                  await Navigator.of(context).push<bool>(MaterialPageRoute(
+                      builder: (_) => const StockListsScreen()));
+                  _load();
+                }),
         ],
       ),
     );
@@ -2094,32 +2065,72 @@ class _State extends State<StockistDashboardScreen> {
     if (result == true) _load();
   }
 
-  Widget _actionBtn(
-      String label, IconData icon, Color color, VoidCallback? onTap) {
+  /// A compact outlined action pill — icon + label on ONE line, colour carried
+  /// by the icon and the border rather than a filled pastel block. Matches the
+  /// brand/list filter pills above it, so the header reads as one system, and
+  /// costs about half the height of the old stacked cards.
+  ///
+  /// [menu] shows a ▾ caret: this pill opens a sheet rather than navigating.
+  /// [badge] surfaces the unread-inquiry count, which used to live on the
+  /// Inquiry tab before Inquiries moved under Orders.
+  Widget _actionBtn(String label, IconData icon, Color color, VoidCallback? onTap,
+      {bool menu = false, int badge = 0}) {
     final enabled = onTap != null;
     return Expanded(
       child: GestureDetector(
         onTap: onTap,
         child: Opacity(
           opacity: enabled ? 1 : 0.4,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: color.withValues(alpha: 0.4)),
-            ),
-            child: Column(
-              children: [
-                Icon(icon, size: 18, color: color),
-                const SizedBox(height: 2),
-                Text(label,
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: color)),
-              ],
-            ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: color.withValues(alpha: 0.45)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(icon, size: 15, color: color),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: color)),
+                    ),
+                    if (menu)
+                      Icon(Icons.arrow_drop_down,
+                          size: 16, color: color.withValues(alpha: 0.8)),
+                  ],
+                ),
+              ),
+              if (badge > 0)
+                Positioned(
+                  top: -5,
+                  right: -3,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFFC62828),
+                        borderRadius: BorderRadius.circular(9),
+                        border: Border.all(color: Colors.white, width: 1.5)),
+                    child: Text('$badge',
+                        style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white)),
+                  ),
+                ),
+            ],
           ),
         ),
       ),
@@ -2239,6 +2250,7 @@ class _State extends State<StockistDashboardScreen> {
     // Edit a working copy of the chip selections; they're committed when the
     // sheet closes (Apply button, swipe-down, or tap-outside all apply).
     var localSizes     = Set<String>.from(_selectedSizes);
+    var localQualities = Set<String>.from(_selectedQualities);
     var localSurfaces  = Set<String>.from(_selectedSurfaces);
     var localColours   = Set<String>.from(_selectedColours);
     var localTypes     = Set<String>.from(_selectedTypes);
@@ -2309,6 +2321,7 @@ class _State extends State<StockistDashboardScreen> {
                   .toList();
             }
             if (localSizes.isNotEmpty) r = r.where((d) => localSizes.contains(d.size)).toList();
+            if (localQualities.isNotEmpty) r = r.where((d) => localQualities.contains(d.quality)).toList();
             if (localSurfaces.isNotEmpty) r = r.where((d) => localSurfaces.contains(d.surfaceWord)).toList();
             if (localColours.isNotEmpty) r = r.where((d) => localColours.contains(d.colour)).toList();
             if (localTypes.isNotEmpty) r = r.where((d) => localTypes.contains(d.tileType)).toList();
@@ -2384,6 +2397,7 @@ class _State extends State<StockistDashboardScreen> {
                       TextButton(
                         onPressed: () => setSheet(() {
                           localSizes.clear();
+                          localQualities.clear();
                           localSurfaces.clear();
                           localColours.clear();
                           localTypes.clear();
@@ -2425,6 +2439,22 @@ class _State extends State<StockistDashboardScreen> {
                           summary: filterSummary(localSizes),
                           child: chipWrap(sizes, localSizes),
                         ),
+                      // Quality moved off the header chip row into the filter,
+                      // directly below Size. (project_dashboard_ia)
+                      FilterSection(
+                        title: 'Quality',
+                        summary: filterSummary(localQualities),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _qualities
+                              .map((q) => chip(q, localQualities.contains(q),
+                                  () => setSheet(() => localQualities.contains(q)
+                                      ? localQualities.remove(q)
+                                      : localQualities.add(q))))
+                              .toList(),
+                        ),
+                      ),
                       if (surfaces.isNotEmpty)
                         FilterSection(
                           title: 'Finish',
@@ -2539,6 +2569,9 @@ class _State extends State<StockistDashboardScreen> {
         _selectedSizes
           ..clear()
           ..addAll(localSizes);
+        _selectedQualities
+          ..clear()
+          ..addAll(localQualities);
         _selectedSurfaces
           ..clear()
           ..addAll(localSurfaces);
