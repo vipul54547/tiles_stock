@@ -351,8 +351,11 @@ $function$;
 -- (my_stock, my_private_designs) -- unlike the legacy add_stock/dispatch_stock
 -- revoked in 20260710_revoke_legacy_stock_rpcs.sql, which took the stockist id
 -- as an argument and checked nothing. Reproduced as-is rather than silently
--- tightened: this file's job is repo/DB parity. Narrowing the my_* grants to
--- `authenticated` is a separate, deliberate change.
+-- tightened: this file's job is repo/DB parity.
+--
+-- That narrowing has since happened -- 20260710_tighten_my_rpc_grants.sql runs
+-- after this file and drops the anon/PUBLIC grants on the three my_* functions.
+-- The grants below are historical, not current intent.
 -- ---------------------------------------------------------------------------
 grant execute on function public.my_library()           to anon, authenticated, service_role;
 grant execute on function public.my_stock()             to anon, authenticated, service_role;
