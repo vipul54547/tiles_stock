@@ -43,6 +43,10 @@ Don't infer a function's signature from its call site.
   word, e.g. "Raindrop") and `surface_type` (admin canonical, e.g. "Sugar"). Cards everywhere read
   `Raindrop (Sugar)`. Filters split by audience: stockist UI and the `/s/` link (one stockist)
   filter on the **word**; the buyer app (many stockists) filters on the **canonical**.
+  A holding's identity is `(stockist, library, brand, quality, surface_type)` — the
+  `designs_holding_uniq` index. **`surface_label` is display-only, NOT part of the key**: a
+  canonical surface = one physical surface = one stock line, and re-adding it just refreshes the
+  word. Never key a holding lookup on `surface_label` (it wedges Add Stock against the index).
 - **surface_mode** — only an **M** has one (`stockists.surface_mode`), because an M *is* the factory
   and its brands are alternate names for one print. **T/W has none**: it carries other factories'
   brands and records whatever the dispatch note said, so Add Stock always offers the picker with a
