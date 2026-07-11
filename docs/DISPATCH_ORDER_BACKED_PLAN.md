@@ -130,9 +130,21 @@ Build the grouped-variant picker widget. Wire it into
 `manual_dispatch_screen` (add-a-line / add-extra-design). Nothing else changes; the two
 dispatch RPCs are untouched. Ship and test this on its own.
 
-**Phase 2 — the picker in Add-Order.**
-Wire the same widget into `stockist_add_order_screen`. ⚠️ That screen is **multi-select**
-today (a grid you tick many designs on). The picker is one-at-a-time. **Open question — see §8.**
+**Phase 2 — ✅ DONE (`c240ad3`).** Not the one-at-a-time picker in the end: a **keyboard
+entry bar** (`lib/widgets/holding_entry_bar.dart`), on **both** Add-Order and Dispatch.
+
+    delt ↓ Tab   m ↓ Tab   p ↓ Tab   40 Enter
+
+Same two questions the touch picker asks — the PRINT first, then only the variants that are
+genuinely ambiguous, each carrying its box count — but typed, because the stockists work at
+a counter, at a keyboard. Brand/Surface/Quality are auto-filled and Tab-skipped when the
+print has only one; the bar **refuses to add while more than one holding is still standing**.
+The count is the caller's: dispatch counts the shelf (`boxQuantity`), an order counts what is
+free to promise (`fStock`).
+
+Add-Order keeps BOTH doors — the multi-select grid stays as **Browse all** (faster for ticking
+many at once), it just is not the only way in. Grouping moved to `lib/utils/holding_group.dart`
+so the touch picker and the bar cannot drift. Pinned by `test/holding_entry_bar_test.dart`.
 
 **Phase 3 — order-backed dispatch.**
 1. Migration: `alter table inquiries add column customer_id uuid references stockist_customers(id)`.
@@ -172,16 +184,16 @@ Phases 1 and 3 are independent. Either can ship first.
 
 ---
 
-## 8. Open questions (need the user)
+## 8. Open questions
 
-1. **Add-Order is multi-select today.** Replacing it with the one-at-a-time picker makes a big
-   order slower to build. Options:
-   (a) use the picker there anyway (safest, slower);
-   (b) keep the multi-select grid but make each card's brand/surface/quality/stock unmistakable;
-   (c) offer both — grid for bulk, picker for a careful single add.
-   Recommend **(c)** or **(b)**; decide before Phase 2.
+1. ~~**Add-Order is multi-select today.**~~ **SETTLED 2026-07-11 → offer both.** Neither (a) nor
+   (b): the stockists work at a **keyboard**, so the answer was a typed entry bar, with the
+   multi-select grid kept as **Browse all**. See Phase 2 above. The premise in §1 was also stale
+   — Add-Order's picker was already a searchable list carrying brand/surface/quality; what it
+   lacked was the **box count** and any grouping, so six near-identical `DELTON_8_A` rows sat
+   adjacent with no number to tell them apart.
 2. Should the auto-created counter-sale order be **visible in My Orders**, or hidden (it is born
-   completed)? Visible = a full audit trail; hidden = less clutter.
+   completed)? Visible = a full audit trail; hidden = less clutter. **Still open** (Phase 3).
 
 ---
 
