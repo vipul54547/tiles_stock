@@ -439,7 +439,14 @@ class _State extends State<StockistDashboardScreen> {
     final map = <String, List<TileDesign>>{};
     final order = <String>[];
     for (final d in list) {
-      final k = d.libraryId.isNotEmpty ? d.libraryId : d.id;
+      // A card merges a print's Premium + Standard, but NOT its surfaces: a T/W
+      // holds one print in several surfaces at once (separate stock lines), so
+      // each surface is its own card. Surface keys into the group alongside the
+      // library id. (M keeps its surface in the name → one library row per
+      // surface → this suffix is constant and never splits an M card.)
+      final base = d.libraryId.isNotEmpty ? d.libraryId : d.id;
+      final k = '$base|${d.surfaceType.trim().toLowerCase()}'
+          '|${d.surfaceLabel.trim().toLowerCase()}';
       final bucket = map[k];
       if (bucket == null) {
         map[k] = [d];
