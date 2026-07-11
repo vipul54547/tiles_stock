@@ -741,31 +741,55 @@ class _State extends State<AddEditStockScreen> {
               children: [
                 for (var i = 0; i < _lists.length; i++) ...[
                   if (i > 0) const Divider(height: 1),
-                  CheckboxListTile(
-                    dense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 12),
-                    controlAffinity: ListTileControlAffinity.leading,
-                    value: _memberIds.contains(_lists[i]['catalog_id'].toString()),
-                    title: Text(_lists[i]['name']?.toString() ?? '',
-                        style: const TextStyle(fontSize: 14)),
-                    subtitle: (multiBrand &&
-                            (_lists[i]['brand_name']?.toString() ?? '').isNotEmpty)
-                        ? Text(_lists[i]['brand_name'].toString(),
-                            style: const TextStyle(fontSize: 11))
-                        : null,
-                    onChanged: (v) {
-                      final id = _lists[i]['catalog_id'].toString();
-                      setState(() {
-                        if (v == true) {
-                          _memberIds.add(id);
-                        } else {
-                          _memberIds.remove(id);
-                        }
-                        _dirty = true;
-                      });
-                    },
-                  ),
+                  // A CONDITION-BASED ("auto") list fills itself from its own
+                  // conditions — it has no hand-picked membership. Ticking it
+                  // used to write a row the list never reads: a silent no-op.
+                  // Show whether the design currently MATCHES, and lock it.
+                  // (project_permanent_temporary_lists)
+                  Builder(builder: (_) {
+                    final auto = _lists[i]['auto'] == true;
+                    final id = _lists[i]['catalog_id'].toString();
+                    final brand =
+                        (_lists[i]['brand_name']?.toString() ?? '').trim();
+                    final sub = <String>[
+                      if (multiBrand && brand.isNotEmpty) brand,
+                      if (auto)
+                        _memberIds.contains(id)
+                            ? 'Auto list — matches its conditions'
+                            : 'Auto list — does not match its conditions',
+                    ].join(' · ');
+                    return CheckboxListTile(
+                      dense: true,
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: _memberIds.contains(id),
+                      title: Text(_lists[i]['name']?.toString() ?? '',
+                          style: TextStyle(
+                              fontSize: 14,
+                              color: auto ? Colors.grey.shade600 : null)),
+                      subtitle: sub.isEmpty
+                          ? null
+                          : Text(sub, style: const TextStyle(fontSize: 11)),
+                      secondary: auto
+                          ? Icon(Icons.bolt,
+                              size: 16, color: Colors.orange.shade700)
+                          : null,
+                      // null = locked. Membership here is the conditions.
+                      onChanged: auto
+                          ? null
+                          : (v) {
+                              setState(() {
+                                if (v == true) {
+                                  _memberIds.add(id);
+                                } else {
+                                  _memberIds.remove(id);
+                                }
+                                _dirty = true;
+                              });
+                            },
+                    );
+                  }),
                 ],
               ],
             ),
