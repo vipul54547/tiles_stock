@@ -77,8 +77,6 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
 
   int _availableOf(String designId) =>
       (_avail[designId]?['available'] as num?)?.toInt() ?? 0;
-  String _statusOf(String designId) =>
-      (_avail[designId]?['status'] ?? 'ok').toString();
 
   /// Basket lines whose design is no longer in the browsable pool — free stock
   /// ran to 0, so it is gone from `market_designs`. Without this they would be
@@ -1041,7 +1039,13 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                 // The supplier's stock moves while the basket sits here. Say so
                 // on the line itself — a surprise at Send is worse than a warning
                 // now. Silent when there is enough (the common case).
-                if (_statusOf(d.id) != 'ok') ...[
+                //
+                // Compare the LIVE quantity against what is free. Never the
+                // status the server stamped on the row: the moment the buyer
+                // trims the line (or "Adjust all" does), that snapshot is stale
+                // and the badge would keep crying "only 85 left" at a line now
+                // asking for exactly 85.
+                if (_avail.containsKey(d.id) && qty > _availableOf(d.id)) ...[
                   const SizedBox(height: 5),
                   _shortBadge(qty, _availableOf(d.id)),
                 ],
