@@ -385,7 +385,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   }
 
   String _buildMessage(Stockist stockist, List<TileDesign> designs) {
-    final order = designs.isEmpty ? null : _orderFor(designs.first.stockistId);
+    final order = _orderFor(stockist.id);
     return buildOrderMessage([
       for (final d in designs)
         (
@@ -395,6 +395,19 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
           quality: d.quality,
           qty: myChoiceQuantities[d.id] ?? d.boxQuantity,
         ),
+      // A sold-out line has no TileDesign (it left the browsable pool), but it is
+      // STILL in my_choices and `send_order_to_stockist` reads my_choices — so the
+      // server WILL send it. Leave it out of the message and the supplier receives
+      // an order the buyer never saw. Kept lines must appear here.
+      for (final r in _orphansFor(stockist.id))
+        if ((myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0) > 0)
+          (
+            name: (r['name'] ?? '').toString(),
+            size: (r['size'] ?? '').toString(),
+            surface: (r['surface_type'] ?? '').toString(),
+            quality: (r['quality'] ?? '').toString(),
+            qty: myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0,
+          ),
     ], orderNo: order?.token, connectionCode: order?.connectionCode);
   }
 
@@ -409,10 +422,13 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     if (!mounted) return;
 
     // The review can trim or drop lines, so rebuild from what is in the basket
-    // NOW — not from the list this was called with.
+    // NOW — not from the list this was called with. Sold-out lines the buyer
+    // KEPT still count: they ride along in my_choices and will be sent.
     final live =
         designs.where((d) => myChoiceQuantities.containsKey(d.id)).toList();
-    if (live.isEmpty) {
+    final keptSoldOut = _orphansFor(stockist.id).where(
+        (r) => (myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0) > 0);
+    if (live.isEmpty && keptSoldOut.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Nothing left to send for this supplier.')));
       return;
@@ -649,10 +665,21 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   }
 
   Widget _buildSummaryBar(List<TileDesign> chosen) {
-    final stockistCount =
-        chosen.map((d) => d.stockistId).toSet().length;
+    // Sold-out lines are still in the basket and still get sent, so they belong
+    // in the totals. Counting only what has a TileDesign made the header
+    // disagree with the section beneath it ("3 Designs" over "4 designs").
+    final orphans = _orphanRows;
+    final stockistCount = {
+      ...chosen.map((d) => d.stockistId),
+      ...orphans.map((r) => (r['stockist_key'] ?? '').toString()),
+    }.length;
     final totalBoxes = chosen.fold(
-        0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0));
+            0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0)) +
+        orphans.fold(
+            0,
+            (sum, r) =>
+                sum +
+                (myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0));
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       padding:
@@ -666,7 +693,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          _summaryItem('${chosen.length}', 'Designs'),
+          _summaryItem('${chosen.length + orphans.length}', 'Designs'),
           Container(
               width: 1, height: 28, color: Colors.grey.shade300),
           _summaryItem('$stockistCount', 'Stockists'),
@@ -746,8 +773,14 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     final stockistName = stockist?.name ?? stockistId;
     const color = Color(0xFF1B4F72);
     final orphans = _orphansFor(stockistId);
+    // Sold-out lines still ride along on Send, so their boxes count here too.
     final sectionBoxes = designs.fold(
-        0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0));
+            0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0)) +
+        orphans.fold(
+            0,
+            (sum, r) =>
+                sum +
+                (myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0));
     final lineCount = designs.length + orphans.length;
     final order = _orderFor(stockistId);
     final editable = order?.buyerEditable ?? true;
@@ -818,6 +851,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   /// it, plainly, with a way out.
   Widget _buildSoldOutRow(Map<String, dynamic> r) {
     final id = (r['design_id'] ?? '').toString();
+    final qty = myChoiceQuantities[id] ?? 0;
     final name = (r['name'] ?? '').toString();
     final img = (r['image_url'] ?? '').toString();
     final surface = (r['surface_label'] ?? r['surface_type'] ?? '').toString();
@@ -905,12 +939,46 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          Text('${r['wanted'] ?? 0}',
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey.shade500,
-                  decoration: TextDecoration.lineThrough)),
+          // Out of stock is a WARNING, not a lock. Over-asking is the buyer's
+          // call (the supplier confirms what they can give), so this line keeps
+          // a real, editable quantity like any other — it is not a dead number.
+          // Without it the buyer could neither keep nor change the line, only
+          // delete it. 0 removes it.
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              const Text('Qty (boxes)',
+                  style: TextStyle(fontSize: 10, color: Colors.grey)),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _qtyBtn(Icons.remove, Colors.red.shade700, () {
+                    if (qty > 1) setState(() => setMyChoiceQty(id, qty - 1));
+                  }),
+                  GestureDetector(
+                    onTap: () => _editQty(id, qty),
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 44),
+                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Text('$qty',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15)),
+                    ),
+                  ),
+                  _qtyBtn(Icons.add, Colors.red.shade700,
+                      () => setState(() => setMyChoiceQty(id, qty + 1))),
+                ],
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -1125,7 +1193,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                     // Tap the number to type a quantity directly — far quicker
                     // than the steppers for large box counts.
                     GestureDetector(
-                      onTap: () => _editQty(d, qty),
+                      onTap: () => _editQty(d.id, qty),
                       child: Container(
                         constraints: const BoxConstraints(minWidth: 44),
                         margin: const EdgeInsets.symmetric(horizontal: 6),
@@ -1156,7 +1224,9 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
 
   // Manual quantity entry — tapping the number opens this so a buyer can type a
   // large box count directly instead of holding the +/- steppers.
-  Future<void> _editQty(TileDesign d, int current) async {
+  /// Takes the design ID, not a [TileDesign] — a sold-out line has no TileDesign
+  /// (it is gone from the browsable pool) but still needs to be editable.
+  Future<void> _editQty(String designId, int current) async {
     // TextFormField (not a manual TextEditingController) so the field owns and
     // disposes its own controller — disposing one by hand here crashed during
     // the dialog's close animation ('_dependents.isEmpty' assertion).
@@ -1188,8 +1258,13 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         ],
       ),
     );
-    if (value != null && value > 0) {
-      setState(() => setMyChoiceQty(d.id, value));
+    // 0 removes the line — the same rule as the Send sheet, so there is one way
+    // to drop a design, not two.
+    if (value != null && value >= 0) {
+      setState(() {
+        setMyChoiceQty(designId, value);
+        if (value == 0) _avail.remove(designId);
+      });
     }
   }
 
