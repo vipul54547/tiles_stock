@@ -1,16 +1,15 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/tile_design.dart';
 import '../../models/brand.dart';
 import '../../models/choice_state.dart';
 import '../../models/inquiry_order.dart';
 import '../../services/supabase_data_service.dart';
-import '../../services/cloudinary_service.dart';
 import '../../utils/india_geo.dart';
 import '../../widgets/save_bar.dart';
+import '../../widgets/holding_picker.dart';
 
 /// Manual dispatch, in the same batch shape as Add Stock: pick designs → set
 /// boxes → Add to a running list, fill dispatch details, then Record. Over-
@@ -240,98 +239,16 @@ class _State extends State<ManualDispatchScreen> {
 
   // ── Design picker ───────────────────────────────────────────────────────────
 
+  /// Hand-picking a holding is where the wrong line gets chosen: one print can
+  /// be held in several brand x quality x surface variants, and a flat list of
+  /// them all is six near-identical rows. [showHoldingPicker] asks the print
+  /// first, then only the variants that are actually ambiguous — each with its
+  /// box count. (docs/DISPATCH_ORDER_BACKED_PLAN.md)
   Future<void> _pickDesign() async {
-    final chosen = await showModalBottomSheet<TileDesign>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) {
-        String q = '';
-        return StatefulBuilder(builder: (ctx, setSheet) {
-          final ql = q.trim().toLowerCase();
-          final res = _designs.where((d) {
-            if (ql.isEmpty) return true;
-            return d.name.toLowerCase().contains(ql) ||
-                _brandName(d.brandId).toLowerCase().contains(ql) ||
-                d.size.toLowerCase().contains(ql) ||
-                _surfaceOf(d).toLowerCase().contains(ql);
-          }).toList();
-          return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-            child: SizedBox(
-              height: MediaQuery.of(ctx).size.height * 0.75,
-              child: Column(
-                children: [
-                  const SizedBox(height: 12),
-                  const Text('Select design',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                    child: TextField(
-                      autofocus: true,
-                      onChanged: (v) => setSheet(() => q = v),
-                      decoration: InputDecoration(
-                        isDense: true,
-                        prefixIcon: const Icon(Icons.search),
-                        hintText: 'Search design, size, brand…',
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: res.isEmpty
-                        ? const Center(child: Text('No in-stock designs match.'))
-                        : ListView.separated(
-                            itemCount: res.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
-                            itemBuilder: (_, i) {
-                              final d = res[i];
-                              final img = d.faceImageUrls.isNotEmpty
-                                  ? d.faceImageUrls.first
-                                  : '';
-                              return ListTile(
-                                leading: ClipRRect(
-                                  borderRadius: BorderRadius.circular(6),
-                                  child: img.isEmpty
-                                      ? Container(
-                                          width: 44,
-                                          height: 44,
-                                          color: Colors.grey.shade100,
-                                          child: const Icon(
-                                              Icons.image_not_supported,
-                                              size: 18,
-                                              color: Colors.grey))
-                                      : CachedNetworkImage(
-                                          imageUrl: CloudinaryService.thumbUrl(
-                                              img,
-                                              width: 120),
-                                          width: 44,
-                                          height: 44,
-                                          fit: BoxFit.cover,
-                                          placeholder: (_, __) => Container(
-                                              color: Colors.grey.shade200),
-                                          errorWidget: (_, __, ___) => Container(
-                                              color: Colors.grey.shade200)),
-                                ),
-                                title: Text(d.name),
-                                subtitle: Text(_holdingLabel(d)),
-                                trailing: Text('${d.boxQuantity} in stock',
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade600)),
-                                onTap: () => Navigator.pop(ctx, d),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        });
-      },
+    final chosen = await showHoldingPicker(
+      context,
+      designs: _designs, // in-stock only
+      brands: _brands,
     );
     if (chosen != null) setState(() => _sel = chosen);
   }
@@ -341,7 +258,7 @@ class _State extends State<ManualDispatchScreen> {
     _qtyCtrl.clear();
   }
 
-  void _addLine() {
+  Future<void> _addLine() async {
     if (_sel == null) {
       _snack('Pick a design first.', _red);
       return;
@@ -350,6 +267,14 @@ class _State extends State<ManualDispatchScreen> {
     if (qty <= 0) {
       _snack('Enter a quantity.', _red);
       return;
+    }
+    // More boxes than the godown holds. Over-dispatch stays ALLOWED (dispatch is
+    // the final truth and the system count is often stale) — but it must be a
+    // deliberate choice, not a typo that slips through. Cancel leaves the design
+    // and the quantity exactly as they are, so the number can just be corrected.
+    if (qty > _sel!.boxQuantity) {
+      final allow = await _confirmOverStock(_sel!, qty);
+      if (!allow) return;
     }
     final idx = _lines.indexWhere((l) => l.d.id == _sel!.id);
     if (idx >= 0) {
@@ -381,6 +306,72 @@ class _State extends State<ManualDispatchScreen> {
   void _lift(int idx) {
     if (idx <= 0) return;
     _lines.insert(0, _lines.removeAt(idx));
+  }
+
+  /// "You are dispatching more than you have." Names the exact holding (a print
+  /// can be held in several surfaces/qualities, and the wrong one is precisely
+  /// the mistake this screen is trying to prevent), shows both numbers, and
+  /// makes the stockist say yes. Returns true = add the line anyway.
+  Future<bool> _confirmOverStock(TileDesign d, int qty) async {
+    final stock = d.boxQuantity;
+    final short = qty - stock;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('More than godown stock'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(d.name,
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+            Text(_holdingLabel(d),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('In godown', style: TextStyle(fontSize: 13)),
+                Text('$stock boxes',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('You entered', style: TextStyle(fontSize: 13)),
+                Text('$qty boxes',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600, color: _red)),
+              ],
+            ),
+            const Divider(height: 18),
+            Text('$short box${short == 1 ? '' : 'es'} more than you have.',
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.bold, color: _red)),
+            const SizedBox(height: 6),
+            Text(
+                'You can still dispatch it — stock will drop to 0, not below. '
+                'Only allow this if the boxes really are going out.',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _red, foregroundColor: Colors.white),
+            child: const Text('Allow'),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
   }
 
   Future<void> _resolveDuplicate(int idx, int newQty) async {
