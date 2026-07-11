@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -114,12 +115,20 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     );
   }
 
-  /// Re-check the basket against live stock, and if anything no longer fits, put
-  /// it in front of the buyer BEFORE the order goes out. Returns true = go ahead.
+  /// Re-check the basket against live stock and, if any line no longer fits, put
+  /// the plain facts in front of the buyer BEFORE the order goes out.
+  /// Returns true = go ahead and send.
   ///
-  /// Sending more than is free stays ALLOWED — an inquiry is a request, not a
-  /// reservation, and the supplier may restock or dispatch part of it. So the
-  /// sheet makes adjusting the easy, obvious path, and leaves Send open.
+  /// Deliberately does NOT decide for them (user, 2026-07-11 — this replaced an
+  /// earlier "Use available / Remove / Adjust all" sheet). It shows three numbers
+  /// per line — what you chose, what is free, and a box holding your number — and
+  /// lets the buyer type whatever they want. Pre-filled with their existing
+  /// quantity, so a line they are happy with needs no typing at all and the box
+  /// is never ambiguously blank. **0 = remove the line.**
+  ///
+  /// Asking for MORE than is free stays allowed: an inquiry is a request, not a
+  /// reservation, and the supplier confirms what they can give. So over-asking
+  /// costs exactly one warning, not a wall.
   /// (docs/BUYER_ORDER_AVAILABILITY_PLAN.md)
   Future<bool> _reviewAvailability(Stockist stockist) async {
     final rows = await _service.choicesAvailability(stockistKey: stockist.id);
@@ -131,182 +140,201 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
       }
     });
 
+    // Only lines whose number no longer fits. Everything else is left alone and
+    // the buyer never sees this sheet at all.
     final problems = rows.where((r) {
       final id = (r['design_id'] ?? '').toString();
-      return myChoiceQuantities.containsKey(id) &&
-          (r['status'] ?? 'ok').toString() != 'ok';
+      if (!myChoiceQuantities.containsKey(id)) return false;
+      final want = myChoiceQuantities[id] ?? 0;
+      final avail = (r['available'] as num?)?.toInt() ?? 0;
+      return want > avail;
     }).toList();
-    if (problems.isEmpty) return true; // all good — no extra screen
+    if (problems.isEmpty) return true; // nothing changed — send straight through
+
+    final ctrls = <String, TextEditingController>{
+      for (final r in problems)
+        (r['design_id'] ?? '').toString(): TextEditingController(
+            text: '${myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0}'),
+    };
 
     final go = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) {
-          // A line the buyer removed or already trimmed drops out of the list.
-          final live = problems
-              .where((r) =>
-                  myChoiceQuantities
-                      .containsKey((r['design_id'] ?? '').toString()) &&
-                  (myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0) >
-                      ((r['available'] as num?)?.toInt() ?? 0))
-              .toList();
-
-          void adjustAll() {
-            setSheet(() => setState(() {
-                  for (final r in problems) {
-                    final id = (r['design_id'] ?? '').toString();
-                    final avail = (r['available'] as num?)?.toInt() ?? 0;
-                    if (!myChoiceQuantities.containsKey(id)) continue;
-                    // 0 free → the line cannot be ordered at all; drop it.
-                    setMyChoiceQty(id, avail);
-                    if (avail <= 0) _avail.remove(id);
-                  }
-                }));
-          }
-
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Icon(Icons.inventory_2_outlined,
-                        color: Colors.orange.shade800),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text('Stock changed since you chose',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 16)),
-                    ),
-                  ]),
-                  const SizedBox(height: 6),
-                  Text(
-                      live.isEmpty
-                          ? 'All lines now fit the available stock.'
-                          : '${live.length} line${live.length == 1 ? '' : 's'} '
-                              'ask for more than the supplier has free right now. '
-                              'You can adjust them, or send anyway — the supplier '
-                              'will confirm what they can give.',
-                      style:
-                          TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
-                  const SizedBox(height: 12),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      child: Column(
-                        children: [
-                          for (final r in live)
-                            _reviewLine(r, () => setSheet(() => setState(() {}))),
-                        ],
-                      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Stock has changed',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                const SizedBox(height: 6),
+                Text(
+                    'These designs have less stock now than when you chose them. '
+                    'Set the quantity you want. Enter 0 to remove a line.',
+                    style:
+                        TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+                const SizedBox(height: 14),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        for (final r in problems)
+                          _reviewLine(r, ctrls[(r['design_id'] ?? '').toString()]!),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  if (live.isNotEmpty)
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: adjustAll,
-                        icon: const Icon(Icons.auto_fix_high, size: 16),
-                        label: const Text('Adjust all to available'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1B4F72),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
+                ),
+                const SizedBox(height: 14),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 13)),
+                      child: const Text('Cancel'),
                     ),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(ctx, false),
-                        style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 13)),
-                        child: const Text('Back'),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _applyAndSend(ctx, ctrls),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2E7D32),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
                       ),
+                      child: const Text('Send choice'),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () => Navigator.pop(ctx, true),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E7D32),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 13),
-                        ),
-                        child: Text(live.isEmpty ? 'Send order' : 'Send anyway'),
-                      ),
-                    ),
-                  ]),
-                ],
-              ),
+                  ),
+                ]),
+              ],
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
+
+    for (final c in ctrls.values) {
+      c.dispose();
+    }
     return go == true;
   }
 
-  /// One over-asked line in the review sheet: what you want, what is left, and
-  /// the two ways out.
-  Widget _reviewLine(Map<String, dynamic> r, VoidCallback changed) {
-    final id = (r['design_id'] ?? '').toString();
+  /// Write the buyer's numbers back to the basket, then — only if something is
+  /// still above what the supplier has free — ask once. Their call either way.
+  Future<void> _applyAndSend(
+      BuildContext sheetCtx, Map<String, TextEditingController> ctrls) async {
+    var over = 0;
+    ctrls.forEach((id, c) {
+      final v = int.tryParse(c.text.trim()) ?? 0;
+      setMyChoiceQty(id, v); // 0 removes the line
+      if (v <= 0) {
+        _avail.remove(id);
+      } else if (v > _availableOf(id)) {
+        over++;
+      }
+    });
+    setState(() {}); // the basket behind the sheet now shows the new numbers
+
+    if (over > 0) {
+      final ok = await showDialog<bool>(
+        context: sheetCtx,
+        builder: (dctx) => AlertDialog(
+          title: const Text('More than available'),
+          content: Text(
+              '$over line${over == 1 ? '' : 's'} ask for more boxes than the '
+              'supplier has free right now.\n\n'
+              'You can still send it — they will confirm what they can give.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dctx, false),
+                child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(dctx, true),
+                child: const Text('Send anyway')),
+          ],
+        ),
+      );
+      if (ok != true) return; // stay on the sheet so they can change the numbers
+    }
+    if (sheetCtx.mounted) Navigator.pop(sheetCtx, true);
+  }
+
+  /// One line that no longer fits: the two numbers, and a box holding THEIR
+  /// number — pre-filled, so a line they are happy with needs no typing.
+  Widget _reviewLine(Map<String, dynamic> r, TextEditingController ctrl) {
     final avail = (r['available'] as num?)?.toInt() ?? 0;
-    final want = myChoiceQuantities[id] ?? 0;
+    final chose = myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0;
+    final sub = [
+      (r['size'] ?? '').toString().replaceAll(' mm', ''),
+      (r['surface_label'] ?? '').toString(),
+      (r['quality'] ?? '').toString(),
+    ].where((x) => x.isNotEmpty && x.toLowerCase() != 'none').join(' · ');
+
+    Widget figure(String label, String value, {Color? color}) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label,
+                style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+            Text(value,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: color ?? Colors.black87)),
+          ],
+        );
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFFDF5),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.orange.shade200),
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text((r['name'] ?? '').toString(),
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-          Text(
-              [
-                (r['size'] ?? '').toString().replaceAll(' mm', ''),
-                (r['surface_label'] ?? '').toString(),
-                (r['quality'] ?? '').toString(),
-              ].where((x) => x.isNotEmpty && x.toLowerCase() != 'none').join(' · '),
-              style: const TextStyle(fontSize: 11, color: Colors.grey)),
-          const SizedBox(height: 6),
-          _shortBadge(want, avail),
-          const SizedBox(height: 6),
-          Row(children: [
-            if (avail > 0)
-              TextButton(
-                onPressed: () {
-                  setMyChoiceQty(id, avail);
-                  changed();
-                },
-                style: TextButton.styleFrom(
-                    minimumSize: const Size(0, 32),
-                    padding: const EdgeInsets.symmetric(horizontal: 8)),
-                child: Text('Use available ($avail)',
-                    style: const TextStyle(fontSize: 12)),
+          if (sub.isNotEmpty)
+            Text(sub, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              figure('You chose', '$chose'),
+              const SizedBox(width: 22),
+              figure('Available', '$avail',
+                  color: avail == 0 ? Colors.grey : Colors.black87),
+              const Spacer(),
+              SizedBox(
+                width: 84,
+                child: TextField(
+                  controller: ctrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.bold),
+                  decoration: InputDecoration(
+                    labelText: 'Qty',
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
               ),
-            TextButton(
-              onPressed: () {
-                removeMyChoice(id);
-                _avail.remove(id);
-                changed();
-              },
-              style: TextButton.styleFrom(
-                  foregroundColor: Colors.red.shade600,
-                  minimumSize: const Size(0, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 8)),
-              child: const Text('Remove', style: TextStyle(fontSize: 12)),
-            ),
-          ]),
+            ],
+          ),
         ],
       ),
     );
