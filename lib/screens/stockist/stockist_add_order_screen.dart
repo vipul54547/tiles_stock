@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/tile_design.dart';
+import '../../models/brand.dart';
 import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/unsaved_changes.dart';
+import '../../widgets/holding_entry_bar.dart';
 
 /// Stockist creates OR edits their own order for a (possibly non-app) customer: a
 /// free-text customer hint + designs picked from their F_Stock with box
@@ -88,6 +90,7 @@ class _State extends State<StockistAddOrderScreen> {
   final _picks = <String, _Pick>{}; // designId → pick
   List<TileDesign> _stock = [];      // F_Stock > 0 (picker source)
   Map<String, String> _brandById = {}; // brandId → name (my_stock has no name)
+  List<Brand> _brands = [];
   bool _loading = true;
   bool _saving = false;
   bool _dirty = false;
@@ -112,6 +115,7 @@ class _State extends State<StockistAddOrderScreen> {
     final brands = await _data.getMyBrands();
     if (!mounted) return;
     setState(() {
+      _brands = brands;
       _brandById = {for (final b in brands) b.id: b.name};
       _stock = all.where((d) => d.fStock > 0).toList()
         ..sort((a, b) => a.name.compareTo(b.name));
@@ -164,6 +168,22 @@ class _State extends State<StockistAddOrderScreen> {
     });
   }
 
+  /// One line from the keyboard bar. An existing line for the same holding is
+  /// REPLACED, not summed — the stockist is correcting the number they can see
+  /// sitting in the list, not adding a second helping of it.
+  Future<bool> _addPick(TileDesign d, int qty) async {
+    setState(() {
+      final p = _picks[d.id];
+      if (p != null) {
+        p.qty = qty;
+      } else {
+        _picks[d.id] = _Pick(d, qty);
+      }
+      _dirty = true;
+    });
+    return true;
+  }
+
   Future<void> _save() async {
     final lines = _picks.values
         .where((p) => p.qty > 0)
@@ -200,6 +220,8 @@ class _State extends State<StockistAddOrderScreen> {
   @override
   Widget build(BuildContext context) {
     final picks = _picks.values.toList();
+    // Wide = a keyboard is in front of the stockist. (project_batch_stock_and_grids)
+    final wide = MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
@@ -249,18 +271,43 @@ class _State extends State<StockistAddOrderScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  // Desktop: build the order from the keyboard, one line at a
+                  // time — `delt ↓ Tab · m ↓ Tab · p ↓ Tab · 40 Enter`. The old
+                  // flat grid listed every holding as its own card, so a print
+                  // held in six variants was six near-identical cards with no box
+                  // count on them: the exact wrong-variant trap the dispatch
+                  // picker was built to kill, still sitting on this screen.
+                  //
+                  // The grid stays, as Browse — it is genuinely faster for
+                  // ticking many designs at once. Two doors, one list.
+                  // (docs/DISPATCH_ORDER_BACKED_PLAN.md — Phase 2)
+                  if (wide) ...[
+                    HoldingEntryBar(
+                      designs: _stock,
+                      brands: _brands,
+                      // An order promises stock — count what is FREE, not what is
+                      // on the shelf. (project_fstock_model)
+                      boxesOf: (d) => d.fStock,
+                      onAdd: _addPick,
+                      onBrowse: _pickDesigns,
+                      browseLabel: 'Browse all',
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   Row(
                     children: [
                       const Text('Designs',
                           style: TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 14)),
                       const Spacer(),
-                      OutlinedButton.icon(
-                        onPressed: _pickDesigns,
-                        icon: const Icon(Icons.add, size: 18),
-                        label: Text(picks.isEmpty ? 'Select' : 'Add / edit'),
-                        style: OutlinedButton.styleFrom(foregroundColor: _navy),
-                      ),
+                      if (!wide)
+                        OutlinedButton.icon(
+                          onPressed: _pickDesigns,
+                          icon: const Icon(Icons.add, size: 18),
+                          label: Text(picks.isEmpty ? 'Select' : 'Add / edit'),
+                          style:
+                              OutlinedButton.styleFrom(foregroundColor: _navy),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 6),

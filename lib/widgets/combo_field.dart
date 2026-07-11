@@ -433,26 +433,32 @@ class _ComboFieldState<T> extends State<ComboField<T>> {
           height: _rowH,
           color: highlighted ? _navy.withValues(alpha: 0.10) : null,
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
+          // Detail sits UNDER the label, not beside it. A design row's detail is
+          // "600x600 · 2 surfaces · 2 qualities · 235 boxes" — far too long to
+          // share a line, and side by side it just overflows the menu.
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  widget.labelOf(o),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 13,
-                      color: highlighted ? _navy : Colors.black87,
-                      fontWeight:
-                          highlighted ? FontWeight.w700 : FontWeight.w500),
-                ),
+              Text(
+                widget.labelOf(o),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: 13,
+                    height: 1.15,
+                    color: highlighted ? _navy : Colors.black87,
+                    fontWeight:
+                        highlighted ? FontWeight.w700 : FontWeight.w500),
               ),
-              if (detail.isNotEmpty) ...[
-                const SizedBox(width: 8),
+              if (detail.isNotEmpty)
                 Text(detail,
-                    style:
-                        TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-              ],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11,
+                        height: 1.15,
+                        color: Colors.grey.shade600)),
             ],
           ),
         ),

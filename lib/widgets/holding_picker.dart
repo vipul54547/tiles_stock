@@ -3,6 +3,7 @@ import '../models/tile_design.dart';
 import '../models/brand.dart';
 import 'tile_card.dart' show TileImage;
 import '../utils/tile_sizes.dart';
+import '../utils/holding_group.dart';
 
 /// Pick ONE holding by hand, safely.
 ///
@@ -46,20 +47,10 @@ Future<TileDesign?> showHoldingPicker(
 
 const _navy = Color(0xFF1B4F72);
 
-/// One print = one library row (name + size) and every holding under it.
-class _Print {
-  final String key;
-  final String name;
-  final String size;
-  final String imageUrl;
-  final List<TileDesign> holdings;
-  _Print(this.key, this.name, this.size, this.imageUrl, this.holdings);
-
-  int get boxes => holdings.fold(0, (s, d) => s + d.boxQuantity);
-}
-
-String _surfKey(TileDesign d) => d.surfaceType.trim().toLowerCase();
-String _brandKey(TileDesign d) => d.brandId ?? '';
+// Grouping lives in utils/holding_group.dart — the keyboard entry bar
+// (HoldingEntryBar) asks exactly the same questions and must group identically.
+String _surfKey(TileDesign d) => surfaceKeyOf(d);
+String _brandKey(TileDesign d) => brandKeyOf(d);
 
 class _HoldingPicker extends StatefulWidget {
   final List<TileDesign> designs;
@@ -73,42 +64,14 @@ class _HoldingPicker extends StatefulWidget {
 
 class _HoldingPickerState extends State<_HoldingPicker> {
   String _q = '';
-  _Print? _print; // null = still choosing the print
+  HoldingPrint? _print; // null = still choosing the print
 
   // Variant selections (null = not chosen yet).
   String? _brand;
   String? _surf;
   String? _qual;
 
-  late final List<_Print> _prints = _group(widget.designs);
-
-  /// Group holdings into prints. A library row IS the print (name + size), so
-  /// its holdings differ only by brand / quality / surface — exactly the
-  /// variants we then ask about.
-  List<_Print> _group(List<TileDesign> list) {
-    final map = <String, List<TileDesign>>{};
-    final order = <String>[];
-    for (final d in list) {
-      final k = d.libraryId.isNotEmpty ? d.libraryId : d.id;
-      if (map[k] == null) {
-        map[k] = [d];
-        order.add(k);
-      } else {
-        map[k]!.add(d);
-      }
-    }
-    final out = <_Print>[];
-    for (final k in order) {
-      final hs = map[k]!;
-      final f = hs.first;
-      final img = hs
-          .map((d) => d.faceImageUrls.isNotEmpty ? d.faceImageUrls.first : '')
-          .firstWhere((u) => u.isNotEmpty, orElse: () => '');
-      out.add(_Print(k, f.name, f.size, img, hs));
-    }
-    out.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-    return out;
-  }
+  late final List<HoldingPrint> _prints = groupHoldingsByPrint(widget.designs);
 
   String _brandName(String id) {
     if (id.isEmpty) return '';
@@ -190,7 +153,7 @@ class _HoldingPickerState extends State<_HoldingPicker> {
     }
   }
 
-  void _openPrint(_Print p) {
+  void _openPrint(HoldingPrint p) {
     // Nothing to disambiguate — the tap that picked the print picked the
     // holding too.
     if (p.holdings.length == 1) {
@@ -266,7 +229,7 @@ class _HoldingPickerState extends State<_HoldingPicker> {
     );
   }
 
-  Widget _printRow(_Print p) {
+  Widget _printRow(HoldingPrint p) {
     // What is still to be decided about this print — so the stockist knows a
     // second question is coming before they tap.
     final surfaces = p.holdings.map(_surfKey).toSet().length;
@@ -307,7 +270,7 @@ class _HoldingPickerState extends State<_HoldingPicker> {
             fontSize: 12,
             color: bits.isEmpty ? Colors.grey.shade600 : _navy),
       ),
-      trailing: Text('${p.boxes} boxes',
+      trailing: Text('${p.boxes((d) => d.boxQuantity)} boxes',
           style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
       onTap: () => _openPrint(p),
     );
@@ -315,7 +278,7 @@ class _HoldingPickerState extends State<_HoldingPicker> {
 
   // Step 2 — which variant? Only the ambiguous dimensions are shown; a
   // dimension with one option is never asked.
-  Widget _variantChooser(_Print p) {
+  Widget _variantChooser(HoldingPrint p) {
     final brandOpts = _opts('brand');
     final surfOpts = _opts('surface');
     final qualOpts = _opts('quality');

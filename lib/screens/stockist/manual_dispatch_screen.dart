@@ -10,6 +10,7 @@ import '../../services/supabase_data_service.dart';
 import '../../utils/india_geo.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/holding_picker.dart';
+import '../../widgets/holding_entry_bar.dart';
 
 /// Manual dispatch, in the same batch shape as Add Stock: pick designs → set
 /// boxes → Add to a running list, fill dispatch details, then Record. Over-
@@ -258,6 +259,7 @@ class _State extends State<ManualDispatchScreen> {
     _qtyCtrl.clear();
   }
 
+  /// The mobile path: a design in `_sel`, a quantity typed in `_qtyCtrl`.
   Future<void> _addLine() async {
     if (_sel == null) {
       _snack('Pick a design first.', _red);
@@ -268,15 +270,22 @@ class _State extends State<ManualDispatchScreen> {
       _snack('Enter a quantity.', _red);
       return;
     }
+    if (await _addLineFor(_sel!, qty)) setState(_resetRow);
+  }
+
+  /// Put [qty] boxes of [d] on the note. Shared by the mobile picker and the
+  /// desktop keyboard bar. Returns false when the line was NOT added, so the
+  /// caller leaves the row exactly as the stockist left it.
+  Future<bool> _addLineFor(TileDesign d, int qty) async {
     // More boxes than the godown holds. Over-dispatch stays ALLOWED (dispatch is
     // the final truth and the system count is often stale) — but it must be a
     // deliberate choice, not a typo that slips through. Cancel leaves the design
     // and the quantity exactly as they are, so the number can just be corrected.
-    if (qty > _sel!.boxQuantity) {
-      final allow = await _confirmOverStock(_sel!, qty);
-      if (!allow) return;
+    if (qty > d.boxQuantity) {
+      final allow = await _confirmOverStock(d, qty);
+      if (!allow) return false;
     }
-    final idx = _lines.indexWhere((l) => l.d.id == _sel!.id);
+    final idx = _lines.indexWhere((l) => l.d.id == d.id);
     if (idx >= 0) {
       // An order row waiting at 0 boxes isn't a duplicate — it's the line the
       // stockist is filling in. Set it, and lift it like any other add.
@@ -284,20 +293,19 @@ class _State extends State<ManualDispatchScreen> {
         setState(() {
           _lines[idx].qty = qty;
           _lift(idx);
-          _resetRow();
         });
-        return;
+        return true;
       }
-      _resolveDuplicate(idx, qty);
-      return;
+      await _resolveDuplicate(idx, qty);
+      return true;
     }
     setState(() {
       // Newest on top: the design-selection bar is pinned above the list, so the
       // row you just added lands right under it instead of off-screen below the
       // order's pre-filled rows.
-      _lines.insert(0, _Line(_sel!, qty));
-      _resetRow();
+      _lines.insert(0, _Line(d, qty));
     });
+    return true;
   }
 
   /// Move the row you just put boxes on to the top, under the selection bar.
@@ -1923,39 +1931,18 @@ class _State extends State<ManualDispatchScreen> {
         ),
       );
 
-  Widget _addBar() => Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: _hField(
-                    'Design',
-                    _hSelect(
-                        _sel == null
-                            ? 'Search & select design'
-                            : '${_sel!.name}  ·  ${_holdingLabel(_sel!)}  ·  ${_sel!.boxQuantity} stock',
-                        _pickDesign,
-                        _sel == null)),
-              ),
-              const SizedBox(width: 12),
-              _hField('Qty (boxes)', _qtyField(), width: 120),
-              const SizedBox(width: 12),
-              SizedBox(
-                height: 44,
-                child: ElevatedButton.icon(
-                  onPressed: _addLine,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add'),
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: _navy, foregroundColor: Colors.white),
-                ),
-              ),
-            ],
-          ),
-        ),
+  /// Desktop: the whole line from the keyboard —
+  /// `delt ↓ Tab · m ↓ Tab · p ↓ Tab · 40 Enter`.
+  ///
+  /// It asks the same two questions the touch picker asks (the PRINT, then only
+  /// the variants that are genuinely ambiguous, each carrying its box count) —
+  /// the stockist just never has to reach for the mouse. And the fields are still
+  /// clickable, so the mouse path is the picker, inline. No Browse button needed.
+  Widget _addBar() => HoldingEntryBar(
+        designs: _designs, // in-stock only
+        brands: _brands,
+        boxesOf: (d) => d.boxQuantity, // dispatch counts what is on the shelf
+        onAdd: _addLineFor,
       );
 
   Widget _desktopTable() {
@@ -2134,47 +2121,6 @@ class _State extends State<ManualDispatchScreen> {
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           ),
-        ),
-      );
-
-  Widget _hField(String label, Widget child, {double? width}) {
-    final col = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label,
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Colors.grey.shade600)),
-        const SizedBox(height: 5),
-        child,
-      ],
-    );
-    return width == null ? col : SizedBox(width: width, child: col);
-  }
-
-  Widget _hSelect(String value, VoidCallback onTap, bool placeholder) => InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade400),
-              borderRadius: BorderRadius.circular(8)),
-          child: Row(children: [
-            Expanded(
-              child: Text(value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 13,
-                      color:
-                          placeholder ? Colors.grey.shade500 : Colors.black87)),
-            ),
-            Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
-          ]),
         ),
       );
 
