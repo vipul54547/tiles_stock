@@ -571,7 +571,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         title: const Text('My Choice'),
         actions: [
           // Dispatch history moved to the ⋮ account menu as "My Dispatch".
-          if (!_loading && _chosenDesigns.isNotEmpty)
+          if (!_loading && !_basketEmpty)
             TextButton.icon(
               onPressed: _confirmClearAll,
               icon: const Icon(Icons.delete_outline, size: 18),
@@ -583,11 +583,21 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _chosenDesigns.isEmpty
+          : _basketEmpty
               ? _buildEmptyState()
               : _buildContent(),
     );
   }
+
+  /// The basket is only truly empty when it has NO lines at all — including the
+  /// sold-out ones, which have no TileDesign because they left the browsable
+  /// pool at 0 free stock.
+  ///
+  /// Testing `_chosenDesigns.isEmpty` alone showed "No choices yet" over a basket
+  /// that still held a sold-out line — invisible on screen, still in my_choices,
+  /// and still sent to the supplier by send_order_to_stockist. The dashboard
+  /// badge (which counts my_choices) said 1 while this screen said none.
+  bool get _basketEmpty => _chosenDesigns.isEmpty && _orphanRows.isEmpty;
 
   void _confirmClearAll() {
     showDialog(
