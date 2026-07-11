@@ -8,6 +8,7 @@ import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/save_bar.dart';
+import '../../widgets/combo_field.dart';
 
 /// Batch manual stock entry. The stockist builds a list of rows — each a
 /// Design + (M:) Brand + Quality + Quantity — and commits them together. Only
@@ -72,6 +73,15 @@ class _State extends State<AddStockBatchScreen> {
   String _selSurfaceLabel = '';
   final _qtyCtrl = TextEditingController();
 
+  // Desktop entry bar: one focus node per field, so Tab walks Brand → Design →
+  // Surface → Quality → Qty and Enter on Qty adds the line. (Size is read-only
+  // and takes no focus, so Tab flows straight past it.)
+  final _fBrand = FocusNode();
+  final _fDesign = FocusNode();
+  final _fSurface = FocusNode();
+  final _fQuality = FocusNode();
+  final _fQty = FocusNode();
+
   /// The stockist's pickable surface options: each alias word with its admin
   /// finish, plus admin finishes they have no word for yet.
   List<({String label, String canonical})> _surfOptions = const [];
@@ -127,6 +137,11 @@ class _State extends State<AddStockBatchScreen> {
   @override
   void dispose() {
     _qtyCtrl.dispose();
+    _fBrand.dispose();
+    _fDesign.dispose();
+    _fSurface.dispose();
+    _fQuality.dispose();
+    _fQty.dispose();
     super.dispose();
   }
 
@@ -152,6 +167,11 @@ class _State extends State<AddStockBatchScreen> {
     if (id == null) return '';
     final m = _brands.where((b) => b.id == id).toList();
     return m.isEmpty ? '' : m.first.name;
+  }
+
+  Brand? get _selBrand {
+    final m = _brands.where((b) => b.id == _selBrandId).toList();
+    return m.isEmpty ? null : m.first;
   }
 
   // ── Surface (project_per_brand_surface_mode) ──────────────────────────────
@@ -299,22 +319,25 @@ class _State extends State<AddStockBatchScreen> {
         );
       },
     );
-    if (chosen != null) {
-      setState(() {
-        _selMaster = chosen;
-        // For M, default the brand to the master's own brand if none picked.
-        if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
-          _selBrandId = chosen.brandId;
-        }
-        // Prefill the surface this print was last stocked in, so restocking is
-        // one tap. Falls back to the library's own word (M + surface-in-name,
-        // where the surface really is part of the print), then 'None'. Always
-        // editable. When a surface is REQUIRED we leave the last pick standing.
-        if (!_selNeedsSurface) {
-          _selSurfaceLabel = _rememberedSurface(chosen);
-        }
-      });
-    }
+    if (chosen != null) _onDesignChosen(chosen);
+  }
+
+  /// A design was chosen — from the sheet (touch) or the combo field (keyboard).
+  void _onDesignChosen(LibraryEntry chosen) {
+    setState(() {
+      _selMaster = chosen;
+      // For M, default the brand to the master's own brand if none picked.
+      if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
+        _selBrandId = chosen.brandId;
+      }
+      // Prefill the surface this print was last stocked in, so restocking is
+      // one tap. Falls back to the library's own word (M + surface-in-name,
+      // where the surface really is part of the print), then 'None'. Always
+      // editable. When a surface is REQUIRED we leave the last pick standing.
+      if (!_selNeedsSurface) {
+        _selSurfaceLabel = _rememberedSurface(chosen);
+      }
+    });
   }
 
   /// The surface to prefill for [m]: the one this print was last stocked in,
@@ -718,61 +741,105 @@ class _State extends State<AddStockBatchScreen> {
     );
   }
 
+  /// The whole line is enterable from the keyboard:
+  ///
+  ///   f Tab · delt ↓ Tab · m Tab · p Tab · 40 Enter
+  ///
+  /// Every field is a [ComboField] — type to filter, ↓ to pick, Tab to move on.
+  /// Size is read-only and takes no focus, so Tab flows past it. Enter on the
+  /// quantity presses Add and puts the cursor back on Design for the next line.
+  ///
+  /// Laid out as a Wrap, NOT a Row: Design used to be the only Expanded field
+  /// among fixed-width ones, so the moment Surface appeared it was squeezed to a
+  /// ~20px slit (its label wrapped to "Desi/gn"). Fixed widths that flow onto a
+  /// second line cannot do that.
   Widget _desktopEntryBar() {
     final sizeText =
         _selMaster == null ? '—' : _selMaster!.size.replaceAll(' mm', '');
+    final surfMissing = _selNeedsSurface &&
+        (_selSurfaceLabel.trim().isEmpty ||
+            _selSurfaceLabel.toLowerCase() == 'none');
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.end,
           children: [
-            if (_isM) ...[
-              _hField('Brand',
-                  _hSelect(
-                      _selBrandId == null
-                          ? 'Select brand'
-                          : _brandNameOf(_selBrandId),
-                      _pickBrand,
-                      _selBrandId == null),
-                  width: 150),
-              const SizedBox(width: 12),
-            ],
-            Expanded(
-              child: _hField(
-                  'Design',
-                  _hSelect(
-                      _selMaster == null
-                          ? 'Search & select design'
-                          : _displayName(_selMaster!, _isM ? _selBrandId : null),
-                      _pickDesign,
-                      _selMaster == null)),
+            if (_isM)
+              _hField(
+                'Brand',
+                ComboField<Brand>(
+                  focusNode: _fBrand,
+                  value: _selBrand,
+                  options: [..._brands]
+                    ..sort((a, b) => a.name.compareTo(b.name)),
+                  labelOf: (b) => b.name,
+                  hint: 'Select brand',
+                  hasError: _selBrandId == null,
+                  onSelected: (b) => setState(() => _selBrandId = b.id),
+                ),
+                width: 150,
+              ),
+            _hField(
+              'Design',
+              ComboField<LibraryEntry>(
+                focusNode: _fDesign,
+                value: _selMaster,
+                options: _filteredMasters('', _brandFilter),
+                labelOf: (m) => _displayName(m, _isM ? _selBrandId : null),
+                detailOf: (m) => m.size.replaceAll(' mm', ''),
+                hint: 'Type to search design',
+                hasError: _selMaster == null,
+                onSelected: _onDesignChosen,
+              ),
+              width: 260,
             ),
-            const SizedBox(width: 12),
-            _hField('Size (auto)', _hReadonly(sizeText), width: 110),
-            const SizedBox(width: 12),
-            if (_selShowSurface) ...[
-              _hField(_selNeedsSurface ? 'Surface *' : 'Surface',
-                  _surfaceDropdown(),
-                  width: 150),
-              const SizedBox(width: 12),
-            ],
-            _hField('Quality', _qualityDropdown(), width: 140),
-            const SizedBox(width: 12),
+            _hField('Size (auto)', _hReadonly(sizeText), width: 100),
+            // Always in the bar, even before a design is picked — greyed, and
+            // skipped by Tab. It used to appear only once a design was chosen,
+            // which re-flowed the whole row under the stockist's hands.
+            _hField(
+              _selNeedsSurface ? 'Surface *' : 'Surface',
+              ComboField<String>(
+                focusNode: _fSurface,
+                enabled: _selShowSurface,
+                value: _surfaceOptions.contains(_selSurfaceLabel)
+                    ? _selSurfaceLabel
+                    : (_selNeedsSurface ? null : 'None'),
+                options: _surfaceOptions,
+                labelOf: (s) => s,
+                hint: 'Select',
+                hasError: surfMissing,
+                onSelected: (s) => setState(() => _selSurfaceLabel = s),
+              ),
+              width: 150,
+            ),
+            _hField(
+              'Quality',
+              ComboField<String>(
+                focusNode: _fQuality,
+                value: _selQuality,
+                options: const ['Premium', 'Standard'],
+                labelOf: (s) => s,
+                onSelected: (s) => setState(() => _selQuality = s),
+              ),
+              width: 130,
+            ),
             _hField('Qty (boxes)', _qtyField(), width: 100),
-            const SizedBox(width: 12),
             SizedBox(
               height: 44,
               child: ElevatedButton.icon(
-                onPressed: _addEntry,
+                onPressed: _addEntryAndFocusDesign,
                 icon: const Icon(Icons.add, size: 18),
                 label: const Text('Add'),
                 style: ElevatedButton.styleFrom(
                     backgroundColor: _green, foregroundColor: Colors.white),
               ),
             ),
-            const SizedBox(width: 8),
             SizedBox(
               height: 44,
               child: OutlinedButton.icon(
@@ -788,12 +855,29 @@ class _State extends State<AddStockBatchScreen> {
     );
   }
 
+  /// The surface words on offer. 'None' is a real answer whenever a surface is
+  /// not required (a T/W factory that ships the finish inside the name).
+  List<String> get _surfaceOptions =>
+      _selNeedsSurface ? _surfLabels : <String>['None', ..._surfLabels];
+
+  /// Add the line, then put the cursor back on Design — the stockist is always
+  /// entering another one.
+  void _addEntryAndFocusDesign() {
+    final before = _entries.length;
+    _addEntry();
+    // Only jump on a real add. A rejected row (no qty, no surface) must keep the
+    // cursor where the stockist can fix it.
+    if (_entries.length > before) _fDesign.requestFocus();
+  }
+
   Widget _hField(String label, Widget child, {double? width}) {
     final col = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
@@ -803,34 +887,6 @@ class _State extends State<AddStockBatchScreen> {
       ],
     );
     return width == null ? col : SizedBox(width: width, child: col);
-  }
-
-  Widget _hSelect(String value, VoidCallback onTap, bool placeholder) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade400),
-            borderRadius: BorderRadius.circular(8)),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 13,
-                      color:
-                          placeholder ? Colors.grey.shade500 : Colors.black87)),
-            ),
-            Icon(Icons.arrow_drop_down, color: Colors.grey.shade600),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _hReadonly(String value) => Container(
@@ -848,69 +904,16 @@ class _State extends State<AddStockBatchScreen> {
                 color: Colors.grey.shade700)),
       );
 
-  // The picker lists the stockist's OWN words (their aliases). Attribute →
-  // required (no 'None'); in_name → optional ('None' first). We store the picked
-  // word as surface_label and its admin canonical as surface_type.
-  Widget _surfaceDropdown() {
-    final labels = _surfLabels;
-    final opts = _selNeedsSurface ? labels : <String>['None', ...labels];
-    final missing = _selNeedsSurface &&
-        (_selSurfaceLabel.trim().isEmpty ||
-            _selSurfaceLabel.toLowerCase() == 'none');
-    final current = opts.contains(_selSurfaceLabel)
-        ? _selSurfaceLabel
-        : (_selNeedsSurface ? null : 'None');
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-          border: Border.all(
-              color: missing ? Colors.red.shade300 : Colors.grey.shade400),
-          borderRadius: BorderRadius.circular(8)),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: current,
-          hint: Text('Select',
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-          isExpanded: true,
-          isDense: true,
-          style: const TextStyle(fontSize: 13, color: Colors.black87),
-          items: opts
-              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-              .toList(),
-          onChanged: (v) => setState(() => _selSurfaceLabel = v ?? _selSurfaceLabel),
-        ),
-      ),
-    );
-  }
-
-  Widget _qualityDropdown() => Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade400),
-            borderRadius: BorderRadius.circular(8)),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-            value: _selQuality,
-            isExpanded: true,
-            isDense: true,
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
-            items: const [
-              DropdownMenuItem(value: 'Premium', child: Text('Premium')),
-              DropdownMenuItem(value: 'Standard', child: Text('Standard')),
-            ],
-            onChanged: (v) => setState(() => _selQuality = v ?? _selQuality),
-          ),
-        ),
-      );
-
+  /// Desktop quantity. The last field of the line, so Enter here means Add.
   Widget _qtyField() => SizedBox(
         height: 44,
         child: TextField(
           controller: _qtyCtrl,
+          focusNode: _fQty,
           keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.done,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          onSubmitted: (_) => _addEntryAndFocusDesign(),
           decoration: InputDecoration(
             hintText: '0',
             isDense: true,
@@ -1126,7 +1129,17 @@ class _State extends State<AddStockBatchScreen> {
                       style: const TextStyle(
                           fontSize: 12, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 4),
-                  _surfaceDropdown(),
+                  ComboField<String>(
+                    value: _surfaceOptions.contains(_selSurfaceLabel)
+                        ? _selSurfaceLabel
+                        : (_selNeedsSurface ? null : 'None'),
+                    options: _surfaceOptions,
+                    labelOf: (s) => s,
+                    hasError: _selNeedsSurface &&
+                        (_selSurfaceLabel.trim().isEmpty ||
+                            _selSurfaceLabel.toLowerCase() == 'none'),
+                    onSelected: (s) => setState(() => _selSurfaceLabel = s),
+                  ),
                 ],
               ),
             ],
