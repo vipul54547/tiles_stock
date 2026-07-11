@@ -26,6 +26,18 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
   bool _loading = true;
   String? _filterStockistId;
 
+  /// designId → what the basket asks for vs what is FREE right now
+  /// (`wanted`, `available`, `status` = ok | reduced | out).
+  ///
+  /// A basket can sit for weeks and the stock moves underneath it. Two traps this
+  /// closes: (1) the buyer sends an inquiry for boxes that are no longer there;
+  /// (2) a design whose free stock hit ZERO drops out of `market_designs`
+  /// altogether, so its row vanished from this screen — while `my_choices` still
+  /// held it and `send_order_to_stockist` still sent it. Reading availability
+  /// straight from `designs` keeps those lines visible and honest.
+  /// (docs/BUYER_ORDER_AVAILABILITY_PLAN.md)
+  Map<String, Map<String, dynamic>> _avail = {};
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +52,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     ]);
     await loadMyChoices(); // restore saved selections
     final orders = await _service.getMyOrders();
+    final avail = await _service.choicesAvailability();
     if (!mounted) return;
     // Choices can be saved from PRIVATE (My-Suppliers) stock too, so the design
     // pool must include private (claimed) designs — getAllDesigns() is the public
@@ -57,8 +70,248 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
       _allDesigns = combined;
       _allStockists = results[1] as List<Stockist>;
       _orders = orders;
+      _avail = {for (final r in avail) (r['design_id'] ?? '').toString(): r};
       _loading = false;
     });
+  }
+
+  int _availableOf(String designId) =>
+      (_avail[designId]?['available'] as num?)?.toInt() ?? 0;
+  String _statusOf(String designId) =>
+      (_avail[designId]?['status'] ?? 'ok').toString();
+
+  /// Basket lines whose design is no longer in the browsable pool — free stock
+  /// ran to 0, so it is gone from `market_designs`. Without this they would be
+  /// invisible here yet still ride along on Send.
+  List<Map<String, dynamic>> get _orphanRows {
+    final known = _allDesigns.map((d) => d.id).toSet();
+    return _avail.values
+        .where((r) =>
+            myChoiceQuantities.containsKey((r['design_id'] ?? '').toString()) &&
+            !known.contains((r['design_id'] ?? '').toString()))
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _orphansFor(String stockistKey) => _orphanRows
+      .where((r) => (r['stockist_key'] ?? '').toString() == stockistKey)
+      .toList();
+
+  /// "You want 50 · Only 20 left" — the whole warning in one line.
+  Widget _shortBadge(int wanted, int available) {
+    final out = available <= 0;
+    final c = out ? Colors.red.shade700 : Colors.orange.shade800;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: c.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        out
+            ? 'You want $wanted · out of stock'
+            : 'You want $wanted · only $available left',
+        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: c),
+      ),
+    );
+  }
+
+  /// Re-check the basket against live stock, and if anything no longer fits, put
+  /// it in front of the buyer BEFORE the order goes out. Returns true = go ahead.
+  ///
+  /// Sending more than is free stays ALLOWED — an inquiry is a request, not a
+  /// reservation, and the supplier may restock or dispatch part of it. So the
+  /// sheet makes adjusting the easy, obvious path, and leaves Send open.
+  /// (docs/BUYER_ORDER_AVAILABILITY_PLAN.md)
+  Future<bool> _reviewAvailability(Stockist stockist) async {
+    final rows = await _service.choicesAvailability(stockistKey: stockist.id);
+    if (!mounted) return false;
+    // Refresh what the screen shows either way — the numbers just came back.
+    setState(() {
+      for (final r in rows) {
+        _avail[(r['design_id'] ?? '').toString()] = r;
+      }
+    });
+
+    final problems = rows.where((r) {
+      final id = (r['design_id'] ?? '').toString();
+      return myChoiceQuantities.containsKey(id) &&
+          (r['status'] ?? 'ok').toString() != 'ok';
+    }).toList();
+    if (problems.isEmpty) return true; // all good — no extra screen
+
+    final go = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          // A line the buyer removed or already trimmed drops out of the list.
+          final live = problems
+              .where((r) =>
+                  myChoiceQuantities
+                      .containsKey((r['design_id'] ?? '').toString()) &&
+                  (myChoiceQuantities[(r['design_id'] ?? '').toString()] ?? 0) >
+                      ((r['available'] as num?)?.toInt() ?? 0))
+              .toList();
+
+          void adjustAll() {
+            setSheet(() => setState(() {
+                  for (final r in problems) {
+                    final id = (r['design_id'] ?? '').toString();
+                    final avail = (r['available'] as num?)?.toInt() ?? 0;
+                    if (!myChoiceQuantities.containsKey(id)) continue;
+                    // 0 free → the line cannot be ordered at all; drop it.
+                    setMyChoiceQty(id, avail);
+                    if (avail <= 0) _avail.remove(id);
+                  }
+                }));
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(Icons.inventory_2_outlined,
+                        color: Colors.orange.shade800),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Stock changed since you chose',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                    ),
+                  ]),
+                  const SizedBox(height: 6),
+                  Text(
+                      live.isEmpty
+                          ? 'All lines now fit the available stock.'
+                          : '${live.length} line${live.length == 1 ? '' : 's'} '
+                              'ask for more than the supplier has free right now. '
+                              'You can adjust them, or send anyway — the supplier '
+                              'will confirm what they can give.',
+                      style:
+                          TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+                  const SizedBox(height: 12),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          for (final r in live)
+                            _reviewLine(r, () => setSheet(() => setState(() {}))),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (live.isNotEmpty)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: adjustAll,
+                        icon: const Icon(Icons.auto_fix_high, size: 16),
+                        label: const Text('Adjust all to available'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF1B4F72),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 13)),
+                        child: const Text('Back'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E7D32),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                        ),
+                        child: Text(live.isEmpty ? 'Send order' : 'Send anyway'),
+                      ),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+    return go == true;
+  }
+
+  /// One over-asked line in the review sheet: what you want, what is left, and
+  /// the two ways out.
+  Widget _reviewLine(Map<String, dynamic> r, VoidCallback changed) {
+    final id = (r['design_id'] ?? '').toString();
+    final avail = (r['available'] as num?)?.toInt() ?? 0;
+    final want = myChoiceQuantities[id] ?? 0;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFDF5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text((r['name'] ?? '').toString(),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+          Text(
+              [
+                (r['size'] ?? '').toString().replaceAll(' mm', ''),
+                (r['surface_label'] ?? '').toString(),
+                (r['quality'] ?? '').toString(),
+              ].where((x) => x.isNotEmpty && x.toLowerCase() != 'none').join(' · '),
+              style: const TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 6),
+          _shortBadge(want, avail),
+          const SizedBox(height: 6),
+          Row(children: [
+            if (avail > 0)
+              TextButton(
+                onPressed: () {
+                  setMyChoiceQty(id, avail);
+                  changed();
+                },
+                style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 8)),
+                child: Text('Use available ($avail)',
+                    style: const TextStyle(fontSize: 12)),
+              ),
+            TextButton(
+              onPressed: () {
+                removeMyChoice(id);
+                _avail.remove(id);
+                changed();
+              },
+              style: TextButton.styleFrom(
+                  foregroundColor: Colors.red.shade600,
+                  minimumSize: const Size(0, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 8)),
+              child: const Text('Remove', style: TextStyle(fontSize: 12)),
+            ),
+          ]),
+        ],
+      ),
+    );
   }
 
   // The order (token) for a stockist group. Designs are grouped by the stockist
@@ -119,9 +372,29 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     ], orderNo: order?.token, connectionCode: order?.connectionCode);
   }
 
-  void _showSendSheet(Stockist stockist, List<TileDesign> designs) {
+  Future<void> _showSendSheet(
+      Stockist stockist, List<TileDesign> designs) async {
     if (blockIfGuest(context, feature: 'Placing orders')) return;
+
+    // The basket may have sat here for weeks while the supplier's stock moved.
+    // send_order_to_stockist copies it into the order with no stock check, so
+    // this is the last place to catch it. Back = stay on the basket, unchanged.
+    if (!await _reviewAvailability(stockist)) return;
+    if (!mounted) return;
+
+    // The review can trim or drop lines, so rebuild from what is in the basket
+    // NOW — not from the list this was called with.
+    final live =
+        designs.where((d) => myChoiceQuantities.containsKey(d.id)).toList();
+    if (live.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Nothing left to send for this supplier.')));
+      return;
+    }
+    designs = live;
+
     final message = _buildMessage(stockist, designs);
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -308,7 +581,19 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     final allStockistIds =
         chosen.map((d) => d.stockistId).toSet().toList();
     final grouped = _groupedByStockist;
-    final visibleIds = grouped.keys.toList();
+    // Sold-out lines are no longer in the browsable pool, so they have no
+    // TileDesign and would otherwise render nowhere — while still being sent.
+    // Fold their stockists back in so every basket line has a home.
+    final orphanKeys =
+        _orphanRows.map((r) => (r['stockist_key'] ?? '').toString()).toSet();
+    for (final k in orphanKeys) {
+      if (!allStockistIds.contains(k)) allStockistIds.add(k);
+    }
+    final visibleIds = <String>{
+      ...grouped.keys,
+      ...orphanKeys.where(
+          (k) => _filterStockistId == null || k == _filterStockistId),
+    }.toList();
 
     // Reset stale filter
     if (_filterStockistId != null &&
@@ -330,7 +615,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                       const EdgeInsets.fromLTRB(16, 8, 16, 80),
                   itemCount: visibleIds.length,
                   itemBuilder: (_, i) => _buildStockistSection(
-                      visibleIds[i], grouped[visibleIds[i]]!),
+                      visibleIds[i], grouped[visibleIds[i]] ?? const []),
                 ),
         ),
       ],
@@ -434,8 +719,10 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
     final stockist = _stockistById(stockistId);
     final stockistName = stockist?.name ?? stockistId;
     const color = Color(0xFF1B4F72);
+    final orphans = _orphansFor(stockistId);
     final sectionBoxes = designs.fold(
         0, (sum, d) => sum + (myChoiceQuantities[d.id] ?? 0));
+    final lineCount = designs.length + orphans.length;
     final order = _orderFor(stockistId);
     final editable = order?.buyerEditable ?? true;
 
@@ -467,7 +754,7 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                             fontWeight: FontWeight.bold,
                             fontSize: 14)),
                     Text(
-                        '${designs.length} design${designs.length == 1 ? '' : 's'} · $sectionBoxes boxes',
+                        '$lineCount design${lineCount == 1 ? '' : 's'} · $sectionBoxes boxes',
                         style: const TextStyle(
                             fontSize: 11, color: Colors.grey)),
                   ],
@@ -493,8 +780,113 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
         // Orders), so only ever holds drafts — no order strip needed here.
         if (order != null && !order.isDraft) _buildOrderStrip(order),
         ...designs.map((d) => _buildDesignRow(d, editable)),
+        ...orphans.map(_buildSoldOutRow),
         Divider(color: Colors.grey.shade200, height: 20),
       ],
+    );
+  }
+
+  /// A basket line whose stock ran out while it sat here. It is NOT in the
+  /// browsable pool any more, so there is no TileDesign to render — but it is
+  /// still in `my_choices`, and Send would still carry it to the supplier. Show
+  /// it, plainly, with a way out.
+  Widget _buildSoldOutRow(Map<String, dynamic> r) {
+    final id = (r['design_id'] ?? '').toString();
+    final name = (r['name'] ?? '').toString();
+    final img = (r['image_url'] ?? '').toString();
+    final surface = (r['surface_label'] ?? r['surface_type'] ?? '').toString();
+    final sub = [
+      (r['size'] ?? '').toString().replaceAll(' mm', ''),
+      if (surface.isNotEmpty && surface.toLowerCase() != 'none') surface,
+      (r['quality'] ?? '').toString(),
+    ].where((x) => x.isNotEmpty).join(' · ');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF5F5),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 64,
+              height: 64,
+              child: img.isEmpty
+                  ? Container(
+                      color: Colors.grey.shade100,
+                      child: const Icon(Icons.image_not_supported, size: 24))
+                  : ColorFiltered(
+                      colorFilter: const ColorFilter.matrix(<double>[
+                        0.2126, 0.7152, 0.0722, 0, 0,
+                        0.2126, 0.7152, 0.0722, 0, 0,
+                        0.2126, 0.7152, 0.0722, 0, 0,
+                        0, 0, 0, 1, 0,
+                      ]),
+                      child: CachedNetworkImage(
+                        imageUrl: CloudinaryService.thumbUrl(img, width: 300),
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) =>
+                            Container(color: Colors.grey.shade200),
+                        errorWidget: (_, __, ___) =>
+                            Container(color: Colors.grey.shade200),
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 13),
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 3),
+                Text(sub,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Icon(Icons.remove_shopping_cart_outlined,
+                        size: 13, color: Colors.red.shade700),
+                    const SizedBox(width: 4),
+                    Text('Out of stock now',
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.red.shade700)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                GestureDetector(
+                  onTap: () => setState(() {
+                    removeMyChoice(id);
+                    _avail.remove(id);
+                  }),
+                  child: Text('Remove',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.red.shade400,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text('${r['wanted'] ?? 0}',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade500,
+                  decoration: TextDecoration.lineThrough)),
+        ],
+      ),
     );
   }
 
@@ -646,6 +1038,13 @@ class _MyChoiceScreenState extends State<MyChoiceScreen> {
                     ].join(' · '),
                     style: const TextStyle(
                         fontSize: 11, color: Colors.grey)),
+                // The supplier's stock moves while the basket sits here. Say so
+                // on the line itself — a surprise at Send is worse than a warning
+                // now. Silent when there is enough (the common case).
+                if (_statusOf(d.id) != 'ok') ...[
+                  const SizedBox(height: 5),
+                  _shortBadge(qty, _availableOf(d.id)),
+                ],
                 const SizedBox(height: 4),
                 if (editable)
                   GestureDetector(

@@ -2957,6 +2957,31 @@ class SupabaseDataService {
     }
   }
 
+  /// What the basket asks for vs what is actually free NOW — one row per choice:
+  /// `wanted`, `available` (free = P − C − H) and `status`
+  /// (`ok` | `reduced` | `out`).
+  ///
+  /// A basket can sit for weeks, and `send_order_to_stockist` copies it into the
+  /// order with no stock check. This is what the basket shows per line and what
+  /// gates Send. It reads `designs` directly, so a line whose stock ran to zero
+  /// reports `out` instead of silently vanishing (a 0-free design drops out of
+  /// `market_designs`). [stockistKey] null = the whole basket.
+  /// (docs/BUYER_ORDER_AVAILABILITY_PLAN.md)
+  Future<List<Map<String, dynamic>>> choicesAvailability(
+      {String? stockistKey}) async {
+    if (currentEndUserId.isEmpty) return [];
+    try {
+      final res = await supabase.rpc('choices_availability',
+          params: {'p_stockist_key': stockistKey});
+      return (res as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('choicesAvailability failed: $e\n$st');
+      return [];
+    }
+  }
+
   // ── stockist groups (per end user) ─────────────────────────────────────────
 
   /// This end user's saved groups (empty for guests / not-logged-in).
