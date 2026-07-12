@@ -978,6 +978,29 @@ class SupabaseDataService {
     }
   }
 
+  /// Set how ONE BRAND packs this print — pieces per box and box weight — straight from the
+  /// Library card's box chip.
+  ///
+  /// Brands can pack differently (the same print may ship 4/box under one brand and 6/box
+  /// under another), which is why the spec lives on the box `(library_id, brand_id)` and not
+  /// on the product. Returns the newly DERIVED thickness
+  /// (`weight / (pieces × area × density_of(tile_type))`), which the server recomputes by
+  /// trigger — thickness is never typed.
+  Future<double?> setLibraryBox(String libraryId, String brandId,
+      {int? pieces, double? weightKg}) async {
+    try {
+      final res = await supabase.rpc('library_set_box', params: {
+        'p_library_id': libraryId,
+        'p_brand_id': brandId,
+        'p_pieces': pieces,
+        'p_weight': weightKg,
+      });
+      return (res as num?)?.toDouble();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   Future<String> libraryMapUpsert({
     required String size,
     required String masterName,

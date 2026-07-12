@@ -20,6 +20,15 @@ class LibraryEntry {
   /// + the brand+name+size image lookup).
   final Map<String, String> aliases;
 
+  /// THE BOX, per brand: brand_id -> how that brand packs this print.
+  ///
+  /// An alias IS a box (`stockist_library_brand_names` is keyed `(library_id, brand_id)`),
+  /// so the same row carries the name stamped on it AND its packing. Brands can pack
+  /// differently — the same print may ship 4/box under one brand and 6/box under another —
+  /// which is exactly why pieces/weight are NOT on the product.
+  /// (docs/BOX_AND_DERIVED_THICKNESS_PLAN.md)
+  final Map<String, ({int pieces, double weightKg})> boxes;
+
   // ── Identity attributes (describe the DESIGN; set once, here in the Library).
   // The stock row (designs) carries only quality + quantity. (identity split)
   final String surfaceType;
@@ -43,6 +52,7 @@ class LibraryEntry {
     this.brandId = '',
     this.brandName = '',
     this.aliases = const {},
+    this.boxes = const {},
     this.surfaceType = 'None',
     this.surfaceLabel = '',
     this.stockType = 'Uncertain',
@@ -60,12 +70,19 @@ class LibraryEntry {
       brandName.trim().isEmpty ? masterName : '${brandName.trim()} $masterName';
 
   factory LibraryEntry.fromJson(Map<String, dynamic> j) {
+    // One `aliases` row IS one box: the name stamped on it + how that brand packs it.
     final aliases = <String, String>{};
+    final boxes = <String, ({int pieces, double weightKg})>{};
     for (final a in (j['aliases'] as List?) ?? const []) {
       final m = Map<String, dynamic>.from(a as Map);
       final bid = (m['brand_id'] ?? '').toString();
       final name = (m['name'] ?? '').toString();
-      if (bid.isNotEmpty && name.isNotEmpty) aliases[bid] = name;
+      if (bid.isEmpty) continue;
+      if (name.isNotEmpty) aliases[bid] = name;
+      boxes[bid] = (
+        pieces: (m['pieces_per_box'] as num?)?.toInt() ?? 0,
+        weightKg: (m['box_weight_kg'] as num?)?.toDouble() ?? 0,
+      );
     }
     return LibraryEntry(
       id: (j['id'] ?? '').toString(),
@@ -75,6 +92,7 @@ class LibraryEntry {
       brandId: (j['brand_id'] ?? '').toString(),
       brandName: (j['brand_name'] ?? '').toString(),
       aliases: aliases,
+      boxes: boxes,
       surfaceType: (j['surface_type'] ?? 'None').toString(),
       surfaceLabel: (j['surface_label'] ?? '').toString(),
       stockType: (j['stock_type'] ?? 'Uncertain').toString(),
