@@ -940,6 +940,9 @@ class _State extends State<StockistDashboardScreen> {
                       await Navigator.of(context).push<bool>(MaterialPageRoute(
                           builder: (_) => const StockistProfileScreen()));
                       if (mounted) _load();
+                    } else if (v == 'customers') {
+                      await Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => const CustomerListScreen()));
                     } else if (v == 'videos') {
                       await Navigator.of(context).push(MaterialPageRoute(
                           builder: (_) => const StockistMyVideosScreen()));
@@ -949,8 +952,8 @@ class _State extends State<StockistDashboardScreen> {
                       context.go('/login');
                     }
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(
                         value: 'profile',
                         child: ListTile(
                           dense: true,
@@ -958,7 +961,19 @@ class _State extends State<StockistDashboardScreen> {
                           leading: Icon(Icons.person_outline),
                           title: Text('Edit profile'),
                         )),
-                    PopupMenuItem(
+                    // Opt-in: only stockists the admin switched on ("save
+                    // customers on dispatch") get the directory + per-customer
+                    // dispatch history. (project_customer_history)
+                    if (currentStockistCustomersEnabled)
+                      const PopupMenuItem(
+                          value: 'customers',
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.people_alt_outlined),
+                            title: Text('Customers'),
+                          )),
+                    const PopupMenuItem(
                         value: 'videos',
                         child: ListTile(
                           dense: true,
@@ -966,8 +981,8 @@ class _State extends State<StockistDashboardScreen> {
                           leading: Icon(Icons.play_circle_outline),
                           title: Text('My Videos'),
                         )),
-                    PopupMenuDivider(),
-                    PopupMenuItem(
+                    const PopupMenuDivider(),
+                    const PopupMenuItem(
                         value: 'logout',
                         child: ListTile(
                           dense: true,
@@ -2023,17 +2038,9 @@ class _State extends State<StockistDashboardScreen> {
                   MaterialPageRoute(
                       builder: (_) => const StockistAddOrderScreen()));
             }),
-            // Opt-in: only stockists who save customers get the directory +
-            // per-customer dispatch history. (project_customer_history)
-            if (currentStockistCustomersEnabled) ...[
-              const Divider(height: 1),
-              _sheetItem(ctx, Icons.people_alt_outlined,
-                  const Color(0xFF6A1B9A), 'Customers',
-                  'Who bought what, and when', () async {
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => const CustomerListScreen()));
-              }),
-            ],
+            // Customers is NOT here — it's a directory, not an order action, so
+            // it lives in the account menu under "Edit profile" (gated on
+            // customers_enabled). (project_customer_history)
             const SizedBox(height: 8),
           ],
         ),

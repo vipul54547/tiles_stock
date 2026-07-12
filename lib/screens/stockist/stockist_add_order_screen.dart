@@ -106,6 +106,10 @@ class _State extends State<StockistAddOrderScreen> {
 
   bool get _isEdit => widget.orderId != null;
 
+  /// Customers on ⇒ the picker (compulsory, new orders only) replaces the hint.
+  bool get _showCustomerRow => _customersEnabled && !_isEdit;
+  bool get _showHint => !_customersEnabled;
+
   @override
   void initState() {
     super.initState();
@@ -225,6 +229,13 @@ class _State extends State<StockistAddOrderScreen> {
           content: Text('Add at least one design with a quantity.')));
       return;
     }
+    // Customers on ⇒ the saved customer IS the order's identity, so it is
+    // compulsory (the free-text hint is gone for these stockists).
+    if (_customersEnabled && !_isEdit && _custId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Select or add a customer for this order.')));
+      return;
+    }
     setState(() => _saving = true);
     try {
       if (_isEdit) {
@@ -234,8 +245,12 @@ class _State extends State<StockistAddOrderScreen> {
         _dirty = false;
         Navigator.pop(context, {'id': widget.orderId});
       } else {
-        final res = await _data.createStockistOrder(
-            _hintCtrl.text.trim(), lines,
+        // customer_hint is the label Inquiries lists/searches on, and
+        // dispatch_inquiry falls back to it for buyer_name (else "Walk-in").
+        // With customers on there's no hint box, so the customer's name fills it.
+        final hint =
+            _customersEnabled ? _custName.trim() : _hintCtrl.text.trim();
+        final res = await _data.createStockistOrder(hint, lines,
             customerId: _customersEnabled ? _custId : null);
         if (!mounted) return;
         _dirty = false;
@@ -282,80 +297,86 @@ class _State extends State<StockistAddOrderScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
                 children: [
-                  Card(
-                    margin: EdgeInsets.zero,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // A saved customer is only offered for a NEW order (it
-                          // is stamped on the inquiry at creation). Editing an
-                          // existing order's customer needs update_order_items to
-                          // carry it — not built.
-                          if (_customersEnabled && !_isEdit) ...[
-                            InkWell(
-                              onTap: _pickCustomer,
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 13),
-                                decoration: BoxDecoration(
-                                    border:
-                                        Border.all(color: Colors.grey.shade400),
-                                    borderRadius: BorderRadius.circular(8)),
-                                child: Row(children: [
-                                  const Icon(Icons.person_outline,
-                                      size: 18, color: _navy),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                        _custName.isEmpty
-                                            ? 'Select or add customer (optional)'
-                                            : _custName,
-                                        style: TextStyle(
-                                            fontSize: 14,
-                                            color: _custName.isEmpty
-                                                ? Colors.grey.shade500
-                                                : Colors.black87)),
-                                  ),
-                                  if (_custId != null)
-                                    InkWell(
-                                      onTap: () => setState(() {
-                                        _custId = null;
-                                        _custName = '';
-                                        _dirty = true;
-                                      }),
-                                      child: Icon(Icons.close,
-                                          size: 18, color: Colors.grey.shade500),
-                                    )
-                                  else
-                                    Icon(Icons.arrow_drop_down,
-                                        color: Colors.grey.shade600),
-                                ]),
+                  // Customers ON  → pick a saved customer (compulsory); the
+                  //                 free-text hint is gone — the customer's name
+                  //                 IS the order's label.
+                  // Customers OFF → the old free-text hint, as before.
+                  // Either way a saved customer is only offered for a NEW order:
+                  // it is stamped on the inquiry at creation, and editing it
+                  // would need update_order_items to carry it — not built.
+                  if (_showCustomerRow || _showHint) ...[
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_showCustomerRow)
+                              InkWell(
+                                onTap: _pickCustomer,
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 13),
+                                  decoration: BoxDecoration(
+                                      border: Border.all(
+                                          color: Colors.grey.shade400),
+                                      borderRadius: BorderRadius.circular(8)),
+                                  child: Row(children: [
+                                    const Icon(Icons.person_outline,
+                                        size: 18, color: _navy),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                          _custName.isEmpty
+                                              ? 'Select or add customer'
+                                              : _custName,
+                                          style: TextStyle(
+                                              fontSize: 14,
+                                              color: _custName.isEmpty
+                                                  ? Colors.grey.shade500
+                                                  : Colors.black87)),
+                                    ),
+                                    if (_custId != null)
+                                      InkWell(
+                                        onTap: () => setState(() {
+                                          _custId = null;
+                                          _custName = '';
+                                          _dirty = true;
+                                        }),
+                                        child: Icon(Icons.close,
+                                            size: 18,
+                                            color: Colors.grey.shade500),
+                                      )
+                                    else
+                                      Icon(Icons.arrow_drop_down,
+                                          color: Colors.grey.shade600),
+                                  ]),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 10),
+                            if (_showHint)
+                              TextField(
+                                controller: _hintCtrl,
+                                textCapitalization: TextCapitalization.words,
+                                maxLength: 80,
+                                onChanged: (_) => _markDirty(),
+                                decoration: const InputDecoration(
+                                  labelText: 'Customer name / hint',
+                                  hintText:
+                                      'e.g. Ramesh (walk-in), site at Bopal…',
+                                  helperText:
+                                      'Just a note for you — no customer details are stored.',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                              ),
                           ],
-                          TextField(
-                            controller: _hintCtrl,
-                            textCapitalization: TextCapitalization.words,
-                            maxLength: 80,
-                            onChanged: (_) => _markDirty(),
-                            decoration: const InputDecoration(
-                              labelText: 'Customer name / hint',
-                              hintText: 'e.g. Ramesh (walk-in), site at Bopal…',
-                              helperText:
-                                  'Just a note for you — no customer details are stored.',
-                              border: OutlineInputBorder(),
-                              isDense: true,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                  ],
                   // Desktop: build the order from the keyboard, one line at a
                   // time — `delt ↓ Tab · m ↓ Tab · p ↓ Tab · 40 Enter`. The old
                   // flat grid listed every holding as its own card, so a print

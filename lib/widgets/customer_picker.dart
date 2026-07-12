@@ -98,15 +98,24 @@ class CustomerPicker {
 
   /// The save-and-reuse form. Upserts the customer and returns the created row
   /// (`{id, name, phone, state, district, pincode, city}`), or null if cancelled.
+  ///
+  /// Name, **State and District are compulsory** — a saved customer without a
+  /// place is useless in the directory, and the pincode lookup can't be relied
+  /// on to supply it (it needs the network and a valid pin). So both are real
+  /// dropdowns off the bundled offline list; the lookup only pre-fills them.
   static Future<Map<String, dynamic>?> _newCustomerForm(
       BuildContext context, SupabaseDataService svc) async {
     final nameCtl = TextEditingController();
     final phoneCtl = TextEditingController();
     final pinCtl = TextEditingController();
     final cityCtl = TextEditingController();
+    final states = await IndiaGeo.states();
+    if (!context.mounted) return null;
+    List<String> districts = const [];
     String state = '';
     String district = '';
     bool looking = false;
+    bool saving = false;
     Map<String, dynamic>? created;
 
     await showModalBottomSheet<bool>(
@@ -120,13 +129,30 @@ class CustomerPicker {
           if (pin.length != 6) return;
           setSheet(() => looking = true);
           final r = await IndiaGeo.lookupPincode(pin);
+          final d = r == null ? const <String>[] : await IndiaGeo.districts(r.state);
           setSheet(() {
             looking = false;
             if (r != null) {
               state = r.state;
+              districts = d;
               district = r.district;
               if (cityCtl.text.trim().isEmpty) cityCtl.text = r.city;
             }
+          });
+          if (r == null && ctx.mounted) {
+            ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                content: Text(
+                    'Couldn\'t find that pincode — pick state & district below.')));
+          }
+        }
+
+        Future<void> onState(String? s) async {
+          if (s == null) return;
+          final d = await IndiaGeo.districts(s);
+          setSheet(() {
+            state = s;
+            districts = d;
+            if (!d.contains(district)) district = '';
           });
         }
 
@@ -134,17 +160,29 @@ class CustomerPicker {
             labelText: l,
             isDense: true,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)));
+        // A pincode lookup can return a district that isn't in the bundled list;
+        // the dropdown must contain its own value or Flutter asserts.
+        List<String> withValue(List<String> list, String v) =>
+            (v.isEmpty || list.contains(v)) ? list : [v, ...list];
+        final valid = nameCtl.text.trim().isNotEmpty &&
+            state.isNotEmpty &&
+            district.isNotEmpty;
         return Padding(
           padding: EdgeInsets.fromLTRB(
               16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               const Text('New customer',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               const SizedBox(height: 12),
-              TextField(controller: nameCtl, decoration: dec('Name *')),
+              TextField(
+                  controller: nameCtl,
+                  textCapitalization: TextCapitalization.words,
+                  onChanged: (_) => setSheet(() {}),
+                  decoration: dec('Name *')),
               const SizedBox(height: 10),
               TextField(
                   controller: phoneCtl,
@@ -173,15 +211,35 @@ class CustomerPicker {
                       : const Text('Find'),
                 ),
               ]),
-              if (state.isNotEmpty || district.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text('$district, $state',
-                      style: TextStyle(
-                          fontSize: 12.5, color: Colors.grey.shade700)),
-                ),
               const SizedBox(height: 10),
-              TextField(controller: cityCtl, decoration: dec('City')),
+              DropdownButtonFormField<String>(
+                initialValue: state.isEmpty ? null : state,
+                isExpanded: true,
+                decoration: dec('State *'),
+                items: [
+                  for (final s in withValue(states, state))
+                    DropdownMenuItem(value: s, child: Text(s)),
+                ],
+                onChanged: onState,
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: district.isEmpty ? null : district,
+                isExpanded: true,
+                decoration: dec('District *'),
+                items: [
+                  for (final d in withValue(districts, district))
+                    DropdownMenuItem(value: d, child: Text(d)),
+                ],
+                onChanged: state.isEmpty
+                    ? null
+                    : (d) => setSheet(() => district = d ?? ''),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                  controller: cityCtl,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: dec('City (optional)')),
               const SizedBox(height: 16),
               Row(children: [
                 Expanded(
@@ -193,16 +251,18 @@ class CustomerPicker {
                 const SizedBox(width: 10),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () async {
-                      if (nameCtl.text.trim().isEmpty) return;
+                    onPressed: (!valid || saving)
+                        ? null
+                        : () async {
+                      setSheet(() => saving = true);
                       try {
                         final id = await svc.upsertCustomer(
                           name: nameCtl.text.trim(),
                           phone: phoneCtl.text.trim().isEmpty
                               ? null
                               : phoneCtl.text.trim(),
-                          state: state.isEmpty ? null : state,
-                          district: district.isEmpty ? null : district,
+                          state: state,
+                          district: district,
                           pincode: pinCtl.text.trim().isEmpty
                               ? null
                               : pinCtl.text.trim(),
@@ -225,6 +285,7 @@ class CustomerPicker {
                         Navigator.pop(ctx, true);
                       } catch (e) {
                         if (ctx.mounted) {
+                          setSheet(() => saving = false);
                           ScaffoldMessenger.of(ctx).showSnackBar(
                               SnackBar(content: Text('$e'), backgroundColor: _red));
                         }
@@ -232,11 +293,16 @@ class CustomerPicker {
                     },
                     style: ElevatedButton.styleFrom(
                         backgroundColor: _green, foregroundColor: Colors.white),
-                    child: const Text('Save'),
+                    child: Text(saving ? 'Saving…' : 'Save'),
                   ),
                 ),
               ]),
-            ],
+              const SizedBox(height: 6),
+              Text('Name, State and District are required.',
+                  style:
+                      TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              ],
+            ),
           ),
         );
       }),
