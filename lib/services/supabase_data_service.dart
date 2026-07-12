@@ -959,12 +959,31 @@ class SupabaseDataService {
   /// Mapping-Excel bulk hook: resolves/creates a master by (master name + size)
   /// and MERGES the given per-brand aliases (brandId -> design name) in without
   /// deleting existing ones. Returns the master id. Throws the server message.
+  /// Change a product's SURFACE (and, optionally, the stockist's word for it) straight
+  /// from the Library card's surface chip.
+  ///
+  /// This is an IDENTITY change — surface is part of the product key — so the server
+  /// CASCADES it to every holding of that product. It refuses if the print already exists
+  /// in the target surface (that would be a duplicate) and throws the message verbatim.
+  Future<void> setLibrarySurface(String libraryId, String surface,
+      {String? label}) async {
+    try {
+      await supabase.rpc('library_set_surface', params: {
+        'p_library_id': libraryId,
+        'p_surface': surface,
+        'p_label': label,
+      });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   Future<String> libraryMapUpsert({
     required String size,
     required String masterName,
     Map<String, String> aliases = const {},
-    // M box identity = master + surface; 'None' is a wildcard the server absorbs.
-    String surface = 'None',
+    // Surface is part of the product's identity — the server rejects a missing one.
+    required String surface,
   }) async {
     final aliasJson = aliases.entries
         .where((e) => e.value.trim().isNotEmpty)

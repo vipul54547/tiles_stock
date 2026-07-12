@@ -1080,6 +1080,104 @@ class _State extends State<MyDesignLibraryScreen> {
     return '$word ($canon)';
   }
 
+  /// The SURFACE chip — deliberately its OWN chip, sitting beside the DNA chips but NOT a
+  /// DNA tag. Surface as a `dna_attribute` was tried and killed
+  /// ([[project_per_brand_surface_mode]]); the deactivated row is still in the DB and must
+  /// never be reactivated. This is a plain identity field with a fast edit affordance.
+  Widget _surfaceChip(LibraryEntry e) {
+    final text = _surfaceOf(e);
+    return InkWell(
+      onTap: () => _editSurface(e),
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B4F72).withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: const Color(0xFF1B4F72).withValues(alpha: 0.20)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(text.isEmpty ? 'Set surface' : text,
+                style: const TextStyle(
+                    fontSize: 11, color: _navy, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 4),
+            const Icon(Icons.edit, size: 11, color: _navy),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Change a product's surface. This is an IDENTITY change — the server cascades it to
+  /// every holding of the product, and refuses if the print already exists in the target
+  /// surface (that would be a duplicate).
+  Future<void> _editSurface(LibraryEntry e) async {
+    final options = _surfaces
+        .where((s) => s.trim().toLowerCase() != 'none')
+        .toList();
+    if (options.isEmpty) return;
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Surface for "${e.masterName}"',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
+                  const SizedBox(height: 4),
+                  Text(
+                      'The surface is part of the design. Changing it moves this '
+                      'design’s stock with it.',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                ],
+              ),
+            ),
+            const Divider(height: 16),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final s in options)
+                    ListTile(
+                      dense: true,
+                      title: Text(s),
+                      trailing: s.toLowerCase() == e.surfaceType.trim().toLowerCase()
+                          ? const Icon(Icons.check, color: _navy, size: 18)
+                          : null,
+                      onTap: () => Navigator.pop(ctx, s),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    if (picked.toLowerCase() == e.surfaceType.trim().toLowerCase()) return;
+
+    try {
+      await _data.setLibrarySurface(e.id, picked);
+    } catch (err) {
+      if (!mounted) return;
+      _snack('$err', error: true);
+      return;
+    }
+    if (!mounted) return;
+    _snack('Surface changed to $picked.');
+    _load();
+  }
+
   Widget _tile(LibraryEntry e) {
     // When the library is filtered to a SINGLE brand, the stockist is viewing it
     // "as that brand", so the title shows THAT brand's name for the tile (e.g.
@@ -1090,13 +1188,10 @@ class _State extends State<MyDesignLibraryScreen> {
     final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
     final titleName = showBrandName ? brandAlias : e.masterName;
     final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
-    // Size · surface. The surface MUST show: it is part of the product's identity now,
-    // so the same print in Glossy and in Matt are two separate cards — without the
-    // surface they read as duplicates. Word (Canonical), per the surface rule.
-    final sizeLine = [
-      e.size.replaceAll(' mm', ''),
-      if (_surfaceOf(e).isNotEmpty) _surfaceOf(e),
-    ].join('  ·  ');
+    // Size only — the SURFACE gets its own tappable chip below (it is part of the
+    // product's identity, and the Library is the only place to change it once Add Stock
+    // stopped asking).
+    final sizeLine = e.size.replaceAll(' mm', '');
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1174,6 +1269,12 @@ class _State extends State<MyDesignLibraryScreen> {
                             Text(sizeLine,
                                 style: TextStyle(
                                     fontSize: 12, color: Colors.grey.shade600)),
+                            // SURFACE chip — tap to change it. Surface is part of the
+                            // product's identity and Add Stock no longer asks for it
+                            // (unless the boxes are stamped with it), so this is where a
+                            // stockist sets or corrects it.
+                            const SizedBox(height: 6),
+                            _surfaceChip(e),
                             // Per-brand chips: solid navy = the BRAND, light =
                             // that brand's design name.
                             if (e.aliases.isNotEmpty) ...[
