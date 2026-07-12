@@ -39,27 +39,50 @@ Don't infer a function's signature from its call site.
 
 ## Vocabulary (these are load-bearing — the DB uses them)
 
-- **surface** — never "glaze". Every stock row carries both `surface_label` (the stockist's own
-  word, e.g. "Raindrop") and `surface_type` (admin canonical, e.g. "Sugar"). Cards everywhere read
-  `Raindrop (Sugar)`. Filters split by audience: stockist UI and the `/s/` link (one stockist)
-  filter on the **word**; the buyer app (many stockists) filters on the **canonical**.
-  A holding's identity is `(stockist, library, brand, quality, surface_type)` — the
-  `designs_holding_uniq` index. **`surface_label` is display-only, NOT part of the key**: a
-  canonical surface = one physical surface = one stock line, and re-adding it just refreshes the
-  word. Never key a holding lookup on `surface_label` (it wedges Add Stock against the index).
-- **surface_mode** — only an **M** has one (`stockists.surface_mode`), because an M *is* the factory
-  and its brands are alternate names for one print. **T/W has none**: it carries other factories'
-  brands and records whatever the dispatch note said, so Add Stock always offers the picker with a
-  `None` choice. `brands.surface_mode` still exists but nothing reads it. A brand's convention is
-  read off that factory's dispatch note — surface in its own column vs. inside the name.
-  In `in_name` mode `add_inventory_batch` stamps the surface onto `stockist_library` (identity);
-  **that stamp is M-only** — for a T/W one print may sit on the shelf in several surfaces.
-- **Stockist_Library** = identity (a design exists). **P_Stock** / `holding` = quantity on hand.
-  These are separate; changing one must not silently change the other.
+### The layering: PRODUCT → (BOX) → HOLDING
+
+- **PRODUCT** = `stockist_library` — the tile itself, one piece. **This is what "a design" means.**
+  Its identity is the `stockist_library_uniq` index:
+
+      (stockist_id, lower(master_design_name), size, surface_type)
+
+  It carries `image_url`, `surface_type` + `surface_label`, **`thickness_mm`**, `colour`,
+  `tile_type`, and its **DNA tags** (via `library_id`). Faces/closelook/mockup all hang here.
+- **HOLDING** = `designs` — **quantity on hand, NOT the design.** `designs_holding_uniq` is
+  `(stockist, library, brand, quality, surface_type)`. It carries `box_quantity`,
+  `control_quantity`, `quality`, `status`. One product → many holdings.
+- ⚠️ **The table named `designs` is STOCK.** The word "design" is overloaded in this codebase:
+  `TileDesign`, `addDesign()` (really `stock_add_holding`), `deleteDesign()` all operate on the
+  **holding**. When it matters, say **product** or **holding**, never bare "design".
+- **BOX** (`product × brand` → `pieces_per_box`, `box_weight_kg`) is the missing entity. Those two
+  columns currently sit on `stockist_library`, which is the **wrong level** — a box holds N pieces
+  and its weight follows from the piece count. Planned, not built.
+
+### Surface and brand
+
+- **surface** — never "glaze". Both `surface_label` (the stockist's own word, e.g. "Raindrop") and
+  `surface_type` (admin canonical, e.g. "Sugar"). Cards read `Raindrop (Sugar)`. Filters split by
+  audience: stockist UI and the `/s/` link filter on the **word**; the buyer app (many stockists)
+  filters on the **canonical**. `surface_label` is **display-only, never a key** — keying a lookup
+  on it wedges Add Stock against the index.
+- 🔑 **Surface IS product identity.** *Glossy Ant Bianco* and *Matt Ant Bianco* are **two products**,
+  made from one print. `surface_type` is `NOT NULL DEFAULT 'None'` — `'None'` is a deliberate
+  answer, not a missing one.
+- 🔑 **Brand is NOT product identity.** For an M, a different brand is only a different **NAME** for
+  the same print. Brand belongs to the **box**; identity is brand-free. `stockist_library.brand_id`
+  survives as a *default/first-seen hint only*. A product's brand names live in
+  `stockist_library_brand_names (library_id, brand_id, brand_design_name)`, and **stock is still
+  per-brand** (`designs.brand_id`). **Identity is brand-free; commerce is per-brand.**
+- **surface_mode** (`stockists.surface_mode`) is a **parser/import hint ONLY** — *where do I read
+  the surface from on this factory's dispatch note*: its own column (`attribute`) or inside the
+  design name (`in_name`). **It has NO influence on identity.** It used to gate a surface *stamp*
+  onto `stockist_library`, which was a workaround for the old broken key and is now deleted.
+  `brands.surface_mode` still exists but nothing reads it.
 - **design_name** is verbatim truth — display the name as stored, never concatenate surface,
-  size, or quality into it.
-- Stock is **per-brand** (`designs.brand_id`); identity is shared across brands via a master +
-  per-brand alias names.
+  size, or quality into it. (An `in_name` factory's name may *contain* a surface word. Leave it.)
+
+See `docs/PRODUCT_IDENTITY_MIGRATION_PLAN.md` for how this got here and what is still deferred
+(BOX, faces, joint type, mockup/aligning/closelook).
 
 `docs/` and the memory index carry the full model. When a decision here changes, update this file
 in the same change.

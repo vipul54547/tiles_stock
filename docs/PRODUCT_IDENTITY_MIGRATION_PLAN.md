@@ -1,6 +1,12 @@
 # Product identity migration — surface IN, brand OUT
 
-**Status:** PLANNED (DDPI: Discussion + Decision done, Planning here, not implemented)
+**Status:** ✅ **DONE — steps 1-6 all applied to prod + committed (2026-07-12).**
+Not yet device-verified. See §6 Verification for what still needs a human on a phone.
+
+**⚠️ ORDER CORRECTION (the plan below is written in the ORIGINAL order):** the key swap MUST
+precede the split. The old index had no surface column, so a split sibling (same brand+name+size,
+different surface) would violate it for every brand-stamped row. Shipped order was:
+**1 normalise → 2 backfill → 3 swap key → 4 split → 5 functions → 6 app.**
 **Chapter:** 2 — the foundation for the media chapter (mockup / aligning / closelook / faces / 360 / video)
 **Decided with user:** 2026-07-12
 

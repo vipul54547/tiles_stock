@@ -28,6 +28,9 @@ class _State extends State<MyDesignLibraryScreen> {
   List<Brand> _brands = [];
   List<LibraryEntry> _entries = [];
   List<String> _sizes = [];
+  // Surface is part of the PRODUCT's identity — Glossy and Matt of one print are two
+  // products — so the editor must be able to pick one. (product identity migration)
+  List<String> _surfaces = [];
   Map<String, List<DnaTag>> _dnaTags = {}; // libraryId → DNA tags (their words)
   bool _loading = true;
 
@@ -83,6 +86,7 @@ class _State extends State<MyDesignLibraryScreen> {
       _data.getMyLibrary(),
       _data.getActiveSizeNames(),
       _data.dnaMyLibraryTags(),
+      _data.getActiveFinishNames(),
     ]);
     if (!mounted) return;
     final brands = results[0] as List<Brand>;
@@ -96,6 +100,7 @@ class _State extends State<MyDesignLibraryScreen> {
       _entries = results[1] as List<LibraryEntry>;
       _sizes = results[2] as List<String>;
       _dnaTags = results[3] as Map<String, List<DnaTag>>;
+      _surfaces = results[4] as List<String>;
       _loading = false;
     });
   }
@@ -150,7 +155,11 @@ class _State extends State<MyDesignLibraryScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => _LibraryEditorScreen(
-            brands: _brands, sizes: _sizes, all: _entries, existing: entry),
+            brands: _brands,
+            sizes: _sizes,
+            surfaces: _surfaces,
+            all: _entries,
+            existing: entry),
       ),
     );
     if (saved == true) _load();
@@ -198,6 +207,7 @@ class _State extends State<MyDesignLibraryScreen> {
           builder: (_) => _LibraryEditorScreen(
             brands: _brands,
             sizes: _sizes,
+            surfaces: _surfaces,
             all: _entries,
             existing: null,
             prefillName: result.name,
@@ -287,18 +297,30 @@ class _State extends State<MyDesignLibraryScreen> {
 
   // Other masters of the SAME size — the only merge candidates (the server also
   // enforces same-size). Used to show/hide the per-tile merge action.
-  List<LibraryEntry> _sameSizeSiblings(LibraryEntry keep) =>
-      _entries.where((o) => o.id != keep.id && o.size == keep.size).toList();
+  // Merge candidates. Same size AND same surface only — two surfaces are two different
+  // products, and `library_merge_masters` now refuses to merge across them, so we must
+  // not offer it. (product identity migration)
+  List<LibraryEntry> _sameSizeSiblings(LibraryEntry keep) => _entries
+      .where((o) =>
+          o.id != keep.id &&
+          o.size == keep.size &&
+          o.surfaceType.trim().toLowerCase() ==
+              keep.surfaceType.trim().toLowerCase())
+      .toList();
 
-  // Likely-duplicate groups: 2+ M boxes sharing the SAME identity key
-  // (master name + size), brand-agnostic. Surface is intentionally excluded:
-  // the same tile often arrives from different suppliers with different surface
-  // labels, creating two masters that should be one. The human confirms via
-  // the Merge tool. (project_addflow_redesign_ddpi #4)
+  // Likely-duplicate groups: 2+ boxes sharing the SAME product key
+  // (master name + size + surface), brand-agnostic.
+  //
+  // Surface used to be excluded here on the theory that one tile arriving from two
+  // suppliers with different surface words was really one master. That theory is dead:
+  // surface IS product identity, so Glossy and Matt of one print are two products and
+  // are NOT duplicates of each other. Including it is what stops this tool from offering
+  // to merge them back into the collapse bug we just repaired.
   List<List<LibraryEntry>> get _duplicateGroups {
     final groups = <String, List<LibraryEntry>>{};
     for (final e in _entries) {
-      final key = '${e.masterName.trim().toLowerCase()}|${e.size}';
+      final key = '${e.masterName.trim().toLowerCase()}|${e.size}'
+          '|${e.surfaceType.trim().toLowerCase()}';
       (groups[key] ??= []).add(e);
     }
     final out = groups.values.where((g) => g.length > 1).toList()
@@ -1047,6 +1069,17 @@ class _State extends State<MyDesignLibraryScreen> {
         ),
       );
 
+  /// The product's surface for display: `Word (Canonical)` when the stockist has their
+  /// own word for it, else just the canonical. Empty for 'None' — a product with no
+  /// surface should not shout about it.
+  static String _surfaceOf(LibraryEntry e) {
+    final canon = e.surfaceType.trim();
+    if (canon.isEmpty || canon.toLowerCase() == 'none') return '';
+    final word = e.surfaceLabel.trim();
+    if (word.isEmpty || word.toLowerCase() == canon.toLowerCase()) return canon;
+    return '$word ($canon)';
+  }
+
   Widget _tile(LibraryEntry e) {
     // When the library is filtered to a SINGLE brand, the stockist is viewing it
     // "as that brand", so the title shows THAT brand's name for the tile (e.g.
@@ -1057,8 +1090,13 @@ class _State extends State<MyDesignLibraryScreen> {
     final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
     final titleName = showBrandName ? brandAlias : e.masterName;
     final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
-    // Size only — the library holds the print; the surface lives on the stock.
-    final sizeLine = e.size.replaceAll(' mm', '');
+    // Size · surface. The surface MUST show: it is part of the product's identity now,
+    // so the same print in Glossy and in Matt are two separate cards — without the
+    // surface they read as duplicates. Word (Canonical), per the surface rule.
+    final sizeLine = [
+      e.size.replaceAll(' mm', ''),
+      if (_surfaceOf(e).isNotEmpty) _surfaceOf(e),
+    ].join('  ·  ');
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1537,6 +1575,7 @@ class _BrandFirstResult {
 class _LibraryEditorScreen extends StatefulWidget {
   final List<Brand> brands;
   final List<String> sizes;
+  final List<String> surfaces; // admin canonicals — surface is product identity
   final List<LibraryEntry> all; // for live duplicate detection
   final LibraryEntry? existing;
   // Brand-first guided add: a new tile arrives pre-filled with the typed name
@@ -1546,6 +1585,7 @@ class _LibraryEditorScreen extends StatefulWidget {
   const _LibraryEditorScreen(
       {required this.brands,
       required this.sizes,
+      required this.surfaces,
       required this.all,
       this.existing,
       this.prefillName,
@@ -1590,28 +1630,37 @@ class _EditorState extends State<_LibraryEditorScreen> {
       .firstWhere((id) => _aliasCtrls[id]?.text.trim().isNotEmpty ?? false,
           orElse: () => _defaultBrand.id);
 
-  /// The library stores the PRINT, not the finished tile: "Satva White" is one
-  /// artwork file, run onto whatever surface the factory schedules. The surface is
-  /// chosen when stock is made (see `stock_add_holding`, whose holding key is
-  /// library_id + brand_id + quality + surface_type), so a print carries no
-  /// surface and this editor never asks for one.
-  /// (project_per_brand_surface_mode)
+  /// The SURFACE is part of the product's identity: "Glossy Ant Bianco" and "Matt Ant
+  /// Bianco" are two different products made from one print. So the editor asks for it,
+  /// and it is saved as identity — not left empty.
   ///
-  /// The legacy `stockist_library.surface_type` column is preserved on edit and
-  /// left empty on create — never read.
-  String get _surfaceToSave => widget.existing?.surfaceType ?? '';
+  /// (This replaces the old rule that "a print carries no surface and this editor never
+  /// asks for one". The product key is now
+  /// `(stockist, lower(master_design_name), size, surface_type)`.)
+  String _surface = 'None';
+  String get _surfaceToSave => _surface;
 
-  // The SAME print already in the library, or null. Identity = master name +
-  // size. M = brand-AGNOSTIC (one print is one box across all its brand names);
-  // T/W = brand silo (each brand is a different factory's catalogue).
+  /// Every admin canonical, with 'None' always available and first — a product genuinely
+  /// may have no surface, and that is a deliberate answer, not a missing one.
+  List<String> get _surfaceOptions => [
+        'None',
+        ...widget.surfaces.where((s) => s.trim().toLowerCase() != 'none'),
+      ];
+
+  // The SAME product already in the library, or null. Identity = master name + size +
+  // SURFACE. Brand is NOT identity — for an M a different brand is only a different NAME
+  // for the same print — so it no longer splits the match. Two surfaces are two products
+  // and must NOT flag as duplicates, or the editor would block the very thing the
+  // migration exists to allow.
   LibraryEntry? get _dupMatch {
     final name = _master.text.trim().toLowerCase();
     if (name.isEmpty || _size.isEmpty) return null;
-    final isM = currentStockistBusinessType == 'M';
     for (final e in widget.all) {
       if (e.id == widget.existing?.id) continue;
       if (e.masterName.trim().toLowerCase() != name || e.size != _size) continue;
-      if (!isM && e.brandId != _targetBrandId) continue; // T/W: stay in the silo
+      if (e.surfaceType.trim().toLowerCase() != _surface.trim().toLowerCase()) {
+        continue; // a different surface is a different product, not a duplicate
+      }
       return e;
     }
     return null;
@@ -1636,6 +1685,8 @@ class _EditorState extends State<_LibraryEditorScreen> {
       });
       _tileType = kTileTypes.contains(e.tileType) ? e.tileType : kTileTypes.first;
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
+      final surf = e.surfaceType.trim();
+      _surface = surf.isEmpty ? 'None' : surf;
       if (e.piecesPerBox > 0) _piecesCtrl.text = '${e.piecesPerBox}';
       if (e.boxWeightKg > 0) _weightCtrl.text = _trimNum(e.boxWeightKg);
       _colourCtrl.text = e.colour;
@@ -1753,9 +1804,10 @@ class _EditorState extends State<_LibraryEditorScreen> {
       builder: (c) => AlertDialog(
         title: const Text('This tile is already in your library'),
         content: Text(adding.isEmpty
-            ? '"${dup.masterName}" (${dup.size}) already exists. There is no new '
-                'brand name to add.'
-            : '"${dup.masterName}" (${dup.size}) already exists. Add your '
+            ? '"${dup.masterName}" (${dup.size} · $_surface) already exists. There '
+                'is no new brand name to add.\n\nTo stock it in a different surface, '
+                'pick that surface — it is a separate product.'
+            : '"${dup.masterName}" (${dup.size} · $_surface) already exists. Add your '
                 'name${adding.length > 1 ? 's' : ''} ($brandList) to it instead '
                 'of creating a duplicate?'),
         actions: [
@@ -1969,11 +2021,13 @@ class _EditorState extends State<_LibraryEditorScreen> {
                 // M: a match isn't an error — saving will add the brand name to
                 // the existing tile, so we hint (not red-error). T/W: hard clash.
                 helperText: (_isDuplicate && currentStockistBusinessType == 'M')
-                    ? 'Already in your library — saving adds your brand name to it'
+                    ? 'Already in your library at this surface — saving adds your '
+                        'brand name to it'
                     : 'Your internal name for this tile',
                 border: const OutlineInputBorder(),
                 errorText: (_isDuplicate && currentStockistBusinessType != 'M')
-                    ? 'You already have "${_master.text.trim()}" at this size'
+                    ? 'You already have "${_master.text.trim()}" at this size '
+                        'in $_surface'
                     : null,
               ),
             ),
@@ -2055,8 +2109,24 @@ class _EditorState extends State<_LibraryEditorScreen> {
             'ask for quality and quantity.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         const SizedBox(height: 10),
-        // No surface here: the library holds the PRINT. The surface is picked
-        // when stock is added. (project_per_brand_surface_mode)
+        // Surface IS identity: the same print in Glossy and in Matt are two products.
+        // (product identity migration — this used to say "no surface here".)
+        _dropdown(
+            'Surface',
+            _surfaceOptions,
+            _surfaceOptions.contains(_surface) ? _surface : 'None',
+            (v) => setState(() {
+                  _surface = v ?? _surface;
+                  _dirty = true;
+                })),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 6),
+          child: Text(
+              'The same print in another surface is a different product — add it '
+              'separately.',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        ),
+        const SizedBox(height: 6),
         _dropdown('Tile type', kTileTypes, _tileType,
             (v) => setState(() {
                   _tileType = v ?? _tileType;
