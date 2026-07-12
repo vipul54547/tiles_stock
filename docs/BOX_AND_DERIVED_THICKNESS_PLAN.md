@@ -247,8 +247,19 @@ stockist has overridden it), and returns the computed thickness so the UI can sh
 3. Buyers see the spec **per brand** — they look at a holding, which carries a brand, so it resolves
    to exactly one box. That falls out naturally.
 
+4. **THICKNESS IS ALWAYS DERIVED — no manual override** (user, 2026-07-13). This kills the
+   `thickness_is_manual` flag and the only data-loss risk in the chapter.
+   - Therefore it is enforced by a **TRIGGER**, not trusted to each writer: any change to a box's
+     `pieces_per_box` / `box_weight_kg`, or to the product's `tile_type` / `size`, recomputes
+     `stockist_library.thickness_mm`. No writer can forget. (`thickness_band` is already a GENERATED
+     column off `thickness_mm`, so it follows for free.)
+   - **Which box does a multi-box product derive from?** Any of them — and that is not a fudge:
+     `box_weight / pieces` is the weight of ONE tile, which is identical however a brand packs it.
+     So every box of a product must yield the same thickness. **Two boxes disagreeing means one has
+     bad data** — worth an assertion, not a tie-break rule.
+   - `thickness_mm` cannot be a GENERATED column: generated columns may not reference another table,
+     and pieces/weight now live on the box.
+
 ## 11. Still open
 
-- **The manual-override flag** (§9) — the one place this chapter can lose data. Needs
-  `thickness_is_manual boolean` on the product, or a box edit silently overwrites a hand-typed
-  thickness.
+Nothing. Ready to implement.
