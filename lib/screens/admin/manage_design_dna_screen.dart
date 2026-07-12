@@ -17,7 +17,21 @@ class ManageDesignDnaScreen extends StatefulWidget {
 
 class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
   static const _navy = Color(0xFF1B4F72);
+  static const _cyan = Color(0xFF00838F);   // dependent (child) accent
+  static const _amber = Color(0xFFB9770E);  // the DNA identity colour
   final _data = SupabaseDataService();
+
+  Map<String, String> get _attrName => {for (final a in _attrs) a.id: a.name};
+  Map<String, String> get _valueName =>
+      {for (final a in _attrs) for (final v in a.values) v.id: v.name};
+
+  DnaAttribute? _attr(String? id) {
+    if (id == null) return null;
+    for (final a in _attrs) {
+      if (a.id == id) return a;
+    }
+    return null;
+  }
 
   List<DnaAttribute> _attrs = [];
   bool _loading = true;
@@ -101,14 +115,85 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
     await _run(() => _data.adminDnaDeleteAttribute(a.id), ok: 'Deleted.');
   }
 
+  // ── mapping + dependency ───────────────────────────────────────────────────
+  Future<void> _setMapping(DnaAttribute a, bool on) async {
+    await _run(() => _data.adminDnaUpdateAttribute(a.id, allowMapping: on),
+        ok: on ? 'Stockist mapping ON.' : 'Admin words only.');
+  }
+
+  Future<void> _setParent(DnaAttribute a) async {
+    // Candidates: other active value-list attributes, not self, and not already a
+    // child of this one (blocks a direct cycle).
+    final cands = _attrs
+        .where((x) =>
+            x.id != a.id && !x.isFreeText && x.parentAttributeId != a.id)
+        .toList();
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text('"${a.name}" depends on'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, '__none__'),
+            child: const Text('Independent (no parent)'),
+          ),
+          const Divider(height: 1),
+          for (final c in cands)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, c.id),
+              child: Text(c.name),
+            ),
+        ],
+      ),
+    );
+    if (chosen == null) return;
+    if (chosen == '__none__') {
+      if (!a.isDependent) return;
+      await _run(() => _data.adminDnaUpdateAttribute(a.id, clearParent: true),
+          ok: 'Now independent.');
+    } else {
+      if (chosen == a.parentAttributeId) return;
+      await _run(
+          () => _data.adminDnaUpdateAttribute(a.id, parentAttributeId: chosen),
+          ok: 'Now a child of ${_attrName[chosen]}. Re-assign its values.');
+    }
+  }
+
   // ── value actions ─────────────────────────────────────────────────────────
   Future<void> _addValue(DnaAttribute a) async {
+    String? parentValueId;
+    if (a.isDependent) {
+      final parent = _attr(a.parentAttributeId);
+      final pvals = (parent?.values ?? const <DnaValue>[])
+          .where((v) => v.name.toLowerCase() != 'none')
+          .toList();
+      if (pvals.isEmpty) {
+        _snack('Add values to ${_attrName[a.parentAttributeId]} first.',
+            error: true);
+        return;
+      }
+      parentValueId = await showDialog<String>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: Text('Under which ${_attrName[a.parentAttributeId]}?'),
+          children: [
+            for (final v in pvals)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, v.id),
+                child: Text(v.name),
+              ),
+          ],
+        ),
+      );
+      if (parentValueId == null) return;
+    }
     final name = await _nameDialog(
         title: 'Add value to ${a.name}',
         label: 'Value',
-        hint: 'e.g. Texture, Marble, White');
+        hint: a.isDependent ? 'e.g. Carara, kota stone' : 'e.g. Texture, Marble');
     if (name == null) return;
-    await _run(() => _data.adminDnaAddValue(a.id, name), ok: 'Value added.');
+    await _run(() => _data.adminDnaAddValue(a.id, name, parentValueId: parentValueId),
+        ok: 'Value added.');
   }
 
   Future<void> _renameValue(DnaAttribute a, DnaValue v) async {
@@ -285,15 +370,59 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
             const SizedBox(width: 8),
             if (a.isMulti) _badge('multi', const Color(0xFF6A1B9A)),
             if (a.isFreeText) _badge('free text', Colors.teal),
+            if (!a.allowMapping) _badge('no map', Colors.orange.shade800),
+            if (a.isDependent)
+              _badge('↳ ${_attrName[a.parentAttributeId] ?? 'parent'}', _cyan),
           ],
         ),
         subtitle: Text(
-            a.isFreeText
-                ? 'Stockist types their own text (no fixed list).'
-                : '${a.values.length} value${a.values.length == 1 ? '' : 's'}',
+            a.isDependent
+                ? 'Child of ${_attrName[a.parentAttributeId] ?? 'parent'} · '
+                    '${a.values.length} value${a.values.length == 1 ? '' : 's'}'
+                : a.isFreeText
+                    ? 'Stockist types their own text (no fixed list).'
+                    : '${a.values.length} value${a.values.length == 1 ? '' : 's'}',
             style: const TextStyle(fontSize: 11.5)),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
         children: [
+          // Mapping on/off + Depends-on — the two new controls.
+          Row(children: [
+            Icon(a.allowMapping ? Icons.edit_note : Icons.lock_outline,
+                size: 18, color: a.allowMapping ? _navy : Colors.orange.shade800),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text('Stockist mapping',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+            Text(a.allowMapping ? 'On' : 'Admin words only',
+                style: TextStyle(
+                    fontSize: 11.5,
+                    color: a.allowMapping ? Colors.grey.shade600 : Colors.orange.shade800)),
+            Switch(
+              value: a.allowMapping,
+              activeThumbColor: _navy,
+              onChanged: _busy ? null : (v) => _setMapping(a, v),
+            ),
+          ]),
+          Row(children: [
+            const Icon(Icons.account_tree_outlined, size: 18, color: _cyan),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text('Depends on',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+            TextButton(
+              onPressed: _busy ? null : () => _setParent(a),
+              child: Text(
+                  a.isDependent
+                      ? (_attrName[a.parentAttributeId] ?? 'parent')
+                      : 'Independent',
+                  style: TextStyle(
+                      color: a.isDependent ? _cyan : Colors.grey.shade600,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          const Divider(height: 8),
           // attribute-level actions
           Row(
             children: [
@@ -332,6 +461,8 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
 
   Widget _valueRow(DnaAttribute a, DnaValue v) {
     final isNone = v.name.toLowerCase() == 'none';
+    final parentName =
+        v.parentValueId == null ? null : _valueName[v.parentValueId];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
@@ -345,6 +476,11 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
                     fontSize: 14,
                     color: isNone ? Colors.grey : Colors.black87)),
           ),
+          // For a dependent attribute, show which parent value this sits under.
+          if (parentName != null) ...[
+            _badge('under $parentName', _amber),
+            const SizedBox(width: 4),
+          ],
           if (!isNone) ...[
             IconButton(
               tooltip: 'Rename',

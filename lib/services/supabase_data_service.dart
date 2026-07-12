@@ -1451,12 +1451,20 @@ class SupabaseDataService {
   }
 
   Future<void> adminDnaUpdateAttribute(String id,
-      {String? name, bool? isActive, bool? showInFacets}) async {
+      {String? name,
+      bool? isActive,
+      bool? showInFacets,
+      bool? allowMapping,
+      String? parentAttributeId,
+      bool clearParent = false}) async {
     await supabase.rpc('admin_dna_update_attribute', params: {
       'p_id': id,
       'p_name': name,
       'p_is_active': isActive,
       'p_show_in_facets': showInFacets,
+      'p_allow_mapping': allowMapping,
+      'p_parent_attribute_id': parentAttributeId,
+      'p_clear_parent': clearParent,
     });
   }
 
@@ -1464,15 +1472,27 @@ class SupabaseDataService {
     await supabase.rpc('admin_dna_delete_attribute', params: {'p_id': id});
   }
 
-  Future<void> adminDnaAddValue(String attributeId, String name) async {
-    await supabase.rpc('admin_dna_add_value',
-        params: {'p_attribute_id': attributeId, 'p_name': name});
+  Future<void> adminDnaAddValue(String attributeId, String name,
+      {String? parentValueId}) async {
+    await supabase.rpc('admin_dna_add_value', params: {
+      'p_attribute_id': attributeId,
+      'p_name': name,
+      'p_parent_value_id': parentValueId,
+    });
   }
 
   Future<void> adminDnaUpdateValue(String id,
-      {String? name, bool? isActive}) async {
-    await supabase.rpc('admin_dna_update_value',
-        params: {'p_id': id, 'p_name': name, 'p_is_active': isActive});
+      {String? name,
+      bool? isActive,
+      String? parentValueId,
+      bool setParent = false}) async {
+    await supabase.rpc('admin_dna_update_value', params: {
+      'p_id': id,
+      'p_name': name,
+      'p_is_active': isActive,
+      'p_parent_value_id': parentValueId,
+      'p_set_parent': setParent,
+    });
   }
 
   Future<void> adminDnaDeleteValue(String id) async {
