@@ -451,14 +451,16 @@ class _State extends State<StockistDashboardScreen> {
     final map = <String, List<TileDesign>>{};
     final order = <String>[];
     for (final d in list) {
-      // A card merges a print's Premium + Standard, but NOT its surfaces: a T/W
-      // holds one print in several surfaces at once (separate stock lines), so
-      // each surface is its own card. Surface keys into the group alongside the
-      // library id. (M keeps its surface in the name → one library row per
-      // surface → this suffix is constant and never splits an M card.)
-      final base = d.libraryId.isNotEmpty ? d.libraryId : d.id;
-      final k = '$base|${d.surfaceType.trim().toLowerCase()}'
-          '|${d.surfaceLabel.trim().toLowerCase()}';
+      // A card merges a print's Premium + Standard holdings. The SURFACE no longer
+      // needs to key the group: it is now part of the product's identity, so each
+      // surface is already its OWN library row. library_id alone says which product
+      // this is, surface included.
+      //
+      // It used to append surfaceType|surfaceLabel. That broke the rule CLAUDE.md
+      // states outright — "surface_label is display-only, NOT part of the key" — and it
+      // split one design into two cards the moment two holdings of the same product
+      // disagreed about the word (one 'MATT', one empty). Never key on the word.
+      final k = d.libraryId.isNotEmpty ? d.libraryId : d.id;
       final bucket = map[k];
       if (bucket == null) {
         map[k] = [d];
