@@ -1,7 +1,32 @@
 # Dispatch: one order-backed path + a safe design picker
 
-Status: **PLANNED, not built.** Written 2026-07-11.
-Supersedes the walk-in (no-order) dispatch data path.
+Status: **Phases 1–2 SHIPPED. Phase 3 SUPERSEDED 2026-07-12 — do NOT build it.**
+Written 2026-07-11.
+
+> ## ⛔ Phase 3 is dead. Walk-in dispatch STAYS.
+>
+> Phase 3 ("every dispatch is backed by an order", `dispatch_counter`, deprecate
+> `dispatch_walkin`) was justified on three claims. All three failed when checked against the
+> live code on 2026-07-12:
+>
+> - *"Walk-in leaves no proper record"* — **false.** It writes `dispatch_notes` +
+>   `dispatches` + `customer_id`.
+> - *"Walk-in risks stock drift"* — **false.** Its stock SQL is byte-identical to the order path.
+> - *"Order-backing restores the customer link"* — **backwards.** `dispatch_inquiry` omits
+>   `customer_id` from its note insert, so the **order** path is the one that drops the customer.
+>   `manual_dispatch_screen.dart:1425` already hides the Customer field for exactly this reason.
+>
+> What the user actually needs — *"if the same customer comes again, how do I find them?"* — is a
+> **customer history read**, which Phase 3 would not have delivered. That is now
+> **`docs/CUSTOMER_HISTORY_PLAN.md`**.
+>
+> **Kept from Phase 3:** the `inquiries.customer_id` column.
+> **Dropped:** `dispatch_counter`, deprecating `dispatch_walkin`, the auto-created counter-sale
+> order — and with it the §8.2 open question, which only existed because of the rewrite.
+>
+> Re-open only if a real need appears (e.g. GST invoicing off orders) — justified by that need,
+> not by architectural symmetry. Sections 3–7 below are left intact as the record of what was
+> verified; read §4B and §5-Phase-3 as **history, not a spec**.
 
 ---
 
@@ -146,7 +171,9 @@ Add-Order keeps BOTH doors — the multi-select grid stays as **Browse all** (fa
 many at once), it just is not the only way in. Grouping moved to `lib/utils/holding_group.dart`
 so the touch picker and the bar cannot drift. Pinned by `test/holding_entry_bar_test.dart`.
 
-**Phase 3 — order-backed dispatch.**
+**Phase 3 — ⛔ SUPERSEDED 2026-07-12, do NOT build. See the banner at the top and
+`docs/CUSTOMER_HISTORY_PLAN.md`. Step 1 below (the `inquiries.customer_id` column) survives, and
+moved to that plan's Phase A; steps 2–4 are dropped. Kept here as the record only.**
 1. Migration: `alter table inquiries add column customer_id uuid references stockist_customers(id)`.
 2. Migration: new `dispatch_counter` RPC (§4B).
 3. `manual_dispatch_screen`: when no order is attached, call `dispatch_counter` instead of
@@ -192,8 +219,9 @@ Phases 1 and 3 are independent. Either can ship first.
    — Add-Order's picker was already a searchable list carrying brand/surface/quality; what it
    lacked was the **box count** and any grouping, so six near-identical `DELTON_8_A` rows sat
    adjacent with no number to tell them apart.
-2. Should the auto-created counter-sale order be **visible in My Orders**, or hidden (it is born
-   completed)? Visible = a full audit trail; hidden = less clutter. **Still open** (Phase 3).
+2. ~~Should the auto-created counter-sale order be **visible in My Orders**, or hidden?~~
+   **DISSOLVED 2026-07-12.** There is no auto-created counter-sale order — Phase 3 is superseded,
+   so the question it depended on no longer exists.
 
 ---
 
