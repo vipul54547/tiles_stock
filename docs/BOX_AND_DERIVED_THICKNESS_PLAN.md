@@ -53,14 +53,38 @@ This is not an approximation — it is the rule the data was built with. **Seed 
 
 ---
 
-## 3. What does not exist yet
+## 3. ⚡ THE FORMULA AND THE DENSITIES ALREADY EXIST — in Dart
 
-**There is NO `tile_types` table.** `stockist_library.tile_type` is free text, backed by a hardcoded
-Dart list (`kTileTypes`). There is a `tile_sizes` table and a `surface_types` table, but nothing for
-tile type — and therefore nowhere to put a density.
+`lib/utils/tile_types.dart` already has the whole derivation, and its densities are **exactly** the
+ones independently derived from the DB above:
 
-**446 of 933 products have a BLANK tile_type**, so they have no density and cannot derive a
-thickness:
+```dart
+const Map<String, double> kTileDensity = {
+  'PGVT & GVT': 2233,   'Porcelain': 2085,   'Ceramic': 1672,
+  'Full Body': 2350,    'DC': 2350,          'Colour Body': 2350,
+};
+double? approxThicknessMm(size, piecesPerBox, boxWeightKg, tileType) =>
+    boxWeightKg / (totalAreaM2 * densityFor(tileType)) * 1000.0;
+```
+
+Its own comment: *"Calibrated from real per-sq-ft weight data supplied by the user."* It already
+drives the buyer's **thickness-band filter** (`thicknessBandOf` / `availableThicknessBands`).
+
+**So nothing about the maths is new.** What is wrong is only:
+1. `pieces_per_box` / `box_weight_kg` sit on the **product** instead of the **box**, and
+2. `thickness_mm` is **typed and stored** on the product, while Dart *separately* derives an
+   approximate thickness from the same inputs. **Two sources of truth for one number.**
+
+There is also a **generated** column `stockist_library.thickness_band` (from `thickness_mm`), so the
+server has its own band while Dart computes another. Consolidate.
+
+### The one genuinely missing thing: a `tile_types` table
+
+`tile_type` is free text backed by the hardcoded `kTileTypes` list — the odd one out, since
+`surface_types` and `tile_sizes` are both admin tables. Moving it (with `density_kg_m3`) makes the
+density admin-tunable and lets the SERVER compute thickness authoritatively.
+
+**446 of 933 products have a BLANK tile_type** — no density, no thickness:
 
 | stockist | products | blank tile_type |
 |---|---|---|
@@ -70,6 +94,11 @@ thickness:
 | Sri Balaji (A05) | 258 | 0 |
 | saanvi (A03) | 131 | 0 |
 | livok (A02) | 43 | 0 |
+
+**Important:** those same 446 have **no pieces/weight/thickness either** (487 products have specs;
+487 have a tile_type — the same 487). So a blank type strands nothing today; it only matters once
+specs are entered. **User (2026-07-13): "all data is test data, you can modify or remove — your
+choice."** → assign a default rather than interrogating each stockist.
 
 ---
 
@@ -207,11 +236,19 @@ stockist has overridden it), and returns the computed thickness so the UI can sh
 
 ---
 
-## 10. Open questions — ANSWER BEFORE CODING
+## 10. Decisions taken (2026-07-13)
 
-1. **What tile_type are cura's 206, famous's 165 and Gracias's 75 blank products?** Porcelain?
-   PGVT? Per stockist, or per size?
-2. **Where does `box_weight` come from for a NEW product** with no stock yet — typed by the
-   stockist, or defaulted from the brand+size like pieces?
-3. Should the buyer see pieces/weight **per brand** (they see a holding, which has a brand → yes,
-   naturally), or the product's "default" box?
+1. ~~What tile_type are the 446 blanks?~~ **User: "all data is test data — modify or remove, your
+   choice."** → assign a default. They have no specs anyway, so nothing is stranded.
+2. **Density lives in the DB** (`tile_types.density_kg_m3`), not only in Dart. `surface_types` and
+   `tile_sizes` are already admin tables; `kTileTypes` being a hardcoded list is the odd one out.
+   The server then computes `thickness_mm` authoritatively whenever a box spec changes, and the Dart
+   `approxThicknessMm` stays only as a **live preview** while the stockist types.
+3. Buyers see the spec **per brand** — they look at a holding, which carries a brand, so it resolves
+   to exactly one box. That falls out naturally.
+
+## 11. Still open
+
+- **The manual-override flag** (§9) — the one place this chapter can lose data. Needs
+  `thickness_is_manual boolean` on the product, or a box edit silently overwrites a hand-typed
+  thickness.
