@@ -33,6 +33,25 @@ String currentStockistBusinessType = 'M';
 bool get currentStockistIsImporter =>
     isImporterType(currentStockistBusinessType);
 
+/// How this stockist's BOXES ARE STAMPED — 'attribute' or 'in_name'. Loaded at login.
+///
+/// It describes the physical box, nothing else:
+///   * 'attribute' — the stamp carries the design name AND the surface as two separate
+///     fields (e.g. famous ceramic: `ANT BIANCO | GLOSSY`). One stamped name therefore
+///     covers several surfaces, so **stock entry must ask which surface** — that question
+///     is really "which product". These stockists are RARE.
+///   * 'in_name'  — the stamp carries the name only. The name alone already identifies one
+///     product: they make a single surface, or they encode it in the number range
+///     (10001-19999 = Glossy, 20001-29999 = Matt). **Stock entry must NOT ask** — the
+///     product already knows its surface and the stock inherits it.
+///
+/// It has NO influence on identity. (Surface is always part of the product key.)
+String currentStockistSurfaceMode = 'in_name';
+
+/// Stock entry (+/-) must ask for a surface. See [currentStockistSurfaceMode].
+bool get currentStockistAsksSurface =>
+    currentStockistSurfaceMode == 'attribute';
+
 /// The logged-in stockist has opted into saving customers on dispatch/order
 /// (admin-set `customers_enabled`). Loaded at login. Gates the Customers entry
 /// + history screens. (project_customer_history)

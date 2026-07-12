@@ -1637,15 +1637,15 @@ class _EditorState extends State<_LibraryEditorScreen> {
   /// (This replaces the old rule that "a print carries no surface and this editor never
   /// asks for one". The product key is now
   /// `(stockist, lower(master_design_name), size, surface_type)`.)
-  String _surface = 'None';
+  String _surface = '';
   String get _surfaceToSave => _surface;
 
-  /// Every admin canonical, with 'None' always available and first — a product genuinely
-  /// may have no surface, and that is a deliberate answer, not a missing one.
-  List<String> get _surfaceOptions => [
-        'None',
-        ...widget.surfaces.where((s) => s.trim().toLowerCase() != 'none'),
-      ];
+  /// The admin canonicals. **'None' is NOT offered.** A tile always has a surface —
+  /// 'None' was never a surface, it was "we don't know yet" wearing one's clothes, and
+  /// since surface is part of the product key it produced a phantom product sitting
+  /// beside the real one. Every product must name a real surface.
+  List<String> get _surfaceOptions =>
+      widget.surfaces.where((s) => s.trim().toLowerCase() != 'none').toList();
 
   // The SAME product already in the library, or null. Identity = master name + size +
   // SURFACE. Brand is NOT identity — for an M a different brand is only a different NAME
@@ -1686,7 +1686,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
       _tileType = kTileTypes.contains(e.tileType) ? e.tileType : kTileTypes.first;
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
       final surf = e.surfaceType.trim();
-      _surface = surf.isEmpty ? 'None' : surf;
+      _surface = (surf.isEmpty || surf.toLowerCase() == 'none') ? '' : surf;
       if (e.piecesPerBox > 0) _piecesCtrl.text = '${e.piecesPerBox}';
       if (e.boxWeightKg > 0) _weightCtrl.text = _trimNum(e.boxWeightKg);
       _colourCtrl.text = e.colour;
@@ -1863,6 +1863,13 @@ class _EditorState extends State<_LibraryEditorScreen> {
     }
     if (_size.trim().isEmpty) {
       setState(() => _error = 'Pick a size.');
+      return;
+    }
+    // A tile always has a surface, and it is part of the product's identity — so it
+    // cannot be skipped. 'None' no longer exists.
+    if (_surface.trim().isEmpty ||
+        _surface.trim().toLowerCase() == 'none') {
+      setState(() => _error = 'Pick a surface — it is part of the design.');
       return;
     }
     final dup = _dupMatch;
@@ -2110,23 +2117,29 @@ class _EditorState extends State<_LibraryEditorScreen> {
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         const SizedBox(height: 10),
         // Surface IS identity: the same print in Glossy and in Matt are two products.
-        // (product identity migration — this used to say "no surface here".)
-        _dropdown(
-            'Surface',
-            _surfaceOptions,
-            _surfaceOptions.contains(_surface) ? _surface : 'None',
-            (v) => setState(() {
-                  _surface = v ?? _surface;
-                  _dirty = true;
-                })),
-        Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 6),
-          child: Text(
-              'The same print in another surface is a different product — add it '
-              'separately.',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        // REQUIRED — there is no 'None'. (product identity migration)
+        DropdownButtonFormField<String>(
+          initialValue: _surfaceOptions.contains(_surface) ? _surface : null,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: 'Surface',
+            isDense: true,
+            border: const OutlineInputBorder(),
+            errorText: _surface.trim().isEmpty ? 'Pick a surface' : null,
+            helperText: 'The same print in another surface is a different product — '
+                'add it separately.',
+            helperMaxLines: 2,
+          ),
+          hint: const Text('Pick a surface'),
+          items: _surfaceOptions
+              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+              .toList(),
+          onChanged: (v) => setState(() {
+            _surface = v ?? _surface;
+            _dirty = true;
+          }),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 12),
         _dropdown('Tile type', kTileTypes, _tileType,
             (v) => setState(() {
                   _tileType = v ?? _tileType;

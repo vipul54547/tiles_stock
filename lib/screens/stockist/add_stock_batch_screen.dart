@@ -148,15 +148,14 @@ class _State extends State<AddStockBatchScreen> {
   Future<void> _load() async {
     final masters = await _svc.getMyLibrary();
     final brands = await _svc.getMyBrands();
-    final profile = await _svc.getMyProfile();
     final options = await _svc.getMySurfaceOptions();
     final lastSurfaces = await _svc.getLastSurfaceByLibrary();
     if (!mounted) return;
     setState(() {
       _masters = masters;
       _brands = brands;
-      _stockistUsesSurface =
-          (profile?['surface_mode'] ?? 'in_name').toString() == 'attribute';
+      // surface_mode is loaded once at login — no need to re-fetch the profile here.
+      _stockistUsesSurface = currentStockistAsksSurface;
       _surfOptions = options;
       _lastSurfaces = lastSurfaces;
       _loading = false;
@@ -187,18 +186,28 @@ class _State extends State<AddStockBatchScreen> {
   /// Whether the CURRENT selection REQUIRES a surface. M + attribute only.
   bool get _selNeedsSurface => _selMaster != null && _isM && _stockistUsesSurface;
 
-  /// The surface picker is always shown once a design is picked. When it isn't
-  /// required, 'None' is a legitimate answer — not a failure to choose. Whatever
-  /// is picked lands on the holding as surface_label (their word) + surface_type
-  /// (admin canonical); the verbatim design name is never touched.
-  /// (project_per_brand_surface_mode / project_design_name_is_verbatim_truth)
-  bool get _selShowSurface => _selMaster != null;
+  /// The surface picker is shown ONLY when the stockist's boxes are stamped with the
+  /// surface as a separate field (M + `attribute` — e.g. famous ceramic). Only then does
+  /// one stamped name cover several surfaces, so only then is "which surface?" a real
+  /// question — and what it is really asking is **which product**.
+  ///
+  /// Everyone else does NOT see it. Their design name already identifies exactly one
+  /// product (a single surface, or the surface encoded in the number range:
+  /// 10001-19999 = Glossy, 20001-29999 = Matt), so the product already knows its surface
+  /// and the stock inherits it. Asking them to re-state it on every entry is noise.
+  /// These attribute stockists are RARE. (product identity migration)
+  bool get _selShowSurface => _selNeedsSurface;
 
-  /// The admin canonical to store on the holding for the current pick.
-  String get _surfaceForEntry => _canonicalOf(_selSurfaceLabel);
+  /// The admin canonical to send. **Empty when we did not ask** — an empty surface tells
+  /// `stock_add_holding` to INHERIT the product's own surface. It must never be 'None':
+  /// 'None' is not a surface, and sending it would look up a product that no longer
+  /// exists and create a phantom beside the real one.
+  String get _surfaceForEntry =>
+      _selNeedsSurface ? _canonicalOf(_selSurfaceLabel) : '';
 
-  /// The stockist's word to store as surface_label ('' when None).
+  /// The stockist's word to store as surface_label ('' when we did not ask).
   String get _labelForEntry {
+    if (!_selNeedsSurface) return '';
     final l = _selSurfaceLabel.trim();
     return (l.isEmpty || l.toLowerCase() == 'none') ? '' : l;
   }
@@ -802,22 +811,25 @@ class _State extends State<AddStockBatchScreen> {
             // Always in the bar, even before a design is picked — greyed, and
             // skipped by Tab. It used to appear only once a design was chosen,
             // which re-flowed the whole row under the stockist's hands.
-            _hField(
-              _selNeedsSurface ? 'Surface *' : 'Surface',
-              ComboField<String>(
-                focusNode: _fSurface,
-                enabled: _selShowSurface,
-                value: _surfaceOptions.contains(_selSurfaceLabel)
-                    ? _selSurfaceLabel
-                    : (_selNeedsSurface ? null : 'None'),
-                options: _surfaceOptions,
-                labelOf: (s) => s,
-                hint: 'Select',
-                hasError: surfMissing,
-                onSelected: (s) => setState(() => _selSurfaceLabel = s),
+            // Only an `attribute` stockist sees this — for everyone else the product
+            // already carries its surface and the stock inherits it.
+            if (_selShowSurface)
+              _hField(
+                'Surface *',
+                ComboField<String>(
+                  focusNode: _fSurface,
+                  enabled: true,
+                  value: _surfaceOptions.contains(_selSurfaceLabel)
+                      ? _selSurfaceLabel
+                      : null,
+                  options: _surfaceOptions,
+                  labelOf: (s) => s,
+                  hint: 'Select',
+                  hasError: surfMissing,
+                  onSelected: (s) => setState(() => _selSurfaceLabel = s),
+                ),
+                width: 150,
               ),
-              width: 150,
-            ),
             _hField(
               'Quality',
               ComboField<String>(
@@ -855,10 +867,9 @@ class _State extends State<AddStockBatchScreen> {
     );
   }
 
-  /// The surface words on offer. 'None' is a real answer whenever a surface is
-  /// not required (a T/W factory that ships the finish inside the name).
-  List<String> get _surfaceOptions =>
-      _selNeedsSurface ? _surfLabels : <String>['None', ..._surfLabels];
+  /// The surface words on offer. **'None' is gone** — a tile always has a surface, and
+  /// the picker only appears at all when a surface is genuinely required.
+  List<String> get _surfaceOptions => _surfLabels;
 
   /// Add the line, then put the cursor back on Design — the stockist is always
   /// entering another one.

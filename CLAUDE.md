@@ -66,18 +66,33 @@ Don't infer a function's signature from its call site.
   filters on the **canonical**. `surface_label` is **display-only, never a key** — keying a lookup
   on it wedges Add Stock against the index.
 - 🔑 **Surface IS product identity.** *Glossy Ant Bianco* and *Matt Ant Bianco* are **two products**,
-  made from one print. `surface_type` is `NOT NULL DEFAULT 'None'` — `'None'` is a deliberate
-  answer, not a missing one.
+  made from one print. `surface_type` is `NOT NULL`.
+- 🚫 **There is no `'None'` surface.** A tile always has a surface; `'None'` was never one — it was
+  *"we don't know yet"* wearing a surface's clothes, and since surface is in the product key it
+  spawned a phantom product beside the real one. **Surface is mandatory when a product is created**
+  (Library editor + import). Never write `'None'`, never offer it in a picker.
+- 🔑 **Stock entry asks for a surface ONLY when `surface_mode = 'attribute'`** (rare). Otherwise the
+  field is not shown at all: the product already knows its surface and **the stock inherits it**
+  (`stock_add_holding` with no surface = "use the product's own"). Asking a surface at Add Stock is
+  really asking **which product** — and that is only a question for an `attribute` stockist, whose
+  one stamped name covers several surfaces. See `currentStockistAsksSurface`.
 - 🔑 **Brand is NOT product identity.** For an M, a different brand is only a different **NAME** for
   the same print. Brand belongs to the **box**; identity is brand-free. `stockist_library.brand_id`
   survives as a *default/first-seen hint only*. A product's brand names live in
   `stockist_library_brand_names (library_id, brand_id, brand_design_name)`, and **stock is still
   per-brand** (`designs.brand_id`). **Identity is brand-free; commerce is per-brand.**
-- **surface_mode** (`stockists.surface_mode`) is a **parser/import hint ONLY** — *where do I read
-  the surface from on this factory's dispatch note*: its own column (`attribute`) or inside the
-  design name (`in_name`). **It has NO influence on identity.** It used to gate a surface *stamp*
-  onto `stockist_library`, which was a workaround for the old broken key and is now deleted.
-  `brands.surface_mode` still exists but nothing reads it.
+- **surface_mode** (`stockists.surface_mode`) describes **how that factory STAMPS ITS BOXES** — the
+  physical box, nothing else. **It has NO influence on identity.**
+  - `attribute` — the stamp carries name **and** surface as two fields (`ANT BIANCO | GLOSSY`). One
+    stamped name covers several surfaces → **stock entry must ask which surface**. **Rare.**
+  - `in_name` — the stamp carries the name only. The name alone identifies one product: they make a
+    single surface, or they encode it in the number range (10001-19999 = Glossy, 20001-29999 = Matt).
+    **Stock entry must NOT ask.** *(Do not read this as "the surface word is inside the name" — it
+    usually isn't. It is simply the default, and it means "don't ask".)*
+  - It once gated a surface *stamp* onto `stockist_library`. That was a **workaround for the old
+    broken key**, not a design — and it left `famous "1001"` carrying a stale `Sugar` label while its
+    stock was Carving/GHR/Matt. Deleted. **Never branch on stockist type to decide identity.**
+  - `brands.surface_mode` still exists but nothing reads it.
 - **design_name** is verbatim truth — display the name as stored, never concatenate surface,
   size, or quality into it. (An `in_name` factory's name may *contain* a surface word. Leave it.)
 
