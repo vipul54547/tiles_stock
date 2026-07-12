@@ -2016,8 +2016,12 @@ class _State extends State<StockistDashboardScreen> {
             const Divider(height: 1),
             _sheetItem(ctx, Icons.post_add_outlined, const Color(0xFF2E7D32),
                 'Add Order', 'Create an order yourself', () async {
-              await Navigator.of(context).push<bool>(MaterialPageRoute(
-                  builder: (_) => const StockistAddOrderScreen()));
+              // The order screen pops its `{id, token, connection_code}` map on
+              // save — NOT a bool. Pushing as <bool> threw a cast error the
+              // moment it popped. (inquiries_screen pushes it as <Map> already.)
+              await Navigator.of(context).push<Map<String, dynamic>>(
+                  MaterialPageRoute(
+                      builder: (_) => const StockistAddOrderScreen()));
             }),
             // Opt-in: only stockists who save customers get the directory +
             // per-customer dispatch history. (project_customer_history)
