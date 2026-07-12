@@ -122,8 +122,12 @@ class _DnaEditorState extends State<_DnaEditor> {
     return (sel != null && sel.isNotEmpty) ? sel.first : null;
   }
 
-  // When a parent value changes, its children no longer apply — clear them.
-  void _clearChildrenOf(DnaAttribute parent) {
+  // When a parent value changes, its children no longer apply — clear them, and
+  // recurse so deeper levels (e.g. a free-text under a value-list child) clear
+  // too. [visited] guards against a mis-configured attribute cycle.
+  void _clearChildrenOf(DnaAttribute parent, [Set<String>? visited]) {
+    final seen = visited ?? <String>{};
+    if (!seen.add(parent.id)) return;
     for (final child in _attrs.where((x) => x.parentAttributeId == parent.id)) {
       if (child.isFreeText) {
         if (_freeTexts[child.id]?.isNotEmpty ?? false) {
@@ -134,6 +138,7 @@ class _DnaEditorState extends State<_DnaEditor> {
         setState(() => _selected[child.id]!.clear());
         _save(child);
       }
+      _clearChildrenOf(child, seen); // deeper levels
     }
   }
 
