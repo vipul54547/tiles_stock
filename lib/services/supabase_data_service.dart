@@ -322,6 +322,20 @@ class SupabaseDataService {
     }
   }
 
+  /// One saved customer's dispatch history — `{customer, summary, dispatches}`,
+  /// newest dispatch first, each with its design lines (walk-in AND order
+  /// dispatches). Null if the customer is not the caller's. (project_customer_history)
+  Future<Map<String, dynamic>?> myCustomerHistory(String customerId) async {
+    try {
+      final res = await supabase
+          .rpc('my_customer_history', params: {'p_customer_id': customerId});
+      return res == null ? null : Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('myCustomerHistory failed: $e\n$st');
+      return null;
+    }
+  }
+
   /// Save (or reuse) a customer — only works when the stockist is customers_enabled.
   /// Returns its id.
   Future<String?> upsertCustomer({
