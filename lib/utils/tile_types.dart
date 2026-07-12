@@ -1,7 +1,10 @@
 import 'tile_sizes.dart';
 import '../models/tile_design.dart';
 
-/// Tile body types the stockist picks at upload time and buyers filter on.
+/// FALLBACK tile body types. The real list lives in the admin-managed `tile_types` TABLE
+/// (with each type's density) — this const is only what we use before it has loaded, or if
+/// the load fails. Keep it in step with the seed in
+/// `20260713_box_step1_tile_types.sql`.
 const List<String> kTileTypes = [
   'PGVT & GVT',
   'Porcelain',
@@ -11,10 +14,12 @@ const List<String> kTileTypes = [
   'Colour Body',
 ];
 
-/// Effective bulk density (kg/m³) per body type, used only to derive the
-/// approximate thickness band from box weight + area. Calibrated from real
-/// per-sq-ft weight data supplied by the user: PGVT&GVT 1.815 kg/sq.ft → 8.75 mm
-/// (2233); Ceramic 1.21 kg/sq.ft → 7.79 mm (1672).
+/// FALLBACK effective bulk density (kg/m³) per body type. Same story: the table is the truth.
+///
+/// Calibrated from real per-sq-ft weight data supplied by the user: PGVT&GVT 1.815 kg/sq.ft →
+/// 8.75 mm (2233); Ceramic 1.21 kg/sq.ft → 7.79 mm (1672). Independently confirmed against the
+/// live stock data with ZERO variance — Porcelain 2085 across 258 products, PGVT & GVT 2233
+/// across 139.
 const Map<String, double> kTileDensity = {
   'PGVT & GVT': 2233,
   'Full Body': 2350,
@@ -24,7 +29,26 @@ const Map<String, double> kTileDensity = {
   'Ceramic': 1672,
 };
 
-double densityFor(String tileType) => kTileDensity[tileType] ?? 2350;
+// ── the live values, refreshed from the tile_types table ─────────────────────────────────
+// densityFor() is called synchronously inside build() (the thickness preview, the buyer's
+// thickness-band filter), so it cannot await a fetch. Cache it instead, seeded with the const
+// above so the app is correct from the very first frame and stays correct offline.
+List<String> _liveTypes = List<String>.from(kTileTypes);
+Map<String, double> _liveDensity = Map<String, double>.from(kTileDensity);
+
+/// Feed in what `SupabaseDataService.getTileTypes()` returned. Ignores an empty list — a
+/// failed fetch must never wipe the fallback and leave every thickness underivable.
+void applyTileTypes(List<({String name, double densityKgM3})> types) {
+  if (types.isEmpty) return;
+  _liveTypes = [for (final t in types) t.name];
+  _liveDensity = {for (final t in types) t.name: t.densityKgM3};
+}
+
+/// The body types on offer — the table's, once loaded; [kTileTypes] until then.
+List<String> get tileTypeNames => _liveTypes;
+
+double densityFor(String tileType) =>
+    _liveDensity[tileType] ?? kTileDensity[tileType] ?? 2350;
 
 /// Square feet covered by one box, from the tile size and pieces/box.
 /// 1 ft = 304.8 mm. Returns null when the size or count is unusable.

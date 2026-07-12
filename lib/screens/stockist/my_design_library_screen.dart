@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -31,10 +31,10 @@ class _State extends State<MyDesignLibraryScreen> {
   List<Brand> _brands = [];
   List<LibraryEntry> _entries = [];
   List<String> _sizes = [];
-  // Surface is part of the PRODUCT's identity — Glossy and Matt of one print are two
-  // products — so the editor must be able to pick one. (product identity migration)
+  // Surface is part of the PRODUCT's identity â€” Glossy and Matt of one print are two
+  // products â€” so the editor must be able to pick one. (product identity migration)
   List<String> _surfaces = [];
-  Map<String, List<DnaTag>> _dnaTags = {}; // libraryId → DNA tags (their words)
+  Map<String, List<DnaTag>> _dnaTags = {}; // libraryId â†’ DNA tags (their words)
   bool _loading = true;
 
   // Search + filters
@@ -118,7 +118,7 @@ class _State extends State<MyDesignLibraryScreen> {
       _brands.firstWhere((b) => b.id == brandId,
           orElse: () => const Brand(id: '', name: '?')).name;
 
-  // Two-tone pill used wherever we show a brand→name pair (library card + the
+  // Two-tone pill used wherever we show a brandâ†’name pair (library card + the
   // merge picker): solid navy = the BRAND, light = that brand's design name, so
   // "my brand vs its name" reads at a glance.
   Widget _brandNamePill(String brandId, String name) => Container(
@@ -151,7 +151,7 @@ class _State extends State<MyDesignLibraryScreen> {
 
   Future<void> _openEditor([LibraryEntry? entry]) async {
     if (_brands.isEmpty) {
-      _snack('Add a brand first — designs live under a brand.', error: true);
+      _snack('Add a brand first â€” designs live under a brand.', error: true);
       return;
     }
     final saved = await Navigator.push<bool>(
@@ -171,11 +171,11 @@ class _State extends State<MyDesignLibraryScreen> {
   // "+ Add design" entry. For M the tile's identity spans brands (one box, many
   // brand-names), so we lead with a BRAND-FIRST guided step: the human enters
   // through their brand, then SEES the existing boxes (across all brands, with
-  // photos) before a blank form can spawn a duplicate. T/W are silos — brand IS
-  // the identity — so they go straight to the editor. (project_addflow_redesign)
+  // photos) before a blank form can spawn a duplicate. T/W are silos â€” brand IS
+  // the identity â€” so they go straight to the editor. (project_addflow_redesign)
   Future<void> _addDesign() async {
     if (_brands.isEmpty) {
-      _snack('Add a brand first — designs live under a brand.', error: true);
+      _snack('Add a brand first â€” designs live under a brand.', error: true);
       return;
     }
     if (currentStockistBusinessType != 'M') {
@@ -298,9 +298,9 @@ class _State extends State<MyDesignLibraryScreen> {
         SnackBar(content: Text(msg), backgroundColor: error ? Colors.red : null));
   }
 
-  // Other masters of the SAME size — the only merge candidates (the server also
+  // Other masters of the SAME size â€” the only merge candidates (the server also
   // enforces same-size). Used to show/hide the per-tile merge action.
-  // Merge candidates. Same size AND same surface only — two surfaces are two different
+  // Merge candidates. Same size AND same surface only â€” two surfaces are two different
   // products, and `library_merge_masters` now refuses to merge across them, so we must
   // not offer it. (product identity migration)
   List<LibraryEntry> _sameSizeSiblings(LibraryEntry keep) => _entries
@@ -333,8 +333,8 @@ class _State extends State<MyDesignLibraryScreen> {
 
   // Family (concept) correction. The app auto-groups variants by name-root
   // (1801-A / 1801-B / 1801, etc.); here the stockist only CORRECTS the
-  // auto-result — remove a wrong member (it stands alone) or add a missing one
-  // — without ever building a list from scratch. Buyer then sees the perfected
+  // auto-result â€” remove a wrong member (it stands alone) or add a missing one
+  // â€” without ever building a list from scratch. Buyer then sees the perfected
   // family on the tile page. (design_family)
   Future<void> _openFamilySheet(LibraryEntry keep) async {
     Future<Map<String, dynamic>> load() => _data.myFamilyFor(keep.id);
@@ -395,7 +395,7 @@ class _State extends State<MyDesignLibraryScreen> {
                               fontWeight: FontWeight.bold, fontSize: 15)),
                       const SizedBox(height: 2),
                       Text(
-                          'Variants sold as a set. Auto-grouped by name — remove '
+                          'Variants sold as a set. Auto-grouped by name â€” remove '
                           'a wrong one or add a missing one. Buyers see the whole '
                           'family on the tile page.',
                           style: TextStyle(
@@ -413,7 +413,7 @@ class _State extends State<MyDesignLibraryScreen> {
                         Padding(
                           padding: const EdgeInsets.all(16),
                           child: Text(
-                              'No family yet — this design stands alone. Add a '
+                              'No family yet â€” this design stands alone. Add a '
                               'same-size variant to start a family.',
                               style: TextStyle(color: Colors.grey.shade600)),
                         ),
@@ -497,7 +497,7 @@ class _State extends State<MyDesignLibraryScreen> {
     );
   }
 
-  // Same-size sibling picker for "add to family" — reuses the merge-sheet list
+  // Same-size sibling picker for "add to family" â€” reuses the merge-sheet list
   // style, excluding members already in the family.
   Future<LibraryEntry?> _pickFamilyAddition(
       LibraryEntry keep, Set<String> excludeIds) {
@@ -924,7 +924,7 @@ class _State extends State<MyDesignLibraryScreen> {
                   controller: _searchCtrl,
                   onChanged: (v) => setState(() => _query = v),
                   decoration: InputDecoration(
-                    hintText: 'Search by design or brand name…',
+                    hintText: 'Search by design or brand nameâ€¦',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     suffixIcon: _query.isEmpty
                         ? null
@@ -1073,7 +1073,7 @@ class _State extends State<MyDesignLibraryScreen> {
       );
 
   /// The product's surface for display: `Word (Canonical)` when the stockist has their
-  /// own word for it, else just the canonical. Empty for 'None' — a product with no
+  /// own word for it, else just the canonical. Empty for 'None' â€” a product with no
   /// surface should not shout about it.
   static String _surfaceOf(LibraryEntry e) {
     final canon = e.surfaceType.trim();
@@ -1083,7 +1083,7 @@ class _State extends State<MyDesignLibraryScreen> {
     return '$word ($canon)';
   }
 
-  /// The SURFACE chip — deliberately its OWN chip, sitting beside the DNA chips but NOT a
+  /// The SURFACE chip â€” deliberately its OWN chip, sitting beside the DNA chips but NOT a
   /// DNA tag. Surface as a `dna_attribute` was tried and killed
   /// ([[project_per_brand_surface_mode]]); the deactivated row is still in the DB and must
   /// never be reactivated. This is a plain identity field with a fast edit affordance.
@@ -1113,7 +1113,7 @@ class _State extends State<MyDesignLibraryScreen> {
     );
   }
 
-  /// Change a product's surface. This is an IDENTITY change — the server cascades it to
+  /// Change a product's surface. This is an IDENTITY change â€” the server cascades it to
   /// every holding of the product, and refuses if the print already exists in the target
   /// surface (that would be a duplicate).
   Future<void> _editSurface(LibraryEntry e) async {
@@ -1139,7 +1139,7 @@ class _State extends State<MyDesignLibraryScreen> {
                   const SizedBox(height: 4),
                   Text(
                       'The surface is part of the design. Changing it moves this '
-                      'design’s stock with it.',
+                      'designâ€™s stock with it.',
                       style:
                           TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                 ],
@@ -1181,9 +1181,9 @@ class _State extends State<MyDesignLibraryScreen> {
     _load();
   }
 
-  /// THE BOX chip — `4 pcs · 24 kg · 8.8 mm`. Tap to set how each brand packs this print.
+  /// THE BOX chip â€” `4 pcs Â· 24 kg Â· 8.8 mm`. Tap to set how each brand packs this print.
   ///
-  /// Pieces + weight live on the BOX (product × brand), because brands can pack differently.
+  /// Pieces + weight live on the BOX (product Ã— brand), because brands can pack differently.
   /// Thickness is DERIVED from them and never typed.
   Widget _boxChip(LibraryEntry e) {
     final bits = <String>[
@@ -1206,7 +1206,7 @@ class _State extends State<MyDesignLibraryScreen> {
           children: [
             Icon(Icons.inventory_2_outlined, size: 11, color: Colors.grey.shade700),
             const SizedBox(width: 4),
-            Text(bits.isEmpty ? 'Set box' : bits.join(' · '),
+            Text(bits.isEmpty ? 'Set box' : bits.join(' Â· '),
                 style: TextStyle(
                     fontSize: 11,
                     color: Colors.grey.shade800,
@@ -1219,7 +1219,7 @@ class _State extends State<MyDesignLibraryScreen> {
 
   /// Per-brand box editor. One row per brand that carries this print, because the same print
   /// may ship 4/box under one brand and 6/box under another. Thickness is shown live as they
-  /// type — derived, never entered.
+  /// type â€” derived, never entered.
   Future<void> _editBox(LibraryEntry e) async {
     // Only the brands that actually carry this print (its boxes); fall back to the product's
     // own brand so a single-brand print is still editable.
@@ -1228,7 +1228,7 @@ class _State extends State<MyDesignLibraryScreen> {
     final brands =
         _brands.where((b) => brandIds.contains(b.id)).toList();
     if (brands.isEmpty) {
-      _snack('This design has no brand yet — add one first.', error: true);
+      _snack('This design has no brand yet â€” add one first.', error: true);
       return;
     }
 
@@ -1266,7 +1266,7 @@ class _State extends State<MyDesignLibraryScreen> {
           final w = double.tryParse(weightCtrls[brandId]!.text.trim()) ?? 0;
           final t = approxThicknessMm(e.size, p, w, e.tileType);
           return (t == null || t <= 0)
-              ? '—'
+              ? 'â€”'
               : '${t.toStringAsFixed(1)} mm';
         }
 
@@ -1280,13 +1280,13 @@ class _State extends State<MyDesignLibraryScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Box for "${e.masterName}"  ·  ${e.size.replaceAll(' mm', '')}',
+              Text('Box for "${e.masterName}"  Â·  ${e.size.replaceAll(' mm', '')}',
                   style:
                       const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
               const SizedBox(height: 4),
               Text(
                   'Each brand can pack the same tile differently. Thickness is worked out '
-                  'from the weight — you never type it.',
+                  'from the weight â€” you never type it.',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
               const Divider(height: 20),
               for (final b in brands) ...[
@@ -1382,7 +1382,7 @@ class _State extends State<MyDesignLibraryScreen> {
     final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
     final titleName = showBrandName ? brandAlias : e.masterName;
     final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
-    // Size only — the SURFACE gets its own tappable chip below (it is part of the
+    // Size only â€” the SURFACE gets its own tappable chip below (it is part of the
     // product's identity, and the Library is the only place to change it once Add Stock
     // stopped asking).
     final sizeLine = e.size.replaceAll(' mm', '');
@@ -1402,7 +1402,7 @@ class _State extends State<MyDesignLibraryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Thumbnail + identity (name · size/surface · brand pills).
+                  // Thumbnail + identity (name Â· size/surface Â· brand pills).
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1463,7 +1463,7 @@ class _State extends State<MyDesignLibraryScreen> {
                             Text(sizeLine,
                                 style: TextStyle(
                                     fontSize: 12, color: Colors.grey.shade600)),
-                            // SURFACE chip — tap to change it. Surface is part of the
+                            // SURFACE chip â€” tap to change it. Surface is part of the
                             // product's identity and Add Stock no longer asks for it
                             // (unless the boxes are stamped with it), so this is where a
                             // stockist sets or corrects it.
@@ -1490,8 +1490,8 @@ class _State extends State<MyDesignLibraryScreen> {
                       ),
                     ],
                   ),
-                  // DNA below — grouped by root attribute, each shown as a
-                  // parent › child › detail breadcrumb. (project_dna_cascade_mapping)
+                  // DNA below â€” grouped by root attribute, each shown as a
+                  // parent â€º child â€º detail breadcrumb. (project_dna_cascade_mapping)
                   if (dnaChains.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     for (final grp in dnaChains.entries)
@@ -1589,7 +1589,7 @@ class _State extends State<MyDesignLibraryScreen> {
   }
 }
 
-// ── Brand-first guided "Add design" sheet ────────────────────────────────────
+// â”€â”€ Brand-first guided "Add design" sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Using a proper StatefulWidget (not StatefulBuilder) so the TextEditingController
 // is disposed in dispose() and the FocusScope inside the modal is torn down in
 // the correct order, preventing the _dependents.isEmpty assertion crash.
@@ -1700,7 +1700,7 @@ class _BrandFirstSheetState extends State<_BrandFirstSheet> {
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
               child: Text(
                   'Type the name. If this tile is already yours under '
-                  'another brand, pick it below — don\'t make a duplicate.',
+                  'another brand, pick it below â€” don\'t make a duplicate.',
                   style:
                       TextStyle(fontSize: 12, color: Colors.grey.shade600)),
             ),
@@ -1751,7 +1751,7 @@ class _BrandFirstSheetState extends State<_BrandFirstSheet> {
                   icon: const Icon(Icons.add),
                   label: Text(q.isEmpty
                       ? 'Create a new tile'
-                      : 'None of these — create new tile'),
+                      : 'None of these â€” create new tile'),
                   style: OutlinedButton.styleFrom(
                       foregroundColor: _navy,
                       side: const BorderSide(color: _navy),
@@ -1874,7 +1874,7 @@ class _BrandFirstResult {
 class _LibraryEditorScreen extends StatefulWidget {
   final List<Brand> brands;
   final List<String> sizes;
-  final List<String> surfaces; // admin canonicals — surface is product identity
+  final List<String> surfaces; // admin canonicals â€” surface is product identity
   final List<LibraryEntry> all; // for live duplicate detection
   final LibraryEntry? existing;
   // Brand-first guided add: a new tile arrives pre-filled with the typed name
@@ -1905,15 +1905,15 @@ class _EditorState extends State<_LibraryEditorScreen> {
   bool _saving = false;
   bool _dirty = false;
 
-  // Identity (physical) attributes — the design IS these. Set once, here.
+  // Identity (physical) attributes â€” the design IS these. Set once, here.
   // (pieces/box + box weight are NOT here: they are BOX facts, set per brand on the card's
   //  box chip. Thickness is derived from them.)
   final _colourCtrl = TextEditingController();
   final _finishCtrl = TextEditingController();
-  String _tileType = kTileTypes.first;
+  String _tileType = tileTypeNames.first;
   String _stockType = 'Uncertain';
   static const _stockTypes = ['Continuous', 'One Time', 'Uncertain'];
-  // True once the user edits the master name by hand — until then it mirrors the
+  // True once the user edits the master name by hand â€” until then it mirrors the
   // default brand's name (locked rule: first upload master name = brand-1 name).
   bool _masterTouched = false;
   String? _error;
@@ -1930,7 +1930,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
 
   /// The SURFACE is part of the product's identity: "Glossy Ant Bianco" and "Matt Ant
   /// Bianco" are two different products made from one print. So the editor asks for it,
-  /// and it is saved as identity — not left empty.
+  /// and it is saved as identity â€” not left empty.
   ///
   /// (This replaces the old rule that "a print carries no surface and this editor never
   /// asks for one". The product key is now
@@ -1938,7 +1938,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
   String _surface = '';
   String get _surfaceToSave => _surface;
 
-  /// The admin canonicals. **'None' is NOT offered.** A tile always has a surface —
+  /// The admin canonicals. **'None' is NOT offered.** A tile always has a surface â€”
   /// 'None' was never a surface, it was "we don't know yet" wearing one's clothes, and
   /// since surface is part of the product key it produced a phantom product sitting
   /// beside the real one. Every product must name a real surface.
@@ -1946,8 +1946,8 @@ class _EditorState extends State<_LibraryEditorScreen> {
       widget.surfaces.where((s) => s.trim().toLowerCase() != 'none').toList();
 
   // The SAME product already in the library, or null. Identity = master name + size +
-  // SURFACE. Brand is NOT identity — for an M a different brand is only a different NAME
-  // for the same print — so it no longer splits the match. Two surfaces are two products
+  // SURFACE. Brand is NOT identity â€” for an M a different brand is only a different NAME
+  // for the same print â€” so it no longer splits the match. Two surfaces are two products
   // and must NOT flag as duplicates, or the editor would block the very thing the
   // migration exists to allow.
   LibraryEntry? get _dupMatch {
@@ -1981,7 +1981,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
       e.aliases.forEach((bid, name) {
         _aliasCtrls[bid]?.text = name;
       });
-      _tileType = kTileTypes.contains(e.tileType) ? e.tileType : kTileTypes.first;
+      _tileType = tileTypeNames.contains(e.tileType) ? e.tileType : tileTypeNames.first;
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
       final surf = e.surfaceType.trim();
       _surface = (surf.isEmpty || surf.toLowerCase() == 'none') ? '' : surf;
@@ -2069,7 +2069,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
     }
   }
 
-  // M auto-link: the entered tile already exists — ADD the brand name(s) the
+  // M auto-link: the entered tile already exists â€” ADD the brand name(s) the
   // stockist typed onto that existing box (merged with its current names), so a
   // duplicate master is never created.
   Future<void> _offerLinkToExisting(LibraryEntry dup) async {
@@ -2096,10 +2096,10 @@ class _EditorState extends State<_LibraryEditorScreen> {
       builder: (c) => AlertDialog(
         title: const Text('This tile is already in your library'),
         content: Text(adding.isEmpty
-            ? '"${dup.masterName}" (${dup.size} · $_surface) already exists. There '
+            ? '"${dup.masterName}" (${dup.size} Â· $_surface) already exists. There '
                 'is no new brand name to add.\n\nTo stock it in a different surface, '
-                'pick that surface — it is a separate product.'
-            : '"${dup.masterName}" (${dup.size} · $_surface) already exists. Add your '
+                'pick that surface â€” it is a separate product.'
+            : '"${dup.masterName}" (${dup.size} Â· $_surface) already exists. Add your '
                 'name${adding.length > 1 ? 's' : ''} ($brandList) to it instead '
                 'of creating a duplicate?'),
         actions: [
@@ -2157,22 +2157,22 @@ class _EditorState extends State<_LibraryEditorScreen> {
       setState(() => _error = 'Pick a size.');
       return;
     }
-    // A tile always has a surface, and it is part of the product's identity — so it
+    // A tile always has a surface, and it is part of the product's identity â€” so it
     // cannot be skipped. 'None' no longer exists.
     if (_surface.trim().isEmpty ||
         _surface.trim().toLowerCase() == 'none') {
-      setState(() => _error = 'Pick a surface — it is part of the design.');
+      setState(() => _error = 'Pick a surface â€” it is part of the design.');
       return;
     }
     final dup = _dupMatch;
     if (dup != null) {
-      // M, adding: the same tile already exists — offer to ADD this brand's
+      // M, adding: the same tile already exists â€” offer to ADD this brand's
       // name onto it (link), instead of spawning a duplicate master.
       if (widget.existing == null && currentStockistBusinessType == 'M') {
         await _offerLinkToExisting(dup);
         return;
       }
-      // T/W silo, or renaming onto another tile while editing → a real clash.
+      // T/W silo, or renaming onto another tile while editing â†’ a real clash.
       setState(() =>
           _error = 'You already have "$master" at size $_size in your library.');
       return;
@@ -2185,8 +2185,8 @@ class _EditorState extends State<_LibraryEditorScreen> {
       for (final e in _aliasCtrls.entries) e.key: e.value.text.trim(),
     };
     try {
-      // pieces/weight are NOT sent from here any more. They are BOX facts (product × brand)
-      // and each brand may pack differently — this form has one value for the whole product,
+      // pieces/weight are NOT sent from here any more. They are BOX facts (product Ã— brand)
+      // and each brand may pack differently â€” this form has one value for the whole product,
       // so sending it would flatten every brand's packing back to a single number. The
       // Library card's BOX CHIP owns them, per brand. Thickness is derived server-side and is
       // never sent at all. (docs/BOX_AND_DERIVED_THICKNESS_PLAN.md)
@@ -2315,10 +2315,10 @@ class _EditorState extends State<_LibraryEditorScreen> {
               textCapitalization: TextCapitalization.words,
               decoration: InputDecoration(
                 labelText: currentStockistBusinessType == 'M' ? 'Master design name' : 'Design name',
-                // M: a match isn't an error — saving will add the brand name to
+                // M: a match isn't an error â€” saving will add the brand name to
                 // the existing tile, so we hint (not red-error). T/W: hard clash.
                 helperText: (_isDuplicate && currentStockistBusinessType == 'M')
-                    ? 'Already in your library at this surface — saving adds your '
+                    ? 'Already in your library at this surface â€” saving adds your '
                         'brand name to it'
                     : 'Your internal name for this tile',
                 border: const OutlineInputBorder(),
@@ -2351,7 +2351,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                          'Have more brands? Ask the admin to enable them — a '
+                          'Have more brands? Ask the admin to enable them â€” a '
                           'field will appear here for each.',
                           style: TextStyle(
                               fontSize: 11, color: Colors.grey.shade600)),
@@ -2388,7 +2388,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
     );
   }
 
-  // ── Tile details (identity attributes) ─────────────────────────────────────
+  // â”€â”€ Tile details (identity attributes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _detailsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2399,12 +2399,12 @@ class _EditorState extends State<_LibraryEditorScreen> {
                 fontSize: 13,
                 color: Colors.grey.shade800)),
         const SizedBox(height: 2),
-        Text('These describe the design itself — set once. Stock screens only '
+        Text('These describe the design itself â€” set once. Stock screens only '
             'ask for quality and quantity.',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
         const SizedBox(height: 10),
         // Surface IS identity: the same print in Glossy and in Matt are two products.
-        // REQUIRED — there is no 'None'. (product identity migration)
+        // REQUIRED â€” there is no 'None'. (product identity migration)
         DropdownButtonFormField<String>(
           initialValue: _surfaceOptions.contains(_surface) ? _surface : null,
           isExpanded: true,
@@ -2413,7 +2413,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
             isDense: true,
             border: const OutlineInputBorder(),
             errorText: _surface.trim().isEmpty ? 'Pick a surface' : null,
-            helperText: 'The same print in another surface is a different product — '
+            helperText: 'The same print in another surface is a different product â€” '
                 'add it separately.',
             helperMaxLines: 2,
           ),
@@ -2427,7 +2427,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
           }),
         ),
         const SizedBox(height: 12),
-        _dropdown('Tile type', kTileTypes, _tileType,
+        _dropdown('Tile type', tileTypeNames, _tileType,
             (v) => setState(() {
                   _tileType = v ?? _tileType;
                   _dirty = true;
@@ -2439,8 +2439,8 @@ class _EditorState extends State<_LibraryEditorScreen> {
                   _dirty = true;
                 })),
         const SizedBox(height: 12),
-        // Pieces / box + box weight are NOT here any more. They are BOX facts (product ×
-        // brand) — the same print may ship 4/box under one brand and 6/box under another —
+        // Pieces / box + box weight are NOT here any more. They are BOX facts (product Ã—
+        // brand) â€” the same print may ship 4/box under one brand and 6/box under another â€”
         // and this form has only one value for the whole product, so it could not express
         // that. They live on the Library card's BOX CHIP, per brand. Thickness is derived
         // from them and never typed. (docs/BOX_AND_DERIVED_THICKNESS_PLAN.md)
@@ -2457,7 +2457,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                  'Pieces / box, box weight and thickness are set per BRAND — tap the box '
+                  'Pieces / box, box weight and thickness are set per BRAND â€” tap the box '
                   'chip on this design in your Library.',
                   style:
                       TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
@@ -2481,7 +2481,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
           onChanged: (_) => setState(() => _dirty = true),
           decoration: const InputDecoration(
               labelText: 'Your finish word (optional)',
-              helperText: 'e.g. Carving, Lustra, Punch Ghr — shown on the design',
+              helperText: 'e.g. Carving, Lustra, Punch Ghr â€” shown on the design',
               helperMaxLines: 2,
               isDense: true,
               border: OutlineInputBorder()),
@@ -2528,7 +2528,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
 
 /// Reviews likely-duplicate master groups (same name+size+surface, brand-
 /// agnostic) and lets the human fold each group into ONE box. Never auto-merges
-/// — images may genuinely differ, so the human picks which to keep after seeing
+/// â€” images may genuinely differ, so the human picks which to keep after seeing
 /// them side by side. Pops `true` if any merge happened. (#4 cleanup tool)
 class _DuplicatesReviewScreen extends StatefulWidget {
   final List<List<LibraryEntry>> groups;
@@ -2562,7 +2562,7 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
     _searchCtrl.addListener(() => setState(() => _search = _searchCtrl.text.trim().toLowerCase()));
   }
 
-  // A stable key for a group (its shared identity — name+size, no surface).
+  // A stable key for a group (its shared identity â€” name+size, no surface).
   String _key(List<LibraryEntry> g) {
     final e = g.first;
     return '${e.masterName.trim().toLowerCase()}|${e.size}';
@@ -2729,7 +2729,7 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
               child: TextField(
                 controller: _searchCtrl,
                 decoration: InputDecoration(
-                  hintText: 'Search by design name…',
+                  hintText: 'Search by design nameâ€¦',
                   prefixIcon: const Icon(Icons.search, size: 20),
                   suffixIcon: _search.isNotEmpty
                       ? IconButton(
@@ -2761,7 +2761,7 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
                                 _search.isNotEmpty
                                     ? 'No matches for "$_search".'
                                     : _changed
-                                        ? 'All done — nothing left to review.'
+                                        ? 'All done â€” nothing left to review.'
                                         : 'No duplicates to review.',
                                 style: const TextStyle(fontSize: 15)),
                           ],
@@ -2775,7 +2775,7 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
                           padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
                           child: Text(
                               'These tiles share a name and size. Pick the one '
-                              'to KEEP and merge the rest — or mark them as genuinely '
+                              'to KEEP and merge the rest â€” or mark them as genuinely '
                               'different to leave them alone.',
                               style: TextStyle(
                                   fontSize: 12.5,
@@ -2806,7 +2806,7 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
               children: [
                 Expanded(
                   child: Text(
-                      '${e0.masterName} · ${e0.size.replaceAll(' mm', '')}',
+                      '${e0.masterName} Â· ${e0.size.replaceAll(' mm', '')}',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 14)),
                 ),
@@ -2848,7 +2848,7 @@ class _DuplicatesReviewState extends State<_DuplicatesReviewScreen> {
                           child: CircularProgressIndicator(
                               strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.call_merge, size: 18),
-                  label: Text('Merge ${g.length} → 1'),
+                  label: Text('Merge ${g.length} â†’ 1'),
                 ),
               ],
             ),

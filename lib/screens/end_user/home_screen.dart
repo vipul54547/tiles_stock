@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
@@ -43,13 +43,13 @@ class _HomeScreenState extends State<HomeScreen> {
   final SupabaseDataService _service = SupabaseDataService();
   List<TileDesign> _designs = [];
   // Father & Child: claimed private catalogs (the buyer's Closed Market) and the
-  // active market tab — 0 Public (Open Market), 1 Private (Closed Market), 2 Both.
+  // active market tab â€” 0 Public (Open Market), 1 Private (Closed Market), 2 Both.
   List<TileDesign> _privateDesigns = [];
   int _tab = 0;
   // Finish + size options for the filter, in the admin's master order.
   List<String> _surfaceOpts = kFinishes;
   List<String> _sizeOpts = _filterSizes;
-  Map<String, String> _stockistNames = {}; // seq id → name (group confirm)
+  Map<String, String> _stockistNames = {}; // seq id â†’ name (group confirm)
   bool _loading = true;
 
   Set<String> _selectedSizes = {};
@@ -58,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _selectedThickness = {};
   Set<String> _selectedQualities = {};
   Set<String> _selectedStockTypes = {};
-  // Design DNA (image DNA) — card bottom-sheet + facet filter + DNA-aware search.
+  // Design DNA (image DNA) â€” card bottom-sheet + facet filter + DNA-aware search.
   final _dna = BuyerDna();
   final Set<String> _selectedDna = {};
   final _minQtyCtrl = TextEditingController();
@@ -107,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
             seed: DateTime.now().microsecondsSinceEpoch);
     final finishes = await _service.getActiveFinishNames();
     final sizes = await _service.getActiveSizeNames();
-    // Stockist seq-id → name (for the group confirm dialog). Empty for guests.
+    // Stockist seq-id â†’ name (for the group confirm dialog). Empty for guests.
     // Masked: anonymized stockists surface as trade name + public code.
     final stockists = await _service.getMarketStockists();
     // Design DNA: global catalog (once) + DNA tags for both pools' designs.
@@ -214,7 +214,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final mx = _maxQtyCtrl.text.trim();
     if (mn.isNotEmpty || mx.isNotEmpty) {
       out.add(ActiveFilter(
-          'Qty ${mn.isEmpty ? '0' : mn}–${mx.isEmpty ? '∞' : mx}',
+          'Qty ${mn.isEmpty ? '0' : mn}â€“${mx.isEmpty ? 'âˆž' : mx}',
           () => setState(() {
                 _minQtyCtrl.clear();
                 _maxQtyCtrl.clear();
@@ -468,7 +468,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 Divider(height: 1, color: Colors.grey.shade200),
-                // Pinned Quantity — always visible at the top.
+                // Pinned Quantity â€” always visible at the top.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
                   child: Column(
@@ -488,7 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     children: [
-                      // Essentials — always visible.
+                      // Essentials â€” always visible.
                       FilterSection(
                         title: 'Size',
                         summary: filterSummary(localSizes),
@@ -513,7 +513,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               .toList(),
                         ),
                       ),
-                      // Advanced — behind the "More filters" toggle.
+                      // Advanced â€” behind the "More filters" toggle.
                       MoreFiltersToggle(
                         expanded: showMore,
                         activeHidden: (localTypes.isNotEmpty ? 1 : 0) +
@@ -525,7 +525,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         FilterSection(
                           title: 'Tile Type',
                           summary: filterSummary(localTypes),
-                          child: chipWrap(kTileTypes, localTypes),
+                          child: chipWrap(tileTypeNames, localTypes),
                         ),
                         if (thicknessBands.isNotEmpty)
                           FilterSection(
@@ -544,7 +544,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
-                // Footer — apply, showing the live result count.
+                // Footer â€” apply, showing the live result count.
                 SafeArea(
                   top: false,
                   child: Padding(
@@ -591,7 +591,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // ── Group filter row ──────────────────────────────────────────────────────
+  // â”€â”€ Group filter row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Widget _groupChip(String label, bool active, VoidCallback? onTap) {
     return GestureDetector(
@@ -716,8 +716,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   onSubmitted: (_) => _closeSearch(),
                   decoration: InputDecoration(
                     hintText: smartSearch
-                        ? 'Smart: white = bianco, carrara…'
-                        : 'Search design name…',
+                        ? 'Smart: white = bianco, carraraâ€¦'
+                        : 'Search design nameâ€¦',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8)),
@@ -749,7 +749,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Design detail modal ───────────────────────────────────────────────────
+  // â”€â”€ Design detail modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   void _openDesign(int startIndex) {
     // Page across the merged cards' representative holdings (matches the grid).
@@ -792,7 +792,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
-                  // Image (bottom-sheet preview → medium thumbnail, not full-size)
+                  // Image (bottom-sheet preview â†’ medium thumbnail, not full-size)
                   AspectRatio(
                     aspectRatio: aspectRatioFromSize(d.size),
                     child: TileImage(url: imageUrl, thumbWidth: 800),
@@ -1047,7 +1047,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
 
-  // ── Nav button (top bar) ──────────────────────────────────────────────────
+  // â”€â”€ Nav button (top bar) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Widget _topNavBtn(BuildContext context, String label, IconData icon,
       VoidCallback? onTap, {bool active = false}) {
@@ -1079,7 +1079,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  // â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // Discover / My Suppliers segmented tabs.
   Widget _marketTabs() {
@@ -1157,7 +1157,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Text('No designs found', style: TextStyle(color: Colors.grey)));
   }
 
-  // Paste a share link → claim the catalog → it lands in the Private tab.
+  // Paste a share link â†’ claim the catalog â†’ it lands in the Private tab.
   Future<void> _showAddCatalogDialog() async {
     if (blockIfGuest(context, feature: 'Saved stock catalogues')) return;
     final ctrl = TextEditingController();
@@ -1178,7 +1178,7 @@ class _HomeScreenState extends State<HomeScreen> {
               controller: ctrl,
               autofocus: true,
               decoration: InputDecoration(
-                hintText: 'https://tilesdesign.in/s/…',
+                hintText: 'https://tilesdesign.in/s/â€¦',
                 isDense: true,
                 border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8)),
@@ -1286,7 +1286,7 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: Row(
               children: [
-                // Group & Stock are stockist-based — hidden for guests.
+                // Group & Stock are stockist-based â€” hidden for guests.
                 if (!isGuest) ...[
                   _topNavBtn(context, 'Manage Group', Icons.group_outlined,
                       () {
@@ -1322,7 +1322,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(width: 8),
                         const Expanded(
                           child: Text(
-                            'Browsing as guest — register to view stockists, '
+                            'Browsing as guest â€” register to view stockists, '
                             'contact them and place orders.',
                             style: TextStyle(
                                 fontSize: 11.5, color: Color(0xFF1B4F72)),
@@ -1338,7 +1338,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                   ),
-                // Father & Child market tabs — Public / Private / Both. Hidden for
+                // Father & Child market tabs â€” Public / Private / Both. Hidden for
                 // guests (they can't claim private catalogs).
                 if (!isGuest) _marketTabs(),
                 // Row 1: quality chips + filter button + clear chip
@@ -1486,7 +1486,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               '/stockist/${m.rep.stockistId}/portfolio',
                               extra: m.rep.id,
                             ),
-                            // DNA chips on each card → tap opens the DNA sheet.
+                            // DNA chips on each card â†’ tap opens the DNA sheet.
                             dnaTagsFor: (id) => _dna.tagsFor(id),
                           ),
                         ),

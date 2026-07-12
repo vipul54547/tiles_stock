@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -21,12 +21,12 @@ import '../../utils/tile_types.dart';
 import '../../models/choice_state.dart';
 import '../../widgets/upload_mode.dart';
 
-// Bulk stock import from an Excel (.xlsx) list — for stockists who keep a plain
+// Bulk stock import from an Excel (.xlsx) list â€” for stockists who keep a plain
 // spreadsheet (design, size, quality, boxes) instead of a PDF with images.
 //
 // Core idea ("image once, quantity many times"): a stock line (P_Stock holding) is
 // keyed by Name + Size + Quality + Surface. A row that matches all four UPDATES the
-// box quantity and reuses the design's existing photo — no image/PDF parsing. Any
+// box quantity and reuses the design's existing photo â€” no image/PDF parsing. Any
 // row that doesn't match is added as a NEW holding (a different surface is simply a
 // different stock line, never a "conflict"). Surface is aligned to the admin
 // finishes first via Map Finishes (which also learns the alias).
@@ -39,7 +39,7 @@ class ImportExcelStockScreen extends StatefulWidget {
   State<ImportExcelStockScreen> createState() => _ImportExcelStockScreenState();
 }
 
-// Header synonyms → the logical field. Matched case-insensitively against the
+// Header synonyms â†’ the logical field. Matched case-insensitively against the
 // sheet's header row, so a stockist's own column wording/order works.
 const Map<String, List<String>> _headerSynonyms = {
   'name':     ['name', 'design', 'design name', 'designname', 'product', 'item', 'article',
@@ -64,7 +64,7 @@ const List<String> _masterHeaders = [
 
 // WIDE quantity layout: separate Premium / Standard box-count columns on one row
 // (instead of a quality column + single qty). When either is present, each row
-// expands into one holding per quality. PRE→Premium, STD→Standard (the only two
+// expands into one holding per quality. PREâ†’Premium, STDâ†’Standard (the only two
 // qualities we keep; GOLD/ECO etc. are out of scope).
 const List<String> _premiumQtyHeaders = [
   'premium', 'pre', 'prm', 'premium qty', 'premium box', 'premium boxes',
@@ -91,7 +91,7 @@ class _XlsRow {
   int? pieces;
   double? weight;
 
-  String? error;          // non-null → invalid, skipped from import
+  String? error;          // non-null â†’ invalid, skipped from import
   String size = '';       // canonical master size (after validation)
   String quality = '';    // normalised 'Premium' | 'Standard'
   String surface = 'None'; // resolved admin finish (after Map Finishes)
@@ -101,14 +101,14 @@ class _XlsRow {
   bool include = true;    // unchecked = excluded from import
   bool editing = false;   // per-cell editor expanded for this row
   bool isNewDesign = false; // name+size not yet in the library (needs identity)
-  // New design missing compulsory identity (tile type / pieces / weight) — blocks
+  // New design missing compulsory identity (tile type / pieces / weight) â€” blocks
   // Save until filled (in-app) or the row is excluded. Existing designs skip this.
   bool get needsFill =>
       isNewDesign &&
       (tileType.trim().isEmpty || (pieces ?? 0) <= 0 || (weight ?? 0) <= 0);
   // Combined sheet (brand-name columns): the per-brand names on this row and the
   // master name, written into the Library during the same import. mapOnly = the
-  // chosen brand has no name here (tile not sold under it) → map, but no stock.
+  // chosen brand has no name here (tile not sold under it) â†’ map, but no stock.
   Map<String, String> brandNames = {}; // brandId -> design name on this row
   String masterName = '';
   bool mapOnly = false;
@@ -141,7 +141,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
   List<_XlsRow> _rows = [];
   // This stockist's OWN Design Library photos matched for the preview
-  // (name+size → url), scoped to the target list's brand. Excel carries no
+  // (name+size â†’ url), scoped to the target list's brand. Excel carries no
   // images, so this is the only photo per row; never borrows across stockists.
   Map<String, String> _libImages = {};
   List<LibraryEntry> _library = []; // this stockist's own master designs
@@ -157,7 +157,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   bool _importing = false;
   bool _loading = false;
   bool _downloading = false; // building/saving the blank template
-  bool _combined = false; // sheet had brand-name columns → also map the Library
+  bool _combined = false; // sheet had brand-name columns â†’ also map the Library
   String _filename = '';
   String _blockError = ''; // header / file-level problem
   int _done = 0;
@@ -166,14 +166,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   List<String> _finishes = kFinishes;
   List<String> _sizes = kAllowedSizes;
   List<TileSize> _tileSizes = []; // full size rows (with inch/feet aliases)
-  String? _brandId; // chosen brand — upload fills P_Stock for it (no list target)
+  String? _brandId; // chosen brand â€” upload fills P_Stock for it (no list target)
   String _brandName = '';
   Map<String, String> _aliases = {};
   List<TileDesign> _existing = [];
   List<Brand> _brands = []; // for labelling each brand-name column
   List<DnaAttribute> _dnaAttrs = []; // DNA catalog (for auto-detecting columns)
   List<String> _dnaDetected = []; // names of DNA columns found in this sheet
-  bool _wideQty = false; // sheet had wide Premium/Standard columns (row → 2 holdings)
+  bool _wideQty = false; // sheet had wide Premium/Standard columns (row â†’ 2 holdings)
   bool _perRowBrand = false; // Option 2/3 stock direct: brand per row, no global selection
   // attributeId -> set of already-resolvable words (lowercased): canonical value
   // names + this stockist's learned aliases. A detected DNA word NOT in this set
@@ -196,7 +196,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   void _snack(String m, [Color? c]) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(m), backgroundColor: c));
 
-  // ── Pick & parse ───────────────────────────────────────────────────────────
+  // â”€â”€ Pick & parse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // T/W multi-brand: download Option 2 (brand cols) or Option 3 (Brand value col).
   Future<void> _downloadTWTemplate({required bool option2}) async {
@@ -208,13 +208,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (option2) {
         bytes = ExcelTemplateService.buildTWOption2Template(
           sizes: _sizes, finishes: _finishes,
-          tileTypes: kTileTypes, brands: _brands,
+          tileTypes: tileTypeNames, brands: _brands,
         );
         label = 'brand_cols';
       } else {
         bytes = ExcelTemplateService.buildTWOption3Template(
           sizes: _sizes, finishes: _finishes,
-          tileTypes: kTileTypes, brands: _brands,
+          tileTypes: tileTypeNames, brands: _brands,
         );
         label = 'brand_value';
       }
@@ -233,7 +233,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         _snack('Template saved. Fill it, then upload it here.', Colors.green);
       }
     } catch (e) {
-      if (mounted) _snack('Could not create template — $e', Colors.red);
+      if (mounted) _snack('Could not create template â€” $e', Colors.red);
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -250,13 +250,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         bytes = ExcelTemplateService.buildStockTemplate(
           multiBrand: true,
           sizes: _sizes, finishes: _finishes,
-          tileTypes: kTileTypes, dnaAttrs: _dnaAttrs, brands: _brands,
+          tileTypes: tileTypeNames, dnaAttrs: _dnaAttrs, brands: _brands,
         );
         label = 'brand_cols';
       } else {
         bytes = ExcelTemplateService.buildMOption3Template(
           sizes: _sizes, finishes: _finishes,
-          tileTypes: kTileTypes, brands: _brands,
+          tileTypes: tileTypeNames, brands: _brands,
         );
         label = 'brand_value';
       }
@@ -275,7 +275,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         _snack('Template saved. Fill it, then upload it here.', Colors.green);
       }
     } catch (e) {
-      if (mounted) _snack('Could not create template — $e', Colors.red);
+      if (mounted) _snack('Could not create template â€” $e', Colors.red);
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -283,7 +283,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
   // Build the blank template (.xlsx with dropdowns) and let the stockist save it.
   // Skin = M (wide brand columns + Premium/Standard) when they run >1 brand, else
-  // single-brand. Needs the admin vocab + brands → loads config first.
+  // single-brand. Needs the admin vocab + brands â†’ loads config first.
   Future<void> _downloadTemplate() async {
     setState(() => _downloading = true);
     try {
@@ -292,7 +292,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         multiBrand: _brands.length > 1,
         sizes: _sizes,
         finishes: _finishes,
-        tileTypes: kTileTypes,
+        tileTypes: tileTypeNames,
         dnaAttrs: _dnaAttrs,
         brands: _brands,
       );
@@ -314,7 +314,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         _snack('Template saved. Fill it, then upload it here.', Colors.green);
       }
     } catch (e) {
-      if (mounted) _snack('Could not create template — $e', Colors.red);
+      if (mounted) _snack('Could not create template â€” $e', Colors.red);
     } finally {
       if (mounted) setState(() => _downloading = false);
     }
@@ -350,7 +350,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       _library = currentStockistUUID.isEmpty
           ? <LibraryEntry>[]
           : await _dataSvc.getMyLibrary();
-      // Existing library identities (name|size, master + aliases) → tells us which
+      // Existing library identities (name|size, master + aliases) â†’ tells us which
       // rows are brand-new designs (and so must carry tile type / pieces / weight).
       _libKeys
         ..clear()
@@ -406,7 +406,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // Brand the import writes to (chosen at the Upload tap).
   String? get _uploadBrandId => _brandId ?? _defaultBrandId;
 
-  // (name+size → own image url) map from this stockist's library for the target
+  // (name+size â†’ own image url) map from this stockist's library for the target
   // list's brand, across all sizes present. Keyed by [designImageKey]; includes
   // the master name and the brand alias so a row matches whichever name was used.
   // Never borrows another stockist's photo.
@@ -431,7 +431,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     return out;
   }
 
-  // Underscores/hyphens fold to spaces too — real stockist files use
+  // Underscores/hyphens fold to spaces too â€” real stockist files use
   // "Design_Name", "Design-Name", "Design Name" interchangeably.
   String _normHeader(String h) => h
       .trim()
@@ -442,8 +442,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   String _sizeKey(String s) => s.toLowerCase().replaceAll(RegExp(r'[^0-9x]'), '');
 
   // Tolerant of stockists' spelling: anything starting 'pr' (premium / primium /
-  // pramium / premeum / pre / prm) → Premium; 'st' / 'ec' or containing 'second'
-  // → Standard; else '' (unknown → row error).
+  // pramium / premeum / pre / prm) â†’ Premium; 'st' / 'ec' or containing 'second'
+  // â†’ Standard; else '' (unknown â†’ row error).
   String _normQuality(String raw) {
     final q = raw.trim().toLowerCase();
     if (q.isEmpty) return '';
@@ -473,10 +473,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     } catch (e) {
       // The reader rejects some valid-but-unusual .xlsx (e.g. inline-string files
       // that certain exporters produce). Re-saving from Excel/Sheets rewrites the
-      // file cleanly — so give the stockist that fix instead of a dead-end.
+      // file cleanly â€” so give the stockist that fix instead of a dead-end.
       setState(() => _blockError =
-          "Couldn't read this Excel file — it may be saved in an unusual format. "
-          'Open it in Excel or Google Sheets, choose Save As → .xlsx, then upload '
+          "Couldn't read this Excel file â€” it may be saved in an unusual format. "
+          'Open it in Excel or Google Sheets, choose Save As â†’ .xlsx, then upload '
           'it again.');
       return;
     }
@@ -494,7 +494,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final header =
         sheet.rows.first.map((c) => _normHeader(c?.value?.toString() ?? '')).toList();
 
-    // M_Stockist ENTRY format → dedicated batch-sum / brand-value path.
+    // M_Stockist ENTRY format â†’ dedicated batch-sum / brand-value path.
     if (_isEntryFormat(header)) {
       await _parseEntryFormat(sheet, header);
       return;
@@ -511,7 +511,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     }
 
     // A header that exactly matches a (value-list) Design DNA attribute name
-    // belongs to DNA, not to a generic synonym field — e.g. "Colour" is the DNA
+    // belongs to DNA, not to a generic synonym field â€” e.g. "Colour" is the DNA
     // Colour attribute, NOT the free-text colour field (whose synonyms would
     // otherwise swallow the header and block DNA tagging). Reserve those columns
     // so the synonym matching below skips them and DNA detection claims them.
@@ -567,7 +567,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     brandCols.forEach((i, bid) { if (bid == chosenBrandId) chosenBrandCol = i; });
 
     // Auto-detect Design DNA columns: any still-unused header that matches a DNA
-    // attribute's name (free-text attributes like Range are skipped — they have
+    // attribute's name (free-text attributes like Range are skipped â€” they have
     // no canonical values to resolve to). The cell value is the raw DNA word(s),
     // resolved on import via dna_resolve (canonical name OR a learned alias).
     final dnaUsed = {...usedCols, ...brandCols.keys};
@@ -595,7 +595,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     // Premium/Standard box columns, so they're no longer required.
     // Tile Type is NOT a required column: a quantity-only / restock sheet (all
     // existing designs) needs no identity, and a NEW design without it is caught
-    // per-row by needsFill (filled in-app or excluded) — same as pieces/weight.
+    // per-row by needsFill (filled in-app or excluded) â€” same as pieces/weight.
     final missing = [
       'size',
       if (!wideQty) 'quality',
@@ -641,7 +641,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           chosenBrandCol != null ? cellAt(row, chosenBrandCol!) : '';
       final nameVal = cell(row, 'name');
 
-      // Option 2 (stock direct): brand cols present → brand is per-row, not
+      // Option 2 (stock direct): brand cols present â†’ brand is per-row, not
       // global. M uses master col as name (brand-agnostic library key); T/W
       // uses the one filled brand col value. Library mapping is separate.
       final bool isAuthor = isAuthorType(currentStockistBusinessType);
@@ -694,7 +694,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         if (words.isNotEmpty) dna[attr.id] = words;
       });
 
-      // Quantity parts → one holding per quality. Map-only rows carry no stock;
+      // Quantity parts â†’ one holding per quality. Map-only rows carry no stock;
       // wide mode emits a part for each Premium/Standard column that has a value;
       // otherwise the single quality + qty columns (unchanged behaviour).
       final parts = <({String quality, int qty})>[];
@@ -737,7 +737,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         // Option 2 validation: exactly 1 brand col must be filled per row
         if (hasBrandCols && brandNames.length != 1) {
           xls.error = brandNames.isEmpty
-              ? 'No brand column filled — fill exactly one brand column'
+              ? 'No brand column filled â€” fill exactly one brand column'
               : 'Only 1 brand column per row (${brandNames.length} filled)';
         }
         // Each sub-row gets its own DNA copy (the Map-DNA step mutates per row).
@@ -764,7 +764,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     if (!ok) return; // cancelled
 
     // Align any DNA words that don't already resolve (canonical name or learned
-    // alias) to a canonical value, and learn them — so dna_resolve can't drop
+    // alias) to a canonical value, and learn them â€” so dna_resolve can't drop
     // them on import. Skips entirely when every detected word already resolves.
     final okDna = await _mapDnaStep(parsed);
     if (!okDna) return; // cancelled
@@ -779,7 +779,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     });
   }
 
-  // ── M_Stockist ENTRY.xlsx (batch-sum + per-row brand value) ─────────────────
+  // â”€â”€ M_Stockist ENTRY.xlsx (batch-sum + per-row brand value) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // The export shape: a per-row brand name in BoxPack (or Brand), wide PRE/STD
   // grade columns, the same design recurring per batch. Detected by BoxPack +
@@ -798,7 +798,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     return (t.isEmpty || t == '--' || t == '-') ? '' : t;
   }
 
-  // Strip a trailing "(2PCS …)" note from a size cell → "800X1600 (2PCS)" = "800X1600".
+  // Strip a trailing "(2PCS â€¦)" note from a size cell â†’ "800X1600 (2PCS)" = "800X1600".
   String _cleanSize(String raw) {
     var s = raw.trim();
     final p = s.indexOf('(');
@@ -815,7 +815,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final stdCol = header.indexWhere((h) => _standardQtyHeaders.contains(h));
     final brandCol = idx(_brandColHeaders);
     final boxpackCol = header.indexWhere((h) => _boxPackHeaders.contains(h));
-    // Optional identity columns — read when present so new ENTRY designs carry
+    // Optional identity columns â€” read when present so new ENTRY designs carry
     // tile type / pieces / weight from the sheet (no manual per-row fill).
     final ttCol = idx(_headerSynonyms['tiletype']!);
     final pcCol = idx(_headerSynonyms['pieces']!);
@@ -855,14 +855,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final brandMap = await _mapBrandValues(brandValues.toList()..sort());
     if (brandMap == null) return; // cancelled
 
-    // Sum PRE→Premium, STD→Standard across each design's batch rows; collect the
-    // brand faces it was packed under; Category → surface; clean the size note.
+    // Sum PREâ†’Premium, STDâ†’Standard across each design's batch rows; collect the
+    // brand faces it was packed under; Category â†’ surface; clean the size note.
     final agg = <String, _EntryAgg>{};
     for (final row in dataRows) {
       final dn = cellAt(row, nameCol).trim();
       if (dn.isEmpty) continue;
       final bid = brandMap[_cleanBrandVal(cellAt(row, brandValCol))];
-      // "Don't import" → drop the row entirely (no qty, surface or brand from it).
+      // "Don't import" â†’ drop the row entirely (no qty, surface or brand from it).
       if (bid == _kSkip) continue;
       final sz = _cleanSize(cellAt(row, sizeCol));
       final key = '${dn.toLowerCase()}|${_sizeKey(sz)}';
@@ -911,7 +911,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     _combined = true; // each design writes master + brand aliases into the Library
     _wideQty = true; // grades came from wide PRE/STD columns
     _validateAndResolve(parsed);
-    final ok = await _mapFinishesStep(parsed); // Category (GLOSSY…) → admin finish
+    final ok = await _mapFinishesStep(parsed); // Category (GLOSSYâ€¦) â†’ admin finish
     if (!ok) return;
     final okDna = await _mapDnaStep(parsed);
     if (!okDna) return;
@@ -921,9 +921,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     });
   }
 
-  // ── Option 3 (T/W multi-brand stock direct) ─────────────────────────────────
+  // â”€â”€ Option 3 (T/W multi-brand stock direct) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Brand value col + Design Name col. Brand col value matched to known brands
-  // per row. No master-design concept for T/W — design name IS the master.
+  // per row. No master-design concept for T/W â€” design name IS the master.
 
   // M Option 3: Master Design col + Brand value col + Design Name col.
   bool _isMOption3Format(List<String> header) {
@@ -975,7 +975,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       return row[i]?.value?.toString().trim() ?? '';
     }
 
-    // Brand name → brand_id lookup (case-insensitive)
+    // Brand name â†’ brand_id lookup (case-insensitive)
     final brandLookup = <String, String>{
       for (final b in _brands) _normHeader(b.name): b.id,
     };
@@ -1032,9 +1032,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         if (stockName.isEmpty) {
           xls.error = 'Missing design name';
         } else if (brandVal.isEmpty) {
-          xls.error = 'No brand value — fill the Brand column';
+          xls.error = 'No brand value â€” fill the Brand column';
         } else if (brandId == null) {
-          xls.error = "Unknown brand '$brandVal' — not in your brand list";
+          xls.error = "Unknown brand '$brandVal' â€” not in your brand list";
         }
         parsed.add(xls);
       }
@@ -1060,7 +1060,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     });
   }
 
-  // ── M Option 3 (M multi-brand stock direct) ────────────────────────────────
+  // â”€â”€ M Option 3 (M multi-brand stock direct) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Master Design col (library key) + Brand value col + Design Name col.
 
   Future<void> _parseMOption3Format(Sheet sheet, List<String> header) async {
@@ -1153,9 +1153,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         if (stockName.isEmpty) {
           xls.error = 'Missing master design name';
         } else if (brandVal.isEmpty) {
-          xls.error = 'No brand value — fill the Brand column';
+          xls.error = 'No brand value â€” fill the Brand column';
         } else if (brandId == null) {
-          xls.error = "Unknown brand '$brandVal' — not in your brand list";
+          xls.error = "Unknown brand '$brandVal' â€” not in your brand list";
         }
         parsed.add(xls);
       }
@@ -1181,7 +1181,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     });
   }
 
-  // "Which column is the brand?" — auto-picks Brand (if real) else BoxPack, lets
+  // "Which column is the brand?" â€” auto-picks Brand (if real) else BoxPack, lets
   // the stockist switch. Returns the chosen column index, or null on cancel.
   Future<int?> _confirmBrandColumn(
       List<String> header, int brandCol, int boxpackCol, int autoCol) async {
@@ -1232,14 +1232,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     return ok == true ? chosen : null;
   }
 
-  // Map each distinct brand value → an existing brand or a new one. Returns
+  // Map each distinct brand value â†’ an existing brand or a new one. Returns
   // { brandValue : brandId }, or null on cancel. New brands are created on Apply.
   static const _kCreateBrand = '__create__';
   static const _kSkip = '__skip__';
   Future<Map<String, String>?> _mapBrandValues(List<String> values) async {
     if (values.isEmpty) return {};
-    // value → chosen ('__skip__', '__create__', or an existing brand id).
-    // Default: match an existing brand by name, else "Don't import" — creating a
+    // value â†’ chosen ('__skip__', '__create__', or an existing brand id).
+    // Default: match an existing brand by name, else "Don't import" â€” creating a
     // brand can hit the 5-brand cap, and unmatched values are often stray data
     // (e.g. a design name in the wrong column), not real brands.
     final choice = <String, String>{};
@@ -1264,7 +1264,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 const Text(
                     'Link each brand from your file to one of your brands, or '
                     'create it. Designs are filed under the brand you pick. '
-                    'Unknown values default to “Don’t import”, so their rows are '
+                    'Unknown values default to â€œDonâ€™t importâ€, so their rows are '
                     'skipped.',
                     style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 12),
@@ -1290,13 +1290,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                                   items: [
                                     const DropdownMenuItem(
                                         value: _kSkip,
-                                        child: Text('🚫 Don’t import',
+                                        child: Text('ðŸš« Donâ€™t import',
                                             style: TextStyle(
                                                 fontSize: 12,
                                                 color: Colors.black54))),
                                     DropdownMenuItem(
                                         value: _kCreateBrand,
-                                        child: Text('➕ Create “$v”',
+                                        child: Text('âž• Create â€œ$vâ€',
                                             style: const TextStyle(
                                                 fontSize: 12,
                                                 color: Color(0xFF2E7D32)))),
@@ -1333,7 +1333,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     );
     if (ok != true) return null;
 
-    // Resolve creates → real brand ids (server enforces the brand limit).
+    // Resolve creates â†’ real brand ids (server enforces the brand limit).
     final result = <String, String>{};
     for (final entry in choice.entries) {
       if (entry.value == _kSkip) {
@@ -1344,15 +1344,15 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           if (id.isEmpty) throw 'no id';
           result[entry.key] = id;
         } catch (e) {
-          // A brand-cap hit is the common case — guide instead of dumping the raw
+          // A brand-cap hit is the common case â€” guide instead of dumping the raw
           // exception, and don't lose the whole import to one stray value.
           final capped = e.toString().toLowerCase().contains('limit');
           if (mounted) {
             _snack(
                 capped
-                    ? 'You’ve reached the 5-brand limit. Set “${entry.key}” to '
-                        '“Don’t import” or map it to an existing brand, then try again.'
-                    : 'Could not create brand “${entry.key}” — $e',
+                    ? 'Youâ€™ve reached the 5-brand limit. Set â€œ${entry.key}â€ to '
+                        'â€œDonâ€™t importâ€ or map it to an existing brand, then try again.'
+                    : 'Could not create brand â€œ${entry.key}â€ â€” $e',
                 Colors.red);
           }
           return null; // abort; stockist resolves and re-runs
@@ -1377,7 +1377,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   void _validateAndResolve(List<_XlsRow> rows) {
     for (final r in rows) {
       // Map-only rows (combined sheet, chosen brand blank) just need size +
-      // master + brand names for the Library mapping — skip the stock fields.
+      // master + brand names for the Library mapping â€” skip the stock fields.
       if (r.mapOnly) {
         if (r.sizeRaw.isEmpty) { r.error = 'Missing size'; continue; }
         final mz = _resolveSize(r.sizeRaw);
@@ -1388,7 +1388,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       }
       if (r.name.isEmpty) { r.error = 'Missing design name'; continue; }
       if (r.sizeRaw.isEmpty) { r.error = 'Missing size'; continue; }
-      // Map any inch/feet trade name (12x18, 2x4 …) to its canonical mm size via
+      // Map any inch/feet trade name (12x18, 2x4 â€¦) to its canonical mm size via
       // the admin alias list; else fall back to a direct mm match.
       final sz = resolveCanonicalSize(r.sizeRaw, _tileSizes) ??
           _sizes.firstWhere(
@@ -1403,13 +1403,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (r.qty < 0) { r.error = 'Missing / invalid box quantity'; continue; }
       // Brand-new design? (name+size not yet in the library.) Only new designs must
       // carry identity (tile type / pieces / weight); existing designs already have
-      // it. A new design left blank is NOT an error — it's a "needs fill" row that
+      // it. A new design left blank is NOT an error â€” it's a "needs fill" row that
       // blocks Save until completed or excluded (see needsFill).
       r.isNewDesign =
           !_libKeys.contains('${r.name.trim().toLowerCase()}|${_sizeKey(r.size)}');
       // Tile type: validate the wording if given; never block on blank here.
       if (r.tileType.trim().isNotEmpty) {
-        final tt = kTileTypes.firstWhere(
+        final tt = tileTypeNames.firstWhere(
             (t) => t.toLowerCase() == r.tileType.trim().toLowerCase(),
             orElse: () => '');
         if (tt.isEmpty) { r.error = "Unknown tile type '${r.tileType}'"; continue; }
@@ -1427,7 +1427,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         } else if (_finishes.contains(r.surfaceRaw.trim())) {
           r.surface = r.surfaceRaw.trim();
         } else {
-          // An unmapped word can no longer fall back to 'None' — a tile always has a
+          // An unmapped word can no longer fall back to 'None' â€” a tile always has a
           // surface, and the DB refuses 'None'. Fall back to the first active finish; the
           // Map-Finishes step is where the human corrects it.
           r.surface = _finishes.isNotEmpty ? _finishes.first : '';
@@ -1440,7 +1440,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       s.trim().isEmpty ? 'none' : s.trim().toLowerCase();
 
   // A holding is keyed by Name + Size + Quality + Surface (surface is a stock-line
-  // dimension on P_Stock). Match all four → update; otherwise → new. A different
+  // dimension on P_Stock). Match all four â†’ update; otherwise â†’ new. A different
   // surface is simply a different stock line, never a "conflict".
   void _computeActions(List<_XlsRow> rows) {
     for (final r in rows) {
@@ -1474,20 +1474,20 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     setState(() {});
   }
 
-  // ── Map Finishes (only for finishes that don't already resolve) ─────────────
+  // â”€â”€ Map Finishes (only for finishes that don't already resolve) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Mirrors the DNA step: a finish that already matches an admin finish exactly
   // (or via a learned alias) needs no mapping, so it's skipped. A stockist who
   // picks from the template's Surface dropdown therefore never sees this step;
   // it only surfaces genuine mismatches (their own wording / own spreadsheet).
 
   Future<bool> _mapFinishesStep(List<_XlsRow> rows) async {
-    final groups = <String, _FinishGroup>{}; // rawKey → group
+    final groups = <String, _FinishGroup>{}; // rawKey â†’ group
     for (final r in rows) {
       if (!r.valid || r.surfaceRaw.trim().isEmpty) continue;
       final aliased = _aliases[r.rawKey];
       final resolves = (aliased != null && _finishes.contains(aliased)) ||
           _finishes.contains(r.surfaceRaw.trim());
-      if (resolves) continue; // already an admin finish — nothing to map
+      if (resolves) continue; // already an admin finish â€” nothing to map
       final initial = _finishes.contains(r.surface)
           ? r.surface
           : (_finishes.isNotEmpty ? _finishes.first : r.surface);
@@ -1576,7 +1576,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     return true;
   }
 
-  // ── Map Design DNA (only words that don't already resolve) ──────────────────
+  // â”€â”€ Map Design DNA (only words that don't already resolve) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // dna_resolve matches a raw word to a canonical value by exact name OR a learned
   // alias; anything else is silently dropped on import. This step surfaces those
   // unresolved words, lets the stockist align each to a canonical value, and LEARNS
@@ -1584,7 +1584,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // up. Free-text attributes (no fixed value list) are left untouched.
   Future<bool> _mapDnaStep(List<_XlsRow> rows) async {
     final attrById = {for (final a in _dnaAttrs) a.id: a};
-    final groups = <String, _DnaMapGroup>{}; // attrId|wordLower → group
+    final groups = <String, _DnaMapGroup>{}; // attrId|wordLower â†’ group
     for (final r in rows) {
       if (!r.valid || r.dna.isEmpty) continue;
       r.dna.forEach((attrId, words) {
@@ -1619,8 +1619,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                    'Some DNA words from your file don’t match a known value. '
-                    'Match each to a standard value so it isn’t lost — we’ll '
+                    'Some DNA words from your file donâ€™t match a known value. '
+                    'Match each to a standard value so it isnâ€™t lost â€” weâ€™ll '
                     'remember your wording next time. Leave as Ignore to skip.',
                     style: TextStyle(fontSize: 12, color: Colors.black54)),
                 const SizedBox(height: 12),
@@ -1656,7 +1656,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                                   items: [
                                     const DropdownMenuItem(
                                         value: '',
-                                        child: Text('— Ignore —',
+                                        child: Text('â€” Ignore â€”',
                                             style: TextStyle(
                                                 color: Colors.black45))),
                                     ...attr.values.map((v) => DropdownMenuItem(
@@ -1714,17 +1714,17 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     return true;
   }
 
-  // ── Import ───────────────────────────────────────────────────────────────
+  // â”€â”€ Import â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Future<void> _startImport() async {
-    if (currentStockistUUID.isEmpty) { _snack('Session error — login again.', Colors.red); return; }
+    if (currentStockistUUID.isEmpty) { _snack('Session error â€” login again.', Colors.red); return; }
     final toDo = _rows.where((r) => r.valid && r.include).toList();
     if (toDo.isEmpty) { _snack('Nothing to import.'); return; }
 
     final willImport = toDo.length;
     setState(() { _importing = true; _done = 0; });
 
-    // Excel carries no photos — fill them from THIS stockist's own Design Library
+    // Excel carries no photos â€” fill them from THIS stockist's own Design Library
     // (by the target brand's design name / master name + size). Never borrows.
     final libImages = _ownLibImages();
     final brandId = _uploadBrandId;
@@ -1732,7 +1732,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     // Build ONE atomic batch payload (no per-row loop of writes). Combined-sheet
     // rows write the master + all brand aliases into the Library inline; plain
     // rows opt out of the Library (skip_master) and just create/update the
-    // design — preserving the old behaviour exactly. Map-only rows carry qty 0
+    // design â€” preserving the old behaviour exactly. Map-only rows carry qty 0
     // (library mapping, no stock). force_new replays the stockist's "add as new"
     // choice on a finish conflict; update_surface replays a finish correction.
     int mapped = 0, news = 0, imagesFromLibrary = 0;
@@ -1747,7 +1747,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           .map((e) => {'brand_id': e.key, 'name': e.value.trim()})
           .toList();
 
-      // Map-only row (chosen brand doesn't sell this tile) → Library only.
+      // Map-only row (chosen brand doesn't sell this tile) â†’ Library only.
       if (r.mapOnly) {
         rows.add(<String, dynamic>{
           'name': r.masterName.trim(),
@@ -1764,7 +1764,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final libUrl = libImages[designImageKey(r.name, r.size)];
 
       // The holding is resolved server-side by (library, quality, surface), so the
-      // client just sends the row's fields — no force_new / conflict flags needed.
+      // client just sends the row's fields â€” no force_new / conflict flags needed.
       final row = <String, dynamic>{
         'name': r.name,
         'size': r.size,
@@ -1775,14 +1775,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         'colour': r.colour,
         'qty': r.qty,
         'stock_type': 'Uncertain',
-        'tile_type': kTileTypes.contains(r.tileType) ? r.tileType : '',
+        'tile_type': tileTypeNames.contains(r.tileType) ? r.tileType : '',
         'pieces_per_box': r.pieces ?? 0,
         'box_weight_kg': r.weight ?? 0,
         'thickness_mm': approxThicknessMm(
                 r.size, r.pieces ?? 0, r.weight ?? 0,
-                kTileTypes.contains(r.tileType)
+                tileTypeNames.contains(r.tileType)
                     ? r.tileType
-                    : kTileTypes.first) ??
+                    : tileTypeNames.first) ??
             0,
         if (libUrl != null) 'image_url': libUrl,
         // surface_label now carries the stockist's word; no separate finish_label.
@@ -1793,20 +1793,20 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         row['aliases'] = aliasJson;
         mapped++;
       } else if (!hasDna && !r.isNewDesign) {
-        // EXISTING plain design, no DNA → leave the Library untouched. A NEW design
+        // EXISTING plain design, no DNA â†’ leave the Library untouched. A NEW design
         // must keep skip_master OFF so its identity (tile type/pieces/weight) is set.
         row['skip_master'] = true;
       }
       // A plain row WITH DNA keeps skip_master off so a master exists to tag it.
       if (hasDna) row['dna'] = r.dna;
       // Stock-direct (Option 2/3): the row's filled brand column sets the HOLDING's
-      // brand — for BOTH M (per-brand stock) and T/W. Passed as a per-row brand_id
+      // brand â€” for BOTH M (per-brand stock) and T/W. Passed as a per-row brand_id
       // so the holding lands under that brand, not the global upload brand.
       // (project_per_brand_stock)
       if (_perRowBrand && r.rowBrandId != null) {
         row['brand_id'] = r.rowBrandId;
         // T/W: also record the brand's design name (brand silo lib lookup). M keeps
-        // its existing alias from the library — don't overwrite it here.
+        // its existing alias from the library â€” don't overwrite it here.
         if (isImporterType(currentStockistBusinessType) &&
             row['aliases'] == null) {
           row['aliases'] = [{'brand_id': r.rowBrandId, 'name': r.name.trim()}];
@@ -1816,11 +1816,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
       if (libUrl != null) imagesFromLibrary++;
       if (r.action == 'new') news++;
-      // Remember the finish wording → chosen finish for next time.
+      // Remember the finish wording â†’ chosen finish for next time.
       if (r.rawKey.isNotEmpty && r.surface != 'None') learned[r.rawKey] = r.surface;
     }
 
-    // ONE atomic, idempotent call — never half-saves, and a reused batch id can't
+    // ONE atomic, idempotent call â€” never half-saves, and a reused batch id can't
     // double-add on retry (the DB rolls the whole thing back on any failure).
     if (_batchId.isEmpty) _batchId = const Uuid().v4();
     Map<String, dynamic> res;
@@ -1832,8 +1832,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         pdfFilename: _filename,
         rows: rows,
         mode: _mode.api,
-        // Per-row multi-brand file → wipe exactly the brands it covers;
-        // single-brand file → the this-brand / all-brands toggle.
+        // Per-row multi-brand file â†’ wipe exactly the brands it covers;
+        // single-brand file â†’ the this-brand / all-brands toggle.
         wipeAllBrands:
             _mode == UploadMode.fullyNew && !_perRowBrand && _wipeAllBrands,
         wipeBrandIds: _mode == UploadMode.fullyNew && _perRowBrand
@@ -1843,12 +1843,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _importing = false);
-      _snack('Nothing was saved — $e. Please try again.', Colors.red);
+      _snack('Nothing was saved â€” $e. Please try again.', Colors.red);
       return;
     }
 
     // Learn finish alignments AFTER the import (idempotent upserts, safe outside
-    // the transaction — they don't add stock so they can't double-apply).
+    // the transaction â€” they don't add stock so they can't double-apply).
     for (final e in learned.entries) {
       await _dataSvc.upsertSurfaceAlias(currentStockistUUID, e.key, e.value);
     }
@@ -1859,13 +1859,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final updated = (res['updated'] as num?)?.toInt() ?? 0;
     final dnaTagged = (res['dna_tagged'] as num?)?.toInt() ?? 0;
     final libNote = imagesFromLibrary > 0
-        ? ' · $imagesFromLibrary photos from library'
+        ? ' Â· $imagesFromLibrary photos from library'
         : '';
-    final mapNote = mapped > 0 ? ' · $mapped mapped to library' : '';
-    final dnaNote = dnaTagged > 0 ? ' · $dnaTagged DNA tagged' : '';
-    final brandNote = _brandName.isEmpty ? '' : ' → $_brandName';
+    final mapNote = mapped > 0 ? ' Â· $mapped mapped to library' : '';
+    final dnaNote = dnaTagged > 0 ? ' Â· $dnaTagged DNA tagged' : '';
+    final brandNote = _brandName.isEmpty ? '' : ' â†’ $_brandName';
     _snack(
-        'Done — $updated updated, $created new$mapNote$dnaNote$libNote$brandNote. '
+        'Done â€” $updated updated, $created new$mapNote$dnaNote$libNote$brandNote. '
         'Add designs to a stock list to show buyers.',
         Colors.green);
     if (updated + created + mapped > 0) Navigator.of(context).pop();
@@ -1877,7 +1877,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         _wideQty = false; _perRowBrand = false;
       });
 
-  // ── Build ───────────────────────────────────────────────────────────────
+  // â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   @override
   Widget build(BuildContext context) {
@@ -1936,7 +1936,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            // Primary action — Browse — on top.
+            // Primary action â€” Browse â€” on top.
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -1972,7 +1972,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             const SizedBox(height: 8),
             _colTable(),
             const SizedBox(height: 22),
-            // Template download — multi-brand gets two options; single-brand gets one.
+            // Template download â€” multi-brand gets two options; single-brand gets one.
             if (_brands.length > 1) ...[
               const Text('Download blank template',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -2013,8 +2013,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               const SizedBox(height: 6),
               Text(
                 isImporterType(currentStockistBusinessType)
-                    ? 'Brand columns — all brands as headers, fill one per row.\nBrand + Name col — write brand name in a cell per row.'
-                    : 'Brand columns — Master Design + brand headers, fill one brand per row.\nBrand + Name col — Master Design + Brand value cell + Design Name per row.',
+                    ? 'Brand columns â€” all brands as headers, fill one per row.\nBrand + Name col â€” write brand name in a cell per row.'
+                    : 'Brand columns â€” Master Design + brand headers, fill one brand per row.\nBrand + Name col â€” Master Design + Brand value cell + Design Name per row.',
                 style: const TextStyle(fontSize: 11, color: Colors.black54),
               ),
             ] else ...[
@@ -2031,7 +2031,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                               strokeWidth: 2, color: Color(0xFF1B4F72)))
                       : const Icon(Icons.download_rounded),
                   label: Text(
-                      _downloading ? 'Preparing…' : 'Download blank template',
+                      _downloading ? 'Preparingâ€¦' : 'Download blank template',
                       style: const TextStyle(fontSize: 14.5)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF1B4F72),
@@ -2044,7 +2044,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               const SizedBox(height: 6),
               const Text(
                 'Pre-filled headers with dropdowns for size, quality, surface, '
-                'tile type and DNA — pick values instead of typing.',
+                'tile type and DNA â€” pick values instead of typing.',
                 style: TextStyle(fontSize: 11, color: Colors.black54),
               ),
             ],
@@ -2054,17 +2054,17 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
   Widget _colTable() {
     const cols = [
-      ('Design Name', 'required — or a brand / master column', true),
-      ('Size', 'required — must match your sizes', true),
-      ('Quality', 'required — Premium / Standard', true),
-      ('Box Quantity', 'required — the boxes to add', true),
-      ('Tile Type', 'new designs only — else taken from your library', false),
-      ('Surface / Finish', 'optional — mapped after upload', false),
-      ('Box Weight', 'optional — for thickness', false),
-      ('Pieces/Box', 'optional — for sq.ft', false),
+      ('Design Name', 'required â€” or a brand / master column', true),
+      ('Size', 'required â€” must match your sizes', true),
+      ('Quality', 'required â€” Premium / Standard', true),
+      ('Box Quantity', 'required â€” the boxes to add', true),
+      ('Tile Type', 'new designs only â€” else taken from your library', false),
+      ('Surface / Finish', 'optional â€” mapped after upload', false),
+      ('Box Weight', 'optional â€” for thickness', false),
+      ('Pieces/Box', 'optional â€” for sq.ft', false),
       ('Colour', 'optional', false),
-      ('Master design name', 'optional — links your brands in the Library', false),
-      ('<Brand name> columns', 'optional — one per brand; the design name under '
+      ('Master design name', 'optional â€” links your brands in the Library', false),
+      ('<Brand name> columns', 'optional â€” one per brand; the design name under '
           'each. The chosen brand\'s name becomes the stock; all are mapped.', false),
     ];
     return Container(
@@ -2110,7 +2110,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     );
   }
 
-  // Distinct brand ids present in the rows that will actually import — the wipe
+  // Distinct brand ids present in the rows that will actually import â€” the wipe
   // scope for a per-row multi-brand file (Option 2/3).
   List<String> _fileBrandIds() => _rows
       .where((r) => r.valid && r.include && r.rowBrandId != null)
@@ -2127,10 +2127,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
   // Every mode goes through the same guarded confirm the PDF importer uses
   // (showUploadModeConfirm). "Fully new" scope depends on the file shape:
-  //  • per-row multi-brand file → wipe exactly the brands the file covers
-  //    (no toggle — a "this brand only" choice is meaningless when the file
+  //  â€¢ per-row multi-brand file â†’ wipe exactly the brands the file covers
+  //    (no toggle â€” a "this brand only" choice is meaningless when the file
   //    already spans several brands);
-  //  • single-brand file → the this-brand / all-brands toggle below the chips.
+  //  â€¢ single-brand file â†’ the this-brand / all-brands toggle below the chips.
   Future<void> _pickQtyMode(UploadMode m) async {
     if (m == _mode) return;
     final String scopeLabel;
@@ -2164,17 +2164,17 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final maps = _rows.where((r) => r.valid && r.action == 'map').length;
     final skipped = _rows.where((r) => !r.valid).length;
     final willImport = _rows.where((r) => r.valid && r.include).length;
-    // New designs still missing identity → block Save until filled or excluded.
+    // New designs still missing identity â†’ block Save until filled or excluded.
     final incomplete =
         _rows.where((r) => r.valid && r.include && r.needsFill).length;
     final allDone = !_importing && _done > 0 && _done >= willImport;
-    // Group rows by design identity (name+size) — identity shown once, a line
+    // Group rows by design identity (name+size) â€” identity shown once, a line
     // per quality (see _groupedRows).
     final groups = _groupedRows();
 
     return Column(
       children: [
-        // Destination brand — hidden for stock direct (brand per row), static
+        // Destination brand â€” hidden for stock direct (brand per row), static
         // label for single-brand, dropdown for multi-brand legacy combined.
         if (_perRowBrand)
           Container(
@@ -2226,7 +2226,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               ],
             ),
           ),
-        // Quantity mode is chosen HERE, with the stock decision (not up-front) —
+        // Quantity mode is chosen HERE, with the stock decision (not up-front) â€”
         // mirrors the PDF flow. Only affects rows that carry a box quantity.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
@@ -2251,10 +2251,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             ],
           ),
         ),
-        // Wipe scope — only while "Fully new" is selected.
-        //  • Per-row multi-brand file: no toggle — the file already covers
+        // Wipe scope â€” only while "Fully new" is selected.
+        //  â€¢ Per-row multi-brand file: no toggle â€” the file already covers
         //    several brands, so it wipes exactly those (shown as a note).
-        //  • Single-brand file: this-brand / all-brands toggle, each switch
+        //  â€¢ Single-brand file: this-brand / all-brands toggle, each switch
         //    re-runs the guarded confirm since it changes what gets zeroed.
         if (_mode == UploadMode.fullyNew && _perRowBrand)
           Padding(
@@ -2326,8 +2326,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                         TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
                 const SizedBox(height: 3),
                 Text(
-                    'Tip: add “Tile Type”, “Pieces/Box” and “Weight (kg)” columns to your '
-                    'file and they’ll import automatically — no filling needed.',
+                    'Tip: add â€œTile Typeâ€, â€œPieces/Boxâ€ and â€œWeight (kg)â€ columns to your '
+                    'file and theyâ€™ll import automatically â€” no filling needed.',
                     style: TextStyle(
                         fontSize: 11,
                         fontStyle: FontStyle.italic,
@@ -2351,7 +2351,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 Expanded(
                   child: Text(
                       '$skipped row${skipped == 1 ? '' : 's'} will be SKIPPED (invalid) and '
-                      'will NOT import. Scroll down — the red rows show why '
+                      'will NOT import. Scroll down â€” the red rows show why '
                       '(e.g. more than one brand column filled in a row).',
                       style: TextStyle(
                           fontSize: 11.5,
@@ -2413,7 +2413,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 Expanded(
                   child: Text(
                     'Design DNA columns detected: ${_dnaDetected.join(', ')} '
-                    '— values will be tagged automatically.',
+                    'â€” values will be tagged automatically.',
                     style: const TextStyle(
                         fontSize: 11, color: Color(0xFF6A1B9A)),
                   ),
@@ -2433,7 +2433,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Premium / Standard columns detected — each row becomes a '
+                    'Premium / Standard columns detected â€” each row becomes a '
                     'separate Premium and Standard stock line.',
                     style: TextStyle(fontSize: 11, color: Color(0xFF1B4F72)),
                   ),
@@ -2507,7 +2507,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
 
   // Group rows by design identity (name + size) so a design with several
   // qualities (wide Premium/Standard, ENTRY batches) shows as ONE card: the
-  // identity (tile type / pieces / weight — same for every quality because it
+  // identity (tile type / pieces / weight â€” same for every quality because it
   // lives on the library, keyed by name+size) is shown and filled once, and each
   // quality is a separate stock line. Order = first appearance.
   List<List<_XlsRow>> _groupedRows() {
@@ -2556,7 +2556,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Design identity (shown ONCE) ──
+          // â”€â”€ Design identity (shown ONCE) â”€â”€
           Row(
             children: [
               if (!hasInvalid) ...[_libThumb(first), const SizedBox(width: 8)],
@@ -2591,9 +2591,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             ],
           ),
           const SizedBox(height: 4),
-          // ── One line per quality / stock line ──
+          // â”€â”€ One line per quality / stock line â”€â”€
           ...group.map(_qualityLine),
-          // ── Per-brand names written to the Library (shown ONCE) ──
+          // â”€â”€ Per-brand names written to the Library (shown ONCE) â”€â”€
           if (brandNames.isNotEmpty) ...[
             const SizedBox(height: 6),
             Wrap(
@@ -2615,7 +2615,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                   .toList(),
             ),
           ],
-          // ── Identity fields — filled ONCE for the whole design (new only) ──
+          // â”€â”€ Identity fields â€” filled ONCE for the whole design (new only) â”€â”€
           if (isNew && !mapOnly) _groupIdentity(group),
         ],
       ),
@@ -2623,7 +2623,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   }
 
   /// The surface as the STOCKIST reads it: their own word from the sheet, with
-  /// the admin canonical in brackets — "RAINDROP (Sugar)". Just the word when the
+  /// the admin canonical in brackets â€” "RAINDROP (Sugar)". Just the word when the
   /// two match, so nothing reads "Matt (Matt)". Showing the bare canonical here
   /// would tell a stockist their sheet said "Sugar" when it said "RAINDROP".
   /// (project_per_brand_surface_mode)
@@ -2645,7 +2645,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final rest = [
       if (r.surfaceRaw.trim().isNotEmpty) _surfaceShown(r),
       if (r.qty >= 0) '${r.qty} boxes',
-    ].join('  ·  ');
+    ].join('  Â·  ');
     final quality = r.quality.isNotEmpty ? r.quality : r.qualityRaw;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2731,7 +2731,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     );
   }
 
-  // The design's identity — tile type / pieces / weight — shown ONCE and written
+  // The design's identity â€” tile type / pieces / weight â€” shown ONCE and written
   // to EVERY quality line in the group (it lives on the library, keyed by
   // name+size, so it can't differ per quality). Blocks Save until filled.
   Widget _groupIdentity(List<_XlsRow> group) {
@@ -2756,13 +2756,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             child: DropdownButtonFormField<String>(
               key: ValueKey('tt_$id'),
               initialValue:
-                  kTileTypes.contains(first.tileType) ? first.tileType : null,
+                  tileTypeNames.contains(first.tileType) ? first.tileType : null,
               isExpanded: true,
               decoration: const InputDecoration(
                   isDense: true,
                   labelText: 'Tile type',
                   border: OutlineInputBorder()),
-              items: kTileTypes
+              items: tileTypeNames
                   .map((t) => DropdownMenuItem(
                       value: t,
                       child: Text(t, style: const TextStyle(fontSize: 12))))
@@ -2811,7 +2811,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 3),
             child: Text(
-                'New design — fill tile type, pieces and weight (or untick).',
+                'New design â€” fill tile type, pieces and weight (or untick).',
                 style: TextStyle(
                     fontSize: 10.5,
                     color: Colors.orange.shade800,

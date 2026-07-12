@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -70,7 +70,7 @@ class _State extends State<StockistsOverviewScreen> {
   // buyer home. Empty = no strip.
   List<Map<String, dynamic>> _learnVideos = [];
 
-  // Father & Child market context — a single global toggle that governs every
+  // Father & Child market context â€” a single global toggle that governs every
   // buyer tab (Group / Stock / All Design). 'Public' = the Open Market,
   // 'Private' = the buyer's claimed Closed Market, 'Both' = the two merged.
   String _market = 'Public'; // 'Public' | 'Private' | 'Both'
@@ -83,7 +83,7 @@ class _State extends State<StockistsOverviewScreen> {
   // Clipboard auto-detect: a /s/ link found on the clipboard that the buyer can
   // add to My Suppliers with one tap. Tokens already claimed or dismissed are
   // remembered in ClaimedLinkStore (persisted) so the banner never nags for a
-  // link the buyer has already handled — even across app restarts.
+  // link the buyer has already handled â€” even across app restarts.
   String? _clipboardToken;
 
   // Progressive group tip: once the buyer has a handful of suppliers and still
@@ -95,7 +95,7 @@ class _State extends State<StockistsOverviewScreen> {
       int.fromEnvironment('GROUP_TIP_THRESHOLD', defaultValue: 7);
   bool _groupTipDismissed = false;
 
-  // Guest-trial ~1-month convert prompt — shown once when an old-enough guest
+  // Guest-trial ~1-month convert prompt â€” shown once when an old-enough guest
   // still has suppliers and hasn't created a login. Default 30 days; lower it
   // (--dart-define=GUEST_TRIAL_DAYS=0) for testing.
   static const _trialDays =
@@ -104,8 +104,8 @@ class _State extends State<StockistsOverviewScreen> {
 
   final _searchCtrl = TextEditingController();
   String _searchQuery  = '';
-  // Search now targets the active tab: All Design → design name (with smart
-  // search), Stock → stockist name/ID. Kept in sync by the tab handlers.
+  // Search now targets the active tab: All Design â†’ design name (with smart
+  // search), Stock â†’ stockist name/ID. Kept in sync by the tab handlers.
   bool _searchByDesign = true; // true = design name, false = stockist
 
   // Quality filter
@@ -116,7 +116,7 @@ class _State extends State<StockistsOverviewScreen> {
   final Set<String> _selectedSurfaces = {};
 
 
-  // Design filter (Qty, Stock Type — in addition to shared Size/Finish/Quality)
+  // Design filter (Qty, Stock Type â€” in addition to shared Size/Finish/Quality)
   final Set<String> _selectedTypes = {};
   final Set<String> _selectedThickness = {};
   Set<String> _selectedStockTypes = {};
@@ -128,13 +128,13 @@ class _State extends State<StockistsOverviewScreen> {
   // chips show the admin's canonical names (the unifying key). See
   // project_design_dna_engine.
   List<DnaAttribute> _dnaAttrs = []; // catalog (non-free-text), for facet chips
-  Map<String, Set<String>> _dnaValues = {}; // designId → canonical value ids
+  Map<String, Set<String>> _dnaValues = {}; // designId â†’ canonical value ids
   final Set<String> _selectedDna = {}; // selected canonical value ids
-  // Which card's DNA-tag ▾ is currently expanded (only one at a time).
+  // Which card's DNA-tag â–¾ is currently expanded (only one at a time).
   String? _expandedDnaDesignId;
 
-  // This design's DNA tags as parent › child breadcrumb chains grouped by the
-  // root attribute, for the card's ▾ section. (project_dna_cascade_mapping)
+  // This design's DNA tags as parent â€º child breadcrumb chains grouped by the
+  // root attribute, for the card's â–¾ section. (project_dna_cascade_mapping)
   Map<String, List<String>> _dnaTagsFor(String designId) {
     final vals = _dnaValues[designId];
     if (vals == null || vals.isEmpty) return const {};
@@ -157,7 +157,7 @@ class _State extends State<StockistsOverviewScreen> {
     return buildDnaChainMap(tags);
   }
 
-  // Search match against a design's DNA tags (canonical name only — a buyer
+  // Search match against a design's DNA tags (canonical name only â€” a buyer
   // browses across many stockists, so there's no single "own wording" to
   // resolve per design). [terms] is the (optionally smart-expanded) set of
   // words typed in the search bar.
@@ -223,7 +223,7 @@ class _State extends State<StockistsOverviewScreen> {
   // Group filter
   int _activeGroupIndex = -1;
 
-  // Shared design-filter predicate — applies every active facet (quality, size,
+  // Shared design-filter predicate â€” applies every active facet (quality, size,
   // surface, colour, tile type, thickness, stock type, qty). Used by both the
   // Stock (stockist) view and the All-Design grid so their filters match.
   bool _matchesDesignFacets(TileDesign t) {
@@ -258,7 +258,7 @@ class _State extends State<StockistsOverviewScreen> {
   bool get _anyDesignFilterActive =>
       _selectedQualities.isNotEmpty || _designFilterCount > 0;
 
-  // Platform-level benchmarks — computed as getters so they always
+  // Platform-level benchmarks â€” computed as getters so they always
   // reflect the active filters.
   List<TileDesign> get _platformFilteredDesigns =>
       _allData.expand((d) => d.designs).where(_matchesDesignFacets).toList();
@@ -329,7 +329,7 @@ class _State extends State<StockistsOverviewScreen> {
           content: Text(
               "You've been using Tiles Stock for a while. Create your free "
               'login so your $n supplier${n == 1 ? '' : 's'} stay with you on '
-              'any phone — it only takes a moment.'),
+              'any phone â€” it only takes a moment.'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -347,7 +347,7 @@ class _State extends State<StockistsOverviewScreen> {
     });
   }
 
-  // One-time "group your suppliers" suggestion — only once the buyer has enough
+  // One-time "group your suppliers" suggestion â€” only once the buyer has enough
   // suppliers (a flat list gets annoying), still has no group, and hasn't been
   // shown it before. Silent for the first few suppliers (frictionless).
   bool get _showGroupTip =>
@@ -399,7 +399,7 @@ class _State extends State<StockistsOverviewScreen> {
       return i < 0 ? 1 << 20 : i;
     }
     // (Size/Finish filter options are derived further below from BOTH the public
-    // market designs AND the buyer's private claimed designs — see filterPool.)
+    // market designs AND the buyer's private claimed designs â€” see filterPool.)
 
     final data = stockists.asMap().entries.map((e) {
       final s = e.value;
@@ -415,7 +415,7 @@ class _State extends State<StockistsOverviewScreen> {
       );
     }).toList();
 
-    // ── Private (Closed Market) — the buyer's claimed catalogs ───────────────
+    // â”€â”€ Private (Closed Market) â€” the buyer's claimed catalogs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Loaded for logged-in buyers only (guests have none). Designs come back in
     // the same masked shape as the open market, so anonymity holds. We group
     // them per stockist (using the claimed-catalog summary for the masked name /
@@ -514,7 +514,7 @@ class _State extends State<StockistsOverviewScreen> {
 
   // After a supplier's /s/ link auto-added them to My Suppliers (deep link), show
   // a one-time confirmation. The group suggestion is separate + progressive (it
-  // only appears once the buyer has ~7 suppliers — see _maybeShowGroupTip).
+  // only appears once the buyer has ~7 suppliers â€” see _maybeShowGroupTip).
   void _maybeShowSupplierAdded() {
     final name = pendingSupplierAdded;
     if (name == null) return;
@@ -528,7 +528,7 @@ class _State extends State<StockistsOverviewScreen> {
               color: Color(0xFF2E7D32), size: 40),
           title: Text('"$name" added'),
           content: const Text(
-              'This supplier is now in My Suppliers — their latest stock stays '
+              'This supplier is now in My Suppliers â€” their latest stock stays '
               'up to date here, no more PDFs.'),
           actions: [
             TextButton(
@@ -550,11 +550,11 @@ class _State extends State<StockistsOverviewScreen> {
       if (!text.contains('/s/')) return;
       final token = _resolveCatalogToken(text);
       if (token == null) return;
-      // Already added (any path) or dismissed before → don't nag (persisted).
+      // Already added (any path) or dismissed before â†’ don't nag (persisted).
       if (await ClaimedLinkStore.isKnown(token)) return;
       if (mounted) setState(() => _clipboardToken = token);
     } catch (_) {
-      // Clipboard can throw on some platforms — never block the screen on it.
+      // Clipboard can throw on some platforms â€” never block the screen on it.
     }
   }
 
@@ -589,7 +589,7 @@ class _State extends State<StockistsOverviewScreen> {
     return 4;
   }
 
-  // ── Market-aware base lists ───────────────────────────────────────────────
+  // â”€â”€ Market-aware base lists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Every tab reads these instead of the raw public lists, so switching the
   // market toggle re-filters stockists *and* designs together.
   List<_StockistData> get _marketData {
@@ -603,7 +603,7 @@ class _State extends State<StockistsOverviewScreen> {
     }
   }
 
-  // Masked stockist keys the buyer has already saved into My Suppliers — used
+  // Masked stockist keys the buyer has already saved into My Suppliers â€” used
   // to flag a "saved" seller while browsing Discover (the upgrade loop).
   Set<String> get _savedStockistKeys =>
       _claimedCatalogs.map((c) => c.stockistKey).toSet();
@@ -640,11 +640,11 @@ class _State extends State<StockistsOverviewScreen> {
           result.where((d) => d.designs.any(_matchesDesignFacets)).toList();
     }
     result.sort((a, b) {
-      // 1) membership tier (Platinum > Gold > Silver > none) — admin-set.
+      // 1) membership tier (Platinum > Gold > Silver > none) â€” admin-set.
       final typeDiff = stockistTierRank(b.stockist.stockistType)
           .compareTo(stockistTierRank(a.stockist.stockistType));
       if (typeDiff != 0) return typeDiff;
-      // 2) priority within the tier (higher shown first) — admin-set.
+      // 2) priority within the tier (higher shown first) â€” admin-set.
       final prioDiff = b.stockist.priority.compareTo(a.stockist.priority);
       if (prioDiff != 0) return prioDiff;
       // 3) automatic stock-volume ranking as the tiebreaker.
@@ -737,7 +737,7 @@ class _State extends State<StockistsOverviewScreen> {
     final mx = _maxQtyCtrl.text.trim();
     if (mn.isNotEmpty || mx.isNotEmpty) {
       out.add(ActiveFilter(
-          'Qty ${mn.isEmpty ? '0' : mn}–${mx.isEmpty ? '∞' : mx}',
+          'Qty ${mn.isEmpty ? '0' : mn}â€“${mx.isEmpty ? 'âˆž' : mx}',
           () => setState(() {
                 _minQtyCtrl.clear();
                 _maxQtyCtrl.clear();
@@ -931,7 +931,7 @@ class _State extends State<StockistsOverviewScreen> {
                   ),
                 ),
                 Divider(height: 1, color: Colors.grey.shade200),
-                // Pinned Quantity — always visible at the top.
+                // Pinned Quantity â€” always visible at the top.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
                   child: Column(
@@ -950,7 +950,7 @@ class _State extends State<StockistsOverviewScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     children: [
-                      // Essentials — always visible.
+                      // Essentials â€” always visible.
                       FilterSection(
                         title: 'Size',
                         summary: filterSummary(localSizes),
@@ -992,7 +992,7 @@ class _State extends State<StockistsOverviewScreen> {
                                 : localStockTypes.add(t)),
                           )).toList()),
                       ),
-                      // Advanced — behind the "More filters" toggle.
+                      // Advanced â€” behind the "More filters" toggle.
                       MoreFiltersToggle(
                         expanded: showMore,
                         activeHidden: (localTypes.isNotEmpty ? 1 : 0) +
@@ -1007,7 +1007,7 @@ class _State extends State<StockistsOverviewScreen> {
                         FilterSection(
                           title: 'Tile Type',
                           summary: filterSummary(localTypes),
-                          child: chipWrap(kTileTypes, localTypes),
+                          child: chipWrap(tileTypeNames, localTypes),
                         ),
                         if (thicknessBands.isNotEmpty)
                           FilterSection(
@@ -1015,8 +1015,8 @@ class _State extends State<StockistsOverviewScreen> {
                             summary: filterSummary(localThickness),
                             child: chipWrap(thicknessBands, localThickness),
                           ),
-                        // ── Design DNA facets (only attributes with tagged values
-                        // present in the current pool are shown) ───────────────
+                        // â”€â”€ Design DNA facets (only attributes with tagged values
+                        // present in the current pool are shown) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                         ...dnaFacets.map((attr) {
                           final vals = attr.values
                               .where((v) => dnaInUse.contains(v.id))
@@ -1154,7 +1154,7 @@ class _State extends State<StockistsOverviewScreen> {
                       ],
                     ),
                   ),
-                  // Big image (bottom-sheet preview → medium thumbnail)
+                  // Big image (bottom-sheet preview â†’ medium thumbnail)
                   SizedBox(
                     height: 240,
                     width: double.infinity,
@@ -1544,21 +1544,21 @@ class _State extends State<StockistsOverviewScreen> {
     final appBar = AppBar(
       // When this screen was pushed (e.g. admin opening it from the panel) show
       // a Back button; when it's the buyer's home root, no leading (Logout now
-      // lives in the ⋮ account menu).
+      // lives in the â‹® account menu).
       leading: Navigator.canPop(context) ? const BackButton() : null,
       title: Text(currentEndUserId.isNotEmpty
           ? (_market == 'Private' ? 'My Suppliers' : 'Discover')
           : 'Tiles Stock'),
       actions: [
         // "Add supplier" lives as a labeled button in the body now (retired the
-        // hidden link icon — see project_two_mode_marketplace Phase 1.2).
+        // hidden link icon â€” see project_two_mode_marketplace Phase 1.2).
         IconButton(
           icon: const Icon(Icons.refresh),
           tooltip: 'Refresh',
           onPressed: _load,
         ),
         const NotificationBell(),
-        // Account menu — profile (with Delete account inside), stock lists, and
+        // Account menu â€” profile (with Delete account inside), stock lists, and
         // Logout. Only on the buyer's own home root, not an admin-pushed view.
         if (!Navigator.canPop(context))
           PopupMenuButton<String>(
@@ -1579,7 +1579,7 @@ class _State extends State<StockistsOverviewScreen> {
                 await context.push<bool>('/my-stock-lists');
                 if (mounted) _load();
               } else if (v == 'logout') {
-                // Guest with saved suppliers → double-confirm (logout is
+                // Guest with saved suppliers â†’ double-confirm (logout is
                 // permanent for them) with a Create-login / Help rescue.
                 final ok = await confirmGuestLogout(context,
                     supplierCount: _privateData.length);
@@ -1700,7 +1700,7 @@ class _State extends State<StockistsOverviewScreen> {
     // brand+surface). (Scenario-2 buyer merge)
     final mergedDesigns = mergeByQuality(filteredDesigns);
     final mergedReps = [for (final m in mergedDesigns) m.rep];
-    // System navigation-bar height — added to the grid's bottom padding so the
+    // System navigation-bar height â€” added to the grid's bottom padding so the
     // last row isn't clipped by the Android nav bar (edge-to-edge).
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
@@ -1720,7 +1720,7 @@ class _State extends State<StockistsOverviewScreen> {
                 // One-tap "add" if a supplier link is on the clipboard.
                 if (currentEndUserCanClaimPrivate && _clipboardToken != null)
                   _buildClipboardBanner(),
-                // "Add supplier" — the primary manual entry on My Suppliers.
+                // "Add supplier" â€” the primary manual entry on My Suppliers.
                 if (currentEndUserCanClaimPrivate && _market == 'Private')
                   _buildAddSupplierBar(),
                 // One-time "group your suppliers" suggestion.
@@ -1808,7 +1808,7 @@ class _State extends State<StockistsOverviewScreen> {
                               _market == 'Private')
                           ? () => _removeSupplier(filteredStockists[i])
                           : null,
-                      // Closes the discover→save loop: flag a seller already
+                      // Closes the discoverâ†’save loop: flag a seller already
                       // saved into My Suppliers.
                       alreadySaved: _market != 'Private' &&
                           _savedStockistKeys
@@ -1820,7 +1820,7 @@ class _State extends State<StockistsOverviewScreen> {
     );
   }
 
-  // Two-mode bottom nav — My Suppliers · Discover — shown to a permitted buyer
+  // Two-mode bottom nav â€” My Suppliers Â· Discover â€” shown to a permitted buyer
   // once the public market is live. While it's off (private-first) there's only
   // one surface, so no nav. Switching to Discover is product-first (the design
   // grid). Killed the old "Both". project_two_mode_marketplace Phase 2 #9.
@@ -1859,18 +1859,18 @@ class _State extends State<StockistsOverviewScreen> {
     );
   }
 
-  // ── Group filter row ─────────────────────────────────────────────────────
+  // â”€â”€ Group filter row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-  // Persistent search + filter bar — pinned under the tabs (see the
+  // Persistent search + filter bar â€” pinned under the tabs (see the
   // NestedScrollView header). Search targets the active tab: All Design = design
   // name (smart search), Stock = stockist name/ID. Quality now lives inside the
   // filter sheet (below Size).
   Widget _buildSearchRow() {
     final hint = _viewDesigns
         ? (smartSearch
-            ? 'Smart search: white = bianco, carrara…'
-            : 'Search design name…')
-        : 'Search stockist name or ID…';
+            ? 'Smart search: white = bianco, carraraâ€¦'
+            : 'Search design nameâ€¦')
+        : 'Search stockist name or IDâ€¦';
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
@@ -1904,7 +1904,7 @@ class _State extends State<StockistsOverviewScreen> {
               ),
             ),
           ),
-          // Smart-search toggle — only when searching designs by name.
+          // Smart-search toggle â€” only when searching designs by name.
           if (_viewDesigns) ...[
             const SizedBox(width: 8),
             SmartSearchToggle(onChanged: () => setState(() {})),
@@ -1987,8 +1987,8 @@ class _State extends State<StockistsOverviewScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (hasBadge) ...[
-              // Same coloured numbered circle shown on the tile cards — the legend
-              // that ties a group's name to its ① circle.
+              // Same coloured numbered circle shown on the tile cards â€” the legend
+              // that ties a group's name to its â‘  circle.
               Container(
                 width: 18,
                 height: 18,
@@ -2048,7 +2048,7 @@ class _State extends State<StockistsOverviewScreen> {
               const SizedBox(width: 6),
               for (int i = 0; i < stockistGroups.length; i++) ...[
                 _groupChip(
-                  // Group name only — the supplier count moves next to the
+                  // Group name only â€” the supplier count moves next to the
                   // "Showing N designs" line when this group is selected.
                   stockistGroups[i].name,
                   _activeGroupIndex == i,
@@ -2063,7 +2063,7 @@ class _State extends State<StockistsOverviewScreen> {
                 ),
                 const SizedBox(width: 6),
               ],
-              // Compact people-icon action (not a chip) — opens Manage Groups.
+              // Compact people-icon action (not a chip) â€” opens Manage Groups.
               Tooltip(
                 message: 'Manage groups',
                 child: GestureDetector(
@@ -2124,7 +2124,7 @@ class _State extends State<StockistsOverviewScreen> {
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
-                    '${stockistGroups[_activeGroupIndex].name} · '
+                    '${stockistGroups[_activeGroupIndex].name} Â· '
                     '${stockistGroups[_activeGroupIndex].stockistIds.length} '
                     'supplier${stockistGroups[_activeGroupIndex].stockistIds.length == 1 ? '' : 's'}',
                     maxLines: 1,
@@ -2239,7 +2239,7 @@ class _State extends State<StockistsOverviewScreen> {
     );
   }
 
-  // Labeled "Add supplier" button — the primary manual way to add a supplier's
+  // Labeled "Add supplier" button â€” the primary manual way to add a supplier's
   // shared link to My Suppliers.
   Widget _buildAddSupplierBar() {
     const brand = Color(0xFF1B4F72);
@@ -2261,7 +2261,7 @@ class _State extends State<StockistsOverviewScreen> {
     );
   }
 
-  // Clipboard nudge: the buyer copied a supplier's /s/ link → offer a one-tap
+  // Clipboard nudge: the buyer copied a supplier's /s/ link â†’ offer a one-tap
   // add, with a dismiss that stops re-prompting for that link.
   Widget _buildClipboardBanner() {
     const brand = Color(0xFF1B4F72);
@@ -2379,7 +2379,7 @@ class _State extends State<StockistsOverviewScreen> {
 
   // Pull the share token out of whatever the buyer pasted. Accepts a full link
   // containing /s/<token> or a bare alphanumeric token. Returns null for junk
-  // (e.g. a random URL with no /s/… path), so we can reject it before it ever
+  // (e.g. a random URL with no /s/â€¦ path), so we can reject it before it ever
   // reaches the server.
   static String? _resolveCatalogToken(String input) {
     final t = input.trim();
@@ -2390,12 +2390,12 @@ class _State extends State<StockistsOverviewScreen> {
     return null;
   }
 
-  // Paste a share link → claim the stock catalog → it lands in the Private
+  // Paste a share link â†’ claim the stock catalog â†’ it lands in the Private
   // market. The input is validated locally first (must contain a /s/ token or
   // be a bare token) so foreign/garbage URLs are rejected with a friendly
   // message instead of being sent to the server.
   Future<void> _showAddCatalogDialog() async {
-    // Guests CAN save suppliers (the trial value) — no block here. Inquiring/
+    // Guests CAN save suppliers (the trial value) â€” no block here. Inquiring/
     // ordering is what triggers the convert prompt (guest-trial scope).
     final ctrl = TextEditingController();
     final token = await showDialog<String>(
@@ -2421,7 +2421,7 @@ class _State extends State<StockistsOverviewScreen> {
                     if (error != null) setDialog(() => error = null);
                   },
                   decoration: InputDecoration(
-                    hintText: 'https://tilesdesign.in/s/…',
+                    hintText: 'https://tilesdesign.in/s/â€¦',
                     isDense: true,
                     errorText: error,
                     border: OutlineInputBorder(
@@ -2441,7 +2441,7 @@ class _State extends State<StockistsOverviewScreen> {
                       setDialog(() => error =
                           "That doesn't look like a supplier link. "
                           'Paste the full link your supplier shared (it '
-                          'contains /s/…).');
+                          'contains /s/â€¦).');
                       return;
                     }
                     Navigator.pop(ctx, resolved);
@@ -2456,7 +2456,7 @@ class _State extends State<StockistsOverviewScreen> {
     await _claimToken(token);
   }
 
-  // Claim a supplier link by token → it lands in My Suppliers. Shared by the
+  // Claim a supplier link by token â†’ it lands in My Suppliers. Shared by the
   // paste dialog and the clipboard "Add" banner.
   Future<void> _claimToken(String token) async {
     try {
@@ -2481,7 +2481,7 @@ class _State extends State<StockistsOverviewScreen> {
   }
 
 
-  // ── Legend ────────────────────────────────────────────────────────────────
+  // â”€â”€ Legend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   Widget _buildLegend() {
     return Container(
@@ -2524,7 +2524,7 @@ class _State extends State<StockistsOverviewScreen> {
       );
 }
 
-// ── Pinned search-bar header ──────────────────────────────────────────────────
+// â”€â”€ Pinned search-bar header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Fixed-height pinned header hosting the persistent search + filter row. Stays
 /// frozen under the tabs while the header rows above it (and the grid below)
@@ -2553,7 +2553,7 @@ class _PinnedSearchHeader extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(covariant _PinnedSearchHeader old) => true;
 }
 
-// ── Stockist card ─────────────────────────────────────────────────────────────
+// â”€â”€ Stockist card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _StockistCard extends StatelessWidget {
   final _StockistData data;
@@ -2568,7 +2568,7 @@ class _StockistCard extends StatelessWidget {
   final bool Function(TileDesign) matches;
   final VoidCallback onViewProfile;
   final void Function(int groupIndex) onToggleGroup;
-  /// Non-null only for My Suppliers (claimed) cards → shows a Remove action.
+  /// Non-null only for My Suppliers (claimed) cards â†’ shows a Remove action.
   final VoidCallback? onRemove;
   /// True in Discover when this seller is already saved in My Suppliers.
   final bool alreadySaved;
@@ -2688,7 +2688,7 @@ class _StockistCard extends StatelessWidget {
                 ),
                 // Stock summary: boxes on top, designs beneath (stacked, not one
                 // line) so it stays narrow and doesn't crowd the company name.
-                // The remove (⋮) action moved to the card's bottom corner.
+                // The remove (â‹®) action moved to the card's bottom corner.
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -2748,7 +2748,7 @@ class _StockistCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 ...List.generate(stockistGroups.length, (i) {
                   final inGroup = stockistGroups[i].stockistIds.contains(s.id);
-                  // Cycle the palette (modulo) — a 4th+ group must not RangeError
+                  // Cycle the palette (modulo) â€” a 4th+ group must not RangeError
                   // and blank the whole card. Matches the chip/badge colour logic.
                   final color = _groupColors[i % _groupColors.length];
                   return Padding(
@@ -2787,7 +2787,7 @@ class _StockistCard extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               child: _buildTable(boxTable, countTable, dispSizes, dispSurfaces),
             ),
-            // Remove supplier (⋮ → horizontal) tucked in the bottom corner —
+            // Remove supplier (â‹® â†’ horizontal) tucked in the bottom corner â€”
             // out of the way so it isn't tapped by mistake, and off the company
             // name's space up top. My Suppliers cards only.
             if (onRemove != null)

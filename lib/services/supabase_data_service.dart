@@ -6,6 +6,7 @@ import '../models/surface_type.dart';
 import '../models/dna.dart';
 import '../models/app_notification.dart';
 import '../models/tile_size.dart';
+import '../models/tile_type.dart';
 import '../models/stock_catalog.dart';
 import '../models/share_link.dart';
 import '../models/claimed_catalog.dart';
@@ -15,6 +16,7 @@ import '../models/dispatch_record.dart';
 import '../models/library_entry.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
+import '../utils/tile_types.dart';
 import '../utils/dna_chains.dart';
 import 'supabase_auth_service.dart';
 import '../models/choice_state.dart';
@@ -3336,6 +3338,36 @@ class SupabaseDataService {
       return names.isEmpty ? List<String>.from(kFinishes) : names;
     } catch (_) {
       return List<String>.from(kFinishes);
+    }
+  }
+
+  // ── tile types (admin-managed master — carries the DENSITY) ─────────────────
+
+  /// The tile body types, with each one's density. Density is the whole reason this is a
+  /// table: thickness is never typed, it is derived from the box —
+  /// `weight / (pieces × area × density)`.
+  Future<List<TileType>> getTileTypes({bool activeOnly = false}) async {
+    var query = supabase.from('tile_types').select();
+    if (activeOnly) query = query.eq('is_active', true);
+    final data = await query.order('sort_order', ascending: true);
+    return data.map<TileType>((t) => TileType.fromJson(t)).toList();
+  }
+
+  /// Load the tile types and push them into `utils/tile_types.dart`, so the synchronous
+  /// `densityFor()` / `tileTypeNames` used inside `build()` reflect the table.
+  ///
+  /// Best-effort ON PURPOSE: on failure the built-in [kTileTypes] / [kTileDensity] fallback
+  /// stands, which is the same data. Throwing here would break a screen over a value it
+  /// already has a correct default for.
+  Future<void> refreshTileTypes() async {
+    try {
+      final types = await getTileTypes(activeOnly: true);
+      applyTileTypes([
+        for (final t in types)
+          if (t.densityKgM3 > 0) (name: t.name, densityKgM3: t.densityKgM3),
+      ]);
+    } catch (e) {
+      debugPrint('refreshTileTypes failed (keeping the built-in defaults): $e');
     }
   }
 
