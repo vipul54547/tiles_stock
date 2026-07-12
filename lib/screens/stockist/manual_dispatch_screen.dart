@@ -1421,8 +1421,10 @@ class _State extends State<ManualDispatchScreen> {
             const SizedBox(height: 10),
             _orderField(),
             const SizedBox(height: 10),
-            // While attached the order names the buyer, and dispatch_inquiry
-            // ignores customer_id — so a Customer field here would lie.
+            // While attached, the order already carries its own customer (chosen
+            // when the order was made) and dispatch_inquiry copies it onto the
+            // note — so re-entering it here would be redundant. A walk-in has no
+            // order, so it collects the customer itself. (project_customer_history)
             if (!attached) ...[
               if (_customersEnabled)
                 InkWell(

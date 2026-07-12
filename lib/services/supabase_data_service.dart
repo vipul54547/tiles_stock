@@ -2606,13 +2606,19 @@ class SupabaseDataService {
 
   /// Stockist creates their own order for a (possibly non-app) customer:
   /// [hint] = customer name/note, [lines] = `[{design_id, quantity}]` from
-  /// their F_Stock. Returns `{id, token, connection_code}`.
-  /// (project_dispatch_order_redesign)
+  /// their F_Stock. [customerId] optionally links the order to a saved customer
+  /// (customers_enabled) so its dispatch is findable in that customer's history.
+  /// Returns `{id, token, connection_code}`.
+  /// (project_dispatch_order_redesign, project_customer_history)
   Future<Map<String, dynamic>> createStockistOrder(
-      String hint, List<Map<String, dynamic>> lines) async {
+      String hint, List<Map<String, dynamic>> lines,
+      {String? customerId}) async {
     try {
-      final res = await supabase.rpc('create_stockist_order',
-          params: {'p_hint': hint, 'p_lines': lines});
+      final res = await supabase.rpc('create_stockist_order', params: {
+        'p_hint': hint,
+        'p_lines': lines,
+        if (customerId != null) 'p_customer_id': customerId,
+      });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
