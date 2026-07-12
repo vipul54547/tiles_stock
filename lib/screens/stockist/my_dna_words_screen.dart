@@ -94,6 +94,7 @@ class _MyDnaWordsScreenState extends State<MyDnaWordsScreen> {
     _words.clear();
     for (final a in attrs) {
       if (a.isFreeText) continue;
+      if (!a.allowMapping) continue; // nothing to map — admin words only
       for (final v in a.values) {
         if (v.name.toLowerCase() == 'none') continue;
         _words[v.id] = List<String>.from(words[v.id] ?? const []);
@@ -121,7 +122,9 @@ class _MyDnaWordsScreenState extends State<MyDnaWordsScreen> {
     }
 
     setState(() {
-      _attrs = attrs.where((a) => !a.isFreeText).toList();
+      // Map-off attributes (admin words only) have nothing to map — leave them
+      // out of My Words entirely. (project_dna_cascade_mapping)
+      _attrs = attrs.where((a) => !a.isFreeText && a.allowMapping).toList();
       _surfaces = finishes.toList();
       _loading = false;
     });
