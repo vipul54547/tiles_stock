@@ -22,6 +22,7 @@ import 'dna_editor_sheet.dart';
 import 'stock_control_screen.dart';
 import 'stock_lists_screen.dart';
 import 'stockist_add_order_screen.dart';
+import 'customer_history_screen.dart';
 import 'stockist_profile_screen.dart';
 import 'stockist_my_videos_screen.dart';
 import '../../utils/tile_types.dart';
@@ -2018,6 +2019,17 @@ class _State extends State<StockistDashboardScreen> {
               await Navigator.of(context).push<bool>(MaterialPageRoute(
                   builder: (_) => const StockistAddOrderScreen()));
             }),
+            // Opt-in: only stockists who save customers get the directory +
+            // per-customer dispatch history. (project_customer_history)
+            if (currentStockistCustomersEnabled) ...[
+              const Divider(height: 1),
+              _sheetItem(ctx, Icons.people_alt_outlined,
+                  const Color(0xFF6A1B9A), 'Customers',
+                  'Who bought what, and when', () async {
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const CustomerListScreen()));
+              }),
+            ],
             const SizedBox(height: 8),
           ],
         ),

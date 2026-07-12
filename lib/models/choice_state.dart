@@ -33,6 +33,11 @@ String currentStockistBusinessType = 'M';
 bool get currentStockistIsImporter =>
     isImporterType(currentStockistBusinessType);
 
+/// The logged-in stockist has opted into saving customers on dispatch/order
+/// (admin-set `customers_enabled`). Loaded at login. Gates the Customers entry
+/// + history screens. (project_customer_history)
+bool currentStockistCustomersEnabled = false;
+
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID
 // Admin-set: may this buyer add (claim) catalog links? Drives whether the
