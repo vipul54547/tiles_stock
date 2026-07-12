@@ -44,6 +44,11 @@ class DnaAttribute {
   /// parent value, and the stockist picks it only after choosing the parent.
   final String? parentAttributeId;
 
+  /// A value-list attribute where, after picking a value, the stockist can add a
+  /// free-text word tied to THAT value (e.g. Punch Type = Wave → "water punch").
+  /// Forces mapping off. (project_dna_cascade_mapping)
+  final bool freeTextDetail;
+
   final List<DnaValue> values;
 
   const DnaAttribute({
@@ -55,6 +60,7 @@ class DnaAttribute {
     this.sortOrder = 0,
     this.allowMapping = true,
     this.parentAttributeId,
+    this.freeTextDetail = false,
     this.values = const [],
   });
 
@@ -69,6 +75,7 @@ class DnaAttribute {
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         allowMapping: j['allow_mapping'] != false, // default true
         parentAttributeId: (j['parent_attribute_id'] as String?),
+        freeTextDetail: j['free_text_detail'] == true,
         values: ((j['values'] as List?) ?? const [])
             .map((v) => DnaValue.fromJson(Map<String, dynamic>.from(v as Map)))
             .toList(),

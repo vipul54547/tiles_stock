@@ -39,6 +39,8 @@ class _DnaEditorState extends State<_DnaEditor> {
   List<DnaAttribute> _attrs = [];
   final Map<String, Set<String>> _selected = {}; // attrId → valueIds (canonical)
   final Map<String, List<String>> _freeTexts = {}; // attrId → free-text values
+  // free_text_detail: primary valueId → the stockist's word tied to it.
+  final Map<String, String> _detailWord = {};
   final Map<String, TextEditingController> _ftCtrls = {}; // free-text inputs
   Map<String, List<String>> _myWords = {}; // valueId → stockist's words
   bool _loading = true;
@@ -79,12 +81,26 @@ class _DnaEditorState extends State<_DnaEditor> {
       });
       _attrs = sorted;
       _myWords = words;
-      _selected
-        ..clear()
-        ..addEntries(_attrs
-            .where((a) => !a.isFreeText)
-            .map((a) =>
-                MapEntry(a.id, (cur[a.id] ?? const []).map((v) => v.id).toSet())));
+      _selected.clear();
+      _detailWord.clear();
+      for (final a in _attrs.where((a) => !a.isFreeText)) {
+        // For a free_text_detail attribute a tagged value is either a PRIMARY
+        // value (its parent is in the parent attribute) or a stockist DETAIL word
+        // (its parent is one of THIS attribute's own values).
+        final ownIds =
+            a.freeTextDetail ? a.values.map((v) => v.id).toSet() : null;
+        final set = <String>{};
+        for (final v in cur[a.id] ?? const <DnaValue>[]) {
+          if (ownIds != null &&
+              v.parentValueId != null &&
+              ownIds.contains(v.parentValueId)) {
+            _detailWord[v.parentValueId!] = v.name;
+          } else {
+            set.add(v.id);
+          }
+        }
+        _selected[a.id] = set;
+      }
       _freeTexts
         ..clear()
         ..addEntries(_attrs
@@ -167,8 +183,15 @@ class _DnaEditorState extends State<_DnaEditor> {
       if (valueId != null) sel.add(valueId);
     });
     _save(a);
-    // If this attribute is a parent and its value changed, reset its children.
-    if (old != valueId) _clearChildrenOf(a);
+    if (old != valueId) {
+      // If this attribute is a parent and its value changed, reset its children.
+      _clearChildrenOf(a);
+      // A free_text_detail word is tied to the old value — the server clears it
+      // via the orphan sweep; drop it from client state too.
+      if (a.freeTextDetail && old != null) {
+        setState(() => _detailWord.remove(old));
+      }
+    }
   }
 
   // Multi-pick (Colour) check-chips.
@@ -303,11 +326,30 @@ class _DnaEditorState extends State<_DnaEditor> {
       content = _freeTextEditor(a);
     } else {
       // Value-list: for a child, only the values under the chosen parent value.
+      // A free_text_detail attribute must not list its own detail words as
+      // pickable primaries (their parent is one of THIS attribute's values).
+      final Set<String> ownIds =
+          a.freeTextDetail ? a.values.map((v) => v.id).toSet() : <String>{};
       final opts = a.values
           .where((v) =>
-              !_isNone(v) && (!a.isDependent || v.parentValueId == parentVal))
+              !_isNone(v) &&
+              (!a.isDependent || v.parentValueId == parentVal) &&
+              !ownIds.contains(v.parentValueId))
           .toList();
-      content = a.isMulti ? _multiChips(a, opts) : _singleDropdown(a, opts);
+      final primary = a.isMulti ? _multiChips(a, opts) : _singleDropdown(a, opts);
+
+      // free_text_detail: once a value is picked, offer a word tied to it.
+      final picked = (!a.isMulti && (_selected[a.id]?.isNotEmpty ?? false))
+          ? _selected[a.id]!.first
+          : null;
+      if (a.freeTextDetail && picked != null) {
+        content = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [primary, const SizedBox(height: 8), _detailControl(a, picked)],
+        );
+      } else {
+        content = primary;
+      }
     }
 
     return Padding(
@@ -350,6 +392,120 @@ class _DnaEditorState extends State<_DnaEditor> {
         ],
       ),
     );
+  }
+
+  // free_text_detail: a dropdown of words already saved under [primaryValueId]
+  // + "Create new". The word is stored tied to that value (e.g. under Wave).
+  Widget _detailControl(DnaAttribute a, String primaryValueId) {
+    const amber = Color(0xFFB9770E);
+    final words =
+        a.values.where((v) => v.parentValueId == primaryValueId).toList();
+    final current = _detailWord[primaryValueId];
+    final value = words.any((w) => w.name == current) ? current : null;
+    final parentName = a.values
+        .firstWhere((v) => v.id == primaryValueId,
+            orElse: () => const DnaValue(id: '', name: ''))
+        .name;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+      decoration: BoxDecoration(
+        color: amber.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: amber.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Detail for “$parentName”',
+              style: const TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600, color: amber)),
+          const SizedBox(height: 6),
+          DropdownButtonFormField<String?>(
+            initialValue: value,
+            isExpanded: true,
+            decoration: InputDecoration(
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            items: [
+              const DropdownMenuItem<String?>(
+                  value: null,
+                  child: Text('— None —',
+                      style: TextStyle(color: Colors.black45, fontSize: 13.5))),
+              ...words.map((w) => DropdownMenuItem<String?>(
+                  value: w.name,
+                  child: Text(w.name, style: const TextStyle(fontSize: 13.5)))),
+              const DropdownMenuItem<String?>(
+                  value: '__new__',
+                  child: Text('＋ Create new…',
+                      style:
+                          TextStyle(color: amber, fontWeight: FontWeight.w600))),
+            ],
+            onChanged: (v) {
+              if (v == '__new__') {
+                _newDetail(primaryValueId);
+              } else {
+                _setDetail(primaryValueId, v);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _setDetail(String primaryValueId, String? name) async {
+    final word = name?.trim() ?? '';
+    setState(() {
+      if (word.isEmpty) {
+        _detailWord.remove(primaryValueId);
+      } else {
+        _detailWord[primaryValueId] = word;
+      }
+    });
+    setState(() => _saving = true);
+    try {
+      await _data.dnaSetValueDetail(
+          widget.libraryId, primaryValueId, word.isEmpty ? [] : [word]);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not save: $e'),
+            backgroundColor: Colors.red.shade700));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _newDetail(String primaryValueId) async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Add detail'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+              hintText: 'e.g. water punch', isDense: true),
+          onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    await _setDetail(primaryValueId, name);
+    if (mounted) _load(); // refresh so the new word joins the dropdown
   }
 
   Widget _gatedPlaceholder(String parentName) => Container(

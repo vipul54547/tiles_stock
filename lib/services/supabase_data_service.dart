@@ -1456,7 +1456,8 @@ class SupabaseDataService {
       bool? showInFacets,
       bool? allowMapping,
       String? parentAttributeId,
-      bool clearParent = false}) async {
+      bool clearParent = false,
+      bool? freeTextDetail}) async {
     await supabase.rpc('admin_dna_update_attribute', params: {
       'p_id': id,
       'p_name': name,
@@ -1465,6 +1466,18 @@ class SupabaseDataService {
       'p_allow_mapping': allowMapping,
       'p_parent_attribute_id': parentAttributeId,
       'p_clear_parent': clearParent,
+      'p_free_text_detail': freeTextDetail,
+    });
+  }
+
+  /// Set (or clear, with an empty list) the free-text detail word(s) under one
+  /// value of a free_text_detail attribute on a design. (project_dna_cascade_mapping)
+  Future<void> dnaSetValueDetail(
+      String libraryId, String parentValueId, List<String> texts) async {
+    await supabase.rpc('dna_set_value_detail', params: {
+      'p_library_id': libraryId,
+      'p_parent_value_id': parentValueId,
+      'p_texts': texts,
     });
   }
 

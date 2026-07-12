@@ -121,6 +121,13 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
         ok: on ? 'Stockist mapping ON.' : 'Admin words only.');
   }
 
+  Future<void> _setFreeTextDetail(DnaAttribute a, bool on) async {
+    await _run(() => _data.adminDnaUpdateAttribute(a.id, freeTextDetail: on),
+        ok: on
+            ? 'Free-text detail ON (mapping forced off).'
+            : 'Free-text detail off.');
+  }
+
   Future<void> _setParent(DnaAttribute a) async {
     // Candidates: other active value-list attributes, not self, and not already a
     // child of this one (blocks a direct cycle).
@@ -371,6 +378,7 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
             if (a.isMulti) _badge('multi', const Color(0xFF6A1B9A)),
             if (a.isFreeText) _badge('free text', Colors.teal),
             if (!a.allowMapping) _badge('no map', Colors.orange.shade800),
+            if (a.freeTextDetail) _badge('free-text detail', _amber),
             if (a.isDependent)
               _badge('↳ ${_attrName[a.parentAttributeId] ?? 'parent'}', _cyan),
           ],
@@ -401,9 +409,29 @@ class _ManageDesignDnaScreenState extends State<ManageDesignDnaScreen> {
             Switch(
               value: a.allowMapping,
               activeThumbColor: _navy,
-              onChanged: _busy ? null : (v) => _setMapping(a, v),
+              // Forced off while free-text detail is on.
+              onChanged: (_busy || a.freeTextDetail) ? null : (v) => _setMapping(a, v),
             ),
           ]),
+          if (!a.isFreeText)
+            Row(children: [
+              Icon(Icons.short_text,
+                  size: 18, color: a.freeTextDetail ? _amber : _navy),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text('Free-text detail',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+              Text(a.freeTextDetail ? 'On · type a word per value' : 'Off',
+                  style: TextStyle(
+                      fontSize: 11.5,
+                      color: a.freeTextDetail ? _amber : Colors.grey.shade600)),
+              Switch(
+                value: a.freeTextDetail,
+                activeThumbColor: _amber,
+                onChanged: _busy ? null : (v) => _setFreeTextDetail(a, v),
+              ),
+            ]),
           Row(children: [
             const Icon(Icons.account_tree_outlined, size: 18, color: _cyan),
             const SizedBox(width: 6),
