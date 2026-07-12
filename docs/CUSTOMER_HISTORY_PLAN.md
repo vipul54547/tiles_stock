@@ -136,15 +136,32 @@ Entry point: the dashboard's **Customers** pill is a disabled placeholder today
 
 ## 5. Phases
 
-**Phase A — the write gap.** `inquiries.customer_id`; `create_stockist_order` takes it;
-`dispatch_inquiry` copies it to the note; un-hide the Customer field on the attached-order branch.
-Ship alone: no screen yet, but from this point every new dispatch records its customer.
+**Phase A — the write gap. ✅ DONE `534bb09`, migration applied to prod 2026-07-12.**
+`inquiries.customer_id`; `create_stockist_order` takes an optional validated `p_customer_id`;
+`dispatch_inquiry` copies it onto the note; `createStockistOrder()` threads it; the stale
+`:1425` comment corrected. Proven end-to-end on live data (rollback-guarded).
+**Add-order customer picker ✅ DONE `075ad41`.** The picker (search sheet + New-customer form)
+was extracted to a shared `lib/widgets/customer_picker.dart` and now serves **both** add-order and
+dispatch (the dispatch screen's ~220 inline lines collapsed to a call). Add-order offers it for
+**new orders only** (editing an order's customer would need `update_order_items` to carry it — not
+built). Pinned by `test/customer_picker_test.dart`. So `inquiries.customer_id` now has a populator.
+**Still deferred:** showing the order's customer on the dispatch screen (needs `my_inquiries` to
+return it + an `InquiryOrder` field). All of this stays gated behind `customers_enabled` (off for
+all stockists) — so still unreachable in production until a stockist is opted in.
 
-**Phase B — the read.** `my_customer_history` RPC + `SupabaseDataService.myCustomerHistory()`.
+**Phase B — the read. ✅ DONE `c6d3e9e`, applied to prod 2026-07-12.** `my_customer_history`
+RPC (mirrors `my_dispatches`' join; scoped to the caller's own customer; lines carry
+`surface_label` + `surface_type`) + `SupabaseDataService.myCustomerHistory()`. Proven on live data
+(rollback-guarded): round-trips brand/quality/surface/invoice; a different stockist gets null.
 
-**Phase C — the screen.** Customers list → history timeline. Fill the dashboard placeholder.
+**Phase C — the screen. ✅ DONE `a596fdb`.** `customer_history_screen.dart` — a searchable
+Customers directory → per-customer history (header with call/WhatsApp/copy · summary strip · a
+timeline of dispatch notes, each expandable to its lines). Reached from the Orders sheet, gated on
+`currentStockistCustomersEnabled` (a new login-loaded global). Enabled for **livok (A02)** as the
+test stockist. Its 6 pre-Phase-A notes have null `customer_id`, so the screen is empty until a new
+order→dispatch records a customer.
 
-A and B are independent. C needs B.
+A and B are independent. C needs B. **All three phases + the picker are now done.**
 
 ---
 
