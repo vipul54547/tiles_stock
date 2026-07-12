@@ -7,10 +7,10 @@ import '../../models/brand.dart';
 import '../../models/choice_state.dart';
 import '../../models/inquiry_order.dart';
 import '../../services/supabase_data_service.dart';
-import '../../utils/india_geo.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/holding_picker.dart';
 import '../../widgets/holding_entry_bar.dart';
+import '../../widgets/customer_picker.dart';
 
 /// Manual dispatch, in the same batch shape as Add Stock: pick designs → set
 /// boxes → Add to a running list, fill dispatch details, then Record. Over-
@@ -621,224 +621,20 @@ class _State extends State<ManualDispatchScreen> {
   // ── Customer (opt-in) ────────────────────────────────────────────────────────
 
   Future<void> _pickCustomer() async {
-    final action = await showModalBottomSheet<Map<String, dynamic>>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) {
-        String q = '';
-        return StatefulBuilder(builder: (ctx, setSheet) {
-          final ql = q.trim().toLowerCase();
-          final res = _customers
-              .where((c) => (c['name'] ?? '').toString().toLowerCase().contains(ql))
-              .toList();
-          return SizedBox(
-            height: MediaQuery.of(ctx).size.height * 0.7,
-            child: Column(
-              children: [
-                const SizedBox(height: 12),
-                const Text('Customer',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                  child: TextField(
-                    onChanged: (v) => setSheet(() => q = v),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      prefixIcon: const Icon(Icons.search),
-                      hintText: 'Search saved customers…',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-                ListTile(
-                  leading: const CircleAvatar(
-                      backgroundColor: Color(0xFF2E7D32),
-                      child: Icon(Icons.person_add_alt, color: Colors.white)),
-                  title: const Text('New customer'),
-                  subtitle: const Text('Save name + location for next time'),
-                  onTap: () => Navigator.pop(ctx, {'_new': true}),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: res.isEmpty
-                      ? const Center(child: Text('No saved customers yet.'))
-                      : ListView(
-                          children: [
-                            for (final c in res)
-                              ListTile(
-                                leading: const Icon(Icons.person_outline),
-                                title: Text((c['name'] ?? '').toString()),
-                                subtitle: Text([
-                                  (c['city'] ?? '').toString(),
-                                  (c['district'] ?? '').toString(),
-                                ].where((x) => x.isNotEmpty).join(', ')),
-                                trailing: (c['phone'] ?? '').toString().isNotEmpty
-                                    ? const Icon(Icons.call, size: 16)
-                                    : null,
-                                onTap: () => Navigator.pop(ctx, c),
-                              ),
-                          ],
-                        ),
-                ),
-              ],
-            ),
-          );
-        });
-      },
-    );
-    if (action == null) return;
-    if (action['_new'] == true) {
-      await _newCustomerForm();
-    } else {
-      setState(() {
-        _custId = (action['id'] ?? '').toString();
-        _custNameCtrl.text = (action['name'] ?? '').toString();
-      });
-    }
-  }
-
-  Future<void> _newCustomerForm() async {
-    final nameCtl = TextEditingController();
-    final phoneCtl = TextEditingController();
-    final pinCtl = TextEditingController();
-    final cityCtl = TextEditingController();
-    String state = '';
-    String district = '';
-    bool looking = false;
-
-    final saved = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
-        Future<void> lookup() async {
-          final pin = pinCtl.text.trim();
-          if (pin.length != 6) return;
-          setSheet(() => looking = true);
-          final r = await IndiaGeo.lookupPincode(pin);
-          setSheet(() {
-            looking = false;
-            if (r != null) {
-              state = r.state;
-              district = r.district;
-              if (cityCtl.text.trim().isEmpty) cityCtl.text = r.city;
-            }
-          });
-        }
-
-        InputDecoration dec(String l) => InputDecoration(
-            labelText: l,
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)));
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-              16, 16, 16, 16 + MediaQuery.of(ctx).viewInsets.bottom),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('New customer',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              TextField(controller: nameCtl, decoration: dec('Name *')),
-              const SizedBox(height: 10),
-              TextField(
-                  controller: phoneCtl,
-                  keyboardType: TextInputType.phone,
-                  decoration: dec('Phone (optional)')),
-              const SizedBox(height: 10),
-              Row(children: [
-                Expanded(
-                  child: TextField(
-                      controller: pinCtl,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(6),
-                      ],
-                      decoration: dec('Pincode')),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  onPressed: looking ? null : lookup,
-                  child: looking
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Find'),
-                ),
-              ]),
-              if (state.isNotEmpty || district.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text('$district, $state',
-                      style: TextStyle(
-                          fontSize: 12.5, color: Colors.grey.shade700)),
-                ),
-              const SizedBox(height: 10),
-              TextField(controller: cityCtl, decoration: dec('City')),
-              const SizedBox(height: 16),
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () async {
-                      if (nameCtl.text.trim().isEmpty) return;
-                      try {
-                        final id = await _svc.upsertCustomer(
-                          name: nameCtl.text.trim(),
-                          phone: phoneCtl.text.trim().isEmpty
-                              ? null
-                              : phoneCtl.text.trim(),
-                          state: state.isEmpty ? null : state,
-                          district: district.isEmpty ? null : district,
-                          pincode: pinCtl.text.trim().isEmpty
-                              ? null
-                              : pinCtl.text.trim(),
-                          city: cityCtl.text.trim().isEmpty
-                              ? null
-                              : cityCtl.text.trim(),
-                        );
-                        if (!ctx.mounted) return;
-                        if (id != null) {
-                          _custId = id;
-                          _custNameCtrl.text = nameCtl.text.trim();
-                        }
-                        Navigator.pop(ctx, true);
-                      } catch (e) {
-                        if (ctx.mounted) {
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                              SnackBar(content: Text('$e'), backgroundColor: _red));
-                        }
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2E7D32),
-                        foregroundColor: Colors.white),
-                    child: const Text('Save'),
-                  ),
-                ),
-              ]),
-            ],
-          ),
-        );
-      }),
-    );
-    if (saved == true) {
-      await _load(); // refresh customer list
-      setState(() {});
-    }
+    final picked = await CustomerPicker.show(context,
+        customers: _customers, svc: _svc);
+    if (picked == null) return;
+    final id = (picked['id'] ?? '').toString();
+    if (id.isEmpty) return;
+    setState(() {
+      // A freshly created customer is not yet in _customers — keep it so a
+      // re-open of the picker shows it too.
+      if (!_customers.any((c) => (c['id'] ?? '').toString() == id)) {
+        _customers = [..._customers, picked];
+      }
+      _custId = id;
+      _custNameCtrl.text = (picked['name'] ?? '').toString();
+    });
   }
 
   // ── Record ───────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import '../../services/cloudinary_service.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/unsaved_changes.dart';
 import '../../widgets/holding_entry_bar.dart';
+import '../../widgets/customer_picker.dart';
 
 /// Stockist creates OR edits their own order for a (possibly non-app) customer: a
 /// free-text customer hint + designs picked from their F_Stock with box
@@ -95,6 +96,14 @@ class _State extends State<StockistAddOrderScreen> {
   bool _saving = false;
   bool _dirty = false;
 
+  // Customer (opt-in, customers_enabled). The order is born with its customer;
+  // on dispatch, dispatch_inquiry copies it onto the note, so the sale is
+  // findable in that customer's history. (project_customer_history)
+  bool _customersEnabled = false;
+  List<Map<String, dynamic>> _customers = [];
+  String? _custId;
+  String _custName = '';
+
   bool get _isEdit => widget.orderId != null;
 
   @override
@@ -113,8 +122,14 @@ class _State extends State<StockistAddOrderScreen> {
   Future<void> _load() async {
     final all = await _data.getDesignsByStockist(currentStockistUUID);
     final brands = await _data.getMyBrands();
+    final profile = await _data.getMyProfile();
+    final enabled = (profile?['customers_enabled'] as bool?) ?? false;
+    final customers =
+        enabled ? await _data.listCustomers() : <Map<String, dynamic>>[];
     if (!mounted) return;
     setState(() {
+      _customersEnabled = enabled;
+      _customers = customers;
       _brands = brands;
       _brandById = {for (final b in brands) b.id: b.name};
       _stock = all.where((d) => d.fStock > 0).toList()
@@ -184,6 +199,22 @@ class _State extends State<StockistAddOrderScreen> {
     return true;
   }
 
+  Future<void> _pickCustomer() async {
+    final picked =
+        await CustomerPicker.show(context, customers: _customers, svc: _data);
+    if (picked == null) return;
+    final id = (picked['id'] ?? '').toString();
+    if (id.isEmpty) return;
+    setState(() {
+      if (!_customers.any((c) => (c['id'] ?? '').toString() == id)) {
+        _customers = [..._customers, picked];
+      }
+      _custId = id;
+      _custName = (picked['name'] ?? '').toString();
+      _dirty = true;
+    });
+  }
+
   Future<void> _save() async {
     final lines = _picks.values
         .where((p) => p.qty > 0)
@@ -203,8 +234,9 @@ class _State extends State<StockistAddOrderScreen> {
         _dirty = false;
         Navigator.pop(context, {'id': widget.orderId});
       } else {
-        final res =
-            await _data.createStockistOrder(_hintCtrl.text.trim(), lines);
+        final res = await _data.createStockistOrder(
+            _hintCtrl.text.trim(), lines,
+            customerId: _customersEnabled ? _custId : null);
         if (!mounted) return;
         _dirty = false;
         Navigator.pop(context, res); // {id, token, connection_code}
@@ -254,19 +286,72 @@ class _State extends State<StockistAddOrderScreen> {
                     margin: EdgeInsets.zero,
                     child: Padding(
                       padding: const EdgeInsets.all(12),
-                      child: TextField(
-                        controller: _hintCtrl,
-                        textCapitalization: TextCapitalization.words,
-                        maxLength: 80,
-                        onChanged: (_) => _markDirty(),
-                        decoration: const InputDecoration(
-                          labelText: 'Customer name / hint',
-                          hintText: 'e.g. Ramesh (walk-in), site at Bopal…',
-                          helperText:
-                              'Just a note for you — no customer details are stored.',
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // A saved customer is only offered for a NEW order (it
+                          // is stamped on the inquiry at creation). Editing an
+                          // existing order's customer needs update_order_items to
+                          // carry it — not built.
+                          if (_customersEnabled && !_isEdit) ...[
+                            InkWell(
+                              onTap: _pickCustomer,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 13),
+                                decoration: BoxDecoration(
+                                    border:
+                                        Border.all(color: Colors.grey.shade400),
+                                    borderRadius: BorderRadius.circular(8)),
+                                child: Row(children: [
+                                  const Icon(Icons.person_outline,
+                                      size: 18, color: _navy),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                        _custName.isEmpty
+                                            ? 'Select or add customer (optional)'
+                                            : _custName,
+                                        style: TextStyle(
+                                            fontSize: 14,
+                                            color: _custName.isEmpty
+                                                ? Colors.grey.shade500
+                                                : Colors.black87)),
+                                  ),
+                                  if (_custId != null)
+                                    InkWell(
+                                      onTap: () => setState(() {
+                                        _custId = null;
+                                        _custName = '';
+                                        _dirty = true;
+                                      }),
+                                      child: Icon(Icons.close,
+                                          size: 18, color: Colors.grey.shade500),
+                                    )
+                                  else
+                                    Icon(Icons.arrow_drop_down,
+                                        color: Colors.grey.shade600),
+                                ]),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                          TextField(
+                            controller: _hintCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            maxLength: 80,
+                            onChanged: (_) => _markDirty(),
+                            decoration: const InputDecoration(
+                              labelText: 'Customer name / hint',
+                              hintText: 'e.g. Ramesh (walk-in), site at Bopal…',
+                              helperText:
+                                  'Just a note for you — no customer details are stored.',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
