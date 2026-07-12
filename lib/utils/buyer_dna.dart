@@ -1,4 +1,5 @@
 import '../services/supabase_data_service.dart';
+import 'dna_chains.dart';
 
 /// Loads + resolves Design DNA for BUYER surfaces (web /s/ + app): the global
 /// facet catalog (attribute/value names) + each design's tagged value ids.
@@ -44,20 +45,12 @@ class BuyerDna {
     }
   }
 
-  /// Card tags: attribute name → [value names] for a design (null when none).
+  /// Card tags as parent → child breadcrumb chains grouped by the ROOT
+  /// attribute (null when the design has none). (project_dna_cascade_mapping)
   Map<String, List<String>>? tagsFor(String designId) {
     final vals = _byDesign[designId];
     if (vals == null || vals.isEmpty) return null;
-    final out = <String, List<String>>{};
-    for (final a in facets) {
-      final names = <String>[];
-      for (final v in (a['values'] as List? ?? const [])) {
-        if (vals.contains((v['id'] ?? '').toString())) {
-          names.add((v['name'] ?? '').toString());
-        }
-      }
-      if (names.isNotEmpty) out[(a['name'] ?? '').toString()] = names;
-    }
+    final out = dnaChainsFromCatalog(facets, vals);
     return out.isEmpty ? null : out;
   }
 

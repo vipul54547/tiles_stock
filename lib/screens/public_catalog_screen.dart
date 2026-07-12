@@ -11,6 +11,7 @@ import '../utils/responsive.dart';
 import '../services/cloudinary_service.dart';
 import '../models/tile_design.dart' show expandSearchTerms;
 import '../utils/tile_types.dart' show thicknessRangeLabel, sqftPerBox;
+import '../utils/dna_chains.dart';
 import '../utils/tile_sizes.dart' show aspectRatioFromSize;
 import '../utils/order_message.dart';
 import '../widgets/banner_view.dart';
@@ -162,25 +163,10 @@ class _State extends State<PublicCatalogScreen> {
   Set<String> _dnaOf(Map<String, dynamic> d) =>
       ((d['dna'] as List?) ?? const []).map((e) => e.toString()).toSet();
 
-  // This design's DNA tags grouped by attribute name, for the card's
-  // expandable ▾ section. Built from the already-loaded facet catalog.
-  Map<String, List<String>> _dnaTagsFor(Map<String, dynamic> d) {
-    final vals = _dnaOf(d);
-    if (vals.isEmpty) return const {};
-    final out = <String, List<String>>{};
-    for (final attr in _dnaFacets) {
-      final name = (attr['name'] ?? '').toString();
-      for (final v in ((attr['values'] as List?) ?? const [])) {
-        final map = v as Map;
-        final vName = (map['name'] ?? '').toString();
-        if (vName.toLowerCase() == 'none') continue;
-        if (vals.contains(map['id'].toString())) {
-          (out[name] ??= []).add(vName);
-        }
-      }
-    }
-    return out;
-  }
+  // This design's DNA tags as parent › child breadcrumb chains grouped by the
+  // root attribute, for the card's ▾ section. (project_dna_cascade_mapping)
+  Map<String, List<String>> _dnaTagsFor(Map<String, dynamic> d) =>
+      dnaChainsFromCatalog(_dnaFacets, _dnaOf(d));
 
   // DNA value ids present across the in-stock pool (so empty facets hide).
   Set<String> get _dnaInUse {

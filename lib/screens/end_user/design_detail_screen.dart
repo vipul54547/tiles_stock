@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../models/tile_design.dart';
 import '../../services/supabase_data_service.dart';
+import '../../utils/dna_chains.dart';
 import '../../services/supabase_auth_service.dart';
 import '../../utils/tile_types.dart';
 import '../../widgets/tile_card.dart';
@@ -461,16 +462,13 @@ class _DnaSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<({String attribute, String label})>>(
+    return FutureBuilder<List<DnaTag>>(
       future: service.designDnaTags(designId),
       builder: (_, snap) {
         final tags = snap.data ?? const [];
         if (tags.isEmpty) return const SizedBox.shrink();
-        // Group labels by attribute, preserving server order.
-        final byAttr = <String, List<String>>{};
-        for (final t in tags) {
-          (byAttr[t.attribute] ??= []).add(t.label);
-        }
+        // Group into parent › child breadcrumb chains under the root attribute.
+        final byAttr = buildDnaChainMap(tags);
         return Padding(
           padding: const EdgeInsets.only(top: 16),
           child: Column(

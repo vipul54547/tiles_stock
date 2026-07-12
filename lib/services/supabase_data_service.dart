@@ -15,6 +15,7 @@ import '../models/dispatch_record.dart';
 import '../models/library_entry.dart';
 import '../utils/finishes.dart';
 import '../utils/tile_sizes.dart';
+import '../utils/dna_chains.dart';
 import 'supabase_auth_service.dart';
 import '../models/choice_state.dart';
 import '../main.dart';
@@ -1614,33 +1615,32 @@ class SupabaseDataService {
 
   /// Bulk DNA tags for the stockist's whole library, in THEIR own words:
   /// { libraryId: ["Glossy", "Marble", …] }. One call for the library list.
-  Future<Map<String, List<String>>> dnaMyLibraryTags() async {
+  /// Per-library DNA tags for the stockist's own designs, as raw [DnaTag]s so the
+  /// UI can render parent → child breadcrumb chains. (project_dna_cascade_mapping)
+  Future<Map<String, List<DnaTag>>> dnaMyLibraryTags() async {
     try {
       final res = await supabase.rpc('dna_my_library_tags');
       final map = res is Map ? Map<String, dynamic>.from(res) : {};
       return map.map((k, v) => MapEntry(
-          k, ((v as List?) ?? const []).map((e) => e.toString()).toList()));
+          k,
+          ((v as List?) ?? const [])
+              .map((e) => DnaTag.fromJson(Map<String, dynamic>.from(e as Map)))
+              .toList()));
     } catch (e) {
       debugPrint('dnaMyLibraryTags failed: $e');
       return {};
     }
   }
 
-  /// A single (buyer-visible) design's DNA tags for display, in the design's
-  /// OWN stockist's word: [ {attribute, label}, … ] grouped/ordered server-side.
-  Future<List<({String attribute, String label})>> designDnaTags(
-      String designId) async {
+  /// A single (buyer-visible) design's DNA tags as raw [DnaTag]s (design's OWN
+  /// stockist's word), for parent → child breadcrumb display.
+  Future<List<DnaTag>> designDnaTags(String designId) async {
     try {
       final res = await supabase
           .rpc('design_dna_tags', params: {'p_design_id': designId});
-      final list = (res as List?) ?? const [];
-      return list.map((e) {
-        final m = Map<String, dynamic>.from(e as Map);
-        return (
-          attribute: (m['attribute'] ?? '').toString(),
-          label: (m['label'] ?? '').toString(),
-        );
-      }).toList();
+      return ((res as List?) ?? const [])
+          .map((e) => DnaTag.fromJson(Map<String, dynamic>.from(e as Map)))
+          .toList();
     } catch (e) {
       debugPrint('designDnaTags failed: $e');
       return [];

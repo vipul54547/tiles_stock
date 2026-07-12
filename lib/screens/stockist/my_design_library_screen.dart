@@ -8,6 +8,7 @@ import '../../models/library_entry.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../utils/tile_types.dart';
+import '../../utils/dna_chains.dart';
 import 'dna_editor_sheet.dart';
 
 /// Stockist's own Design Library: master (physical) designs with their image +
@@ -27,7 +28,7 @@ class _State extends State<MyDesignLibraryScreen> {
   List<Brand> _brands = [];
   List<LibraryEntry> _entries = [];
   List<String> _sizes = [];
-  Map<String, List<String>> _dnaTags = {}; // libraryId → DNA labels (their words)
+  Map<String, List<DnaTag>> _dnaTags = {}; // libraryId → DNA tags (their words)
   bool _loading = true;
 
   // Search + filters
@@ -94,7 +95,7 @@ class _State extends State<MyDesignLibraryScreen> {
       _brands = brands;
       _entries = results[1] as List<LibraryEntry>;
       _sizes = results[2] as List<String>;
-      _dnaTags = results[3] as Map<String, List<String>>;
+      _dnaTags = results[3] as Map<String, List<DnaTag>>;
       _loading = false;
     });
   }
@@ -1055,7 +1056,7 @@ class _State extends State<MyDesignLibraryScreen> {
     final brandAlias = singleBrand == null ? null : e.aliases[singleBrand];
     final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
     final titleName = showBrandName ? brandAlias : e.masterName;
-    final dnaTags = _dnaTags[e.id] ?? const <String>[];
+    final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
     // Size only — the library holds the print; the surface lives on the stock.
     final sizeLine = e.size.replaceAll(' mm', '');
     return Container(
@@ -1152,28 +1153,49 @@ class _State extends State<MyDesignLibraryScreen> {
                       ),
                     ],
                   ),
-                  // DNA chips span the FULL width below — filling the empty space
-                  // under the thumbnail rather than crowding the narrow column.
-                  if (dnaTags.isNotEmpty) ...[
+                  // DNA below — grouped by root attribute, each shown as a
+                  // parent › child › detail breadcrumb. (project_dna_cascade_mapping)
+                  if (dnaChains.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 4,
-                      children: dnaTags
-                          .map((t) => Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 7, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFB9770E)
-                                      .withValues(alpha: 0.10),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(t,
-                                    style: const TextStyle(
-                                        fontSize: 11, color: Color(0xFF8A5A09))),
-                              ))
-                          .toList(),
-                    ),
+                    for (final grp in dnaChains.entries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3, right: 6),
+                              child: Text('${grp.key}:',
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.grey.shade600)),
+                            ),
+                            Expanded(
+                              child: Wrap(
+                                spacing: 5,
+                                runSpacing: 4,
+                                children: grp.value
+                                    .map((chain) => Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 7, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFB9770E)
+                                                .withValues(alpha: 0.10),
+                                            borderRadius:
+                                                BorderRadius.circular(6),
+                                          ),
+                                          child: Text(chain,
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: Color(0xFF8A5A09))),
+                                        ))
+                                    .toList(),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ],
               ),

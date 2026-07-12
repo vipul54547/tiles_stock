@@ -28,6 +28,7 @@ import '../utils/guest_gate.dart';
 import '../utils/claimed_link_store.dart';
 import '../models/claimed_catalog.dart';
 import '../models/dna.dart';
+import '../utils/dna_chains.dart';
 
 const _qualities = ['Premium', 'Standard'];
 // Distinct from the primary blue (0xFF1B4F72) used for stockist ID / view-profile,
@@ -132,20 +133,28 @@ class _State extends State<StockistsOverviewScreen> {
   // Which card's DNA-tag ▾ is currently expanded (only one at a time).
   String? _expandedDnaDesignId;
 
-  // This design's DNA tags grouped by attribute name, for the card's
-  // expandable ▾ section. Reuses the already-loaded facet catalog/values.
+  // This design's DNA tags as parent › child breadcrumb chains grouped by the
+  // root attribute, for the card's ▾ section. (project_dna_cascade_mapping)
   Map<String, List<String>> _dnaTagsFor(String designId) {
     final vals = _dnaValues[designId];
     if (vals == null || vals.isEmpty) return const {};
-    final out = <String, List<String>>{};
-    for (final attr in _dnaAttrs) {
-      for (final v in attr.values) {
-        if (v.name.toLowerCase() != 'none' && vals.contains(v.id)) {
-          (out[attr.name] ??= []).add(v.name);
-        }
+    final tags = <DnaTag>[];
+    for (final a in _dnaAttrs) {
+      var vs = 0;
+      for (final v in a.values) {
+        final vs0 = vs++;
+        if (v.name.toLowerCase() == 'none' || !vals.contains(v.id)) continue;
+        tags.add(DnaTag(
+          valueId: v.id,
+          label: v.name,
+          attribute: a.name,
+          parentValueId: v.parentValueId,
+          attrSort: a.sortOrder,
+          valSort: vs0,
+        ));
       }
     }
-    return out;
+    return buildDnaChainMap(tags);
   }
 
   // Search match against a design's DNA tags (canonical name only — a buyer
