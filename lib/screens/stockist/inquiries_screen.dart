@@ -185,7 +185,7 @@ class _State extends State<InquiriesScreen> {
         backgroundColor: _navy,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
-        label: const Text('Add Order'),
+        label: const Text('Add Order from Stock'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

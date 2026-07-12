@@ -257,7 +257,7 @@ class _State extends State<StockistAddOrderScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: Text(_isEdit ? 'Edit Order' : 'New Order'),
+        title: Text(_isEdit ? 'Edit Order' : 'Add Order from Stock'),
         actions: [
           if (!_loading)
             TextButton.icon(

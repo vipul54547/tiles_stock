@@ -2015,7 +2015,7 @@ class _State extends State<StockistDashboardScreen> {
             }),
             const Divider(height: 1),
             _sheetItem(ctx, Icons.post_add_outlined, const Color(0xFF2E7D32),
-                'Add Order', 'Create an order yourself', () async {
+                'Add Order from Stock', 'Create an order yourself', () async {
               // The order screen pops its `{id, token, connection_code}` map on
               // save — NOT a bool. Pushing as <bool> threw a cast error the
               // moment it popped. (inquiries_screen pushes it as <Map> already.)
