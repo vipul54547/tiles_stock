@@ -3077,33 +3077,37 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
               onNo: () => _answerSurfaceInPdf(false)),
         ]);
 
+      // Surface is part of the design's identity, so there is no "save them all as None"
+      // any more — a tile always has a surface. Since the PDF doesn't carry one, the whole
+      // list must take one. That is the normal case for a stockist who makes a single
+      // surface (and never writes it in the design name).
       case _AskStep.surfaceChoice:
         return ListView(children: [
-          _askHeading('Is the whole list one surface?'),
-          _askHelp('Since the surface isn’t in the PDF, choose one finish for every '
-              'design, or save them all as “None” and set surfaces later.'),
+          _askHeading('Which surface is this whole list?'),
+          _askHelp('The PDF doesn’t show a surface, so every design in it will be saved '
+              'with the one you pick here. A tile always has a surface — it is part of '
+              'the design. You can change any of them afterwards in your Library.'),
           const SizedBox(height: 16),
-          _bigChoice('Yes — one surface for all designs', _singleSurface,
-              () => setState(() => _singleSurface = true)),
-          _bigChoice('No — save them all as “None”', !_singleSurface,
-              () => setState(() => _singleSurface = false)),
-          if (_singleSurface)
-            Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: DropdownButtonFormField<String>(
-                initialValue: _surfaceOptions.contains(_singleSurfaceValue)
-                    ? _singleSurfaceValue
-                    : 'None',
-                decoration: const InputDecoration(
-                    labelText: 'Surface for all',
-                    border: OutlineInputBorder()),
-                items: _surfaceOptions
-                    .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                    .toList(),
-                onChanged: (v) =>
-                    setState(() => _singleSurfaceValue = v ?? 'None'),
-              ),
+          DropdownButtonFormField<String>(
+            initialValue: _surfaceOptions.contains(_singleSurfaceValue)
+                ? _singleSurfaceValue
+                : null,
+            decoration: InputDecoration(
+              labelText: 'Surface for all',
+              border: const OutlineInputBorder(),
+              errorText: _surfaceOptions.contains(_singleSurfaceValue)
+                  ? null
+                  : 'Pick a surface',
             ),
+            hint: const Text('Pick a surface'),
+            items: _surfaceOptions
+                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                .toList(),
+            onChanged: (v) => setState(() {
+              _singleSurface = true;
+              _singleSurfaceValue = v ?? _singleSurfaceValue;
+            }),
+          ),
         ]);
     }
   }
@@ -3495,8 +3499,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
                   if (_surfacePresent)
                     Expanded(
                       child: DropdownButtonFormField<String>(
-                        initialValue:
-                            _surfaceOptions.contains(r.surface) ? r.surface : 'None',
+                        initialValue: _surfaceOptions.contains(r.surface)
+                            ? r.surface
+                            : null, // no 'None' fallback — a surface must be picked
                         isExpanded: true,
                         decoration: const InputDecoration(
                             isDense: true,
@@ -3520,7 +3525,11 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     );
   }
 
-  List<String> get _surfaceOptions => ['None', ..._finishes];
+  /// **'None' is not offered.** A tile always has a surface, and it is part of the
+  /// product's identity — importing a 'None' would create a phantom product beside the
+  /// real one. The DB now refuses it outright (stockist_library_surface_not_none).
+  /// `_finishes` comes from getSurfaceTypes(activeOnly: true), and 'None' is deactivated.
+  List<String> get _surfaceOptions => _finishes;
 
   Widget _doneBody() {
     return Padding(

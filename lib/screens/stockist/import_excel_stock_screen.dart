@@ -1427,7 +1427,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         } else if (_finishes.contains(r.surfaceRaw.trim())) {
           r.surface = r.surfaceRaw.trim();
         } else {
-          r.surface = _finishes.contains('None') ? 'None' : (_finishes.isNotEmpty ? _finishes.first : 'None');
+          // An unmapped word can no longer fall back to 'None' — a tile always has a
+          // surface, and the DB refuses 'None'. Fall back to the first active finish; the
+          // Map-Finishes step is where the human corrects it.
+          r.surface = _finishes.isNotEmpty ? _finishes.first : '';
         }
       }
     }
@@ -2822,8 +2825,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // Each field writes the canonical value onto the raw field and re-resolves.
   Widget _rowEditor(_XlsRow r) {
     final id = identityHashCode(r);
-    final surfOpts =
-        _finishes.contains('None') ? _finishes : <String>['None', ..._finishes];
+    // No 'None': a tile always has a surface, and it is part of the product's identity.
+    final surfOpts = _finishes;
     const qualities = ['Premium', 'Standard'];
     InputDecoration dec(String label) => InputDecoration(
         isDense: true,
@@ -2896,9 +2899,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               child: DropdownButtonFormField<String>(
                 key: ValueKey('sf_$id'),
                 initialValue:
-                    surfOpts.contains(r.surface) ? r.surface : 'None',
+                    surfOpts.contains(r.surface) ? r.surface : null,
                 isExpanded: true,
                 decoration: dec('Surface'),
+                hint: const Text('Pick', style: TextStyle(fontSize: 12)),
                 items: surfOpts
                     .map((s) => DropdownMenuItem(
                         value: s,
@@ -2908,7 +2912,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     ? null
                     : (v) {
                         if (v == null) return;
-                        r.surfaceRaw = v == 'None' ? '' : v;
+                        r.surfaceRaw = v;
                         r.surface = v;
                         _reResolve(r);
                       },
