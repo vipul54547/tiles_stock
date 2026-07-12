@@ -67,14 +67,15 @@ class _ManageRegistrationRequestsScreenState
       ),
     );
     if (ok != true) return;
-    final done = await _dataSvc.rejectRegistrationRequest(r['id'] as String);
-    if (!mounted) return;
-    if (done) {
-      _load();
-    } else {
+    try {
+      await _dataSvc.rejectRegistrationRequest(r['id'] as String);
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not reject the request.')));
+          SnackBar(content: Text('Could not reject the request: $e')));
+      return;
     }
+    if (mounted) _load();
   }
 
   Future<void> _approve(Map<String, dynamic> r) async {

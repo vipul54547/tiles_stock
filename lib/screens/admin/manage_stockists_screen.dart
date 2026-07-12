@@ -119,14 +119,15 @@ class _ManageStockistsScreenState extends State<ManageStockistsScreen> {
   }
 
   Future<void> _toggleActive(Stockist s, bool active) async {
-    final ok = await _dataSvc.setStockistActive(s.id, active);
-    if (!mounted) return;
-    if (ok) {
-      _load();
-    } else {
+    try {
+      await _dataSvc.setStockistActive(s.id, active);
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not update status.')));
+          SnackBar(content: Text('Could not update status: $e')));
+      return;
     }
+    if (mounted) _load();
   }
 
   @override

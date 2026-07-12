@@ -116,7 +116,22 @@ Future<bool> confirmToggleStockistInGroup(
     g.stockistIds.remove(stockistId);
   }
   if (g.id != null) {
-    await SupabaseDataService().setGroupMembers(g.id!, g.stockistIds.toList());
+    try {
+      await SupabaseDataService().setGroupMembers(g.id!, g.stockistIds.toList());
+    } catch (e) {
+      // The save failed, so the group did NOT change — put the member back
+      // rather than showing a membership that only exists on this device.
+      if (adding) {
+        g.stockistIds.remove(stockistId);
+      } else {
+        g.stockistIds.add(stockistId);
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not update the group: $e')));
+      }
+      return false;
+    }
   }
   return true;
 }
@@ -158,8 +173,18 @@ class _State extends State<StockistGroupScreen> {
   Color _colorFor(int i) => _groupColors[i % _groupColors.length];
 
   // Persist a group's members to the DB (after any add/remove/clear/toggle).
-  void _persistMembers(StockistGroup g) {
-    if (g.id != null) _service.setGroupMembers(g.id!, g.stockistIds.toList());
+  // Reloads from the server on failure so the screen can't keep showing a
+  // membership that was never saved.
+  Future<void> _persistMembers(StockistGroup g) async {
+    if (g.id == null) return;
+    try {
+      await _service.setGroupMembers(g.id!, g.stockistIds.toList());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save the group: $e')));
+      _load();
+    }
   }
 
   Future<void> _createGroup() async {
@@ -171,7 +196,15 @@ class _State extends State<StockistGroupScreen> {
               initialName: '', title: 'New Group', showPresets: true),
     );
     if (!mounted || name == null || name.trim().isEmpty) return;
-    final id = await _service.createGroup(name.trim());
+    final String? id;
+    try {
+      id = await _service.createGroup(name.trim());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not create the group: $e')));
+      return;
+    }
     if (!mounted) return;
     setState(() {
       stockistGroups.add(StockistGroup(name.trim(), id: id));
@@ -199,7 +232,16 @@ class _State extends State<StockistGroupScreen> {
       ),
     );
     if (ok != true) return;
-    if (g.id != null) await _service.deleteGroup(g.id!);
+    if (g.id != null) {
+      try {
+        await _service.deleteGroup(g.id!);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not delete the group: $e')));
+        return; // still on the server — leave it on screen
+      }
+    }
     if (!mounted) return;
     setState(() {
       stockistGroups.removeAt(index);
@@ -210,6 +252,7 @@ class _State extends State<StockistGroupScreen> {
   void _renameGroup(int index) async {
     if (blockIfGuest(context, feature: 'Groups')) return;
     final g = stockistGroups[index];
+    final was = g.name;
     final newName = await showDialog<String>(
       context: context,
       builder: (ctx) => _RenameGroupDialog(initialName: g.name),
@@ -217,7 +260,15 @@ class _State extends State<StockistGroupScreen> {
     if (!mounted) return;
     if (newName != null && newName.isNotEmpty) {
       setState(() => g.name = newName);
-      if (g.id != null) _service.renameGroup(g.id!, newName);
+      if (g.id == null) return;
+      try {
+        await _service.renameGroup(g.id!, newName);
+      } catch (e) {
+        if (!mounted) return;
+        setState(() => g.name = was); // the rename never landed
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not rename the group: $e')));
+      }
     }
   }
 

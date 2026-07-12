@@ -306,39 +306,41 @@ class _State extends State<AddEditStockScreen> {
 
     setState(() => _saving = true);
 
-    bool ok;
-    if (isEdit) {
-      // Quality + which lists this design is published in (membership). Quantity
-      // is changed via Recount; identity is edited in the Library.
-      ok = await _service.updateDesign(widget.designId!, {'quality': _quality});
-      if (ok) {
+    try {
+      if (isEdit) {
+        // Quality + which lists this design is published in (membership). Quantity
+        // is changed via Recount; identity is edited in the Library.
+        await _service.updateDesign(widget.designId!, {'quality': _quality});
         await _service.setDesignLists(widget.designId!, _memberIds.toList());
         final cQty = int.tryParse(_controlCtrl.text.trim()) ?? 0;
         await _service.setControlQuantities(
             [(id: widget.designId!, controlQuantity: cQty)]);
+      } else {
+        final master = _selectedMaster!;
+        await _service.addDesign(
+          libraryId:    master.id,
+          quality:      _quality,
+          boxQuantity:  int.tryParse(_qtyCtrl.text) ?? 0,
+          catalogId:    _catalogId, // publishes the design into this list (membership)
+          brandId:      _isM ? _designBrandId : null, // M: stock is per-brand
+          surface:      master.surfaceType,
+        );
       }
-    } else {
-      final master = _selectedMaster!;
-      final id = await _service.addDesign(
-        libraryId:    master.id,
-        quality:      _quality,
-        boxQuantity:  int.tryParse(_qtyCtrl.text) ?? 0,
-        catalogId:    _catalogId, // publishes the design into this list (membership)
-        brandId:      _isM ? _designBrandId : null, // M: stock is per-brand
-        surface:      master.surfaceType,
-      );
-      ok = id != null;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _snack('Could not save: $e', Colors.red);
+      return;
     }
 
     if (!mounted) return;
     setState(() {
       _saving = false;
-      if (ok) _dirty = false;
+      _dirty  = false;
     });
 
-    _snack(ok ? 'Design saved.' : 'Failed to save. Please try again.',
-        ok ? Colors.green : Colors.red);
-    if (ok) context.pop();
+    _snack('Design saved.', Colors.green);
+    context.pop();
   }
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -366,15 +368,22 @@ class _State extends State<AddEditStockScreen> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _saving = true);
-    final ok = await _service.deleteDesign(widget.designId!);
+    try {
+      await _service.deleteDesign(widget.designId!);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _snack('Delete failed: $e', Colors.red);
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _saving = false;
-      if (ok) _dirty = false;
+      _dirty  = false;
     });
 
-    _snack(ok ? 'Design deleted.' : 'Delete failed.', ok ? Colors.green : Colors.red);
-    if (ok) context.pop();
+    _snack('Design deleted.', Colors.green);
+    context.pop();
   }
 
   void _snack(String msg, Color color) {

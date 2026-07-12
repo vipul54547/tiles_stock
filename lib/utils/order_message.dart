@@ -12,6 +12,7 @@ typedef OrderLine = ({
 ///   Order Request
 ///   Order: INQ 1234        <- only if [orderNo] given
 ///   [C-4B0712]             <- only if [connectionCode] given
+///   *NOTE ...*             <- only if [note] given (no order was saved)
 ///                          <- blank line
 ///   *300x450*  *Glossy*    <- bold size + surface header
 ///   PRM-10-Alaska White
@@ -25,10 +26,15 @@ typedef OrderLine = ({
 /// Each design row is `PRM-`/`STD-` + `qty-` + design name. Designs are grouped
 /// by (size + surface); a fresh bold header prints whenever either changes.
 /// No greeting, no "powered by" footer.
+///
+/// [note] is for the one case where the buyer's order could NOT be saved: the
+/// message still carries every line so the stockist can fulfil it, but there is
+/// no order number to open in the app, so the note tells them to add it by hand.
 String buildOrderMessage(
   List<OrderLine> lines, {
   String? orderNo,
   String? connectionCode,
+  String? note,
 }) {
   // Group by (size + surface), preserving first-seen order.
   final order = <String>[];
@@ -53,6 +59,9 @@ String buildOrderMessage(
   }
   if (connectionCode != null && connectionCode.trim().isNotEmpty) {
     b.writeln('[${connectionCode.trim()}]');
+  }
+  if (note != null && note.trim().isNotEmpty) {
+    b.writeln('*${note.trim()}*');
   }
 
   var total = 0;

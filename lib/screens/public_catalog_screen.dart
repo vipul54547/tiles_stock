@@ -552,14 +552,23 @@ class _State extends State<PublicCatalogScreen> {
     final name = (_stockist['name'] ?? '').toString();
     // Turn a selection into a real saved order so the stockist can manage it;
     // the returned connection code goes into the message as the shared handle.
+    // If that fails we still send — the message carries every design and
+    // quantity, so the stockist can fulfil it by hand — but both sides are told
+    // the order was not recorded, instead of a message with a blank order no.
     Map<String, dynamic>? order;
+    var unsaved = false;
     if (_selected.isNotEmpty) {
-      order = await _svc.createWebOrder(
-        widget.token,
-        _selected.entries
-            .map((e) => {'design_id': e.key, 'quantity': e.value})
-            .toList(),
-      );
+      try {
+        order = await _svc.createWebOrder(
+          widget.token,
+          _selected.entries
+              .map((e) => {'design_id': e.key, 'quantity': e.value})
+              .toList(),
+        );
+      } catch (_) {
+        order = null;
+      }
+      unsaved = order == null;
     }
 
     final String msg;
@@ -579,7 +588,19 @@ class _State extends State<PublicCatalogScreen> {
               quality: (d['quality'] ?? '').toString(),
               qty: _selected['${d['id']}']!,
             ),
-      ], orderNo: ot, connectionCode: code);
+      ],
+          orderNo: ot,
+          connectionCode: code,
+          note: unsaved
+              ? 'NOTE: This order did not reach the app. '
+                  'Please add it manually and confirm with the buyer.'
+              : null);
+    }
+    if (unsaved && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Order not saved — your message still goes through. '
+              'Your supplier will confirm it with you.'),
+          backgroundColor: Color(0xFFE65100)));
     }
     // Record this link enquiry (which catalog/visibility, selected designs) so
     // the stockist/admin can see demand coming via links. Best-effort.

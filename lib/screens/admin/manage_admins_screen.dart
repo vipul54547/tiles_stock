@@ -140,14 +140,15 @@ class _ManageAdminsScreenState extends State<ManageAdminsScreen> {
   }
 
   Future<void> _toggleActive(Map<String, dynamic> a, bool active) async {
-    final ok = await _dataSvc.setAdminActive(a['id'] as String, active);
-    if (!mounted) return;
-    if (ok) {
-      _load();
-    } else {
+    try {
+      await _dataSvc.setAdminActive(a['id'] as String, active);
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not update status.')));
+          SnackBar(content: Text('Could not update status: $e')));
+      return;
     }
+    if (mounted) _load();
   }
 
   @override

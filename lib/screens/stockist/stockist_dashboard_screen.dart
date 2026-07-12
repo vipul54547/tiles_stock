@@ -180,12 +180,23 @@ class _State extends State<StockistDashboardScreen> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _loading = true);
+    // Delete every selected design even if one fails, then report the first
+    // failure — a half-finished loop must still leave the list consistent.
+    Object? failure;
     for (final id in List<String>.from(_selectedIds)) {
-      await _service.deleteDesign(id);
+      try {
+        await _service.deleteDesign(id);
+      } catch (e) {
+        failure ??= e;
+      }
     }
     _selectMode = false;
     _selectedIds.clear();
     await _load();
+    if (!mounted || failure == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Some designs could not be deleted: $failure'),
+        backgroundColor: Colors.red.shade700));
   }
 
   Future<void> _load() async {
@@ -1650,7 +1661,16 @@ class _State extends State<StockistDashboardScreen> {
   // resolving (find-or-create) its Library master first. Refreshes the dots on
   // close so the just-tagged design updates immediately.
   Future<void> _openDnaForDesign(TileDesign d) async {
-    final libId = await _service.libraryEnsureForDesign(d.id);
+    final String? libId;
+    try {
+      libId = await _service.libraryEnsureForDesign(d.id);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not open Design DNA: $e'),
+          backgroundColor: Colors.red.shade700));
+      return;
+    }
     if (!mounted) return;
     if (libId == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

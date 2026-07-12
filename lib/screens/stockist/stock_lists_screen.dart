@@ -281,24 +281,42 @@ class _StockListsScreenState extends State<StockListsScreen> {
       return;
     }
     setState(() => _busy = true);
-    final token = await _data.createCatalogShareLinkDays(c.id, days);
+    String? token;
+    Object? failure;
+    try {
+      token = await _data.createCatalogShareLinkDays(c.id, days);
+    } catch (e) {
+      failure = e;
+    }
     _links.remove(c.id); // force reload
     await _ensureLinks(c.id);
     if (!mounted) return;
     setState(() => _busy = false);
-    if (token == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Could not create link — try again')));
+    if (failure != null || token == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(failure == null
+              ? 'Could not create link — try again'
+              : 'Could not create link: $failure')));
     }
   }
 
   Future<void> _deleteLink(StockCatalog c, ShareLink l) async {
     if (l.id == null) return;
     setState(() => _busy = true);
-    await _data.revokeShareLink(l.id!);
+    Object? failure;
+    try {
+      await _data.revokeShareLink(l.id!);
+    } catch (e) {
+      failure = e;
+    }
     _links.remove(c.id);
     await _ensureLinks(c.id);
-    if (mounted) setState(() => _busy = false);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (failure != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not revoke the link: $failure')));
+    }
   }
 
   // Per-list banner: open the full layout editor (source / logo·name / position),
@@ -404,15 +422,27 @@ class _StockListsScreenState extends State<StockListsScreen> {
         return;
       }
       setState(() => _busy = true);
+      // Keep going if one list fails — the rest still get their link — then
+      // report, rather than aborting the loop with _busy stuck on.
+      Object? failure;
       for (final c in _lists) {
-        final token = await _data.createCatalogShareLinkDays(c.id, days);
-        if (token != null) {
-          entries.add('${c.name}: ${AppConfig.shareBaseUrl}/s/$token');
+        try {
+          final token = await _data.createCatalogShareLinkDays(c.id, days);
+          if (token != null) {
+            entries.add('${c.name}: ${AppConfig.shareBaseUrl}/s/$token');
+          }
+        } catch (e) {
+          failure ??= e;
         }
         _links.remove(c.id); // force reload of that list's links
       }
       if (_openId != null) await _ensureLinks(_openId!);
-      if (mounted) setState(() => _busy = false);
+      if (!mounted) return;
+      setState(() => _busy = false);
+      if (failure != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Some links could not be created: $failure')));
+      }
     }
     if (entries.isEmpty) return;
     final body = entries.join('\n');

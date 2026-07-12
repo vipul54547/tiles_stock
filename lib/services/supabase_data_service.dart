@@ -398,9 +398,8 @@ class SupabaseDataService {
         'p_brand_id':   brandId,
       });
       return res?.toString();
-    } catch (e, st) {
-      debugPrint('SupabaseDataService.addDesign failed ($libraryId): $e\n$st');
-      return null;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -434,33 +433,28 @@ class SupabaseDataService {
 
   /// Sets exactly which lists a design is published in (membership). Only the
   /// caller's own eligible lists are affected. (stocklist-output)
-  Future<bool> setDesignLists(String designId, List<String> catalogIds) async {
+  Future<void> setDesignLists(String designId, List<String> catalogIds) async {
     try {
       await supabase.rpc('set_design_lists',
           params: {'p_design_id': designId, 'p_catalog_ids': catalogIds});
-      return true;
-    } catch (e, st) {
-      debugPrint('setDesignLists failed ($designId): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  Future<bool> updateDesign(String designId, Map<String, dynamic> data) async {
+  Future<void> updateDesign(String designId, Map<String, dynamic> data) async {
     try {
       await supabase.from('designs').update(data).eq('id', designId);
-      return true;
-    } catch (e, st) {
-      debugPrint('SupabaseDataService.updateDesign failed ($designId): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  Future<bool> deleteDesign(String designId) async {
+  Future<void> deleteDesign(String designId) async {
     try {
       await supabase.from('designs').delete().eq('id', designId);
-      return true;
-    } catch (_) {
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -476,9 +470,8 @@ class SupabaseDataService {
       final res = await supabase.rpc('create_web_order',
           params: {'p_token': token, 'p_lines': lines});
       return res == null ? null : Map<String, dynamic>.from(res as Map);
-    } catch (e, st) {
-      debugPrint('createWebOrder failed: $e\n$st');
-      return null;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -1794,7 +1787,6 @@ class SupabaseDataService {
 
   /// Find-or-create the Library master id for a stock design (so the dashboard
   /// DNA dot can open the editor even for designs not yet in the Library).
-  /// Returns null on failure.
   Future<String?> libraryEnsureForDesign(String designId) async {
     try {
       final res = await supabase
@@ -1802,8 +1794,7 @@ class SupabaseDataService {
       final id = res?.toString() ?? '';
       return id.isEmpty ? null : id;
     } catch (e) {
-      debugPrint('libraryEnsureForDesign failed: $e');
-      return null;
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -2165,40 +2156,35 @@ class SupabaseDataService {
 
   /// Creates a timed link for one catalog. [duration] is one of
   /// '1week','1month','3month','6month','1year' (Permanent is always-on, not
-  /// created here). Returns true on success.
-  Future<bool> createCatalogShareLink(String catalogId, String duration) async {
+  /// created here).
+  Future<void> createCatalogShareLink(String catalogId, String duration) async {
     try {
       await supabase.rpc('create_catalog_share_link',
           params: {'p_catalog_id': catalogId, 'p_duration': duration});
-      return true;
-    } catch (e, st) {
-      debugPrint('createCatalogShareLink($catalogId,$duration) failed: $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
   /// Creates a timed link for one stock list valid for [days] days. Returns the
-  /// new token on success, or null on failure.
+  /// new token.
   Future<String?> createCatalogShareLinkDays(String catalogId, int days) async {
     try {
       final res = await supabase.rpc('create_catalog_share_link_days',
           params: {'p_catalog_id': catalogId, 'p_days': days});
       final map = res is Map ? Map<String, dynamic>.from(res) : null;
       return map?['token'] as String?;
-    } catch (e, st) {
-      debugPrint('createCatalogShareLinkDays($catalogId,$days) failed: $e\n$st');
-      return null;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
   /// Revokes (deactivates) one of the calling stockist's create-on-demand links.
-  Future<bool> revokeShareLink(String id) async {
+  Future<void> revokeShareLink(String id) async {
     try {
       await supabase.rpc('revoke_share_link', params: {'p_id': id});
-      return true;
-    } catch (e, st) {
-      debugPrint('revokeShareLink($id) failed: $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -2246,16 +2232,14 @@ class SupabaseDataService {
   }
 
   /// Activate / deactivate a stockist by its display (sequential) ID.
-  Future<bool> setStockistActive(String sequentialId, bool active) async {
+  Future<void> setStockistActive(String sequentialId, bool active) async {
     try {
       await supabase
           .from('stockists')
           .update({'is_active': active})
           .eq('sequential_id', sequentialId);
-      return true;
-    } catch (e, st) {
-      debugPrint('setStockistActive failed ($sequentialId): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -2407,16 +2391,14 @@ class SupabaseDataService {
   }
 
   /// Activate / deactivate an end user by its row UUID.
-  Future<bool> setEndUserActive(String uuid, bool active) async {
+  Future<void> setEndUserActive(String uuid, bool active) async {
     try {
       await supabase
           .from('end_users')
           .update({'is_active': active})
           .eq('id', uuid);
-      return true;
-    } catch (e, st) {
-      debugPrint('setEndUserActive failed ($uuid): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -3053,7 +3035,8 @@ class SupabaseDataService {
     }
   }
 
-  /// Creates an empty group; returns its new id (or null on failure).
+  /// Creates an empty group; returns its new id. Null only for a guest (no
+  /// signed-in end user) — a real failure throws.
   Future<String?> createGroup(String name) async {
     if (currentEndUserId.isEmpty) return null;
     try {
@@ -3063,45 +3046,38 @@ class SupabaseDataService {
         'stockist_ids': <String>[],
       }).select().single();
       return row['id'] as String?;
-    } catch (e, st) {
-      debugPrint('createGroup failed: $e\n$st');
-      return null;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  Future<bool> renameGroup(String id, String name) async {
+  Future<void> renameGroup(String id, String name) async {
     try {
       await supabase.from('stockist_groups').update({
         'name': name,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', id);
-      return true;
-    } catch (e, st) {
-      debugPrint('renameGroup failed ($id): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  Future<bool> setGroupMembers(String id, List<String> stockistIds) async {
+  Future<void> setGroupMembers(String id, List<String> stockistIds) async {
     try {
       await supabase.from('stockist_groups').update({
         'stockist_ids': stockistIds,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', id);
-      return true;
-    } catch (e, st) {
-      debugPrint('setGroupMembers failed ($id): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
-  Future<bool> deleteGroup(String id) async {
+  Future<void> deleteGroup(String id) async {
     try {
       await supabase.from('stockist_groups').delete().eq('id', id);
-      return true;
-    } catch (e, st) {
-      debugPrint('deleteGroup failed ($id): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -3168,13 +3144,11 @@ class SupabaseDataService {
   }
 
   /// Admin: reject (delete) a request.
-  Future<bool> rejectRegistrationRequest(String id) async {
+  Future<void> rejectRegistrationRequest(String id) async {
     try {
       await supabase.rpc('reject_registration_request', params: {'p_id': id});
-      return true;
-    } catch (e, st) {
-      debugPrint('rejectRegistrationRequest failed ($id): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -3210,14 +3184,12 @@ class SupabaseDataService {
 
   /// Activate / deactivate a sub-admin by UUID (super-admin only; the super
   /// admin itself cannot be deactivated — enforced server-side).
-  Future<bool> setAdminActive(String uuid, bool active) async {
+  Future<void> setAdminActive(String uuid, bool active) async {
     try {
       await supabase.rpc('set_admin_active',
           params: {'p_uuid': uuid, 'p_active': active});
-      return true;
-    } catch (e, st) {
-      debugPrint('setAdminActive failed ($uuid): $e\n$st');
-      return false;
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 
@@ -3544,8 +3516,8 @@ class SupabaseDataService {
           'display_text': entry.value,
         }, onConflict: 'stockist_id,raw_text');
       }
-    } catch (e, stk) {
-      debugPrint('setSurfaceWords failed ("$surfaceName"): $e\n$stk');
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 

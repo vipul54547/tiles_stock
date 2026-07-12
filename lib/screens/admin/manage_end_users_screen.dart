@@ -104,14 +104,15 @@ class _ManageEndUsersScreenState extends State<ManageEndUsersScreen> {
   }
 
   Future<void> _toggleActive(EndUser u, bool active) async {
-    final ok = await _dataSvc.setEndUserActive(u.uuid, active);
-    if (!mounted) return;
-    if (ok) {
-      _load();
-    } else {
+    try {
+      await _dataSvc.setEndUserActive(u.uuid, active);
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not update status.')));
+          SnackBar(content: Text('Could not update status: $e')));
+      return;
     }
+    if (mounted) _load();
   }
 
   @override
