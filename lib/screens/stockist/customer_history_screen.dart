@@ -245,23 +245,40 @@ class _CustomerHistoryState extends State<CustomerHistoryScreen> {
                   Text(where,
                       style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
                 ],
-                if (phone.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(
-                      child: Text('$cc $phone',
-                          style: const TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w600)),
-                    ),
-                    _iconBtn(Icons.copy, 'Copy', () => _copy('$cc $phone')),
+                // WhatsApp + Copy are always offered — with no saved number,
+                // WhatsApp opens so the stockist can pick a contact, and Copy
+                // copies the name. Only Call truly needs a number.
+                // ([[feedback_copy_when_no_whatsapp]])
+                const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                    child: Text(
+                        phone.isNotEmpty
+                            ? '$cc $phone'
+                            : 'No number saved',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: phone.isNotEmpty
+                                ? Colors.black
+                                : Colors.grey.shade500)),
+                  ),
+                  _iconBtn(
+                      Icons.copy,
+                      'Copy',
+                      () => _copy(phone.isNotEmpty
+                          ? '$cc $phone'
+                          : (cust['name'] ?? widget.customerName).toString())),
+                  if (phone.isNotEmpty)
                     _iconBtn(Icons.call, 'Call',
                         () => _launch(Uri.parse('tel:$cc$phone'))),
-                    _iconBtn(Icons.chat, 'WhatsApp', () {
-                      final digits = '$cc$phone'.replaceAll(RegExp(r'[^0-9]'), '');
-                      _launch(Uri.parse('https://wa.me/$digits'));
-                    }),
-                  ]),
-                ],
+                  _iconBtn(Icons.chat, 'WhatsApp', () {
+                    final digits = '$cc$phone'.replaceAll(RegExp(r'[^0-9]'), '');
+                    _launch(Uri.parse(digits.isEmpty
+                        ? 'https://wa.me/'
+                        : 'https://wa.me/$digits'));
+                  }),
+                ]),
               ],
             ),
           ),

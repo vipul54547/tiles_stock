@@ -41,6 +41,7 @@ dependencies:
   excel: ^4.0.6
   syncfusion_flutter_pdf: ^28.1.33
   syncfusion_flutter_xlsio: ^28.1.33   # generates the downloadable stock template (real dropdowns)
+  printing: ^5.13.4   # print a dispatch note + share/save it as PDF (syncfusion builds it)
   image: ^4.3.0
   image_picker: ^1.1.2
   pdfx: ^2.6.0   # on-device PDF page rasteriser (pdfium) for the crop fallback

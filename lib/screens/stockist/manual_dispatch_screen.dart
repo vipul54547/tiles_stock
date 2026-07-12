@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:printing/printing.dart';
+import '../../config/app_config.dart';
+import '../../utils/dispatch_pdf.dart';
 import '../../models/tile_design.dart';
 import '../../models/brand.dart';
 import '../../models/choice_state.dart';
@@ -91,6 +94,7 @@ class _State extends State<ManualDispatchScreen> {
   List<Brand> _brands = [];
   bool _customersEnabled = false;
   List<Map<String, dynamic>> _customers = [];
+  String _stockistName = ''; // for the printed dispatch note header
 
   // Attached order (null = walk-in dispatch).
   InquiryOrder? _order;
@@ -158,6 +162,7 @@ class _State extends State<ManualDispatchScreen> {
       _brands = brands;
       _customersEnabled = enabled;
       _customers = customers;
+      _stockistName = (profile?['name'] ?? '').toString();
       _loading = false;
     });
 
@@ -723,8 +728,14 @@ class _State extends State<ManualDispatchScreen> {
       final status = (res['status'] ?? '').toString();
       final outstanding = (res['outstanding'] as num?)?.toInt() ?? 0;
 
+      final noteId = (res['note_id'] ?? '').toString();
       final report = _buildReport(no, sent, total, outstanding, status);
-      await _showReportSheet(report, status, outstanding: outstanding);
+      await _showReportSheet(report, status,
+          outstanding: outstanding,
+          noteId: noteId,
+          sent: sent,
+          total: total,
+          dispatchNo: no);
       if (!mounted) return;
 
       if (Navigator.of(context).canPop()) {
@@ -1065,103 +1076,193 @@ class _State extends State<ManualDispatchScreen> {
     return b.toString();
   }
 
-  /// Preview the report, then Copy (always) or WhatsApp (only with a number).
-  /// ([[feedback_copy_when_no_whatsapp]])
+  /// The order's outstanding note, for the printed / shared dispatch.
+  String _balanceLine(String status, int outstanding) {
+    if (_order == null || outstanding <= 0) return '';
+    return status == 'completed'
+        ? 'Remaining $outstanding boxes: not included — please place a new order '
+            'if you still need them.'
+        : 'Balance $outstanding boxes: reserved for you, coming in a later dispatch.';
+  }
+
+  /// The dispatch note as printable PDF bytes.
+  Future<Uint8List> _dispatchPdfBytes(
+      List<_Line> sent, int total, String dispatchNo, String status,
+      int outstanding) async {
+    final bytes = await buildDispatchPdf(DispatchPdfData(
+      stockistName: _stockistName,
+      who: _order != null ? _buyerLabel : _custNameCtrl.text.trim(),
+      dispatchNo: dispatchNo,
+      date: _fmtDate(_date),
+      invoice: _invoiceCtrl.text.trim(),
+      vehicle: _vehicleCtrl.text.trim(),
+      transporter: _transporterCtrl.text.trim(),
+      note: _noteCtrl.text.trim(),
+      lines: [
+        for (final l in sent)
+          DispatchPdfLine(
+            name: l.d.name,
+            size: l.d.size,
+            surface: l.d.hasSurface ? l.d.surfaceCardLabel : '',
+            quality: l.d.quality,
+            boxes: l.qty,
+          )
+      ],
+      total: total,
+      balanceLine: _balanceLine(status, outstanding),
+    ));
+    return Uint8List.fromList(bytes);
+  }
+
+  /// Preview the report, then act on it: Copy, WhatsApp, Print, PDF, Send Link.
+  /// WhatsApp is offered even with NO saved number — it opens WhatsApp to pick a
+  /// contact. Only Call needs a number. ([[feedback_copy_when_no_whatsapp]])
   ///
   /// [outstanding] separates the two ways an order reaches 'completed': nothing
   /// left (finished) versus closed short with boxes released.
   Future<void> _showReportSheet(String report, String status,
-      {int outstanding = 0}) async {
+      {int outstanding = 0,
+      String noteId = '',
+      List<_Line> sent = const [],
+      int total = 0,
+      String dispatchNo = ''}) async {
     final (code, phone) = _reportPhone;
     final hasPhone = phone.trim().isNotEmpty;
     final digits = '$code$phone'.replaceAll(RegExp(r'[^0-9]'), '');
+
+    // WhatsApp the given text — to the number if we have one, else open WhatsApp
+    // so the stockist can choose a contact.
+    Future<void> whatsApp(String text) async {
+      final uri = hasPhone
+          ? Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(text)}')
+          : Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-            16, 16, 16, 16 + MediaQuery.of(ctx).viewPadding.bottom),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
-              const SizedBox(width: 8),
-              Text(
-                  status != 'completed'
-                      ? 'Dispatch recorded'
-                      : outstanding > 0
-                          ? 'Order closed · $outstanding released'
-                          : 'Order completed',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 16)),
-            ]),
-            const SizedBox(height: 10),
-            Text(
-                _order != null
-                    ? 'Dispatch report for the buyer:'
-                    : 'Dispatch report:',
-                style: const TextStyle(fontSize: 12.5)),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              constraints: const BoxConstraints(maxHeight: 260),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.grey.shade200),
-              ),
-              child: SingleChildScrollView(
-                child: Text(report,
-                    style: const TextStyle(fontSize: 12.5, height: 1.5)),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await Clipboard.setData(ClipboardData(text: report));
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    if (mounted) _snack('Report copied — paste it into your chat.');
-                  },
-                  icon: const Icon(Icons.copy, size: 18),
-                  label: const Text('Copy report'),
-                  style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 13)),
-                ),
-              ),
-              if (hasPhone) ...[
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      final uri = Uri.parse(
-                          'https://wa.me/$digits?text=${Uri.encodeComponent(report)}');
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    },
-                    icon: const Icon(Icons.chat_rounded, size: 18),
-                    label: const Text('WhatsApp'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                    ),
+      builder: (ctx) {
+        bool busy = false;
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          Future<void> guard(Future<void> Function() body) async {
+            if (busy) return;
+            setSheet(() => busy = true);
+            try {
+              await body();
+            } catch (e) {
+              if (mounted) _snack('$e', _red);
+            } finally {
+              if (ctx.mounted) setSheet(() => busy = false);
+            }
+          }
+
+          Widget act(IconData icon, String label, Color color,
+                  Future<void> Function() onTap) =>
+              OutlinedButton.icon(
+                onPressed: busy ? null : () => guard(onTap),
+                icon: Icon(icon, size: 18, color: color),
+                label: Text(label, style: TextStyle(color: color)),
+                style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: color.withValues(alpha: 0.5)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 11)),
+              );
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+                16, 16, 16, 16 + MediaQuery.of(ctx).viewPadding.bottom),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                        status != 'completed'
+                            ? 'Dispatch recorded'
+                            : outstanding > 0
+                                ? 'Order closed · $outstanding released'
+                                : 'Order completed',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
+                  ),
+                ]),
+                const SizedBox(height: 10),
+                Text(
+                    _order != null
+                        ? 'Dispatch report for the buyer:'
+                        : 'Dispatch report:',
+                    style: const TextStyle(fontSize: 12.5)),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(report,
+                        style: const TextStyle(fontSize: 12.5, height: 1.5)),
                   ),
                 ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    act(Icons.copy, 'Copy', _navy, () async {
+                      await Clipboard.setData(ClipboardData(text: report));
+                      if (mounted) _snack('Report copied.');
+                    }),
+                    act(Icons.chat_rounded, 'WhatsApp',
+                        const Color(0xFF25D366), () => whatsApp(report)),
+                    act(Icons.print_outlined, 'Print', _navy, () async {
+                      final bytes = await _dispatchPdfBytes(
+                          sent, total, dispatchNo, status, outstanding);
+                      await Printing.layoutPdf(onLayout: (_) async => bytes);
+                    }),
+                    act(Icons.picture_as_pdf_outlined, 'PDF', _red, () async {
+                      final bytes = await _dispatchPdfBytes(
+                          sent, total, dispatchNo, status, outstanding);
+                      await Printing.sharePdf(
+                          bytes: bytes,
+                          filename:
+                              'dispatch_${dispatchNo.isEmpty ? 'note' : dispatchNo}.pdf');
+                    }),
+                    act(Icons.link, 'Send link', const Color(0xFF00838F),
+                        () async {
+                      if (noteId.isEmpty) {
+                        if (mounted) _snack('No link for this dispatch.', _red);
+                        return;
+                      }
+                      final token = await _svc.createDispatchLink(noteId);
+                      if (token == null || token.isEmpty) return;
+                      final url = '${AppConfig.shareBaseUrl}/d/$token';
+                      await Clipboard.setData(ClipboardData(text: url));
+                      await whatsApp('Dispatch details:\n$url');
+                      if (mounted) _snack('Link copied & WhatsApp opened.');
+                    }),
+                  ],
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Done')),
+                ),
               ],
-            ]),
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Done')),
-          ],
-        ),
-      ),
+            ),
+          );
+        });
+      },
     );
   }
 
