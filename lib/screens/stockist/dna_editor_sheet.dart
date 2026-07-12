@@ -65,8 +65,19 @@ class _DnaEditorState extends State<_DnaEditor> {
     if (!mounted) return;
     setState(() {
       // Free-text attributes (e.g. Range) are edited as typed chips; the rest
-      // pick canonical values (dropdown / check-chips).
-      _attrs = attrs.toList();
+      // pick canonical values (dropdown / check-chips). Order each dependent
+      // (child) attribute right after its parent so the cascade reads top-down.
+      final sorted = attrs.toList();
+      double keyOf(DnaAttribute a) {
+        if (a.parentAttributeId == null) return a.sortOrder.toDouble();
+        final p = attrs.where((z) => z.id == a.parentAttributeId);
+        return (p.isEmpty ? a.sortOrder : p.first.sortOrder) + 0.5;
+      }
+      sorted.sort((x, y) {
+        final c = keyOf(x).compareTo(keyOf(y));
+        return c != 0 ? c : x.sortOrder.compareTo(y.sortOrder);
+      });
+      _attrs = sorted;
       _myWords = words;
       _selected
         ..clear()
@@ -85,13 +96,46 @@ class _DnaEditorState extends State<_DnaEditor> {
   }
 
   // The label shown for a value: the stockist's first own word for it, else the
-  // admin's canonical name.
-  String _label(DnaValue v) {
+  // admin's canonical name. When mapping is OFF, always the admin name.
+  String _label(DnaAttribute a, DnaValue v) {
+    if (!a.allowMapping) return v.name;
     final words = _myWords[v.id];
     return (words != null && words.isNotEmpty) ? words.first : v.name;
   }
 
   bool _isNone(DnaValue v) => v.name.toLowerCase() == 'none';
+
+  DnaAttribute? _attr(String? id) {
+    if (id == null) return null;
+    for (final a in _attrs) {
+      if (a.id == id) return a;
+    }
+    return null;
+  }
+
+  // The parent value chosen on THIS design for a dependent attribute (null = the
+  // stockist hasn't picked the parent yet, so the child stays gated).
+  String? _parentValueOf(DnaAttribute child) {
+    final pid = child.parentAttributeId;
+    if (pid == null) return null;
+    final sel = _selected[pid];
+    return (sel != null && sel.isNotEmpty) ? sel.first : null;
+  }
+
+  // When a parent value changes, its children no longer apply — clear them.
+  void _clearChildrenOf(DnaAttribute parent) {
+    for (final child in _attrs.where((x) => x.parentAttributeId == parent.id)) {
+      if (child.isFreeText) {
+        if (_freeTexts[child.id]?.isNotEmpty ?? false) {
+          setState(() => _freeTexts[child.id] = []);
+          _saveFreeText(child);
+        }
+      } else if (_selected[child.id]?.isNotEmpty ?? false) {
+        setState(() => _selected[child.id]!.clear());
+        _save(child);
+      }
+    }
+  }
 
   Future<void> _save(DnaAttribute a) async {
     setState(() => _saving = true);
@@ -111,11 +155,15 @@ class _DnaEditorState extends State<_DnaEditor> {
 
   // Single-pick dropdown: null = None (clears the attribute on this design).
   void _pickSingle(DnaAttribute a, String? valueId) {
+    final old =
+        (_selected[a.id]?.isNotEmpty ?? false) ? _selected[a.id]!.first : null;
     setState(() {
       final sel = _selected[a.id]!..clear();
       if (valueId != null) sel.add(valueId);
     });
     _save(a);
+    // If this attribute is a parent and its value changed, reset its children.
+    if (old != valueId) _clearChildrenOf(a);
   }
 
   // Multi-pick (Colour) check-chips.
@@ -235,6 +283,28 @@ class _DnaEditorState extends State<_DnaEditor> {
     // Own-naming single-pick attributes (e.g. Series): no admin mapping, the
     // stockist creates + manages their own value list.
     final isOwnSingle = a.isFreeText && !a.isMulti;
+
+    // Dependent (child) attribute: gate it behind its parent value.
+    final parentName = a.isDependent ? _attr(a.parentAttributeId)?.name : null;
+    final parentVal = a.isDependent ? _parentValueOf(a) : null;
+    final gated = a.isDependent && parentVal == null;
+
+    Widget content;
+    if (gated) {
+      content = _gatedPlaceholder(parentName ?? 'parent');
+    } else if (isOwnSingle) {
+      content = _singleFreeTextPicker(a);
+    } else if (a.isFreeText) {
+      content = _freeTextEditor(a);
+    } else {
+      // Value-list: for a child, only the values under the chosen parent value.
+      final opts = a.values
+          .where((v) =>
+              !_isNone(v) && (!a.isDependent || v.parentValueId == parentVal))
+          .toList();
+      content = a.isMulti ? _multiChips(a, opts) : _singleDropdown(a, opts);
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Column(
@@ -242,16 +312,24 @@ class _DnaEditorState extends State<_DnaEditor> {
         children: [
           Row(
             children: [
-              Text(a.name,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 13.5)),
+              Flexible(
+                child: Text(a.name,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 13.5)),
+              ),
               const SizedBox(width: 6),
+              if (parentName != null)
+                Text('↳ $parentName',
+                    style: const TextStyle(
+                        fontSize: 10.5,
+                        color: Color(0xFF00838F),
+                        fontWeight: FontWeight.w600)),
               if (a.isMulti)
                 Text('(pick any)',
                     style:
                         TextStyle(fontSize: 10.5, color: Colors.grey.shade500)),
               const Spacer(),
-              if (isOwnSingle)
+              if (isOwnSingle && !gated)
                 InkWell(
                   onTap: () => _manageOwnValues(a),
                   child: Padding(
@@ -263,15 +341,30 @@ class _DnaEditorState extends State<_DnaEditor> {
             ],
           ),
           const SizedBox(height: 6),
-          isOwnSingle
-              ? _singleFreeTextPicker(a)
-              : (a.isFreeText
-                  ? _freeTextEditor(a)
-                  : (a.isMulti ? _multiChips(a) : _singleDropdown(a))),
+          content,
         ],
       ),
     );
   }
+
+  Widget _gatedPlaceholder(String parentName) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(children: [
+          Icon(Icons.subdirectory_arrow_right,
+              size: 16, color: Colors.grey.shade500),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Choose $parentName first',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+          ),
+        ]),
+      );
 
   Future<void> _manageOwnValues(DnaAttribute a) async {
     await Navigator.push(
@@ -418,11 +511,10 @@ class _DnaEditorState extends State<_DnaEditor> {
   }
 
   // Single-pick → dropdown; the leading "None" entry clears the attribute.
-  Widget _singleDropdown(DnaAttribute a) {
-    final options = a.values.where((v) => !_isNone(v)).toList();
+  Widget _singleDropdown(DnaAttribute a, List<DnaValue> options) {
     final sel = _selected[a.id] ?? const {};
     final current = sel.isEmpty ? null : sel.first;
-    // Guard against a stored value that's no longer in the active catalog.
+    // Guard against a stored value that's no longer in the active/filtered list.
     final value =
         options.any((v) => v.id == current) ? current : null;
     return DropdownButtonFormField<String?>(
@@ -445,7 +537,7 @@ class _DnaEditorState extends State<_DnaEditor> {
         ),
         ...options.map((v) => DropdownMenuItem<String?>(
               value: v.id,
-              child: Text(_label(v),
+              child: Text(_label(a, v),
                   style: const TextStyle(fontSize: 13.5),
                   overflow: TextOverflow.ellipsis),
             )),
@@ -455,16 +547,15 @@ class _DnaEditorState extends State<_DnaEditor> {
   }
 
   // Multi-pick (Colour) → check-chips.
-  Widget _multiChips(DnaAttribute a) {
+  Widget _multiChips(DnaAttribute a, List<DnaValue> options) {
     final sel = _selected[a.id] ?? const {};
-    final options = a.values.where((v) => !_isNone(v)).toList();
     return Wrap(
       spacing: 7,
       runSpacing: 7,
       children: options.map((v) {
         final on = sel.contains(v.id);
         return FilterChip(
-          label: Text(_label(v)),
+          label: Text(_label(a, v)),
           selected: on,
           showCheckmark: true,
           selectedColor: _navy.withValues(alpha: 0.15),
