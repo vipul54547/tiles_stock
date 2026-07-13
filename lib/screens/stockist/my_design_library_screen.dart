@@ -239,9 +239,6 @@ class _State extends State<MyDesignLibraryScreen> {
         surfaceType: box.surfaceType,
         stockType: box.stockType,
         tileType: box.tileType,
-        piecesPerBox: box.piecesPerBox,
-        boxWeightKg: box.boxWeightKg,
-        thicknessMm: box.thicknessMm,
         colour: box.colour,
         finishLabel: box.finishLabel,
       );
@@ -2130,9 +2127,6 @@ class _EditorState extends State<_LibraryEditorScreen> {
         surfaceType: dup.surfaceType,
         stockType: dup.stockType,
         tileType: dup.tileType,
-        piecesPerBox: dup.piecesPerBox,
-        boxWeightKg: dup.boxWeightKg,
-        thicknessMm: dup.thicknessMm,
         colour: dup.colour,
         finishLabel: dup.finishLabel,
       );
