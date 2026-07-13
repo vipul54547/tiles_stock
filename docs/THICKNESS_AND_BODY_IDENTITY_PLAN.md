@@ -72,7 +72,13 @@ instead of rejecting (which deadlocks: each brand's correction is blocked by the
 ## Steps
 
 1. **`thickness_options`** admin table (like `tile_types`, so it extends without a deploy).
-   Seed: `5, 6, 7, 8, 9, 10, 12, 15, 16, 18, 20` mm. ⚠️ **User to correct the edges.**
+   **The list is 0.5 mm BANDS: `4.0–4.5` … `19.5–20.0` (32 bands).** The stored number is the band's
+   **LOW EDGE**; it displays as `8.5–9.0 mm`.
+   > My first seed was round "nominal" figures (`5, 6, 7, 8, …`). **The user corrected it to bands**,
+   > and he is right: a real tile is **8.86 mm, not 9 mm**, so a band is what can honestly be
+   > declared. It also makes the suggestion *exact* — the bands tile the range, so a derived figure
+   > falls in exactly ONE band. That is not a rounding; it is the band the figure is already in.
+
    → new public table = revoke `anon` write ([[feedback_new_public_table_anon_grants]]).
 2. `stockist_library.nominal_thickness_mm` (nullable at first — see backfill).
    `tile_type` → **NOT NULL** (already 100% populated: Porcelain 702 / PGVT & GVT 141 / Ceramic 87).

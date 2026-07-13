@@ -98,6 +98,10 @@ class _XlsRow {
   // confused with the thickness DERIVED from weight, which is only evidence.
   // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
   double? thicknessRaw;
+  // The Thickness cell exactly as written. An EMPTY cell may be pre-filled from the box weight;
+  // a cell that was FILLED but unreadable must ERROR — silently replacing a typo with a derived
+  // guess would put a wrong value in the identity key.
+  String thicknessCell = '';
 
   String? error;          // non-null → invalid, skipped from import
   String size = '';       // canonical master size (after validation)
@@ -139,6 +143,7 @@ class _XlsRow {
     required this.pieces,
     required this.weight,
     this.thicknessRaw,
+    this.thicknessCell = '',
   });
 
   bool get valid => error == null;
@@ -186,12 +191,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // Thickness is part of product identity, so the stockist PICKS it from a dropdown rather than
   // typing a figure — a free number would make 8 and 8.0 two products.
   // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
-  List<String> get _thicknessStrings => [
-        for (final mm in thicknessOptions)
-          mm == mm.roundToDouble()
-              ? mm.toStringAsFixed(0)
-              : mm.toStringAsFixed(1),
-      ];
+  List<String> get _thicknessStrings =>
+      [for (final mm in thicknessOptions) thicknessLabel(mm)];
   List<String> _sizes = kAllowedSizes;
   List<TileSize> _tileSizes = []; // full size rows (with inch/feet aliases)
   String? _brandId; // chosen brand — upload fills P_Stock for it (no list target)
@@ -731,7 +732,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final sizeRaw = cell(row, 'size');
       final surfaceRaw = cell(row, 'surface');
       final tileType = cell(row, 'tiletype');
-      final thickRaw = double.tryParse(cell(row, 'thickness').trim());
+      final thickCell = cell(row, 'thickness').trim();
+      final thickRaw = parseDeclaredThickness(thickCell);
       final colour = cell(row, 'colour');
       final pieces = _toInt(cell(row, 'pieces'));
       final weight = _toDouble(cell(row, 'weight'));
@@ -780,6 +782,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           surfaceRaw: surfaceRaw,
           tileType: tileType,
           thicknessRaw: thickRaw,
+          thicknessCell: thickCell,
           colour: colour,
           qty: part.qty,
           pieces: pieces,
@@ -929,8 +932,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (catCol >= 0 && a.surface.isEmpty) a.surface = cellAt(row, catCol).trim();
       // Take the first non-empty identity value seen across the design's batch.
       if (ttCol >= 0 && a.tileType.isEmpty) a.tileType = cellAt(row, ttCol).trim();
-      if (thCol >= 0 && a.thickness == null) {
-        a.thickness = double.tryParse(cellAt(row, thCol).trim());
+      if (thCol >= 0 && a.thicknessCell.isEmpty) {
+        a.thicknessCell = cellAt(row, thCol).trim();
+        a.thickness = parseDeclaredThickness(a.thicknessCell);
       }
       if (pcCol >= 0 && a.pieces == null) a.pieces = _toInt(cellAt(row, pcCol));
       if (wtCol >= 0 && a.weight == null) a.weight = _toDouble(cellAt(row, wtCol));
@@ -951,6 +955,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           surfaceRaw: a.surface,
           tileType: a.tileType,
           thicknessRaw: a.thickness,
+          thicknessCell: a.thicknessCell,
           colour: '',
           qty: qty,
           pieces: a.pieces,
@@ -1055,7 +1060,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final sizeRaw   = cellAt(row, sizeCol);
       final surfRaw   = surfCol >= 0 ? cellAt(row, surfCol) : '';
       final tileType  = ttCol >= 0  ? cellAt(row, ttCol)  : '';
-      final thickRaw  = thCol >= 0  ? double.tryParse(cellAt(row, thCol).trim()) : null;
+      final thickCell = thCol >= 0  ? cellAt(row, thCol).trim() : '';
+      final thickRaw  = parseDeclaredThickness(thickCell);
       final pieces    = pcCol >= 0  ? _toInt(cellAt(row, pcCol))    : null;
       final weight    = wtCol >= 0  ? _toDouble(cellAt(row, wtCol)) : null;
 
@@ -1085,6 +1091,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           surfaceRaw: surfRaw,
           tileType: tileType,
           thicknessRaw: thickRaw,
+          thicknessCell: thickCell,
           colour: '',
           qty: part.qty,
           pieces: pieces,
@@ -1176,7 +1183,8 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final sizeRaw      = cellAt(row, sizeCol);
       final surfRaw      = surfCol >= 0 ? cellAt(row, surfCol) : '';
       final tileType     = ttCol >= 0 ? cellAt(row, ttCol) : '';
-      final thickRaw     = thCol >= 0 ? double.tryParse(cellAt(row, thCol).trim()) : null;
+      final thickCell    = thCol >= 0 ? cellAt(row, thCol).trim() : '';
+      final thickRaw     = parseDeclaredThickness(thickCell);
       final pieces       = pcCol >= 0 ? _toInt(cellAt(row, pcCol)) : null;
       final weight       = wtCol >= 0 ? _toDouble(cellAt(row, wtCol)) : null;
 
@@ -1209,6 +1217,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           surfaceRaw: surfRaw,
           tileType: tileType,
           thicknessRaw: thickRaw,
+          thicknessCell: thickCell,
           colour: '',
           qty: part.qty,
           pieces: pieces,
@@ -1485,21 +1494,22 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         r.tileType = '';
       }
 
-      // Thickness: identity, so a figure the stockist WROTE must be one of the fixed nominals — an
-      // unrecognised one is rejected rather than rounded, because a wrong value in the identity key
-      // is worse than a blank.
-      if (r.thicknessRaw != null && !thicknessOptions.contains(r.thicknessRaw)) {
-        r.error = "Thickness '${r.thicknessRaw}' is not one of "
-            '${thicknessOptions.map((m) => thicknessLabel(m)).join(', ')}';
+      // Thickness is identity, so a value the stockist WROTE and we cannot read is an ERROR — never
+      // quietly ignored. Falling through to the pre-fill below would replace their typo with a
+      // derived guess and stamp a wrong value into the identity key.
+      if (r.thicknessCell.isNotEmpty && r.thicknessRaw == null) {
+        r.error = "Thickness '${r.thicknessCell}' is not one of "
+            '${thicknessOptions.first.toStringAsFixed(1)}–'
+            '${(thicknessOptions.last + 0.5).toStringAsFixed(1)} mm';
         continue;
       }
-      // Not written? They already gave pieces + box weight, and the body type is known — so PROPOSE
-      // the nominal those imply rather than ask for the same fact twice. nearestThicknessOption
-      // proposes nothing when the derivation lands nowhere near a real tile, so a nonsense box
-      // weight leaves the row undeclared (and the server then ADOPTS an existing library row)
-      // rather than stamping a confident wrong thickness into the key.
+      // Cell left EMPTY? They already gave pieces + box weight, and the body type is known — so
+      // propose the band those imply rather than ask for the same fact twice. thicknessBandFor
+      // proposes nothing when the derivation lands outside 4–20 mm, so a nonsense box weight leaves
+      // the row undeclared (the server then ADOPTS an existing library row) instead of declaring a
+      // wrong thickness.
       if (r.thicknessRaw == null && r.tileType.isNotEmpty) {
-        r.thicknessRaw = nearestThicknessOption(approxThicknessMm(
+        r.thicknessRaw = thicknessBandFor(approxThicknessMm(
             r.size, r.pieces ?? 0, r.weight ?? 0, r.tileType));
       }
 
@@ -3081,6 +3091,7 @@ class _EntryAgg {
   double? weight;
   // The DECLARED nominal thickness (identity), if the sheet carries a Thickness column.
   double? thickness;
+  String thicknessCell = '';
   final Set<String> brandIds = {};
   _EntryAgg({required this.name, required this.size});
 }

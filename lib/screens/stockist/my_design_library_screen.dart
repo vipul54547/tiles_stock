@@ -2054,7 +2054,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
           ? e.nominalThicknessMm
           : null;
       if (_thickness == null) {
-        _thickness = nearestThicknessOption(e.thicknessMm);
+        _thickness = thicknessBandFor(e.thicknessMm);
         _thicknessSuggested = _thickness != null;
       }
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';

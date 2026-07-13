@@ -52,26 +52,52 @@ void main() {
     });
   });
 
-  // The stockist already types pieces + box weight, so the app PROPOSES the nominal rather than
-  // asking for the same fact twice. It is only a proposal: the derivation is unreliable (all 258
-  // Porcelain 600x600 derive to exactly 7.99mm), and identity may never be recomputed from a box.
-  group('nearestThicknessOption — proposes, and knows when NOT to', () {
-    test('snaps a derived figure to the nominal it plainly means', () {
-      expect(nearestThicknessOption(7.99), 8);   // the Porcelain artifact -> 8 mm
-      expect(nearestThicknessOption(8.40), 8);
-      expect(nearestThicknessOption(8.86), 9);
-      expect(nearestThicknessOption(9.75), 10);
-      expect(nearestThicknessOption(10.63), 10);
+  // The DECLARED thickness is a 0.5 mm BAND (4.0–4.5 … 19.5–20.0), not a round number: a real tile
+  // is 8.86 mm, not 9 mm. Because the bands tile the range, a figure lands in exactly ONE band —
+  // so proposing it is not a rounding, it is the band that figure is already in.
+  group('thicknessBandFor — the band a measured figure is IN', () {
+    test('places a derived figure in its band', () {
+      expect(thicknessBandFor(7.99), 7.5);   // the Porcelain artifact
+      expect(thicknessBandFor(8.86), 8.5);
+      expect(thicknessBandFor(9.30), 9.0);
+      expect(thicknessBandFor(8.50), 8.5);   // a boundary opens its band
+      expect(thicknessBandFor(4.08), 4.0);   // now IN range — 4.0 is a real band
     });
 
-    test('proposes NOTHING when the derivation lands nowhere near a real tile', () {
-      // 4.1mm on an 800x1600 is not a tile — it is a bad box weight. Better to leave the row
-      // undeclared (the server then adopts an existing product) than to stamp a confident wrong
-      // thickness into the identity key.
-      expect(nearestThicknessOption(3.0), isNull);
-      expect(nearestThicknessOption(13.6), isNull);
-      expect(nearestThicknessOption(null), isNull);
-      expect(nearestThicknessOption(0), isNull);
+    test('proposes NOTHING outside the declarable range', () {
+      // Below 4 mm or at/above 20 mm is not a tile — it is a bad box weight. Better to leave the
+      // row undeclared (the server then adopts an existing product) than to declare a wrong one.
+      expect(thicknessBandFor(3.9), isNull);
+      expect(thicknessBandFor(20.0), isNull);
+      expect(thicknessBandFor(null), isNull);
+      expect(thicknessBandFor(0), isNull);
+    });
+
+    test('reads back as the band, not a bare figure', () {
+      expect(thicknessLabel(8.5), '8.5–9.0 mm');
+      expect(thicknessLabel(4.0), '4.0–4.5 mm');
+      expect(thicknessLabel(19.5), '19.5–20.0 mm');
+    });
+  });
+
+  // What a stockist can plausibly write in the sheet: the band as offered, or a bare measurement.
+  group('parseDeclaredThickness — reads what they wrote', () {
+    test('accepts the band as the template offers it', () {
+      expect(parseDeclaredThickness('8.5–9.0 mm'), 8.5);
+      expect(parseDeclaredThickness('8.5-9.0'), 8.5);
+    });
+
+    test('accepts a bare measurement and places it in its band', () {
+      expect(parseDeclaredThickness('8.86'), 8.5);
+      expect(parseDeclaredThickness('9'), 9.0);
+      expect(parseDeclaredThickness(' 10 mm '), 10.0);
+    });
+
+    test('refuses what it cannot read — the caller must ERROR, not guess', () {
+      expect(parseDeclaredThickness(''), isNull);
+      expect(parseDeclaredThickness('thick'), isNull);
+      expect(parseDeclaredThickness('25'), isNull);  // not a tile
+      expect(parseDeclaredThickness('2'), isNull);
     });
   });
 

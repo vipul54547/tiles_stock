@@ -71,16 +71,20 @@ Don't infer a function's signature from its call site.
   (`pieces_per_box`, `box_weight_kg`). One print under two brands packs two ways, independently.
   `library_set_box` is the **only** writer of the packing.
 - 📏 **THICKNESS — two columns, do not confuse them:**
-  - **`nominal_thickness_mm` — DECLARED**, from the fixed `thickness_options` list (a free number
-    would make `8` and `8.0` two products). **This is IDENTITY and this is the truth.** Show it
-    exactly: **`8 mm`**. Buyers filter on it exactly.
+  - **`nominal_thickness_mm` — DECLARED**, from the fixed `thickness_options` list. **This is
+    IDENTITY and this is the truth.** The list is **0.5 mm BANDS** — `4.0–4.5` … `19.5–20.0` (32).
+    The stored number is the band's **LOW EDGE**; display it as **`8.5–9.0 mm`**. A band, not a
+    round figure, because a real tile is **8.86 mm, not 9 mm**. One number per band keeps it a
+    clean key — `8` and `8.0` can never become two products.
   - **`thickness_mm` — DERIVED** from the BOX by trigger (`weight / (pieces × area × density)`).
     **EVIDENCE ONLY** — it validates the declaration and warns on mismatch. **It is NOT identity.**
     Unknown is `NULL`, never `0` (a tile is never 0 mm thick).
   - 🔑 **Why declared, not derived:** the BOX hangs off the PRODUCT, so a derived value in the
     identity key would mean **editing a box weight silently changes which product it is**.
-  - ⚠️ **SUPERSEDED:** ~~"thickness is always derived, never typed"~~ and ~~"always show the 0.5 mm
-    BAND"~~. The band existed *only* because the number was fuzzy; a declared nominal is not.
+  - 💡 The app **PROPOSES** the band from pieces + box weight + body (`thicknessBandFor`) so the
+    stockist confirms rather than enters the same fact twice — but it **never stores it silently**,
+    and it proposes **nothing** outside 4–20 mm (that is a bad box weight, not a thin tile).
+  - ⚠️ **SUPERSEDED:** ~~"thickness is always derived, never typed"~~ — it is **declared**.
 - ⚠️ A product with **no box spec** resolves `pieces_per_box` / `box_weight_kg` to **NULL**
   (`_box_pieces` / `_box_weight`). Dart lands those on **`0`**, which every display site already
   reads as "unknown" and hides. Parse defensively — a bare `json['pieces_per_box']` crashes.
