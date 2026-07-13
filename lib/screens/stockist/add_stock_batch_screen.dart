@@ -87,6 +87,11 @@ class _State extends State<AddStockBatchScreen> {
   /// surface_label; its admin canonical (via _canonicalOf) is stored as
   /// surface_type. (project_per_brand_surface_mode)
   String _selSurfaceLabel = '';
+  /// 🔑 THIS batch's box, when the stockist says these boxes are packed differently. Set in the
+  /// form BEFORE Add, because that is when they are looking at the box. Null = same as always.
+  /// Whether it becomes a new stock line is the 1 mm rule's decision, not theirs.
+  int? _selBoxPieces;
+  double? _selBoxWeight;
   final _qtyCtrl = TextEditingController();
 
   // Desktop entry bar: one focus node per field, so Tab walks Brand → Design →
@@ -351,6 +356,8 @@ class _State extends State<AddStockBatchScreen> {
   void _onDesignChosen(LibraryEntry chosen) {
     setState(() {
       _selMaster = chosen;
+      _selBoxPieces = null;   // the override belonged to the previous design
+      _selBoxWeight = null;
       // For M, default the brand to the master's own brand if none picked.
       if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
         _selBrandId = chosen.brandId;
@@ -451,6 +458,9 @@ class _State extends State<AddStockBatchScreen> {
   void _resetRow() {
     _selMaster = null;
     _qtyCtrl.clear();
+    // The box override belongs to the design that was just added — never carry it onto the next.
+    _selBoxPieces = null;
+    _selBoxWeight = null;
     // brand + quality + surface kept for faster repeated entry.
   }
 
@@ -482,6 +492,8 @@ class _State extends State<AddStockBatchScreen> {
       surface: _surfaceForEntry,
       surfaceLabel: _labelForEntry,
       qty: qty,
+      boxPieces: _selBoxPieces,
+      boxWeightKg: _selBoxWeight,
     );
     final idx = _entries.indexWhere((x) => x.key == e.key);
     if (idx >= 0) {
@@ -1156,13 +1168,49 @@ class _State extends State<AddStockBatchScreen> {
               onTap: _pickDesign,
               placeholder: _selMaster == null,
             ),
-            // Size belongs to the print — shown, never typed.
+            // Size and SURFACE belong to the print — shown, never typed. Both are part of what
+            // makes this tile this tile, so the stockist can see at a glance which one they picked.
             if (_selMaster != null) ...[
               const SizedBox(height: 8),
-              Row(children: [
+              Wrap(spacing: 6, runSpacing: 6, children: [
                 _autoChip(
                     Icons.straighten, _selMaster!.size.replaceAll(' mm', '')),
+                if (_selSurfaceOfMaster.isNotEmpty)
+                  _autoChip(Icons.texture, _selSurfaceOfMaster),
+                if (_selMaster!.thicknessMm != null)
+                  _autoChip(Icons.height,
+                      thicknessBandLabel(_selMaster!.thicknessMm) ?? ''),
               ]),
+              const SizedBox(height: 6),
+              // 🔑 The ONLY place a different packing can be reported. They open Add stock (not
+              // Add design) for a tile they already have, so this is where they notice the boxes
+              // are packed differently. They enter what is ON the box; the 1 mm rule decides
+              // whether it becomes a separate stock line.
+              InkWell(
+                onTap: _editSelBox,
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Text(
+                    _selBoxPieces != null && _selBoxWeight != null
+                        ? 'This batch: $_selBoxPieces pcs · '
+                            '${_trimKg(_selBoxWeight!)} kg  (tap to change)'
+                        : 'Different pieces or box weight?',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: _selBoxPieces != null
+                          ? FontWeight.w600
+                          : FontWeight.normal,
+                      color: _selBoxPieces != null
+                          ? Colors.teal.shade700
+                          : _navy.withValues(alpha: 0.8),
+                      decoration: _selBoxPieces != null
+                          ? TextDecoration.none
+                          : TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ),
             ],
             // Attribute → required pick; in_name → optional (may tag a surface).
             if (_selShowSurface) ...[
@@ -1370,38 +1418,131 @@ class _State extends State<AddStockBatchScreen> {
   static String _trimKg(double v) =>
       v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 
-  /// "This batch's boxes are packed differently." They enter what is ON the box — pieces and
-  /// weight — and nothing else. Whether that makes a new product is the server's 1 mm rule to
-  /// decide, not theirs: within 1 mm it is ordinary drift and the stock joins this same design.
-  Future<void> _editBox(_Entry e) async {
-    final box = e.master.boxes[e.brandId ?? e.master.brandId];
+  /// The selected design's own surface, as the stockist's own word where they have one.
+  String get _selSurfaceOfMaster {
+    final m = _selMaster;
+    if (m == null) return '';
+    final word = m.surfaceLabel.trim();
+    final canon = m.surfaceType.trim();
+    if (word.isEmpty || word.toLowerCase() == canon.toLowerCase()) return canon;
+    return '$word ($canon)';
+  }
+
+  /// What WILL happen if this box is used — worked out with the same rule the server applies, so
+  /// the stockist is told before they commit, never surprised after.
+  ///
+  /// Within 1 mm of a design they already have → the SAME tile (box weights drift). Beyond it →
+  /// a genuinely different tile, which becomes its own stock line.
+  ({bool forks, String verdict, String? band}) _boxVerdict(int pcs, double kg) {
+    final m = _selMaster!;
+    final mm = approxThicknessMm(m.size, pcs, kg, m.tileType);
+    if (mm == null) {
+      return (
+        forks: false,
+        verdict: 'Enter the pieces and box weight.',
+        band: null
+      );
+    }
+    // every product of this same print + size + surface + body
+    final siblings = _masters.where((o) =>
+        o.masterName.toLowerCase() == m.masterName.toLowerCase() &&
+        o.size == m.size &&
+        o.surfaceType == m.surfaceType &&
+        o.tileType == m.tileType &&
+        o.thicknessMm != null);
+
+    LibraryEntry? near;
+    for (final o in siblings) {
+      if ((o.thicknessMm! - mm).abs() <= 1.0) {
+        if (near == null ||
+            (o.thicknessMm! - mm).abs() < (near.thicknessMm! - mm).abs()) {
+          near = o;
+        }
+      }
+    }
+    final band = thicknessBandLabel(mm);
+    if (near != null) {
+      final diff = (near.thicknessMm! - mm).abs().toStringAsFixed(2);
+      return (
+        forks: false,
+        verdict: 'Same design — only $diff mm different, which is normal box-weight drift. '
+            'The stock goes on the SAME row.',
+        band: band,
+      );
+    }
+    return (
+      forks: true,
+      verdict: 'This is a different tile — more than 1 mm thicker or thinner. '
+          'It will become a NEW stock line, shown as ($band).',
+      band: band,
+    );
+  }
+
+  /// "These boxes are packed differently." Shows the design's ORIGINAL box, takes the new one,
+  /// works out what it means, and asks before applying it.
+  Future<void> _editSelBox() async {
+    final m = _selMaster;
+    if (m == null) return;
+    final box = m.boxes[(_isM ? _selBrandId : null) ?? m.brandId];
+    final origPcs = box?.pieces ?? m.piecesPerBox;
+    final origKg = box?.weightKg ?? m.boxWeightKg;
+
     final pcsCtrl = TextEditingController(
-        text: '${e.boxPieces ?? (box?.pieces ?? e.master.piecesPerBox)}');
+        text: _selBoxPieces != null ? '$_selBoxPieces' : '');
     final kgCtrl = TextEditingController(
-        text: (e.boxWeightKg ?? box?.weightKg ?? e.master.boxWeightKg) > 0
-            ? _trimKg(e.boxWeightKg ?? box?.weightKg ?? e.master.boxWeightKg)
-            : '');
+        text: _selBoxWeight != null ? _trimKg(_selBoxWeight!) : '');
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) {
-          final pcs = int.tryParse(pcsCtrl.text.trim()) ?? 0;
-          final kg = double.tryParse(kgCtrl.text.trim()) ?? 0;
-          final band = thicknessRangeLabel(
-              e.master.size, pcs, kg, e.master.tileType);
-          return AlertDialog(
-            title: const Text('This batch\'s box'),
-            content: Column(
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        final pcs = int.tryParse(pcsCtrl.text.trim()) ?? 0;
+        final kg = double.tryParse(kgCtrl.text.trim()) ?? 0;
+        final ready = pcs > 0 && kg > 0;
+        final v = ready ? _boxVerdict(pcs, kg) : null;
+
+        return AlertDialog(
+          title: const Text('This batch\'s box'),
+          content: SingleChildScrollView(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Only if these boxes are packed differently from before. '
-                  'The thickness is worked out from them.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                // What this design is packed as TODAY — so they can compare against the box in
+                // front of them rather than remember it.
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Currently',
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade700)),
+                      const SizedBox(height: 3),
+                      Text(
+                        origPcs > 0 && origKg > 0
+                            ? '$origPcs pcs · ${_trimKg(origKg)} kg'
+                                '${m.thicknessMm != null ? '  ·  ${thicknessBandLabel(m.thicknessMm)}' : ''}'
+                            : 'No box recorded yet',
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 12),
+                Text('This batch',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade700)),
+                const SizedBox(height: 6),
                 Row(children: [
                   Expanded(
                     child: TextField(
@@ -1428,59 +1569,63 @@ class _State extends State<AddStockBatchScreen> {
                     ),
                   ),
                 ]),
-                const SizedBox(height: 8),
-                Text(
-                  band == null
-                      ? 'Thickness is worked out from the pieces and box weight.'
-                      : 'Thickness: $band',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight:
-                        band == null ? FontWeight.normal : FontWeight.w600,
-                    color: band == null
-                        ? Colors.grey.shade600
-                        : Colors.teal.shade700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'A small weight change is the same tile — box weights drift. '
-                  'Only a real difference makes a separate design.',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                ),
+                const SizedBox(height: 12),
+                // The answer, BEFORE they commit to it.
+                if (v != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: (v.forks ? Colors.teal : Colors.blueGrey)
+                          .withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Thickness: ${v.band}',
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: v.forks
+                                    ? Colors.teal.shade800
+                                    : Colors.blueGrey.shade800)),
+                        const SizedBox(height: 4),
+                        Text(v.verdict,
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade800)),
+                      ],
+                    ),
+                  )
+                else
+                  Text('Enter the pieces and box weight.',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
               ],
             ),
-            actions: [
-              if (e.hasBoxOverride)
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Same as before'),
-                ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, null),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: (int.tryParse(pcsCtrl.text.trim()) ?? 0) > 0 &&
-                        (double.tryParse(kgCtrl.text.trim()) ?? 0) > 0
-                    ? () => Navigator.pop(ctx, true)
-                    : null,
-                child: const Text('Use this box'),
-              ),
-            ],
-          );
-        },
-      ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Discard'),
+            ),
+            FilledButton(
+              onPressed: ready ? () => Navigator.pop(ctx, true) : null,
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      }),
     );
 
     if (saved == null || !mounted) return;
     setState(() {
       if (saved) {
-        e.boxPieces = int.tryParse(pcsCtrl.text.trim());
-        e.boxWeightKg = double.tryParse(kgCtrl.text.trim());
+        _selBoxPieces = int.tryParse(pcsCtrl.text.trim());
+        _selBoxWeight = double.tryParse(kgCtrl.text.trim());
       } else {
-        e.boxPieces = null; // back to "same as always"
-        e.boxWeightKg = null;
+        _selBoxPieces = null; // discard → back to the design's own box
+        _selBoxWeight = null;
       }
     });
   }
@@ -1512,34 +1657,16 @@ class _State extends State<AddStockBatchScreen> {
                     ].join(' · '),
                     style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
                   ),
-                  // 🔑 The stockist knows when a batch is packed differently — they can see it on
-                  // the box. This is the ONLY place that fact can be reported, because they open
-                  // Add stock (not Add design) for a tile already in the library.
-                  const SizedBox(height: 3),
-                  InkWell(
-                    onTap: () => _editBox(e),
-                    borderRadius: BorderRadius.circular(4),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(
-                        e.hasBoxOverride
-                            ? 'Box: ${e.boxPieces} pcs · ${_trimKg(e.boxWeightKg!)} kg'
-                            : 'Different box weight?',
-                        style: TextStyle(
+                  if (e.hasBoxOverride) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      'This batch: ${e.boxPieces} pcs · ${_trimKg(e.boxWeightKg!)} kg',
+                      style: TextStyle(
                           fontSize: 11,
-                          fontWeight: e.hasBoxOverride
-                              ? FontWeight.w600
-                              : FontWeight.normal,
-                          color: e.hasBoxOverride
-                              ? Colors.teal.shade700
-                              : _navy.withValues(alpha: 0.75),
-                          decoration: e.hasBoxOverride
-                              ? TextDecoration.none
-                              : TextDecoration.underline,
-                        ),
-                      ),
+                          fontWeight: FontWeight.w600,
+                          color: Colors.teal.shade700),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
