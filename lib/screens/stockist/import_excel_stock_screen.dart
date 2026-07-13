@@ -1485,13 +1485,22 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         r.tileType = '';
       }
 
-      // Thickness: identity, so it must be one of the fixed nominals — an unrecognised figure is
-      // rejected rather than rounded, because a wrong value in the identity key is worse than a
-      // blank. Blank is fine: the server then adopts an undeclared library row.
+      // Thickness: identity, so a figure the stockist WROTE must be one of the fixed nominals — an
+      // unrecognised one is rejected rather than rounded, because a wrong value in the identity key
+      // is worse than a blank.
       if (r.thicknessRaw != null && !thicknessOptions.contains(r.thicknessRaw)) {
         r.error = "Thickness '${r.thicknessRaw}' is not one of "
             '${thicknessOptions.map((m) => thicknessLabel(m)).join(', ')}';
         continue;
+      }
+      // Not written? They already gave pieces + box weight, and the body type is known — so PROPOSE
+      // the nominal those imply rather than ask for the same fact twice. nearestThicknessOption
+      // proposes nothing when the derivation lands nowhere near a real tile, so a nonsense box
+      // weight leaves the row undeclared (and the server then ADOPTS an existing library row)
+      // rather than stamping a confident wrong thickness into the key.
+      if (r.thicknessRaw == null && r.tileType.isNotEmpty) {
+        r.thicknessRaw = nearestThicknessOption(approxThicknessMm(
+            r.size, r.pieces ?? 0, r.weight ?? 0, r.tileType));
       }
 
       // Align finish via learned alias (only matters when a finish is given).

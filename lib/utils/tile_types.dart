@@ -68,6 +68,27 @@ void applyThicknessOptions(List<double> mm) {
 /// The nominal thicknesses on offer — the table's once loaded, [kThicknessOptions] until then.
 List<double> get thicknessOptions => _liveThickness;
 
+/// The nominal a DERIVED thickness most likely means — used to PRE-FILL the picker, never to
+/// store silently. The stockist already types pieces + box weight, and the body type is known, so
+/// the app can propose the thickness rather than ask for it twice.
+///
+/// ⚠️ A SUGGESTION, not the truth. The derivation is demonstrably unreliable on real data: all 258
+/// Porcelain 600x600 derive to exactly 7.99 mm (a density artifact), and Ceramic 300x450 derives
+/// 9.3 mm when the trade calls that tile 8 mm. The stockist must be able to override it — and the
+/// stored value is whatever they CONFIRM, because identity may never be recomputed from a box edit.
+/// (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+///
+/// Returns null when [mm] is missing, or when the nearest option is further than [tolerance] away —
+/// a derivation that lands nowhere near a real tile should propose nothing rather than guess.
+double? nearestThicknessOption(double? mm, {double tolerance = 1.0}) {
+  if (mm == null || mm <= 0 || thicknessOptions.isEmpty) return null;
+  var best = thicknessOptions.first;
+  for (final o in thicknessOptions) {
+    if ((o - mm).abs() < (best - mm).abs()) best = o;
+  }
+  return (best - mm).abs() <= tolerance ? best : null;
+}
+
 /// A declared nominal reads exactly — "8 mm", never a band. The 0.5 mm BAND belonged to the
 /// DERIVED figure, which was fuzzy; a declared value is not.
 String thicknessLabel(double? mm) {

@@ -1948,6 +1948,10 @@ class _EditorState extends State<_LibraryEditorScreen> {
   // design and never guessed. Null on the legacy rows that predate CHAPTER 3; editing one of
   // those does not force a value, so an image or name can still be fixed.
   double? _thickness;
+  // True when [_thickness] was PROPOSED from the box weight rather than chosen by the stockist.
+  // The value still saves normally — but the field says so, because the derivation is only
+  // evidence and is wrong often enough that a silent pre-fill would be a lie.
+  bool _thicknessSuggested = false;
   String _stockType = 'Uncertain';
   static const _stockTypes = ['Continuous', 'One Time', 'Uncertain'];
   // True once the user edits the master name by hand — until then it mirrors the
@@ -2043,11 +2047,16 @@ class _EditorState extends State<_LibraryEditorScreen> {
         _aliasCtrls[bid]?.text = name;
       });
       _tileType = tileTypeNames.contains(e.tileType) ? e.tileType : tileTypeNames.first;
-      // Legacy rows predate CHAPTER 3 and carry no declared thickness — leave it blank rather
-      // than guessing one into the identity key.
+      // Declared wins. Otherwise (a legacy row that predates CHAPTER 3) PROPOSE the nominal its
+      // box weight implies, so the stockist confirms rather than re-enters what the app can work
+      // out. Only a proposal — they can change it, and the field says where it came from.
       _thickness = thicknessOptions.contains(e.nominalThicknessMm)
           ? e.nominalThicknessMm
           : null;
+      if (_thickness == null) {
+        _thickness = nearestThicknessOption(e.thicknessMm);
+        _thicknessSuggested = _thickness != null;
+      }
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
       final surf = e.surfaceType.trim();
       _surface = (surf.isEmpty || surf.toLowerCase() == 'none') ? '' : surf;
@@ -2536,9 +2545,14 @@ class _EditorState extends State<_LibraryEditorScreen> {
             labelText: 'Thickness',
             border: const OutlineInputBorder(),
             isDense: true,
-            helperText: widget.existing == null
-                ? 'Part of the design — an 8 mm and a 12 mm are two products.'
-                : (_thickness == null ? 'Not declared yet — please set it.' : null),
+            helperText: _thicknessSuggested
+                ? 'Suggested from the box weight — check it, then save.'
+                : widget.existing == null
+                    ? 'Part of the design — an 8 mm and a 12 mm are two products.'
+                    : (_thickness == null ? 'Not declared yet — please set it.' : null),
+            helperStyle: _thicknessSuggested
+                ? TextStyle(color: Colors.orange.shade800)
+                : null,
           ),
           hint: const Text('Pick a thickness'),
           items: [
@@ -2547,6 +2561,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
           ],
           onChanged: (v) => setState(() {
             _thickness = v ?? _thickness;
+            _thicknessSuggested = false; // they chose it; it is no longer a guess
             _dirty = true;
           }),
         ),

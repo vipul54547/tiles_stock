@@ -52,6 +52,29 @@ void main() {
     });
   });
 
+  // The stockist already types pieces + box weight, so the app PROPOSES the nominal rather than
+  // asking for the same fact twice. It is only a proposal: the derivation is unreliable (all 258
+  // Porcelain 600x600 derive to exactly 7.99mm), and identity may never be recomputed from a box.
+  group('nearestThicknessOption — proposes, and knows when NOT to', () {
+    test('snaps a derived figure to the nominal it plainly means', () {
+      expect(nearestThicknessOption(7.99), 8);   // the Porcelain artifact -> 8 mm
+      expect(nearestThicknessOption(8.40), 8);
+      expect(nearestThicknessOption(8.86), 9);
+      expect(nearestThicknessOption(9.75), 10);
+      expect(nearestThicknessOption(10.63), 10);
+    });
+
+    test('proposes NOTHING when the derivation lands nowhere near a real tile', () {
+      // 4.1mm on an 800x1600 is not a tile — it is a bad box weight. Better to leave the row
+      // undeclared (the server then adopts an existing product) than to stamp a confident wrong
+      // thickness into the identity key.
+      expect(nearestThicknessOption(3.0), isNull);
+      expect(nearestThicknessOption(13.6), isNull);
+      expect(nearestThicknessOption(null), isNull);
+      expect(nearestThicknessOption(0), isNull);
+    });
+  });
+
   group('thicknessBandLabel — always a 0.5 mm range, never a bare number', () {
     test('bands to the 0.5 mm floor, like the generated column', () {
       expect(thicknessBandLabel(8.8), '8.5–9.0 mm');
