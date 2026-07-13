@@ -62,7 +62,6 @@ import 'screens/end_user/my_orders_screen.dart';
 import 'screens/end_user/my_dispatch_screen.dart';
 import 'screens/end_user/my_profile_screen.dart';
 import 'screens/end_user/dispatch_history_screen.dart';
-import 'screens/stockist/upload_stock_screen.dart';
 import 'screens/stockist/import_supplier_pdf_screen.dart';
 import 'screens/stockist/my_design_library_screen.dart';
 import 'screens/stockist/import_mapping_excel_screen.dart';
@@ -202,11 +201,6 @@ final GoRouter _router = GoRouter(
           path: '/stockist/stock/edit/:id',
           builder: (_, state) =>
               AddEditStockScreen(designId: state.pathParameters['id']),
-        ),
-        GoRoute(
-          path: '/stockist/stock/upload',
-          builder: (_, state) =>
-              UploadStockScreen(initialCatalogId: state.extra as String?),
         ),
         GoRoute(
           path: '/stockist/stock/import-supplier-pdf',
