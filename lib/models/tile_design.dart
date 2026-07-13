@@ -38,6 +38,10 @@ class TileDesign {
   /// Null when the product has no box spec yet — a tile is never 0 mm thick.
   /// Derived server-side from the BOX; never typed.
   final double? thicknessMm;
+  /// When the PRODUCT (not this holding) was created. Tells the ORIGINAL of a print from a product
+  /// FORKED off it by a genuinely different thickness — only the fork wears its thickness in
+  /// brackets. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+  final DateTime? libraryCreatedAt;
   final String colour;
   /// Body type (PGVT & GVT, Porcelain, Ceramic, Full Body, DC, Colour Body).
   /// Empty for legacy designs uploaded before this field existed.
@@ -98,6 +102,7 @@ class TileDesign {
     required this.piecesPerBox,
     required this.boxWeightKg,
     required this.thicknessMm,
+    this.libraryCreatedAt,
     required this.colour,
     this.tileType = '',
     required this.faceImageUrls,
@@ -137,6 +142,9 @@ class TileDesign {
         piecesPerBox: (json['pieces_per_box'] as num?)?.toInt() ?? 0,
         boxWeightKg: (json['box_weight_kg'] as num?)?.toDouble() ?? 0,
         thicknessMm: (json['thickness_mm'] as num?)?.toDouble(),
+        libraryCreatedAt: json['library_created_at'] == null
+            ? null
+            : DateTime.tryParse(json['library_created_at'].toString()),
         colour: json['colour'],
         tileType: json['tile_type'] ?? '',
         faceImageUrls: List<String>.from(json['face_image_urls']),
@@ -163,7 +171,8 @@ class TileDesign {
         surfaceType: surfaceType, surfaceLabel: surfaceLabel,
         finishLabel: finishLabel,
         piecesPerBox: piecesPerBox, boxWeightKg: boxWeightKg,
-        thicknessMm: thicknessMm, colour: colour, tileType: tileType,
+        thicknessMm: thicknessMm, libraryCreatedAt: libraryCreatedAt,
+        colour: colour, tileType: tileType,
         faceImageUrls: [url],
         stockistId: stockistId, stockistName: stockistName,
         catalogId: catalogId, catalogIds: catalogIds,

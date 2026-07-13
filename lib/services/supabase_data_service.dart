@@ -207,6 +207,9 @@ class SupabaseDataService {
       piecesPerBox: (d['pieces_per_box'] ?? 0) as int,
       boxWeightKg:  ((d['box_weight_kg'] ?? 0) as num).toDouble(),
       thicknessMm:  (d['thickness_mm'] as num?)?.toDouble(),
+      libraryCreatedAt: d['library_created_at'] == null
+          ? null
+          : DateTime.tryParse(d['library_created_at'].toString()),
       colour:       (d['colour'] ?? '').toString(),
       tileType:     (d['tile_type'] ?? '').toString(),
       faceImageUrls: img.isEmpty ? const [] : [img],

@@ -231,6 +231,7 @@ class _State extends State<StockistDashboardScreen> {
     }).toList();
     setState(() {
       _designs = enriched;
+      _forkLabels = thicknessForkLabels(enriched);
       _inquiries = inquiries;
       _newOrders = orders.where((o) => o.status == 'sent').length;
       _pendingBoxes = pending;
@@ -274,10 +275,19 @@ class _State extends State<StockistDashboardScreen> {
   // Card title for the current view: when filtered to ONE brand, show THAT brand's
   // name for the design (its alias, e.g. ANUJ's "601001") instead of the
   // brand-agnostic master name; else the master name. (M multi-brand)
+  /// library_id -> "11.5–12.0 mm", for products FORKED off a print by a genuinely different
+  /// thickness. Without it, the fork and its original are two identical rows on this screen.
+  Map<String, String> _forkLabels = const {};
+
   String _designDisplayName(TileDesign d) {
-    if (_brandFilter == 'all') return d.name;
-    final alias = _libById[d.libraryId]?.aliases[_brandFilter];
-    return (alias != null && alias.isNotEmpty) ? alias : d.name;
+    final base = _brandFilter == 'all'
+        ? d.name
+        : (() {
+            final alias = _libById[d.libraryId]?.aliases[_brandFilter];
+            return (alias != null && alias.isNotEmpty) ? alias : d.name;
+          })();
+    final fork = _forkLabels[d.libraryId];
+    return fork == null ? base : '$base ($fork)';
   }
 
   // Search must also match a design's brand-alias names (e.g. ANUJ "601001"),

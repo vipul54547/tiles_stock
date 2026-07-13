@@ -1,4 +1,5 @@
 import '../models/tile_design.dart';
+import 'tile_types.dart';
 
 /// Grouping holdings by PRINT — the shared brain behind both hand-pick paths
 /// (`showHoldingPicker` for touch, `HoldingEntryBar` for the keyboard).
@@ -43,7 +44,14 @@ String surfaceKeyOf(TileDesign d) => d.surfaceType.trim().toLowerCase();
 String brandKeyOf(TileDesign d) => d.brandId ?? '';
 
 /// Group holdings into prints, alphabetical by name.
+///
+/// ⚠️ A print carried in TWO THICKNESSES is two products with the SAME name, size and surface —
+/// they differ only by `library_id`. Each rightly gets its own row here, but they would READ
+/// identically, and the stockist could not tell which stock they were dispatching. So the product
+/// FORKED off the original wears its thickness: `6003 (SV) (11.5–12.0 mm)`.
+/// (This is the one chokepoint for the dispatch picker AND the desktop entry bar.)
 List<HoldingPrint> groupHoldingsByPrint(List<TileDesign> list) {
+  final forkLabels = thicknessForkLabels(list);
   final map = <String, List<TileDesign>>{};
   final order = <String>[];
   for (final d in list) {
@@ -61,7 +69,10 @@ List<HoldingPrint> groupHoldingsByPrint(List<TileDesign> list) {
     final img = hs
         .map((d) => d.faceImageUrls.isNotEmpty ? d.faceImageUrls.first : '')
         .firstWhere((u) => u.isNotEmpty, orElse: () => '');
-    out.add(HoldingPrint(k, hs.first.name, hs.first.size, img, hs));
+    final fork = forkLabels[hs.first.libraryId];
+    final name =
+        fork == null ? hs.first.name : '${hs.first.name} ($fork)';
+    out.add(HoldingPrint(k, name, hs.first.size, img, hs));
   }
   out.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   return out;

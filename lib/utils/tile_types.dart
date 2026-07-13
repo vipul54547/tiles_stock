@@ -106,6 +106,50 @@ String? thicknessRangeLabel(
 String? thicknessBandOf(TileDesign d) =>
     thicknessRangeLabel(d.size, d.piecesPerBox, d.boxWeightKg, d.tileType);
 
+/// 🔑 Which products need their THICKNESS shown beside the name to be tellable apart.
+///
+/// A print can be carried in two thicknesses — but only when they differ by more than 1 mm (box
+/// weights drift: a 600x1200 2-pc box went 28 kg → 26 kg, which is 0.62 mm and the SAME tile).
+/// When that genuinely happens, the two products share a name, size and surface, and every screen
+/// that lists them — dashboard, dispatch, stock — would otherwise show two identical rows.
+///
+/// The FIRST one created is the original and reads plainly; anything FORKED off it later carries
+/// its thickness. Returns `library_id -> "11.5–12.0 mm"` for the forks only.
+/// (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+Map<String, String> thicknessForkLabels(Iterable<TileDesign> designs) {
+  // one entry per PRODUCT (a product has many holdings — Premium, Standard, per brand)
+  final byLib = <String, TileDesign>{};
+  for (final d in designs) {
+    if (d.libraryId.isEmpty) continue;
+    byLib.putIfAbsent(d.libraryId, () => d);
+  }
+
+  final groups = <String, List<TileDesign>>{};
+  for (final d in byLib.values) {
+    final k = '${d.name.toLowerCase()}|${d.size}|${d.surfaceType}';
+    (groups[k] ??= []).add(d);
+  }
+
+  final out = <String, String>{};
+  for (final g in groups.values) {
+    if (g.length < 2) continue; // the only one of its kind — nothing to tell apart
+    DateTime? oldest;
+    for (final d in g) {
+      final c = d.libraryCreatedAt;
+      if (c == null) continue;
+      if (oldest == null || c.isBefore(oldest)) oldest = c;
+    }
+    if (oldest == null) continue;
+    for (final d in g) {
+      final c = d.libraryCreatedAt;
+      if (c == null || !c.isAfter(oldest)) continue; // this IS the original
+      final label = thicknessBandLabel(d.thicknessMm);
+      if (label != null) out[d.libraryId] = label;
+    }
+  }
+  return out;
+}
+
 /// Distinct thickness bands present across [designs], sorted ascending. Drives
 /// the buyer Thickness filter chips so only bands that actually exist are shown.
 List<String> availableThicknessBands(Iterable<TileDesign> designs) {

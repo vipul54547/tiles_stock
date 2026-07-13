@@ -14,6 +14,7 @@ import '../../widgets/save_bar.dart';
 import '../../widgets/holding_picker.dart';
 import '../../widgets/holding_entry_bar.dart';
 import '../../widgets/customer_picker.dart';
+import '../../utils/tile_types.dart';
 
 /// Manual dispatch, in the same batch shape as Add Stock: pick designs → set
 /// boxes → Add to a running list, fill dispatch details, then Record. Over-
@@ -91,6 +92,16 @@ class _State extends State<ManualDispatchScreen> {
 
   /// What the design picker offers: only what there is stock of.
   List<TileDesign> _designs = [];
+  /// library_id -> "11.5–12.0 mm" for a product FORKED off a print by a genuinely different
+  /// thickness. Two such products share a NAME, so without this you cannot tell which stock you
+  /// are dispatching. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+  Map<String, String> _forkLabels = const {};
+
+  /// The design's name as it must READ here — with its thickness when a same-named sibling exists.
+  String _dispName(TileDesign d) {
+    final fork = _forkLabels[d.libraryId];
+    return fork == null ? d.name : '${d.name} ($fork)';
+  }
   List<Brand> _brands = [];
   bool _customersEnabled = false;
   List<Map<String, dynamic>> _customers = [];
@@ -159,6 +170,9 @@ class _State extends State<ManualDispatchScreen> {
       _all = all;
       _designs = all.where((d) => d.boxQuantity > 0).toList()
         ..sort((a, b) => a.name.compareTo(b.name));
+      // A print carried in two thicknesses is two products with the SAME name. Without this the
+      // dispatch list shows two identical rows and you cannot tell which stock you are sending.
+      _forkLabels = thicknessForkLabels(all);
       _brands = brands;
       _customersEnabled = enabled;
       _customers = customers;
@@ -336,7 +350,7 @@ class _State extends State<ManualDispatchScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(d.name,
+            Text(_dispName(d),
                 style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
             Text(_holdingLabel(d),
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
@@ -397,7 +411,7 @@ class _State extends State<ManualDispatchScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${l.d.name} · ${_holdingLabel(l.d)}',
+            Text('${_dispName(l.d)} · ${_holdingLabel(l.d)}',
                 style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(height: 10),
             Text('Existing:  ${l.qty} boxes'),
@@ -963,7 +977,7 @@ class _State extends State<ManualDispatchScreen> {
                           style: TextStyle(
                               fontSize: 12, color: Colors.orange.shade800)),
                       for (final l in over)
-                        Text('• ${l.d.name}: ${l.qty} > ${l.d.boxQuantity}',
+                        Text('• ${_dispName(l.d)}: ${l.qty} > ${l.d.boxQuantity}',
                             style: TextStyle(
                                 fontSize: 11.5, color: Colors.orange.shade800)),
                     ],
@@ -1059,7 +1073,7 @@ class _State extends State<ManualDispatchScreen> {
     for (var i = 0; i < sent.length; i++) {
       final l = sent[i];
       b.writeln(
-          '${i + 1}. ${l.d.name} (${l.d.size.replaceAll(' mm', '')}) — ${l.qty} boxes');
+          '${i + 1}. ${_dispName(l.d)} (${l.d.size.replaceAll(' mm', '')}) — ${l.qty} boxes');
     }
     b.writeln('Total dispatched: $total boxes');
     if (o != null && outstanding > 0) {
