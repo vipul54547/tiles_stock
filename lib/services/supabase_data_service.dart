@@ -1061,7 +1061,7 @@ class SupabaseDataService {
         'p_size': size,
         'p_master_name': masterName,
         'p_aliases': aliasJson,
-        'p_surface': surface.trim().isEmpty ? 'None' : surface.trim(),
+        'p_surface': surfaceForImport(surface),
         'p_tile_type': tileType,
       });
       return (res ?? '').toString();

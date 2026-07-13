@@ -898,11 +898,11 @@ class _State extends State<UploadStockScreen> {
         'name': r.row.name,
         'size': _size,
         'quality': _quality,
-        'surface': r.row.surface,
-        'surface_label': (r.row.surfaceRaw != null &&
-                r.row.surfaceRaw!.trim().isNotEmpty)
-            ? r.row.surfaceRaw!.trim()
-            : r.row.surface,
+        // A row the parser found no surface word for lands on 'Special' — a real surface the
+        // stockist corrects later. It used to send 'None', which the server REJECTS, and one
+        // such row threw the whole batch. No raw word ⇒ no word of his own ⇒ blank label.
+        'surface': surfaceForImport(r.row.surface),
+        'surface_label': r.row.surfaceRaw?.trim() ?? '',
         'qty': r.row.quantity,
         'stock_type': _stockType,
         'tile_type': _tileType,
@@ -942,11 +942,12 @@ class _State extends State<UploadStockScreen> {
 
     // Learn finish alignments: remember each raw PDF surface word → the finish
     // it ended up as, so the next PDF from this stockist auto-aligns. Deduped
-    // (last choice wins); 'None' and empty keys are not worth remembering.
+    // (last choice wins); an unknown surface teaches us nothing, so skip it.
     final learned = <String, String>{};
     for (final r in _rows) {
-      if (r.rawKey.isEmpty || r.row.surface == 'None') continue;
-      learned[r.rawKey] = r.row.surface;
+      final s = r.row.surface.trim();
+      if (r.rawKey.isEmpty || s.isEmpty || s.toLowerCase() == 'none') continue;
+      learned[r.rawKey] = s;
     }
     for (final e in learned.entries) {
       await _dataSvc.upsertSurfaceAlias(currentStockistUUID, e.key, e.value);

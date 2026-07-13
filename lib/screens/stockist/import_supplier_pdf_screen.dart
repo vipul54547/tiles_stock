@@ -151,7 +151,7 @@ class _ImpRow {
     required this.size,
     this.imageBytes,
     int qty = 0,
-    this.surface = 'None',
+    this.surface = '', // '' = the parser found no surface word → 'Special' on save
     this.quality = 'Standard',
   }) : qtyCtrl = TextEditingController(text: qty > 0 ? '$qty' : '');
 
@@ -282,7 +282,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
 
   // Surface, when NOT in the PDF: optionally one surface for the whole list.
   bool _singleSurface = false;
-  String _singleSurfaceValue = 'None';
+  String _singleSurfaceValue = '';
 
   // Admin finishes + this stockist's learned surface aliases — used by the
   // Map-surfaces step to align the PDF's scraped surface text to a real finish
@@ -995,7 +995,9 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
       return;
     }
     if (!_surfacePresent) {
-      final s = _singleSurface ? _singleSurfaceValue : 'None';
+      // No surface anywhere in the PDF, and the stockist didn't say it's all one surface:
+      // leave the row UNKNOWN (''), and let the write boundary turn that into 'Special'.
+      final s = _singleSurface ? _singleSurfaceValue : '';
       for (final r in _rows) {
         r.surface = s;
       }
@@ -1023,7 +1025,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             ? aliased
             : (_finishes.contains(raw)
                 ? raw
-                : (_finishes.isNotEmpty ? _finishes.first : 'None'));
+                : (_finishes.isNotEmpty ? _finishes.first : kSpecialSurface));
         return _SurfGroup(label: raw, choice: init);
       });
       g.count++;
@@ -1105,7 +1107,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     for (final r in _kept) {
       final raw = r.surface.trim();
       if (raw.isEmpty || raw.toLowerCase() == 'none') {
-        r.surface = 'None';
+        r.surface = ''; // unknown → 'Special' at the write boundary
         continue;
       }
       final g = groups[normalizeSurfaceRaw(raw)];
@@ -1114,7 +1116,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     // Learn the alias (raw wording → chosen finish) for next time.
     for (final k in keys) {
       final g = groups[k]!;
-      if (g.choice != 'None' && currentStockistUUID.isNotEmpty) {
+      if (g.choice.isNotEmpty && currentStockistUUID.isNotEmpty) {
         await _dataSvc.upsertSurfaceAlias(currentStockistUUID, k, g.choice);
       }
     }
@@ -1202,7 +1204,10 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
         'name': r.name.trim(),
         'size': r.size.trim(),
         'quality': _qualityOf(r),
-        'surface': libraryOnly ? 'None' : r.surface,
+        // A library-only import (the M PDF) captures no surface at all, and a stock import can
+        // still carry a row the parser found none for. Both land on 'Special' — a real surface
+        // the stockist corrects later, not the old 'None', which the server REJECTS outright.
+        'surface': libraryOnly ? kSpecialSurface : surfaceForImport(r.surface),
         'qty': libraryOnly ? 0 : r.qty,
         if (r.uploadedUrl != null && r.contributeImage) 'image_url': r.uploadedUrl,
         'stock_type': 'Uncertain',
@@ -2175,9 +2180,17 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
     );
   }
 
+  /// What a scraped surface reads as on a review card. An unknown one is a DASH, like an
+  /// unknown quality beside it — never the word "None", which is not a surface and which
+  /// the stockist would reasonably read as one.
+  String _surfLabel(String s) {
+    final t = s.trim();
+    return (t.isEmpty || t.toLowerCase() == 'none') ? '—' : t;
+  }
+
   Widget _mistakeCard(_MistakeGroup g) {
     final first = g.rows.first;
-    final surface = first.surface.trim().isEmpty ? 'None' : first.surface.trim();
+    final surface = _surfLabel(first.surface);
     final quality = first.quality.trim().isEmpty ? '—' : first.quality.trim();
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -2490,7 +2503,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // fields (e.g. one ANT GREY in Glossy, another in Lustra), so the stockist can
   // tell "same design twice" from "two different designs" at a glance.
   Widget _scrapeDetail(_ImpRow r, {bool center = false}) {
-    final surface = r.surface.trim().isEmpty ? 'None' : r.surface.trim();
+    final surface = _surfLabel(r.surface);
     final parts = <String>[
       'Box ${r.qty > 0 ? r.qty : '—'}',
       surface,
@@ -2517,7 +2530,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
             size: 40, color: Colors.grey.shade400),
       );
     }
-    final surface = r.surface.trim().isEmpty ? 'None' : r.surface.trim();
+    final surface = _surfLabel(r.surface);
     showDialog<void>(
       context: context,
       builder: (c) => Dialog(
@@ -2561,7 +2574,7 @@ class _ImportSupplierPdfScreenState extends State<ImportSupplierPdfScreen> {
   // select it as the carrier; tap the magnifier to see the full image + details.
   Widget _dupPhotoChoice(_DupGroup g, _ImpRow r) {
     final sel = identical(g.chosen, r);
-    final surface = r.surface.trim().isEmpty ? 'None' : r.surface.trim();
+    final surface = _surfLabel(r.surface);
     return InkWell(
       onTap: () => setState(() => g.chosen = r),
       borderRadius: BorderRadius.circular(8),

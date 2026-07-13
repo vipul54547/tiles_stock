@@ -94,7 +94,7 @@ class _XlsRow {
   String? error;          // non-null → invalid, skipped from import
   String size = '';       // canonical master size (after validation)
   String quality = '';    // normalised 'Premium' | 'Standard'
-  String surface = 'None'; // resolved admin finish (after Map Finishes)
+  String surface = '';    // resolved admin finish (after Map Finishes); '' = the sheet gave none
   String rawKey = '';     // normalised raw surface for alias learning
   TileDesign? match;      // matched existing design (name+size+quality)
   String action = 'skip'; // 'update' | 'new' | 'map' | 'skip'
@@ -1805,9 +1805,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         'name': r.name,
         'size': r.size,
         'quality': r.quality,
-        'surface': r.surface,
-        'surface_label':
-            r.surfaceRaw.trim().isNotEmpty ? r.surfaceRaw.trim() : r.surface,
+        // A sheet with no surface column leaves the row unknown → 'Special'. No raw word means
+        // the stockist has no word of his own for it either, so the label stays blank.
+        'surface': surfaceForImport(r.surface),
+        'surface_label': r.surfaceRaw.trim(),
         'colour': r.colour,
         'qty': r.qty,
         'stock_type': 'Uncertain',
@@ -1853,7 +1854,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (libUrl != null) imagesFromLibrary++;
       if (r.action == 'new') news++;
       // Remember the finish wording → chosen finish for next time.
-      if (r.rawKey.isNotEmpty && r.surface != 'None') learned[r.rawKey] = r.surface;
+      if (r.rawKey.isNotEmpty && r.surface.isNotEmpty) learned[r.rawKey] = r.surface;
     }
 
     // ONE atomic, idempotent call — never half-saves, and a reused batch id can't

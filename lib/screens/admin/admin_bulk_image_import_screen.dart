@@ -7,6 +7,7 @@ import 'package:image/image.dart' as img;
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../models/stockist.dart';
+import '../../utils/finishes.dart';
 import '../../utils/tile_types.dart';
 
 // ADMIN-ONLY bulk image-folder import (concierge onboarding). Reads a brand's
@@ -260,13 +261,11 @@ class _State extends State<AdminBulkImageImportScreen> {
         if (d.surfaceFolder.isNotEmpty) {
           _surfaceMap.putIfAbsent(d.surfaceFolder, () {
             // Auto-match the folder word to an admin surface, case-insensitively
-            // ("MATT" → "Matt"); fall back to None only when nothing matches.
+            // ("MATT" → "Matt"). An unrecognised word is NOT a guess we get to make —
+            // it becomes 'Special', which the admin can correct in the dropdown below.
             final m = _adminSurfaces.where(
                 (s) => s.toLowerCase() == d.surfaceFolder.trim().toLowerCase());
-            if (m.isNotEmpty) return m.first;
-            return _adminSurfaces.contains('None')
-                ? 'None'
-                : (_adminSurfaces.isNotEmpty ? _adminSurfaces.first : 'None');
+            return m.isNotEmpty ? m.first : kSpecialSurface;
           });
         }
       }
@@ -328,10 +327,14 @@ class _State extends State<AdminBulkImageImportScreen> {
     return m.isNotEmpty ? (m.first['name'] ?? '').toString() : '';
   }
 
-  // Surface picklist for the per-design dropdown — admin surfaces plus 'None'
-  // (a design from a folder without a surface subfolder defaults to None).
-  List<String> get _surfaceOptions =>
-      [..._adminSurfaces, if (!_adminSurfaces.contains('None')) 'None'];
+  // Surface picklist for the per-design dropdown. 'None' is NOT offered — a tile always has a
+  // surface, and the surface is part of the product's identity, so a 'None' would spawn a
+  // phantom product beside the real one. 'Special' IS a real surface and is already in the
+  // admin list; a folder with no surface subfolder lands there.
+  List<String> get _surfaceOptions => [
+        ..._adminSurfaces,
+        if (!_adminSurfaces.contains(kSpecialSurface)) kSpecialSurface,
+      ];
 
   // Seed each design's packing from the size/surface defaults, then show
   // Preview where they become individually editable. One-way (Preview only
@@ -343,8 +346,8 @@ class _State extends State<AdminBulkImageImportScreen> {
     for (final d in _designs) {
       final pack = _sizePacks[d.sizeFolder];
       d.surface = d.surfaceFolder.isEmpty
-          ? 'None'
-          : (_surfaceMap[d.surfaceFolder] ?? 'None');
+          ? kSpecialSurface
+          : (_surfaceMap[d.surfaceFolder] ?? kSpecialSurface);
       d.tileType = pack?.tileType;
       d.pieces = pack?.pieces;
       d.weight = pack?.weight ?? '';
@@ -400,11 +403,9 @@ class _State extends State<AdminBulkImageImportScreen> {
           filename: '${d.name}.jpg');
       if (!res.ok) throw res.error ?? 'upload failed';
       // Per-design values win; the size-pack default is the fallback.
-      final surface = (d.surface ?? '').isNotEmpty
-          ? d.surface!
-          : (d.surfaceFolder.isEmpty
-              ? 'None'
-              : (_surfaceMap[d.surfaceFolder] ?? 'None'));
+      final surface = surfaceForImport((d.surface ?? '').isNotEmpty
+          ? d.surface
+          : _surfaceMap[d.surfaceFolder]);
       final weightStr = d.weight.trim().isNotEmpty ? d.weight : pack.weight;
       final weight = double.tryParse(weightStr.trim()) ?? 0;
       await _data.adminLibraryUpsert(
@@ -672,7 +673,8 @@ class _State extends State<AdminBulkImageImportScreen> {
               items: _adminSurfaces
                   .map((s) => DropdownMenuItem(value: s, child: Text(s)))
                   .toList(),
-              onChanged: (v) => setState(() => _surfaceMap[folder] = v ?? 'None'),
+              onChanged: (v) =>
+                  setState(() => _surfaceMap[folder] = v ?? kSpecialSurface),
             ),
           ),
         ]),

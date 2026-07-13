@@ -10,6 +10,7 @@ import '../../models/brand.dart';
 import '../../models/library_entry.dart';
 import '../../models/tile_size.dart';
 import '../../models/choice_state.dart';
+import '../../utils/finishes.dart';
 import '../../utils/tile_sizes.dart';
 
 // Mapping-Excel importer for the stockist's Design Library
@@ -64,7 +65,11 @@ class _MapRow {
   // What we actually send to the server: a forced/auto link rewrites the name
   // (and surface) to the target box so the merge-by-name RPC folds into it.
   String get effMaster => target?.masterName ?? master;
-  String get effSurface => target?.surfaceType ?? 'None';
+  // Linking to an existing product takes ITS surface, so the merge folds into it. A row that
+  // CREATES one has no surface to take — this sheet has no surface column, and there is nobody
+  // to ask mid-import — so it gets 'Special'. It used to send 'None', which the server REJECTS,
+  // and one such row threw the whole batch.
+  String get effSurface => surfaceForImport(target?.surfaceType);
 }
 
 // Sentinel popped by the link picker to mean "clear the link → create new".

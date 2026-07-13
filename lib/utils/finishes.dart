@@ -18,3 +18,33 @@ const List<String> kFinishes = [
   'Lappato',
   'Sugar',
 ];
+
+/// The surface a MACHINE import gives a row it has no surface for.
+///
+/// It is NOT 'None' wearing a new hat. 'None' meant "we don't know yet" while sitting in
+/// the product KEY, so it spawned a phantom product beside the real one. `Special` is a
+/// REAL surface, and a legitimate PERMANENT answer for a stockist whose surfaces cannot
+/// sensibly be enumerated — stock INHERITS a product's surface rather than asking for one,
+/// so it cannot spawn a twin, and `library_set_surface` cascades a later correction onto
+/// every holding.
+///
+/// 🚫 NO free text under it. `surface_label` is not identity, so two `Special` tiles told
+/// apart only by a label would COLLIDE into one product.
+const String kSpecialSurface = 'Special';
+
+/// The one boundary between "the app doesn't know this row's surface" and what we send
+/// to the DB. Every RPC that can CREATE a product goes through here.
+///
+/// Inside the app, an unknown surface is the empty string (and, until the PDF parser is
+/// rewritten, the legacy 'None' sentinel it still stamps on an unparseable row). Neither
+/// may reach Postgres: `library_map_upsert` RAISES on both, and one bad row throws the
+/// WHOLE batch — which is exactly why the M-PDF library import could not run at all.
+///
+/// ⚠️ A human is NEVER defaulted. This is for the PDF / Excel path only: we don't ask
+/// mid-parse, so we must not GUESS mid-parse either. In the Library editor the surface is
+/// COMPULSORY and blank — the stockist is standing right there, so ask him.
+String surfaceForImport(String? s) {
+  final t = (s ?? '').trim();
+  if (t.isEmpty || t.toLowerCase() == 'none') return kSpecialSurface;
+  return t;
+}

@@ -114,6 +114,19 @@ Don't infer a function's signature from its call site.
   *"we don't know yet"* wearing a surface's clothes, and since surface is in the product key it
   spawned a phantom product beside the real one. **Surface is mandatory when a product is created**
   (Library editor + import). Never write `'None'`, never offer it in a picker.
+- 🎨 **`'Special'` is what a MACHINE import writes when it has no surface for a row** — and it is
+  **not `'None'` in a new hat.** `'Special'` is a **real, active surface**, and a legitimate
+  *permanent* answer for a stockist whose surfaces cannot sensibly be enumerated. Stock **inherits**
+  a product's surface rather than asking for one, so it cannot spawn a twin, and `library_set_surface`
+  cascades a later correction onto every holding.
+  - **PDF / Excel / bulk-image import → `Special`.** We never ask mid-parse, so we must not **guess**
+    mid-parse either. One chokepoint: **`surfaceForImport()`** in `lib/utils/finishes.dart` — every
+    RPC that can CREATE a product goes through it. (`library_map_upsert` **RAISES** on a blank *and*
+    on `'None'`, and one bad row throws the WHOLE batch.)
+  - **A HUMAN is never defaulted.** In the Library editor the surface is **blank and compulsory** —
+    he is standing right there, so ask him.
+  - 🚫 **No free text under `Special`.** `surface_label` is not identity, so two `Special` tiles told
+    apart only by a label would **collide into one product**.
 - 🔑 **Stock entry asks for a surface ONLY when `surface_mode = 'attribute'`** (rare). Otherwise the
   field is not shown at all: the product already knows its surface and **the stock inherits it**
   (`stock_add_holding` with no surface = "use the product's own"). Asking a surface at Add Stock is
