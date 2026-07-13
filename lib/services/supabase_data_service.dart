@@ -1009,11 +1009,11 @@ class SupabaseDataService {
     Map<String, String> aliases = const {},
     // Surface is part of the product's identity — the server rejects a missing one.
     required String surface,
-    // Body + DECLARED nominal thickness are identity too. Null = not declared: the server then
-    // ADOPTS an undeclared row rather than spawning a duplicate beside it.
+    // Body is identity too. Null = not declared: the server then ADOPTS an undeclared row rather
+    // than spawning a duplicate beside it. There is NO thickness here on purpose — it is DERIVED
+    // from the box and may never be handed in.
     // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
     String? tileType,
-    double? nominalThicknessMm,
   }) async {
     final aliasJson = aliases.entries
         .where((e) => e.value.trim().isNotEmpty)
@@ -1026,7 +1026,6 @@ class SupabaseDataService {
         'p_aliases': aliasJson,
         'p_surface': surface.trim().isEmpty ? 'None' : surface.trim(),
         'p_tile_type': tileType,
-        'p_thickness': nominalThicknessMm,
       });
       return (res ?? '').toString();
     } catch (e) {
@@ -3375,25 +3374,6 @@ class SupabaseDataService {
       ]);
     } catch (e) {
       debugPrint('refreshTileTypes failed (keeping the built-in defaults): $e');
-    }
-  }
-
-  /// The NOMINAL thicknesses a product may declare — part of product identity.
-  /// Same best-effort contract as [refreshTileTypes]: on failure the built-in
-  /// [kThicknessOptions] fallback stands rather than leaving the picker empty.
-  Future<void> refreshThicknessOptions() async {
-    try {
-      final data = await supabase
-          .from('thickness_options')
-          .select('mm')
-          .eq('is_active', true)
-          .order('sort', ascending: true);
-      applyThicknessOptions([
-        for (final r in data)
-          if ((r['mm'] as num?) != null) (r['mm'] as num).toDouble(),
-      ]);
-    } catch (e) {
-      debugPrint('refreshThicknessOptions failed (keeping the built-in list): $e');
     }
   }
 

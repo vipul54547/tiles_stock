@@ -47,77 +47,12 @@ void applyTileTypes(List<({String name, double densityKgM3})> types) {
 /// The body types on offer — the table's, once loaded; [kTileTypes] until then.
 List<String> get tileTypeNames => _liveTypes;
 
-/// 🔑 The thicknesses a product may DECLARE, as 0.5 mm BANDS: 4.0–4.5 … 19.5–20.0.
-/// Part of product identity, alongside print + size + surface + body — an 8 mm and a 12 mm of one
-/// print cover the same sq ft but sell at a different rate, so they are two products.
-///
-/// Each entry is the band's **LOW EDGE**; the band runs `[mm, mm + 0.5)`. A band, not a round
-/// number, because a real tile is 8.86 mm — not 9 mm — and it belongs honestly in 8.5–9.0. One
-/// number per band keeps it a clean key: `8` and `8.0` can never become two products.
-///
-/// The real list lives in the admin-managed `thickness_options` table; this const is the fallback
-/// until it loads. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
-const List<double> kThicknessOptions = [
-  4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5,
-  11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0, 14.5, 15.0, 15.5, 16.0, 16.5,
-  17.0, 17.5, 18.0, 18.5, 19.0, 19.5,
-];
-
-List<double> _liveThickness = List<double>.from(kThicknessOptions);
-
-/// Feed in what `SupabaseDataService.getThicknessOptions()` returned. Ignores an empty list —
-/// a failed fetch must never wipe the fallback and leave every product undeclarable.
-void applyThicknessOptions(List<double> mm) {
-  if (mm.isEmpty) return;
-  _liveThickness = List<double>.from(mm);
-}
-
-/// The nominal thicknesses on offer — the table's once loaded, [kThicknessOptions] until then.
-List<double> get thicknessOptions => _liveThickness;
-
-/// The BAND a measured/derived thickness falls in — used to PRE-FILL the picker, and to read a
-/// figure a stockist typed into a spreadsheet. The stockist already gives pieces + box weight, and
-/// the body type is known, so the app proposes the band rather than asking for the same fact twice.
-///
-/// Because the bands tile the whole range, a figure inside 4.0–20.0 lands in exactly ONE band —
-/// so this is not a rounding or a guess, it is the band that figure *is in*. A figure OUTSIDE the
-/// range returns null: 3 mm and 25 mm are not tiles, they are a bad box weight, and a bad weight
-/// must propose nothing rather than stamp a wrong value into the identity key.
-///
-/// ⚠️ Still only ever a SUGGESTION to be confirmed — never stored silently. The derivation is
-/// unreliable (all 258 Porcelain 600x600 derive to exactly 7.99 mm, a density artifact), and
-/// identity may never be recomputed from a box edit. (THICKNESS_AND_BODY_IDENTITY_PLAN.md)
-double? thicknessBandFor(double? mm) {
-  if (mm == null || mm <= 0 || thicknessOptions.isEmpty) return null;
-  final low = (mm / 0.5).floor() * 0.5;
-  return thicknessOptions.contains(low) ? low : null;
-}
-
-/// A declared thickness reads as its BAND — "8.5–9.0 mm". [mm] is the band's low edge.
-String thicknessLabel(double? mm) {
-  if (mm == null) return '';
-  return '${mm.toStringAsFixed(1)}–${(mm + 0.5).toStringAsFixed(1)} mm';
-}
-
-/// Read a thickness a stockist wrote in a spreadsheet, and return the BAND's low edge.
-///
-/// Accepts what they can plausibly type: the band as the template offers it ("8.5–9.0 mm"), or a
-/// bare measurement ("8.86", "9"). A bare figure is not "rounded" — it is placed in the band it
-/// already falls in, which is exactly one band. Anything outside 4.0–20.0, or unreadable, is null
-/// (and the caller then REJECTS the row rather than guessing an identity).
-double? parseDeclaredThickness(String raw) {
-  var s = raw.toLowerCase().replaceAll('mm', '').trim();
-  if (s.isEmpty) return null;
-  // "8.5–9.0" / "8.5-9.0" → take the low edge they picked.
-  for (final dash in const ['–', '-', '—', 'to']) {
-    final i = s.indexOf(dash);
-    if (i > 0) {
-      s = s.substring(0, i).trim();
-      break;
-    }
-  }
-  return thicknessBandFor(double.tryParse(s));
-}
+/// 🔑 There is NO list of declarable thicknesses, and there must never be one.
+/// Thickness is DERIVED from the BOX — `box_weight / (pieces × area × density)` — and a stockist
+/// cannot know "8.5–9.0 mm"; they read PIECES and WEIGHT off the box. The 0.5 mm band the derived
+/// figure falls in is part of product identity (`stockist_library.thickness_band`, a GENERATED
+/// column), so a typed thickness would let a guess into the identity key.
+/// Format it with [thicknessBandLabel]. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
 
 double densityFor(String tileType) =>
     _liveDensity[tileType] ?? kTileDensity[tileType] ?? 2350;

@@ -1947,11 +1947,18 @@ class _EditorState extends State<_LibraryEditorScreen> {
   // 🔑 DECLARED nominal thickness — part of the product's identity, so it is REQUIRED on a new
   // design and never guessed. Null on the legacy rows that predate CHAPTER 3; editing one of
   // those does not force a value, so an image or name can still be fixed.
-  double? _thickness;
-  // True when [_thickness] was PROPOSED from the box weight rather than chosen by the stockist.
-  // The value still saves normally — but the field says so, because the derivation is only
-  // evidence and is wrong often enough that a silent pre-fill would be a lie.
-  bool _thicknessSuggested = false;
+  // 🔑 There is NO thickness field, and there must never be one. Thickness is DERIVED —
+  // box weight / (pieces x area x density) — and a stockist cannot know "8.5-9.0 mm"; they read
+  // PIECES and WEIGHT off the box. Asking them to pick a thickness would invite a guess into the
+  // identity key. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+  //
+  // A NEW design has no box, so it would have no thickness and no complete identity. So Add-design
+  // asks for the three things that ARE on the box — tile type, box weight, pieces — and the
+  // thickness falls out of them the moment it saves. On EDIT these are hidden: by then several
+  // brands may pack the same print differently, and this form has one value for all of them, so
+  // writing it would flatten every brand's packing. The card's per-brand BOX CHIP owns them.
+  final _piecesCtrl = TextEditingController();
+  final _weightCtrl = TextEditingController();
   String _stockType = 'Uncertain';
   static const _stockTypes = ['Continuous', 'One Time', 'Uncertain'];
   // True once the user edits the master name by hand — until then it mirrors the
@@ -2047,16 +2054,6 @@ class _EditorState extends State<_LibraryEditorScreen> {
         _aliasCtrls[bid]?.text = name;
       });
       _tileType = tileTypeNames.contains(e.tileType) ? e.tileType : tileTypeNames.first;
-      // Declared wins. Otherwise (a legacy row that predates CHAPTER 3) PROPOSE the nominal its
-      // box weight implies, so the stockist confirms rather than re-enters what the app can work
-      // out. Only a proposal — they can change it, and the field says where it came from.
-      _thickness = thicknessOptions.contains(e.nominalThicknessMm)
-          ? e.nominalThicknessMm
-          : null;
-      if (_thickness == null) {
-        _thickness = thicknessBandFor(e.thicknessMm);
-        _thicknessSuggested = _thickness != null;
-      }
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
       final surf = e.surfaceType.trim();
       _surface = (surf.isEmpty || surf.toLowerCase() == 'none') ? '' : surf;
@@ -2239,12 +2236,19 @@ class _EditorState extends State<_LibraryEditorScreen> {
       setState(() => _error = 'Pick a surface — it is part of the design.');
       return;
     }
-    // Thickness is identity too: an 8 mm and a 12 mm of the same print are two products at two
-    // rates. Required on a NEW design; an existing legacy row (declared before CHAPTER 3, so
-    // blank) can still be edited without one, or its image could never be fixed.
-    if (widget.existing == null && _thickness == null) {
-      setState(() => _error = 'Pick a thickness — it is part of the design.');
-      return;
+    // A new design must arrive with its box facts, because the THICKNESS derives from them and
+    // thickness is part of the identity. Without them the product has no complete identity.
+    if (widget.existing == null) {
+      final pcs = int.tryParse(_piecesCtrl.text.trim()) ?? 0;
+      final kg = double.tryParse(_weightCtrl.text.trim()) ?? 0;
+      if (pcs <= 0) {
+        setState(() => _error = 'Enter the pieces per box — the thickness is worked out from it.');
+        return;
+      }
+      if (kg <= 0) {
+        setState(() => _error = 'Enter the box weight — the thickness is worked out from it.');
+        return;
+      }
     }
     final dup = _dupMatch;
     if (dup != null) {
@@ -2285,7 +2289,14 @@ class _EditorState extends State<_LibraryEditorScreen> {
         surfaceType: _surfaceToSave,
         stockType: _stockType,
         tileType: _tileType,
-        thicknessMm: _thickness,
+        // Only used when CREATING — they seed the product's first box, and the server derives the
+        // thickness from them. Ignored on edit (the per-brand box chip owns the packing).
+        piecesPerBox: widget.existing == null
+            ? int.tryParse(_piecesCtrl.text.trim())
+            : null,
+        boxWeightKg: widget.existing == null
+            ? double.tryParse(_weightCtrl.text.trim())
+            : null,
         colour: _colourCtrl.text.trim(),
         finishLabel: _finishCtrl.text.trim(),
       );
@@ -2535,37 +2546,68 @@ class _EditorState extends State<_LibraryEditorScreen> {
                   _dirty = true;
                 })),
         const SizedBox(height: 12),
-        // 🔑 Identity, like size and surface — an 8 mm and a 12 mm of the same print cover the
-        // same sq ft but sell at a different rate, so they are two products. A FIXED list: a
-        // free number would make 8 and 8.0 two products.
-        DropdownButtonFormField<double>(
-          initialValue: _thickness,
-          isExpanded: true,
-          decoration: InputDecoration(
-            labelText: 'Thickness',
-            border: const OutlineInputBorder(),
-            isDense: true,
-            helperText: _thicknessSuggested
-                ? 'Suggested from the box weight — check it, then save.'
-                : widget.existing == null
-                    ? 'Part of the design — an 8 mm and a 12 mm are two products.'
-                    : (_thickness == null ? 'Not declared yet — please set it.' : null),
-            helperStyle: _thicknessSuggested
-                ? TextStyle(color: Colors.orange.shade800)
-                : null,
+        // 🔑 NEW design only: the two facts printed on the box. The THICKNESS is worked out from
+        // them (weight / (pieces × area × density)) and is never asked for — a stockist reads
+        // pieces and weight off the box, they do not know "8.5–9.0 mm".
+        //
+        // Hidden when editing: by then the print may be boxed by several brands that pack it
+        // differently, and this form has one value for all of them. The card's per-brand BOX CHIP
+        // owns them from that point on.
+        if (widget.existing == null) ...[
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _piecesCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Pieces / box',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setState(() => _dirty = true),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _weightCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Box weight (kg)',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (_) => setState(() => _dirty = true),
+                ),
+              ),
+            ],
           ),
-          hint: const Text('Pick a thickness'),
-          items: [
-            for (final mm in thicknessOptions)
-              DropdownMenuItem(value: mm, child: Text(thicknessLabel(mm))),
-          ],
-          onChanged: (v) => setState(() {
-            _thickness = v ?? _thickness;
-            _thicknessSuggested = false; // they chose it; it is no longer a guess
-            _dirty = true;
+          const SizedBox(height: 6),
+          // The thickness, falling out of what they just typed — the same formula the server
+          // uses, so what they see here is what gets stored.
+          Builder(builder: (_) {
+            final band = thicknessRangeLabel(
+                _size,
+                int.tryParse(_piecesCtrl.text.trim()) ?? 0,
+                double.tryParse(_weightCtrl.text.trim()) ?? 0,
+                _tileType);
+            return Text(
+              band == null
+                  ? 'Thickness is worked out from the pieces and box weight.'
+                  : 'Thickness: $band',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: band == null ? FontWeight.normal : FontWeight.w600,
+                color: band == null
+                    ? Colors.grey.shade600
+                    : Colors.teal.shade700,
+              ),
+            );
           }),
-        ),
-        const SizedBox(height: 12),
+          const SizedBox(height: 12),
+        ],
         _dropdown('Restock type', _stockTypes, _stockType,
             (v) => setState(() {
                   _stockType = v ?? _stockType;

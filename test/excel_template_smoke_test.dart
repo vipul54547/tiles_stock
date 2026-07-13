@@ -4,7 +4,6 @@
 // A free-text DNA attribute (Range) is included to prove it's excluded.
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tiles_stock/utils/tile_types.dart';
 import 'package:tiles_stock/services/excel_template_service.dart';
 import 'package:tiles_stock/models/dna.dart';
 import 'package:tiles_stock/models/brand.dart';
@@ -18,8 +17,6 @@ void main() {
   // never appear in a picker.
   final surfaceWords = ['Raindrop', 'Matt', 'Glossy', 'Carving'];
   final tileTypes = ['PGVT & GVT', 'Porcelain', 'Ceramic'];
-  // The declarable thicknesses, as the template offers them: 0.5 mm BANDS, picked not typed.
-  final thicknesses = ['8.0–8.5 mm', '8.5–9.0 mm', '9.0–9.5 mm'];
   final dnaAttrs = <DnaAttribute>[
     const DnaAttribute(id: 'a-colour', name: 'Colour', isMulti: true, values: [
       DnaValue(id: 'c1', name: 'White'),
@@ -39,17 +36,6 @@ void main() {
 
   setUpAll(() => Directory('build/test_out').createSync(recursive: true));
 
-  // Thickness is IDENTITY, so the template OFFERS it rather than inviting a typed figure. Whatever
-  // it offers must survive the round trip back through the importer's parser, or a stockist who
-  // picked from our own dropdown would get "not one of..." thrown back at them on import.
-  test('every thickness the template offers parses back to a real band', () {
-    expect(thicknessOptions, isNotEmpty);
-    for (final mm in thicknessOptions) {
-      expect(parseDeclaredThickness(thicknessLabel(mm)), mm,
-          reason: '"${thicknessLabel(mm)}" does not round-trip');
-    }
-  });
-
   // 🚫 'None' is not a surface. It is part of the product key, so offering it forges
   // a phantom product beside the real one — and the DB refuses it outright. kFinishes
   // is the last-resort fallback when the admin list can't be read, and it carried a
@@ -64,7 +50,6 @@ void main() {
       sizes: sizes,
       surfaceWords: surfaceWords,
       tileTypes: tileTypes,
-      thicknesses: thicknesses,
       dnaAttrs: dnaAttrs,
       brands: [brand('br1', 'VERITAAS', isDefault: true)],
     );
@@ -78,7 +63,6 @@ void main() {
       sizes: sizes,
       surfaceWords: surfaceWords,
       tileTypes: tileTypes,
-      thicknesses: thicknesses,
       dnaAttrs: dnaAttrs,
       brands: [
         brand('br1', 'BOTTEGA', isDefault: true),

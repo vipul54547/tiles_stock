@@ -45,7 +45,7 @@ Don't infer a function's signature from its call site.
   Its identity is the `stockist_library_uniq` index:
 
       (stockist_id, lower(master_design_name), size, surface_type,
-       tile_type, nominal_thickness_mm)   NULLS NOT DISTINCT
+       tile_type, thickness_band)   NULLS NOT DISTINCT
 
   It carries `image_url`, `surface_type` + `surface_label`, `colour`, and its **DNA tags**
   (via `library_id`). Faces/closelook/mockup all hang here.
@@ -70,21 +70,22 @@ Don't infer a function's signature from its call site.
   stamped on that brand's box (`brand_design_name`) plus **how that brand packs it**
   (`pieces_per_box`, `box_weight_kg`). One print under two brands packs two ways, independently.
   `library_set_box` is the **only** writer of the packing.
-- 📏 **THICKNESS — two columns, do not confuse them:**
-  - **`nominal_thickness_mm` — DECLARED**, from the fixed `thickness_options` list. **This is
-    IDENTITY and this is the truth.** The list is **0.5 mm BANDS** — `4.0–4.5` … `19.5–20.0` (32).
-    The stored number is the band's **LOW EDGE**; display it as **`8.5–9.0 mm`**. A band, not a
-    round figure, because a real tile is **8.86 mm, not 9 mm**. One number per band keeps it a
-    clean key — `8` and `8.0` can never become two products.
-  - **`thickness_mm` — DERIVED** from the BOX by trigger (`weight / (pieces × area × density)`).
-    **EVIDENCE ONLY** — it validates the declaration and warns on mismatch. **It is NOT identity.**
+- 📏 **THICKNESS IS DERIVED — NEVER TYPED, AND THERE IS NO PICKER.**
+  - `thickness_mm` = `box_weight / (pieces × area × density)`, written **by trigger** from the BOX.
     Unknown is `NULL`, never `0` (a tile is never 0 mm thick).
-  - 🔑 **Why declared, not derived:** the BOX hangs off the PRODUCT, so a derived value in the
-    identity key would mean **editing a box weight silently changes which product it is**.
-  - 💡 The app **PROPOSES** the band from pieces + box weight + body (`thicknessBandFor`) so the
-    stockist confirms rather than enters the same fact twice — but it **never stores it silently**,
-    and it proposes **nothing** outside 4–20 mm (that is a bad box weight, not a thin tile).
-  - ⚠️ **SUPERSEDED:** ~~"thickness is always derived, never typed"~~ — it is **declared**.
+  - `thickness_band` = its **0.5 mm band** (`4.0–4.5` … `19.5–20.0`, stored as the band's LOW EDGE),
+    a **GENERATED** column. **This is what is in the identity key.** Outside 4–20 mm it is NULL —
+    that is a bad box weight, not a thin tile. Display it as **`8.5–9.0 mm`**.
+  - 🚫 **Never add a thickness field to any form.** A stockist reads **PIECES and WEIGHT** off the
+    box; they do **not** know "8.5–9.0 mm". A typed thickness is a guess, and it would go straight
+    into the identity key. **The BOX is the source of truth for thickness.**
+  - 🔑 **Add-design therefore asks for TILE TYPE + BOX WEIGHT + PIECES** — the three facts that are
+    actually on the box — and the thickness falls out of them at once. Those two box facts are used
+    **on CREATE only** (they seed the product's first box); on EDIT they are hidden, because several
+    brands may pack the same print differently and the per-brand **BOX CHIP** owns them from then on.
+  - ⚠️ A box edit can move a product into a different band, i.e. **change its identity** — that is
+    correct (the weight is the truth), and `library_set_box` raises a plain-English error if it
+    lands on top of an existing product.
 - ⚠️ A product with **no box spec** resolves `pieces_per_box` / `box_weight_kg` to **NULL**
   (`_box_pieces` / `_box_weight`). Dart lands those on **`0`**, which every display site already
   reads as "unknown" and hides. Parse defensively — a bare `json['pieces_per_box']` crashes.

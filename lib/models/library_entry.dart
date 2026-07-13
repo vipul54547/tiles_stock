@@ -40,13 +40,10 @@ class LibraryEntry {
   final String tileType;
   final int piecesPerBox;
   final double boxWeightKg;
-  /// DERIVED from the BOX — EVIDENCE only. It validates [nominalThicknessMm] and warns on a
-  /// mismatch; it is not the truth and it is not identity. Null when no box carries a spec.
+  /// DERIVED from the BOX — `weight / (pieces × area × density)`. This is the ONLY way a
+  /// thickness is known; it is never typed. Its 0.5 mm BAND is part of product identity
+  /// (`thickness_band`). Null when no box carries a spec yet.
   final double? thicknessMm;
-  /// 🔑 DECLARED nominal thickness — part of PRODUCT IDENTITY (print + size + surface + body +
-  /// thickness). Null on the rows that predate CHAPTER 3; never guessed, because a wrong value
-  /// in the identity key is worse than a blank.
-  final double? nominalThicknessMm;
   final String colour;
   final String? finishLabel;
 
@@ -66,7 +63,6 @@ class LibraryEntry {
     this.piecesPerBox = 0,
     this.boxWeightKg = 0,
     this.thicknessMm,
-    this.nominalThicknessMm,
     this.colour = '',
     this.finishLabel,
   });
@@ -107,7 +103,6 @@ class LibraryEntry {
       piecesPerBox: (j['pieces_per_box'] as num?)?.toInt() ?? 0,
       boxWeightKg: (j['box_weight_kg'] as num?)?.toDouble() ?? 0,
       thicknessMm: (j['thickness_mm'] as num?)?.toDouble(),
-      nominalThicknessMm: (j['nominal_thickness_mm'] as num?)?.toDouble(),
       colour: (j['colour'] ?? '').toString(),
       finishLabel: (j['finish_label'] as String?)?.trim().isEmpty ?? true
           ? null
