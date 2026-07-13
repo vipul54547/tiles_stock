@@ -14,6 +14,18 @@ import 'dna_editor_sheet.dart';
 /// "24.0" -> "24", "10.1" -> "10.1". Used by both the card chips and the editor.
 String _trimNum(double v) => v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
 
+/// One pickable surface: the stockist's own WORD and the admin CANONICAL it means.
+/// The word is shown and stored as `surface_label` (display only); the canonical is
+/// stored as `surface_type` and IS the product's identity. (my_surface_options)
+typedef SurfaceOption = ({String label, String canonical});
+
+/// How a surface reads in a picker: their word with the canonical it maps to, so
+/// "RAINDROP (Sugar)" is self-explanatory. Just the name when they are the same.
+String _surfaceOptionText(SurfaceOption o) =>
+    o.label.trim().toLowerCase() == o.canonical.trim().toLowerCase()
+        ? o.canonical
+        : '${o.label} (${o.canonical})';
+
 /// Stockist's own Design Library: master (physical) designs with their image +
 /// the name each tile carries under every brand the stockist runs. This is the
 /// ONLY place a design's identity/photo is edited; stock screens are quantity-only.
@@ -33,7 +45,12 @@ class _State extends State<MyDesignLibraryScreen> {
   List<String> _sizes = [];
   // Surface is part of the PRODUCT's identity — Glossy and Matt of one print are two
   // products — so the editor must be able to pick one. (product identity migration)
-  List<String> _surfaces = [];
+  //
+  // These are the stockist's OWN WORDS, each with the admin canonical it means:
+  // livok picks "RAINDROP", and Sugar is what gets stored. A surface they have no word
+  // of their own for falls back to the admin name. The word is what they read on their
+  // boxes; the canonical is the identity. (my_surface_options — never 'None')
+  List<SurfaceOption> _surfaces = [];
   Map<String, List<DnaTag>> _dnaTags = {}; // libraryId → DNA tags (their words)
   bool _loading = true;
 
@@ -89,7 +106,7 @@ class _State extends State<MyDesignLibraryScreen> {
       _data.getMyLibrary(),
       _data.getActiveSizeNames(),
       _data.dnaMyLibraryTags(),
-      _data.getActiveFinishNames(),
+      _data.getMySurfaceOptions(),
     ]);
     if (!mounted) return;
     final brands = results[0] as List<Brand>;
@@ -103,7 +120,13 @@ class _State extends State<MyDesignLibraryScreen> {
       _entries = results[1] as List<LibraryEntry>;
       _sizes = results[2] as List<String>;
       _dnaTags = results[3] as Map<String, List<DnaTag>>;
-      _surfaces = results[4] as List<String>;
+      // De-duplicated by word: two of their aliases can share a display word, and a
+      // dropdown needs its values distinct.
+      final seen = <String>{};
+      _surfaces = [
+        for (final o in results[4] as List<SurfaceOption>)
+          if (o.label.trim().isNotEmpty && seen.add(o.label.trim().toLowerCase())) o
+      ];
       _loading = false;
     });
   }
@@ -1114,12 +1137,11 @@ class _State extends State<MyDesignLibraryScreen> {
   /// every holding of the product, and refuses if the print already exists in the target
   /// surface (that would be a duplicate).
   Future<void> _editSurface(LibraryEntry e) async {
-    final options = _surfaces
-        .where((s) => s.trim().toLowerCase() != 'none')
-        .toList();
+    // Their own words. ('None' can't appear — my_surface_options excludes it.)
+    final options = _surfaces;
     if (options.isEmpty) return;
 
-    final picked = await showModalBottomSheet<String>(
+    final picked = await showModalBottomSheet<SurfaceOption>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
@@ -1150,8 +1172,9 @@ class _State extends State<MyDesignLibraryScreen> {
                   for (final s in options)
                     ListTile(
                       dense: true,
-                      title: Text(s),
-                      trailing: s.toLowerCase() == e.surfaceType.trim().toLowerCase()
+                      title: Text(_surfaceOptionText(s)),
+                      trailing: s.canonical.toLowerCase() ==
+                              e.surfaceType.trim().toLowerCase()
                           ? const Icon(Icons.check, color: _navy, size: 18)
                           : null,
                       onTap: () => Navigator.pop(ctx, s),
@@ -1164,17 +1187,25 @@ class _State extends State<MyDesignLibraryScreen> {
       ),
     );
     if (picked == null || !mounted) return;
-    if (picked.toLowerCase() == e.surfaceType.trim().toLowerCase()) return;
+    // Nothing to do only if BOTH the identity and their word are already what was
+    // picked — re-picking the same canonical under a different word still changes
+    // the label they read on the card.
+    if (picked.canonical.toLowerCase() == e.surfaceType.trim().toLowerCase() &&
+        picked.label.toLowerCase() == e.surfaceLabel.trim().toLowerCase()) {
+      return;
+    }
 
     try {
-      await _data.setLibrarySurface(e.id, picked);
+      // canonical = identity (surface_type); label = their word (surface_label).
+      // The server cascades both to every holding of this product.
+      await _data.setLibrarySurface(e.id, picked.canonical, label: picked.label);
     } catch (err) {
       if (!mounted) return;
       _snack('$err', error: true);
       return;
     }
     if (!mounted) return;
-    _snack('Surface changed to $picked.');
+    _snack('Surface changed to ${_surfaceOptionText(picked)}.');
     _load();
   }
 
@@ -1871,7 +1902,9 @@ class _BrandFirstResult {
 class _LibraryEditorScreen extends StatefulWidget {
   final List<Brand> brands;
   final List<String> sizes;
-  final List<String> surfaces; // admin canonicals — surface is product identity
+  // The stockist's own surface WORDS + the canonical each means. Surface is product
+  // identity, so the canonical is what gets stored; the word is what they recognise.
+  final List<SurfaceOption> surfaces;
   final List<LibraryEntry> all; // for live duplicate detection
   final LibraryEntry? existing;
   // Brand-first guided add: a new tile arrives pre-filled with the typed name
@@ -1932,15 +1965,39 @@ class _EditorState extends State<_LibraryEditorScreen> {
   /// (This replaces the old rule that "a print carries no surface and this editor never
   /// asks for one". The product key is now
   /// `(stockist, lower(master_design_name), size, surface_type)`.)
+  /// The ADMIN CANONICAL — this is the identity, and what is stored as `surface_type`.
   String _surface = '';
+
+  /// The stockist's own WORD for it ("RAINDROP"), stored as `surface_label`. Display
+  /// only, never a key — keying on it would wedge Add Stock against the product index.
+  String _surfaceWord = '';
+
   String get _surfaceToSave => _surface;
 
-  /// The admin canonicals. **'None' is NOT offered.** A tile always has a surface —
-  /// 'None' was never a surface, it was "we don't know yet" wearing one's clothes, and
-  /// since surface is part of the product key it produced a phantom product sitting
-  /// beside the real one. Every product must name a real surface.
-  List<String> get _surfaceOptions =>
-      widget.surfaces.where((s) => s.trim().toLowerCase() != 'none').toList();
+  /// Their own words, each carrying the canonical it means. **'None' is NOT offered** —
+  /// a tile always has a surface. 'None' was never one, it was "we don't know yet"
+  /// wearing one's clothes, and since surface is part of the product key it produced a
+  /// phantom product sitting beside the real one. (my_surface_options excludes it.)
+  List<SurfaceOption> get _surfaceOptions => widget.surfaces;
+
+  /// The option currently selected, matched on their WORD first (a product may carry a
+  /// word whose canonical several words share) and on the canonical otherwise — an
+  /// older product has a surface_type but no word yet.
+  SurfaceOption? get _selectedSurface {
+    for (final o in _surfaceOptions) {
+      if (_surfaceWord.isNotEmpty &&
+          o.label.trim().toLowerCase() == _surfaceWord.trim().toLowerCase()) {
+        return o;
+      }
+    }
+    for (final o in _surfaceOptions) {
+      if (_surface.isNotEmpty &&
+          o.canonical.trim().toLowerCase() == _surface.trim().toLowerCase()) {
+        return o;
+      }
+    }
+    return null;
+  }
 
   // The SAME product already in the library, or null. Identity = master name + size +
   // SURFACE. Brand is NOT identity — for an M a different brand is only a different NAME
@@ -1982,6 +2039,9 @@ class _EditorState extends State<_LibraryEditorScreen> {
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
       final surf = e.surfaceType.trim();
       _surface = (surf.isEmpty || surf.toLowerCase() == 'none') ? '' : surf;
+      // Their word for it, if this product already carries one. Blank is fine: the
+      // dropdown then falls back to matching on the canonical.
+      _surfaceWord = e.surfaceLabel.trim();
       _colourCtrl.text = e.colour;
       _finishCtrl.text = e.finishLabel ?? '';
     } else {
@@ -2184,7 +2244,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
       // so sending it would flatten every brand's packing back to a single number. The
       // Library card's BOX CHIP owns them, per brand. Thickness is derived server-side and is
       // never sent at all. (docs/BOX_AND_DERIVED_THICKNESS_PLAN.md)
-      await _data.upsertLibraryMaster(
+      final id = await _data.upsertLibraryMaster(
         id: widget.existing?.id,
         size: _size,
         masterName: master,
@@ -2197,6 +2257,15 @@ class _EditorState extends State<_LibraryEditorScreen> {
         colour: _colourCtrl.text.trim(),
         finishLabel: _finishCtrl.text.trim(),
       );
+      // Their WORD for the surface. library_upsert_master only carries the canonical
+      // (surface_type = identity); this is what puts "RAINDROP" on the card beside it,
+      // and it cascades the word onto every holding of the product. Only when they
+      // actually have a word of their own — for a surface they don't, the word IS the
+      // admin name and there is nothing to record.
+      if (_surfaceWord.isNotEmpty &&
+          _surfaceWord.trim().toLowerCase() != _surfaceToSave.trim().toLowerCase()) {
+        await _data.setLibrarySurface(id, _surfaceToSave, label: _surfaceWord);
+      }
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
@@ -2399,8 +2468,12 @@ class _EditorState extends State<_LibraryEditorScreen> {
         const SizedBox(height: 10),
         // Surface IS identity: the same print in Glossy and in Matt are two products.
         // REQUIRED — there is no 'None'. (product identity migration)
-        DropdownButtonFormField<String>(
-          initialValue: _surfaceOptions.contains(_surface) ? _surface : null,
+        //
+        // Offered in the stockist's OWN words — "RAINDROP (Sugar)" — because that is
+        // what is stamped on their boxes. The word is saved as surface_label; the
+        // canonical beside it is what actually keys the product.
+        DropdownButtonFormField<SurfaceOption>(
+          initialValue: _selectedSurface,
           isExpanded: true,
           decoration: InputDecoration(
             labelText: 'Surface',
@@ -2413,10 +2486,13 @@ class _EditorState extends State<_LibraryEditorScreen> {
           ),
           hint: const Text('Pick a surface'),
           items: _surfaceOptions
-              .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+              .map((s) => DropdownMenuItem(
+                  value: s, child: Text(_surfaceOptionText(s))))
               .toList(),
           onChanged: (v) => setState(() {
-            _surface = v ?? _surface;
+            if (v == null) return;
+            _surface = v.canonical;
+            _surfaceWord = v.label;
             _dirty = true;
           }),
         ),
