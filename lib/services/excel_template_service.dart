@@ -29,6 +29,9 @@ class ExcelTemplateService {
     required List<String> sizes,
     required List<String> surfaceWords,
     required List<String> tileTypes,
+    /// The fixed NOMINAL thickness list. Identity, like surface and body — so the
+    /// stockist PICKS it, never types it. (THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+    required List<String> thicknesses,
     required List<DnaAttribute> dnaAttrs,
     required List<Brand> brands,
     int dataRows = 200,
@@ -49,6 +52,7 @@ class ExcelTemplateService {
         'Quality': const ['Premium', 'Standard'],
         'Surface': surfaceWords,
         'Tile Type': tileTypes,
+        'Thickness': thicknesses,
         for (final a in dnaUsable) a.name: a.values.map((v) => v.name).toList(),
       };
       final localRange = <String, String>{}; // header -> 'A2:A12' on the Lists sheet
@@ -98,6 +102,7 @@ class ExcelTemplateService {
         col('Standard', null, dailyColor);
         col('Surface', 'Surface', onceColor);
         col('Tile Type', 'Tile Type', onceColor);
+        col('Thickness', 'Thickness', onceColor);
         col('Pieces/Box', null, onceColor);
         col('Weight (kg)', null, onceColor);
       } else {
@@ -107,6 +112,7 @@ class ExcelTemplateService {
         col('Box Qty', null, dailyColor);
         col('Surface', 'Surface', onceColor);
         col('Tile Type', 'Tile Type', onceColor);
+        col('Thickness', 'Thickness', onceColor);
         col('Pieces/Box', null, onceColor);
         col('Weight (kg)', null, onceColor);
       }
@@ -175,6 +181,9 @@ class ExcelTemplateService {
     required List<String> sizes,
     required List<String> surfaceWords,
     required List<String> tileTypes,
+    /// The fixed NOMINAL thickness list. Identity, like surface and body — so the
+    /// stockist PICKS it, never types it. (THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+    required List<String> thicknesses,
     required List<Brand> brands,
     int dataRows = 200,
   }) {
@@ -190,6 +199,7 @@ class ExcelTemplateService {
         'Size':     sizes,
         'Surface':  surfaceWords,
         'Tile Type': tileTypes,
+        'Thickness': thicknesses,
       };
       final localRange = <String, String>{};
       var lc = 1;
@@ -223,7 +233,8 @@ class ExcelTemplateService {
       col('Premium',       null,       dailyColor);
       col('Standard',      null,       dailyColor);
       col('Surface',       'Surface',  onceColor);
-      col('Tile Type',     'Tile Type',onceColor);
+      col('Tile Type', 'Tile Type', onceColor);
+      col('Thickness', 'Thickness', onceColor);
       col('Pieces/Box',    null,       onceColor);
       col('Weight (kg)',   null,       onceColor);
 
@@ -276,6 +287,9 @@ class ExcelTemplateService {
     required List<String> sizes,
     required List<String> surfaceWords,
     required List<String> tileTypes,
+    /// The fixed NOMINAL thickness list. Identity, like surface and body — so the
+    /// stockist PICKS it, never types it. (THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+    required List<String> thicknesses,
     required List<Brand> brands,
     int dataRows = 200,
   }) {
@@ -290,6 +304,7 @@ class ExcelTemplateService {
         'Quality': const ['Premium', 'Standard'],
         'Surface': surfaceWords,
         'Tile Type': tileTypes,
+        'Thickness': thicknesses,
       };
       final localRange = <String, String>{};
       var lc = 1;
@@ -321,7 +336,8 @@ class ExcelTemplateService {
       col('Quality',  'Quality', dailyColor);
       col('Box Qty',  null,      dailyColor);
       col('Surface',  'Surface', onceColor);
-      col('Tile Type','Tile Type',onceColor);
+      col('Tile Type', 'Tile Type', onceColor);
+      col('Thickness', 'Thickness', onceColor);
       col('Pieces/Box',null,     onceColor);
       col('Weight (kg)',null,    onceColor);
 
@@ -373,6 +389,9 @@ class ExcelTemplateService {
     required List<String> sizes,
     required List<String> surfaceWords,
     required List<String> tileTypes,
+    /// The fixed NOMINAL thickness list. Identity, like surface and body — so the
+    /// stockist PICKS it, never types it. (THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+    required List<String> thicknesses,
     required List<Brand> brands,
     int dataRows = 200,
   }) {
@@ -389,6 +408,7 @@ class ExcelTemplateService {
         'Quality': const ['Premium', 'Standard'],
         'Surface': surfaceWords,
         'Tile Type': tileTypes,
+        'Thickness': thicknesses,
       };
       final localRange = <String, String>{};
       var lc = 1;
@@ -420,7 +440,8 @@ class ExcelTemplateService {
       col('Quality',    'Quality',  dailyColor);
       col('Box Qty',    null,       dailyColor);
       col('Surface',    'Surface',  onceColor);
-      col('Tile Type',  'Tile Type',onceColor);
+      col('Tile Type', 'Tile Type', onceColor);
+      col('Thickness', 'Thickness', onceColor);
       col('Pieces/Box', null,       onceColor);
       col('Weight (kg)',null,       onceColor);
 

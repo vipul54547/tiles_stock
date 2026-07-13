@@ -52,6 +52,9 @@ const Map<String, List<String>> _headerSynonyms = {
   'weight':   ['weight', 'box weight', 'box weight (kg)', 'weight (kg)', 'weight kg', 'wt', 'weight/box'],
   'pieces':   ['pieces', 'pieces/box', 'pcs', 'pcs/box', 'pieces per box', 'piece', 'pc'],
   'colour':   ['colour', 'color', 'shade'],
+  // The DECLARED nominal thickness — identity, so it is picked from the fixed list, never
+  // computed. Deliberately NOT synonymous with the box weight (which only DERIVES evidence).
+  'thickness': ['thickness', 'thickness (mm)', 'thickness mm', 'thick', 'nominal thickness'],
 };
 
 // Combined sheet: a master-design column links the per-brand name columns. The
@@ -90,6 +93,11 @@ class _XlsRow {
   int qty;
   int? pieces;
   double? weight;
+  // 🔑 The DECLARED nominal thickness (identity), as read from the sheet. Null = not declared:
+  // the server then ADOPTS an undeclared library row rather than spawning a duplicate. Not to be
+  // confused with the thickness DERIVED from weight, which is only evidence.
+  // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+  double? thicknessRaw;
 
   String? error;          // non-null → invalid, skipped from import
   String size = '';       // canonical master size (after validation)
@@ -130,6 +138,7 @@ class _XlsRow {
     required this.qty,
     required this.pieces,
     required this.weight,
+    this.thicknessRaw,
   });
 
   bool get valid => error == null;
@@ -173,6 +182,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // what is written on their boxes. It is display-only and never a key: the word is
   // resolved back to a canonical on the way in. (my_surface_options)
   List<String> _surfaceWords = kFinishes;
+  // The fixed NOMINAL thickness list, as the plain numbers the template offers ("8", "12").
+  // Thickness is part of product identity, so the stockist PICKS it from a dropdown rather than
+  // typing a figure — a free number would make 8 and 8.0 two products.
+  // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+  List<String> get _thicknessStrings => [
+        for (final mm in thicknessOptions)
+          mm == mm.roundToDouble()
+              ? mm.toStringAsFixed(0)
+              : mm.toStringAsFixed(1),
+      ];
   List<String> _sizes = kAllowedSizes;
   List<TileSize> _tileSizes = []; // full size rows (with inch/feet aliases)
   String? _brandId; // chosen brand — upload fills P_Stock for it (no list target)
@@ -217,13 +236,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (option2) {
         bytes = ExcelTemplateService.buildTWOption2Template(
           sizes: _sizes, surfaceWords: _surfaceWords,
-          tileTypes: tileTypeNames, brands: _brands,
+          tileTypes: tileTypeNames, thicknesses: _thicknessStrings, brands: _brands,
         );
         label = 'brand_cols';
       } else {
         bytes = ExcelTemplateService.buildTWOption3Template(
           sizes: _sizes, surfaceWords: _surfaceWords,
-          tileTypes: tileTypeNames, brands: _brands,
+          tileTypes: tileTypeNames, thicknesses: _thicknessStrings, brands: _brands,
         );
         label = 'brand_value';
       }
@@ -259,13 +278,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         bytes = ExcelTemplateService.buildStockTemplate(
           multiBrand: true,
           sizes: _sizes, surfaceWords: _surfaceWords,
-          tileTypes: tileTypeNames, dnaAttrs: _dnaAttrs, brands: _brands,
+          tileTypes: tileTypeNames, thicknesses: _thicknessStrings, dnaAttrs: _dnaAttrs, brands: _brands,
         );
         label = 'brand_cols';
       } else {
         bytes = ExcelTemplateService.buildMOption3Template(
           sizes: _sizes, surfaceWords: _surfaceWords,
-          tileTypes: tileTypeNames, brands: _brands,
+          tileTypes: tileTypeNames, thicknesses: _thicknessStrings, brands: _brands,
         );
         label = 'brand_value';
       }
@@ -301,7 +320,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         multiBrand: _brands.length > 1,
         sizes: _sizes,
         surfaceWords: _surfaceWords,
-        tileTypes: tileTypeNames,
+        tileTypes: tileTypeNames, thicknesses: _thicknessStrings,
         dnaAttrs: _dnaAttrs,
         brands: _brands,
       );
@@ -712,6 +731,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final sizeRaw = cell(row, 'size');
       final surfaceRaw = cell(row, 'surface');
       final tileType = cell(row, 'tiletype');
+      final thickRaw = double.tryParse(cell(row, 'thickness').trim());
       final colour = cell(row, 'colour');
       final pieces = _toInt(cell(row, 'pieces'));
       final weight = _toDouble(cell(row, 'weight'));
@@ -759,6 +779,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           qualityRaw: part.quality,
           surfaceRaw: surfaceRaw,
           tileType: tileType,
+          thicknessRaw: thickRaw,
           colour: colour,
           qty: part.qty,
           pieces: pieces,
@@ -853,6 +874,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     // Optional identity columns — read when present so new ENTRY designs carry
     // tile type / pieces / weight from the sheet (no manual per-row fill).
     final ttCol = idx(_headerSynonyms['tiletype']!);
+    final thCol = idx(_headerSynonyms['thickness']!);
     final pcCol = idx(_headerSynonyms['pieces']!);
     final wtCol = idx(_headerSynonyms['weight']!);
 
@@ -907,6 +929,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (catCol >= 0 && a.surface.isEmpty) a.surface = cellAt(row, catCol).trim();
       // Take the first non-empty identity value seen across the design's batch.
       if (ttCol >= 0 && a.tileType.isEmpty) a.tileType = cellAt(row, ttCol).trim();
+      if (thCol >= 0 && a.thickness == null) {
+        a.thickness = double.tryParse(cellAt(row, thCol).trim());
+      }
       if (pcCol >= 0 && a.pieces == null) a.pieces = _toInt(cellAt(row, pcCol));
       if (wtCol >= 0 && a.weight == null) a.weight = _toDouble(cellAt(row, wtCol));
       if (bid != null) a.brandIds.add(bid);
@@ -925,6 +950,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           qualityRaw: quality,
           surfaceRaw: a.surface,
           tileType: a.tileType,
+          thicknessRaw: a.thickness,
           colour: '',
           qty: qty,
           pieces: a.pieces,
@@ -989,6 +1015,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final qtyCol  = header.indexWhere((h) => _headerSynonyms['qty']!.contains(h));
     final surfCol = header.indexWhere((h) => _headerSynonyms['surface']!.contains(h));
     final ttCol   = header.indexWhere((h) => _headerSynonyms['tiletype']!.contains(h));
+    final thCol   = header.indexWhere((h) => _headerSynonyms['thickness']!.contains(h));
     final pcCol   = header.indexWhere((h) => _headerSynonyms['pieces']!.contains(h));
     final wtCol   = header.indexWhere((h) => _headerSynonyms['weight']!.contains(h));
     final premCol = header.indexWhere((h) => _premiumQtyHeaders.contains(h));
@@ -1028,6 +1055,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final sizeRaw   = cellAt(row, sizeCol);
       final surfRaw   = surfCol >= 0 ? cellAt(row, surfCol) : '';
       final tileType  = ttCol >= 0  ? cellAt(row, ttCol)  : '';
+      final thickRaw  = thCol >= 0  ? double.tryParse(cellAt(row, thCol).trim()) : null;
       final pieces    = pcCol >= 0  ? _toInt(cellAt(row, pcCol))    : null;
       final weight    = wtCol >= 0  ? _toDouble(cellAt(row, wtCol)) : null;
 
@@ -1056,6 +1084,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           qualityRaw: part.quality,
           surfaceRaw: surfRaw,
           tileType: tileType,
+          thicknessRaw: thickRaw,
           colour: '',
           qty: part.qty,
           pieces: pieces,
@@ -1107,6 +1136,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     final qtyCol       = header.indexWhere((h) => _headerSynonyms['qty']!.contains(h));
     final surfCol      = header.indexWhere((h) => _headerSynonyms['surface']!.contains(h));
     final ttCol        = header.indexWhere((h) => _headerSynonyms['tiletype']!.contains(h));
+    final thCol        = header.indexWhere((h) => _headerSynonyms['thickness']!.contains(h));
     final pcCol        = header.indexWhere((h) => _headerSynonyms['pieces']!.contains(h));
     final wtCol        = header.indexWhere((h) => _headerSynonyms['weight']!.contains(h));
     final premCol      = header.indexWhere((h) => _premiumQtyHeaders.contains(h));
@@ -1146,6 +1176,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final sizeRaw      = cellAt(row, sizeCol);
       final surfRaw      = surfCol >= 0 ? cellAt(row, surfCol) : '';
       final tileType     = ttCol >= 0 ? cellAt(row, ttCol) : '';
+      final thickRaw     = thCol >= 0 ? double.tryParse(cellAt(row, thCol).trim()) : null;
       final pieces       = pcCol >= 0 ? _toInt(cellAt(row, pcCol)) : null;
       final weight       = wtCol >= 0 ? _toDouble(cellAt(row, wtCol)) : null;
 
@@ -1177,6 +1208,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           qualityRaw: part.quality,
           surfaceRaw: surfRaw,
           tileType: tileType,
+          thicknessRaw: thickRaw,
           colour: '',
           qty: part.qty,
           pieces: pieces,
@@ -1451,6 +1483,15 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         r.tileType = tt;
       } else {
         r.tileType = '';
+      }
+
+      // Thickness: identity, so it must be one of the fixed nominals — an unrecognised figure is
+      // rejected rather than rounded, because a wrong value in the identity key is worse than a
+      // blank. Blank is fine: the server then adopts an undeclared library row.
+      if (r.thicknessRaw != null && !thicknessOptions.contains(r.thicknessRaw)) {
+        r.error = "Thickness '${r.thicknessRaw}' is not one of "
+            '${thicknessOptions.map((m) => thicknessLabel(m)).join(', ')}';
+        continue;
       }
 
       // Align finish via learned alias (only matters when a finish is given).
@@ -1811,6 +1852,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         'qty': r.qty,
         'stock_type': 'Uncertain',
         'tile_type': tileTypeNames.contains(r.tileType) ? r.tileType : '',
+        // 🔑 The DECLARED nominal — IDENTITY. Null = undeclared, and the server adopts an
+        // undeclared library row rather than duplicating it. Kept strictly apart from
+        // 'thickness_mm' below, which is the DERIVED evidence and is NOT identity: feeding that
+        // free-typed figure in as the nominal would fail the fixed list and break the import.
+        'nominal_thickness_mm': r.thicknessRaw,
         'pieces_per_box': r.pieces ?? 0,
         'box_weight_kg': r.weight ?? 0,
         'thickness_mm': approxThicknessMm(
@@ -3024,6 +3070,8 @@ class _EntryAgg {
   String tileType = '';
   int? pieces;
   double? weight;
+  // The DECLARED nominal thickness (identity), if the sheet carries a Thickness column.
+  double? thickness;
   final Set<String> brandIds = {};
   _EntryAgg({required this.name, required this.size});
 }

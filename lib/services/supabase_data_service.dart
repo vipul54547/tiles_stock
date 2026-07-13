@@ -1009,6 +1009,11 @@ class SupabaseDataService {
     Map<String, String> aliases = const {},
     // Surface is part of the product's identity — the server rejects a missing one.
     required String surface,
+    // Body + DECLARED nominal thickness are identity too. Null = not declared: the server then
+    // ADOPTS an undeclared row rather than spawning a duplicate beside it.
+    // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+    String? tileType,
+    double? nominalThicknessMm,
   }) async {
     final aliasJson = aliases.entries
         .where((e) => e.value.trim().isNotEmpty)
@@ -1020,6 +1025,8 @@ class SupabaseDataService {
         'p_master_name': masterName,
         'p_aliases': aliasJson,
         'p_surface': surface.trim().isEmpty ? 'None' : surface.trim(),
+        'p_tile_type': tileType,
+        'p_thickness': nominalThicknessMm,
       });
       return (res ?? '').toString();
     } catch (e) {

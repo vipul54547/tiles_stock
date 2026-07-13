@@ -17,6 +17,8 @@ void main() {
   // never appear in a picker.
   final surfaceWords = ['Raindrop', 'Matt', 'Glossy', 'Carving'];
   final tileTypes = ['PGVT & GVT', 'Porcelain', 'Ceramic'];
+  // The fixed NOMINAL thickness list, as the template offers it: plain numbers, picked not typed.
+  final thicknesses = ['8', '9', '10', '12'];
   final dnaAttrs = <DnaAttribute>[
     const DnaAttribute(id: 'a-colour', name: 'Colour', isMulti: true, values: [
       DnaValue(id: 'c1', name: 'White'),
@@ -40,6 +42,15 @@ void main() {
   // a phantom product beside the real one — and the DB refuses it outright. kFinishes
   // is the last-resort fallback when the admin list can't be read, and it carried a
   // 'None' that leaked all the way into a stockist's downloaded template.
+  // Thickness is IDENTITY and comes from a FIXED list — a free number would make 8 and 8.0
+  // two different products. The template must therefore OFFER it, not invite typing.
+  test('the fixed thickness list is offered, and is all plain numbers', () {
+    expect(thicknesses, isNotEmpty);
+    for (final t in thicknesses) {
+      expect(double.tryParse(t), isNotNull, reason: '"$t" is not a plain number');
+    }
+  });
+
   test("'None' is never offered as a surface", () {
     expect(kFinishes.map((f) => f.toLowerCase()), isNot(contains('none')));
   });
@@ -50,6 +61,7 @@ void main() {
       sizes: sizes,
       surfaceWords: surfaceWords,
       tileTypes: tileTypes,
+      thicknesses: thicknesses,
       dnaAttrs: dnaAttrs,
       brands: [brand('br1', 'VERITAAS', isDefault: true)],
     );
@@ -63,6 +75,7 @@ void main() {
       sizes: sizes,
       surfaceWords: surfaceWords,
       tileTypes: tileTypes,
+      thicknesses: thicknesses,
       dnaAttrs: dnaAttrs,
       brands: [
         brand('br1', 'BOTTEGA', isDefault: true),
