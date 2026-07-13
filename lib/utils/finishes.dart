@@ -1,9 +1,13 @@
-/// Canonical finish (surface) options, shared by the add/edit form, the PDF
-/// import picker and every search filter so they never drift apart.
+/// Canonical surface options — the LAST-RESORT fallback only, used when the admin
+/// `surface_types` table can't be read. The live list comes from the DB; this
+/// constant exists so a failed load doesn't leave a picker empty.
 ///
-/// 'None' is always last — it is selected when a tile's finish is unknown or is
-/// something not in this list. In that case the original finish text from the
-/// PDF is preserved separately in `TileDesign.finishLabel` and shown as a badge.
+/// 🚫 There is no 'None'. A tile always has a surface, and the surface is part of
+/// the product's identity — 'None' was never a surface, it was "we don't know yet"
+/// wearing one's clothes, and because it sits in the product key it spawned a
+/// phantom product beside the real one. The DB now refuses it outright
+/// (`stockist_library_surface_not_none`) and the admin row is deactivated. Never
+/// put it back, and never offer it in a picker.
 const List<String> kFinishes = [
   'Glossy',
   'Matt',
@@ -13,5 +17,4 @@ const List<String> kFinishes = [
   'Carving',
   'Lappato',
   'Sugar',
-  'None',
 ];

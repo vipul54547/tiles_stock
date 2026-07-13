@@ -6,7 +6,18 @@ import '../models/brand.dart';
 /// has the correct headers in the right shape; a second "Lists" sheet holds every
 /// allowed value, and each constrained column gets a real Excel dropdown sourced
 /// from that sheet (so the stockist picks instead of typing — no mismatches the
-/// importer would have to reconcile). Two skins:
+/// importer would have to reconcile).
+///
+/// [surfaceWords] are **the stockist's OWN surface words**, not the admin
+/// canonicals — this is what they call the surface on their own boxes (e.g.
+/// "Raindrop"), so it is what they can actually recognise in a dropdown. It comes
+/// from `my_surface_options()`, which pairs each word with its canonical and falls
+/// back to the admin name for any surface the stockist has no word of their own for.
+/// The importer resolves the word back to the canonical on the way in
+/// (`surface_type` = identity, `surface_label` = the word). 'None' is never offered:
+/// a tile always has a surface, and the surface is part of the product's identity.
+///
+/// Two skins:
 ///   • multiBrand (M) → Master Design + one column per brand + WIDE Premium /
 ///     Standard quantity columns.
 ///   • single brand (T/W) → Design Name + Quality + Box Qty.
@@ -16,7 +27,7 @@ class ExcelTemplateService {
   static List<int> buildStockTemplate({
     required bool multiBrand,
     required List<String> sizes,
-    required List<String> finishes,
+    required List<String> surfaceWords,
     required List<String> tileTypes,
     required List<DnaAttribute> dnaAttrs,
     required List<Brand> brands,
@@ -36,7 +47,7 @@ class ExcelTemplateService {
       final listCols = <String, List<String>>{
         'Size': sizes,
         'Quality': const ['Premium', 'Standard'],
-        'Surface': finishes,
+        'Surface': surfaceWords,
         'Tile Type': tileTypes,
         for (final a in dnaUsable) a.name: a.values.map((v) => v.name).toList(),
       };
@@ -162,7 +173,7 @@ class ExcelTemplateService {
   /// M stockist multi-brand Option 3: Master Design + Brand value col + Design Name col.
   static List<int> buildMOption3Template({
     required List<String> sizes,
-    required List<String> finishes,
+    required List<String> surfaceWords,
     required List<String> tileTypes,
     required List<Brand> brands,
     int dataRows = 200,
@@ -177,7 +188,7 @@ class ExcelTemplateService {
       final listCols = <String, List<String>>{
         'Brand':    brandNames,
         'Size':     sizes,
-        'Surface':  finishes,
+        'Surface':  surfaceWords,
         'Tile Type': tileTypes,
       };
       final localRange = <String, String>{};
@@ -263,7 +274,7 @@ class ExcelTemplateService {
   /// No Master Design column (T/W design name IS the master).
   static List<int> buildTWOption2Template({
     required List<String> sizes,
-    required List<String> finishes,
+    required List<String> surfaceWords,
     required List<String> tileTypes,
     required List<Brand> brands,
     int dataRows = 200,
@@ -277,7 +288,7 @@ class ExcelTemplateService {
       final listCols = <String, List<String>>{
         'Size': sizes,
         'Quality': const ['Premium', 'Standard'],
-        'Surface': finishes,
+        'Surface': surfaceWords,
         'Tile Type': tileTypes,
       };
       final localRange = <String, String>{};
@@ -360,7 +371,7 @@ class ExcelTemplateService {
   /// T/W multi-brand Option 3 template: Brand value column + Design Name column.
   static List<int> buildTWOption3Template({
     required List<String> sizes,
-    required List<String> finishes,
+    required List<String> surfaceWords,
     required List<String> tileTypes,
     required List<Brand> brands,
     int dataRows = 200,
@@ -376,7 +387,7 @@ class ExcelTemplateService {
         'Brand':   brandNames,
         'Size':    sizes,
         'Quality': const ['Premium', 'Standard'],
-        'Surface': finishes,
+        'Surface': surfaceWords,
         'Tile Type': tileTypes,
       };
       final localRange = <String, String>{};

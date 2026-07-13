@@ -163,7 +163,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   int _done = 0;
 
   // Admin config + this stockist's data.
+  // _finishes = the ADMIN canonicals. This is what a row RESOLVES to and what gets
+  // stored as surface_type (product identity), so the Map-surfaces step and the
+  // resolver both work in these.
   List<String> _finishes = kFinishes;
+  // _surfaceWords = the stockist's OWN words for those surfaces ("Raindrop"), each
+  // falling back to the admin name where they have no word of their own. This is
+  // what they see — in the template dropdown and in the row editor — because it is
+  // what is written on their boxes. It is display-only and never a key: the word is
+  // resolved back to a canonical on the way in. (my_surface_options)
+  List<String> _surfaceWords = kFinishes;
   List<String> _sizes = kAllowedSizes;
   List<TileSize> _tileSizes = []; // full size rows (with inch/feet aliases)
   String? _brandId; // chosen brand — upload fills P_Stock for it (no list target)
@@ -207,13 +216,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final String label;
       if (option2) {
         bytes = ExcelTemplateService.buildTWOption2Template(
-          sizes: _sizes, finishes: _finishes,
+          sizes: _sizes, surfaceWords: _surfaceWords,
           tileTypes: tileTypeNames, brands: _brands,
         );
         label = 'brand_cols';
       } else {
         bytes = ExcelTemplateService.buildTWOption3Template(
-          sizes: _sizes, finishes: _finishes,
+          sizes: _sizes, surfaceWords: _surfaceWords,
           tileTypes: tileTypeNames, brands: _brands,
         );
         label = 'brand_value';
@@ -249,13 +258,13 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (option2) {
         bytes = ExcelTemplateService.buildStockTemplate(
           multiBrand: true,
-          sizes: _sizes, finishes: _finishes,
+          sizes: _sizes, surfaceWords: _surfaceWords,
           tileTypes: tileTypeNames, dnaAttrs: _dnaAttrs, brands: _brands,
         );
         label = 'brand_cols';
       } else {
         bytes = ExcelTemplateService.buildMOption3Template(
-          sizes: _sizes, finishes: _finishes,
+          sizes: _sizes, surfaceWords: _surfaceWords,
           tileTypes: tileTypeNames, brands: _brands,
         );
         label = 'brand_value';
@@ -291,7 +300,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       final bytes = ExcelTemplateService.buildStockTemplate(
         multiBrand: _brands.length > 1,
         sizes: _sizes,
-        finishes: _finishes,
+        surfaceWords: _surfaceWords,
         tileTypes: tileTypeNames,
         dnaAttrs: _dnaAttrs,
         brands: _brands,
@@ -326,7 +335,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     if (res == null || res.files.single.bytes == null) return;
     _filename = res.files.single.name;
     setState(() { _loading = true; _blockError = ''; });
-    await _loadConfig();
+    try {
+      await _loadConfig();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _blockError = 'Could not load your surfaces, sizes and brands — $e';
+      });
+      return;
+    }
     await _parseBytes(res.files.single.bytes!);
     if (mounted) setState(() => _loading = false);
   }
@@ -335,6 +353,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     try {
       final types = await _dataSvc.getSurfaceTypes(activeOnly: true);
       final names = types.map((t) => t.name).toList();
+      // The stockist's own word per surface, admin name where they have none.
+      // De-duplicated: two of their words can carry the same display text, and a
+      // dropdown (Flutter's and Excel's) needs its values distinct.
+      final opts = await _dataSvc.getMySurfaceOptions();
+      final seenWords = <String>{};
+      final surfaceWords = <String>[];
+      for (final o in opts) {
+        final w = o.label.trim();
+        if (w.isNotEmpty && seenWords.add(w)) surfaceWords.add(w);
+      }
       final tileSizes = await _dataSvc.getTileSizes(activeOnly: true);
       final sizeNames = tileSizes.map((s) => s.name).toList();
       _aliases = currentStockistUUID.isEmpty
@@ -399,8 +427,15 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       }
       if (names.isNotEmpty) _finishes = names;
       if (sizeNames.isNotEmpty) _sizes = sizeNames;
+      if (surfaceWords.isNotEmpty) _surfaceWords = surfaceWords;
       _tileSizes = tileSizes;
-    } catch (_) {/* keep fallbacks */}
+    } catch (_) {
+      // Never swallow this. The fallbacks are stale constants: a template built on
+      // them carries the wrong sizes, the wrong surfaces and no brands at all, yet
+      // looks perfectly normal. Silence here is exactly how a 'None' surface — a
+      // value the DB refuses — reached a stockist's template. Callers surface it.
+      rethrow;
+    }
   }
 
   // Brand the import writes to (chosen at the Upload tap).
@@ -2825,8 +2860,24 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // Each field writes the canonical value onto the raw field and re-resolves.
   Widget _rowEditor(_XlsRow r) {
     final id = identityHashCode(r);
+    // The stockist's OWN words, same as the template offered them — picking a word
+    // writes it to surfaceRaw and _reResolve turns it back into the admin canonical.
     // No 'None': a tile always has a surface, and it is part of the product's identity.
-    final surfOpts = _finishes;
+    //
+    // Matched on the NORMALISED key, not the literal string: the cell may read
+    // "Punch Ghr." while their stored word is "Punchghr". If the row's word still
+    // isn't one of theirs (their own spreadsheet, not our template), it is appended
+    // so the dropdown can always show what the row actually says — the Map-surfaces
+    // step is what teaches it.
+    final rawWord = r.surfaceRaw.trim();
+    final surfOpts = [..._surfaceWords];
+    var curSurfWord = surfOpts.firstWhere(
+        (w) => normalizeSurfaceRaw(w) == normalizeSurfaceRaw(rawWord),
+        orElse: () => '');
+    if (curSurfWord.isEmpty && rawWord.isNotEmpty) {
+      surfOpts.add(rawWord);
+      curSurfWord = rawWord;
+    }
     const qualities = ['Premium', 'Standard'];
     InputDecoration dec(String label) => InputDecoration(
         isDense: true,
@@ -2898,8 +2949,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             Expanded(
               child: DropdownButtonFormField<String>(
                 key: ValueKey('sf_$id'),
-                initialValue:
-                    surfOpts.contains(r.surface) ? r.surface : null,
+                initialValue: curSurfWord.isEmpty ? null : curSurfWord,
                 isExpanded: true,
                 decoration: dec('Surface'),
                 hint: const Text('Pick', style: TextStyle(fontSize: 12)),
@@ -2912,8 +2962,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                     ? null
                     : (v) {
                         if (v == null) return;
+                        // Write the WORD only. _reResolve maps it to the canonical
+                        // (surface_type); the word itself is kept as surface_label.
                         r.surfaceRaw = v;
-                        r.surface = v;
                         _reResolve(r);
                       },
               ),

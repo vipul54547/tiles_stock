@@ -185,10 +185,13 @@ class _State extends State<UploadStockScreen> {
     }
   }
 
-  // Aligns a parsed row's finish to the admin master list:
+  // Aligns a parsed row's surface to the admin master list:
   //   1. a learned alias for the raw PDF word wins (the stockist's past choice)
-  //   2. otherwise keep the parser's guess if it's an official finish
-  //   3. otherwise fall back to 'None'
+  //   2. otherwise keep the parser's guess if it's an official surface
+  //   3. otherwise leave the raw word alone — the Map-surfaces step is where a
+  //      human resolves it. It used to be dumped into 'None', which is not a
+  //      surface: it is part of the product key, so it forged a phantom product
+  //      beside the real one. The DB refuses it now.
   // Returns the normalised raw key so the caller can later learn from it.
   String _alignSurface(PdfDesignRow row) {
     final rawKey = normalizeSurfaceRaw(
@@ -196,8 +199,6 @@ class _State extends State<UploadStockScreen> {
     final aliased = _aliases[rawKey];
     if (aliased != null && _finishes.contains(aliased)) {
       row.surface = aliased;
-    } else if (!_finishes.contains(row.surface)) {
-      row.surface = _finishes.contains('None') ? 'None' : row.surface;
     }
     return rawKey;
   }
