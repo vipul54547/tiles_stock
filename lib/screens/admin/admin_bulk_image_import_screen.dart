@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -10,11 +10,11 @@ import '../../models/stockist.dart';
 import '../../utils/tile_types.dart';
 
 // ADMIN-ONLY bulk image-folder import (concierge onboarding). Reads a brand's
-// image folder from disk â†’ builds the stockist's Design Library:
+// image folder from disk → builds the stockist's Design Library:
 //   folder layout = <brand folder> / <SIZE> / [<SURFACE>] / <design>.jpg
-//   size folder   â†’ admin size (inchâ†’mm mapped + confirmed)
-//   surface folderâ†’ admin surface (confirmed)
-//   filename      â†’ design name; the image is EXIF-baked + downscaled, uploaded,
+//   size folder   → admin size (inch→mm mapped + confirmed)
+//   surface folder→ admin surface (confirmed)
+//   filename      → design name; the image is EXIF-baked + downscaled, uploaded,
 //                   then admin_library_upsert creates/matches the master.
 // Desktop-only (recursive folder reads); never shown to stockists.
 class AdminBulkImageImportScreen extends StatefulWidget {
@@ -27,13 +27,13 @@ const _navy = Color(0xFF1B4F72);
 const _imgExts = {'.jpg', '.jpeg', '.png', '.webp'};
 
 // How many designs are processed+uploaded concurrently during commit. The old
-// commit loop ran one image fully (decodeâ†’uploadâ†’DB) before starting the next,
+// commit loop ran one image fully (decode→upload→DB) before starting the next,
 // so CPU sat idle during the network round-trips and vice-versa. A small pool
 // overlaps decode (across cores) with uploads, cutting commit time ~4x. Kept
 // modest so a weak uplink / low-core machine isn't overwhelmed.
 const _kCommitConcurrency = 4;
 
-// Common inch tile-size folder names â†’ admin mm size. Best-effort pre-fill; the
+// Common inch tile-size folder names → admin mm size. Best-effort pre-fill; the
 // admin confirms/overrides each in the Sizes step.
 const _inchToMm = {
   '12X12': '300x300', '16X16': '400x400', '24X24': '600x600',
@@ -50,7 +50,7 @@ class _ImgDesign {
   bool include = true;
   int rotation = 0; // 0 / 90 / 180 / 270
   String? error; // set during commit on failure
-  // Per-design packing â€” seeded from the size/surface defaults on entering
+  // Per-design packing — seeded from the size/surface defaults on entering
   // Preview, then individually overridable (two designs of one size can differ).
   String? surface;
   String? tileType;
@@ -68,7 +68,7 @@ class _SizePack {
   String? adminSize; // mapped admin size
   String tileType;
   int pieces = 1;
-  String weight = ''; // free text â†’ parsed to double
+  String weight = ''; // free text → parsed to double
   _SizePack({this.adminSize, this.tileType = ''});
 }
 
@@ -78,11 +78,11 @@ enum _Phase { pick, map, preview, committing, done }
 // below it so the file is never rejected mid-import.
 const _maxUploadBytes = 980 * 1024; // ~0.96 MB
 
-// EXIF-bake â†’ manual rotate â†’ downscale to ~1600px â†’ JPEG q80, then GUARANTEE the
+// EXIF-bake → manual rotate → downscale to ~1600px → JPEG q80, then GUARANTEE the
 // result fits under Cloudinary's 1 MB limit (step quality down, then dimensions,
 // for the rare ultra-detailed tile that's still too big). Top-level + sync so it
 // can run inside Isolate.run (off the UI thread). Reads the file itself so only
-// the path (sendable) crosses the isolate boundary. Bulk-import only â€” the PDF
+// the path (sendable) crosses the isolate boundary. Bulk-import only — the PDF
 // importer keeps its own (q85/native) encoding.
 Uint8List _processImageSync(String path, int rotation) {
   final raw = File(path).readAsBytesSync();
@@ -135,13 +135,13 @@ class _State extends State<AdminBulkImageImportScreen> {
 
   // Parsed
   final List<_ImgDesign> _designs = [];
-  final Map<String, _SizePack> _sizePacks = {}; // sizeFolder â†’ packing
-  final Map<String, String> _surfaceMap = {}; // surfaceFolder â†’ admin surface
+  final Map<String, _SizePack> _sizePacks = {}; // sizeFolder → packing
+  final Map<String, String> _surfaceMap = {}; // surfaceFolder → admin surface
   bool _stripSuffix = false; // strip trailing _A/_B from filenames
   Set<String> _existingKeys = {}; // "name|size|brandId" already in the library
 
   // Per-design text controllers, OWNED by the State (keyed by file path) so the
-  // typed name/weight survive a row being disposed+rebuilt while scrolling â€” the
+  // typed name/weight survive a row being disposed+rebuilt while scrolling — the
   // model (`d`) stays the source of truth, the controller just keeps the widget
   // text alive. Without this, edits to scrolled-past rows were lost.
   final Map<String, TextEditingController> _nameCtrls = {};
@@ -203,7 +203,7 @@ class _State extends State<AdminBulkImageImportScreen> {
     setState(() => _brands = b);
   }
 
-  // â”€â”€ Folder pick + parse â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Folder pick + parse ─────────────────────────────────────────────────────
   Future<void> _pickFolder() async {
     final dir = await FilePicker.platform.getDirectoryPath(
         dialogTitle: 'Pick the brand image folder');
@@ -217,7 +217,7 @@ class _State extends State<AdminBulkImageImportScreen> {
           .where((f) {
             final base = f.path.split(Platform.pathSeparator).last;
             // Skip hidden / OS-junk that a Mac-made zip leaves behind: AppleDouble
-            // "._*" resource forks, ".DS_Store", "Thumbs.db" â€” they're not real
+            // "._*" resource forks, ".DS_Store", "Thumbs.db" — they're not real
             // images (decode fails) and would create garbage "._design" entries.
             if (base.startsWith('.')) return false;
             if (base.toLowerCase() == 'thumbs.db') return false;
@@ -248,7 +248,7 @@ class _State extends State<AdminBulkImageImportScreen> {
           name: _designName(filename),
         ));
       }
-      // Distinct size folders â†’ packing rows (with inchâ†’mm guess).
+      // Distinct size folders → packing rows (with inch→mm guess).
       for (final d in _designs) {
         _sizePacks.putIfAbsent(d.sizeFolder, () {
           final guess = _inchToMm[d.sizeFolder.toUpperCase().replaceAll(' ', '')];
@@ -260,7 +260,7 @@ class _State extends State<AdminBulkImageImportScreen> {
         if (d.surfaceFolder.isNotEmpty) {
           _surfaceMap.putIfAbsent(d.surfaceFolder, () {
             // Auto-match the folder word to an admin surface, case-insensitively
-            // ("MATT" â†’ "Matt"); fall back to None only when nothing matches.
+            // ("MATT" → "Matt"); fall back to None only when nothing matches.
             final m = _adminSurfaces.where(
                 (s) => s.toLowerCase() == d.surfaceFolder.trim().toLowerCase());
             if (m.isNotEmpty) return m.first;
@@ -270,7 +270,7 @@ class _State extends State<AdminBulkImageImportScreen> {
           });
         }
       }
-      // Preload the stockist's existing library keys â†’ flag NEW vs already-in.
+      // Preload the stockist's existing library keys → flag NEW vs already-in.
       final lib = await _data.adminStockistLibrary(_stockist!.id);
       _existingKeys = {
         for (final m in lib)
@@ -279,7 +279,7 @@ class _State extends State<AdminBulkImageImportScreen> {
       };
       setState(() => _phase = _Phase.map);
     } catch (e) {
-      setState(() => _error = 'Could not read the folder â€” $e');
+      setState(() => _error = 'Could not read the folder — $e');
     }
   }
 
@@ -288,7 +288,7 @@ class _State extends State<AdminBulkImageImportScreen> {
     return i < 0 ? '' : p.substring(i).toLowerCase();
   }
 
-  // filename â†’ design name: drop extension; optionally strip a trailing _A/_B.
+  // filename → design name: drop extension; optionally strip a trailing _A/_B.
   String _designName(String filename) {
     var n = filename;
     final dot = n.lastIndexOf('.');
@@ -328,7 +328,7 @@ class _State extends State<AdminBulkImageImportScreen> {
     return m.isNotEmpty ? (m.first['name'] ?? '').toString() : '';
   }
 
-  // Surface picklist for the per-design dropdown â€” admin surfaces plus 'None'
+  // Surface picklist for the per-design dropdown — admin surfaces plus 'None'
   // (a design from a folder without a surface subfolder defaults to None).
   List<String> get _surfaceOptions =>
       [..._adminSurfaces, if (!_adminSurfaces.contains('None')) 'None'];
@@ -359,7 +359,7 @@ class _State extends State<AdminBulkImageImportScreen> {
       (d.pieces ?? 0) > 0 &&
       (double.tryParse(d.weight.trim()) ?? 0) > 0;
 
-  // â”€â”€ Commit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Commit ───────────────────────────────────────────────────────────────
   Future<void> _commit() async {
     final todo = _designs.where((d) => d.include).toList();
     if (todo.isEmpty) return;
@@ -370,7 +370,7 @@ class _State extends State<AdminBulkImageImportScreen> {
     final seq = _stockist!.id;
 
     // Worker pool: _kCommitConcurrency workers pull the next design off a shared
-    // cursor and run its full decodeâ†’uploadâ†’DB pipeline. Dart runs one isolate
+    // cursor and run its full decode→upload→DB pipeline. Dart runs one isolate
     // single-threaded, so `cursor++` between workers is race-free (no await sits
     // between the read and the increment). This overlaps CPU-bound image work
     // with network-bound uploads instead of doing them strictly one-at-a-time.
@@ -435,13 +435,13 @@ class _State extends State<AdminBulkImageImportScreen> {
     return Isolate.run(() => _processImageSync(path, rot));
   }
 
-  // â”€â”€ UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── UI ─────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         // Once a stockist+brand are picked, keep them in the header for the rest
-        // of the flow (mapâ†’previewâ†’uploadâ†’done) so the admin never loses track of
+        // of the flow (map→preview→upload→done) so the admin never loses track of
         // which library they're filling.
         title: (_stockist != null && _phase != _Phase.pick)
             ? Column(
@@ -452,7 +452,7 @@ class _State extends State<AdminBulkImageImportScreen> {
                       style: TextStyle(fontSize: 16)),
                   Text(
                     '${_stockist!.name}'
-                    '${_selectedBrandName.isNotEmpty ? '  Â·  $_selectedBrandName' : ''}',
+                    '${_selectedBrandName.isNotEmpty ? '  ·  $_selectedBrandName' : ''}',
                     style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
@@ -513,7 +513,7 @@ class _State extends State<AdminBulkImageImportScreen> {
                 labelText: 'Stockist', border: OutlineInputBorder()),
             items: _stockists
                 .map((s) => DropdownMenuItem(
-                    value: s, child: Text('${s.name}  (${s.id} Â· ${s.businessType})')))
+                    value: s, child: Text('${s.name}  (${s.id} · ${s.businessType})')))
                 .toList(),
             onChanged: (s) { if (s != null) _pickBrands(s); },
           ),
@@ -543,7 +543,7 @@ class _State extends State<AdminBulkImageImportScreen> {
             contentPadding: EdgeInsets.zero,
             title: const Text('Strip trailing _A / _B from filenames',
                 style: TextStyle(fontSize: 13)),
-            subtitle: const Text('e.g. "3212_A" â†’ "3212" (shade variants)',
+            subtitle: const Text('e.g. "3212_A" → "3212" (shade variants)',
                 style: TextStyle(fontSize: 11)),
             value: _stripSuffix,
             onChanged: (v) => setState(() {
@@ -567,7 +567,7 @@ class _State extends State<AdminBulkImageImportScreen> {
           Text('2. Map sizes & packing   (${_designs.length} images)',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 4),
-          const Text('Each folder size â†’ an admin size, plus its packing.',
+          const Text('Each folder size → an admin size, plus its packing.',
               style: TextStyle(fontSize: 12, color: Colors.black54)),
           const SizedBox(height: 10),
           ..._sizePacks.entries.map((e) => _sizeRow(e.key, e.value)),
@@ -696,7 +696,7 @@ class _State extends State<AdminBulkImageImportScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('$on selected Â· $fresh new Â· $existing already in library',
+                  Text('$on selected · $fresh new · $existing already in library',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   if (notReady > 0)
                     Text('$notReady need surface / tile type / pieces / weight',
@@ -716,7 +716,7 @@ class _State extends State<AdminBulkImageImportScreen> {
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(8),
-            // Keep a large cache so rows aren't disposed while scrolling â€”
+            // Keep a large cache so rows aren't disposed while scrolling —
             // belt-and-braces with the State-owned controllers above.
             cacheExtent: 100000,
             itemCount: _designs.length,
@@ -789,13 +789,13 @@ class _State extends State<AdminBulkImageImportScreen> {
               }),
               const SizedBox(width: 4),
               IconButton(
-                tooltip: 'Rotate 90Â°',
+                tooltip: 'Rotate 90°',
                 icon: const Icon(Icons.rotate_right, color: _navy),
                 onPressed: () =>
                     setState(() => d.rotation = (d.rotation + 90) % 360),
               ),
             ]),
-            // Per-design packing â€” pre-filled from the size/surface defaults,
+            // Per-design packing — pre-filled from the size/surface defaults,
             // overridable so two designs of one size can differ.
             const SizedBox(height: 6),
             Row(children: [
@@ -896,7 +896,7 @@ class _State extends State<AdminBulkImageImportScreen> {
             ],
             const CircularProgressIndicator(),
             const SizedBox(height: 16),
-            Text('Importingâ€¦ ${_done + _failed} / $_total'),
+            Text('Importing… ${_done + _failed} / $_total'),
             if (_failed > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
@@ -915,7 +915,7 @@ class _State extends State<AdminBulkImageImportScreen> {
         Row(children: [
           const Icon(Icons.check_circle, color: Color(0xFF2E7D32)),
           const SizedBox(width: 8),
-          Text('Done â€” $_done imported, $_failed failed',
+          Text('Done — $_done imported, $_failed failed',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         ]),
         if (fails.isNotEmpty) ...[

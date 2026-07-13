@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -28,12 +28,12 @@ const List<String> _nonPremiumStockTypes = ['One Time', 'Uncertain'];
 List<String> stockTypesForQuality(String quality) =>
     quality == 'Premium' ? _premiumStockTypes : _nonPremiumStockTypes;
 
-// â”€â”€ Resolved row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Resolved row ─────────────────────────────────────────────────────────────
 // Produced after matching PDF rows to existing designs.
 
 class _Resolved {
   final PdfDesignRow row;
-  final TileDesign? match; // non-null â†’ update existing; null â†’ create new
+  final TileDesign? match; // non-null → update existing; null → create new
   String rawKey;           // normalised original PDF finish word (for learning).
   // Mutable: a single-surface PDF carries no finish word, so the stockist may
   // type their own in the Map-Finishes step, which becomes the key to learn.
@@ -77,7 +77,7 @@ class _State extends State<UploadStockScreen> {
   PdfImportResult?   _parsed;
   List<_Resolved>    _rows      = [];
   // This stockist's OWN Design Library photos matched for the preview
-  // (name+size â†’ url, scoped to the upload brand). Shown as the thumbnail for
+  // (name+size → url, scoped to the upload brand). Shown as the thumbnail for
   // rows the PDF carried no image for; never borrows another stockist's photo.
   Map<String, String> _libImages = {};
   bool  _loading   = false;
@@ -89,7 +89,7 @@ class _State extends State<UploadStockScreen> {
   // choice is the source of truth, guarding against wrongly-named files).
   String _size     = kAllowedSizes.first;
   String _quality  = 'Standard';
-  int?   _expectedCount; // designs the stockist expects â†’ checksum vs parsed
+  int?   _expectedCount; // designs the stockist expects → checksum vs parsed
   // Body type + per-box weight/pieces the stockist confirms for the whole batch
   // (constant per size). Used to save real values and derive sqft + thickness.
   String _tileType     = tileTypeNames.first;
@@ -105,13 +105,13 @@ class _State extends State<UploadStockScreen> {
   List<TileSize>      _tileSizes = [];           // full size rows (with aliases)
   List<StockCatalog>  _catalogs  = [];           // default-brand stock lists only
   String?             _catalogId;                // chosen upload target catalog
-  Map<String, String> _aliases  = {};            // normalisedRaw â†’ finish name
+  Map<String, String> _aliases  = {};            // normalisedRaw → finish name
   // Multi-brand: PDF upload is the DEFAULT brand's only ([[project_stockist_library]]
-  // decision #5 â€” other brands import via Excel). The library + contributions are
+  // decision #5 — other brands import via Excel). The library + contributions are
   // scoped to this brand.
   String?             _defaultBrandId;
   List<LibraryEntry>  _library  = [];            // this stockist's own master designs
-  // True when the screen was opened from a non-default brand's list â€” PDF isn't
+  // True when the screen was opened from a non-default brand's list — PDF isn't
   // allowed there, so we show a "use Excel" block instead of the picker.
   bool _brandBlocked = false;
   bool _configLoaded = false;
@@ -206,7 +206,7 @@ class _State extends State<UploadStockScreen> {
   // the stored format differs slightly (mirrors the Excel importer).
   String _sizeKey(String s) => s.toLowerCase().replaceAll(RegExp(r'[^0-9x]'), '');
 
-  // Builds a (name+size â†’ own image url) map from this stockist's library for the
+  // Builds a (name+size → own image url) map from this stockist's library for the
   // current upload brand + size. Keyed by [designImageKey] so the existing row
   // lookups work unchanged. Includes both the master name and the brand alias so
   // a row matches whichever name the PDF used.
@@ -233,7 +233,7 @@ class _State extends State<UploadStockScreen> {
     return (raw != null && raw.isNotEmpty) ? raw : null;
   }
 
-  // â”€â”€ Pick file + auto-process â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Pick file + auto-process ──────────────────────────────────────────────
 
   Future<void> _pickFile() async {
     FilePickerResult? res;
@@ -247,7 +247,7 @@ class _State extends State<UploadStockScreen> {
 
     final name     = res.files.first.name;
     final filePath = res.files.first.path;
-    setState(() { _loading = true; _filename = name; _loadingStep = 'Reading PDFâ€¦'; });
+    setState(() { _loading = true; _filename = name; _loadingStep = 'Reading PDF…'; });
 
     // Parse PDF in background isolate (UI stays responsive for any file size)
     final parsed = await _pdfService.parsePdf(name, filePath);
@@ -266,7 +266,7 @@ class _State extends State<UploadStockScreen> {
         builder: (ctx) => AlertDialog(
           title: const Text('No designs found'),
           content: const Text(
-              'This PDF has no design names to import. A design needs a name â€” '
+              'This PDF has no design names to import. A design needs a name — '
               'it identifies the tile. Please check the file and try again.'),
           actions: [
             TextButton(
@@ -288,7 +288,7 @@ class _State extends State<UploadStockScreen> {
     await _ensureConfig();
 
     // Load existing designs for this stockist
-    setState(() { _loading = true; _loadingStep = 'Matching designsâ€¦'; });
+    setState(() { _loading = true; _loadingStep = 'Matching designs…'; });
     final existing = currentStockistUUID.isEmpty
         ? <TileDesign>[]
         : await _dataSvc.getDesignsByStockist(currentStockistUUID);
@@ -322,7 +322,7 @@ class _State extends State<UploadStockScreen> {
     });
   }
 
-  // Shows the "Map your PDF finishes â†’ standard finishes" dialog. Groups rows by
+  // Shows the "Map your PDF finishes → standard finishes" dialog. Groups rows by
   // their normalised raw surface word, lets the stockist pick the official
   // finish for each group via a dropdown, then applies the choice to every row
   // in that group. Returns false if cancelled.
@@ -515,7 +515,7 @@ class _State extends State<UploadStockScreen> {
 
     // Apply each group's chosen finish to every row that shares its raw key.
     // When the stockist typed their own wording ("Add manually"), record it as
-    // the row's finish text and re-key the row so that wording â†’ chosen finish
+    // the row's finish text and re-key the row so that wording → chosen finish
     // is what gets learned for next time.
     for (final r in rows) {
       final g = groups[r.rawKey];
@@ -548,7 +548,7 @@ class _State extends State<UploadStockScreen> {
     final resolved = resolveCanonicalSize(parsed.size, _tileSizes);
     final parsedSize = resolved ?? normaliseSize(parsed.size);
     String? size = _sizes.contains(parsedSize) ? parsedSize : null;
-    String? quality;   // empty + required (Economy removed â†’ Standard/Premium)
+    String? quality;   // empty + required (Economy removed → Standard/Premium)
     String? tileType;  // empty + required (drives the thickness calc)
     String? stockType; // disabled until quality chosen, then soft Uncertain
     bool showErrors = false; // reveal red "Required" after a failed Continue
@@ -571,7 +571,7 @@ class _State extends State<UploadStockScreen> {
           Widget reqError(bool show) => show
               ? Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text('Required â€” please select',
+                  child: Text('Required — please select',
                       style:
                           TextStyle(fontSize: 11, color: Colors.red.shade700)))
               : const SizedBox.shrink();
@@ -592,7 +592,7 @@ class _State extends State<UploadStockScreen> {
                             fontSize: 11, color: Colors.orange.shade800)),
                   ],
                   const SizedBox(height: 14),
-                  // Which stock list this upload goes into â€” only when the
+                  // Which stock list this upload goes into — only when the
                   // stockist has more than one list.
                   if (_catalogs.length > 1) ...[
                     const Text('Add to stock list',
@@ -610,7 +610,7 @@ class _State extends State<UploadStockScreen> {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  // Size â€” HARD required (empty unless the filename was recognised)
+                  // Size — HARD required (empty unless the filename was recognised)
                   const Text('Tile size',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
@@ -623,13 +623,13 @@ class _State extends State<UploadStockScreen> {
                     onChanged: (v) => setLocal(() => size = v),
                   ),
                   if (size == null && parsed.size.isNotEmpty)
-                    Text('âš  Filename size "${parsed.size}" not recognised â€” '
+                    Text('⚠ Filename size "${parsed.size}" not recognised — '
                         'please pick the correct size.',
                         style: TextStyle(
                             fontSize: 11, color: Colors.orange.shade800)),
                   reqError(showErrors && size == null),
                   const SizedBox(height: 12),
-                  // Quality â€” HARD required, empty (Economy removed)
+                  // Quality — HARD required, empty (Economy removed)
                   const Text('Quality',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
@@ -654,7 +654,7 @@ class _State extends State<UploadStockScreen> {
                   ),
                   reqError(showErrors && quality == null),
                   const SizedBox(height: 12),
-                  // Tile type (body) â€” HARD required, empty
+                  // Tile type (body) — HARD required, empty
                   const Text('Tile type',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                   DropdownButton<String>(
@@ -669,7 +669,7 @@ class _State extends State<UploadStockScreen> {
                   ),
                   reqError(showErrors && tileType == null),
                   const SizedBox(height: 12),
-                  // Design Stock Type â€” soft default Uncertain, DISABLED until a
+                  // Design Stock Type — soft default Uncertain, DISABLED until a
                   // quality is chosen (its options are quality-gated).
                   const Text('Design Stock Type',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
@@ -782,7 +782,7 @@ class _State extends State<UploadStockScreen> {
                   const SizedBox(height: 6),
                   Text(
                     countMismatch
-                        ? 'âš  PDF parsed $parsedCount designs, but you expect '
+                        ? '⚠ PDF parsed $parsedCount designs, but you expect '
                             '$entered. Check for missing/extra rows before saving.'
                         : 'PDF parsed $parsedCount designs.',
                     style: TextStyle(
@@ -801,7 +801,7 @@ class _State extends State<UploadStockScreen> {
               ),
               ElevatedButton(
                 onPressed: () {
-                  // Hard-required fields must be chosen â€” reveal errors + block.
+                  // Hard-required fields must be chosen — reveal errors + block.
                   if (size == null || quality == null || tileType == null) {
                     setLocal(() => showErrors = true);
                     return;
@@ -841,11 +841,11 @@ class _State extends State<UploadStockScreen> {
     return null;
   }
 
-  // â”€â”€ Confirm: auto-process all rows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Confirm: auto-process all rows ───────────────────────────────────────
 
   Future<void> _confirm() async {
     if (_parsed == null || currentStockistUUID.isEmpty) return;
-    setState(() { _importing = true; _loadingStep = 'Saving designsâ€¦'; });
+    setState(() { _importing = true; _loadingStep = 'Saving designs…'; });
 
     int updated = 0;
     int created = 0;
@@ -860,16 +860,16 @@ class _State extends State<UploadStockScreen> {
     final libImages = _libImages;
     final brandId = _uploadBrandId;
 
-    // â”€â”€ Phase A: resolve images (non-transactional). Upload each PDF photo to
+    // ── Phase A: resolve images (non-transactional). Upload each PDF photo to
     // Cloudinary once (cached on the row so a retry never re-uploads), or fall
     // back to this stockist's own library photo. We only fetch a photo when the
-    // row actually needs one â€” a new design, or an existing one with no image yet.
+    // row actually needs one — a new design, or an existing one with no image yet.
     Future<String?> resolveImage(_Resolved r) async {
       final needs = !r.isUpdate || r.match!.faceImageUrls.isEmpty;
       if (!needs) return null;
       if (r.uploadedUrl != null) return r.uploadedUrl;
       if (r.row.imageBytes != null) {
-        setState(() => _loadingStep = 'Uploading image for ${r.row.name}â€¦');
+        setState(() => _loadingStep = 'Uploading image for ${r.row.name}…');
         final res = await CloudinaryService.uploadImageBytes(
           r.row.imageBytes!,
           filename: '${r.row.name.replaceAll(' ', '_')}.jpg',
@@ -885,9 +885,9 @@ class _State extends State<UploadStockScreen> {
     final thick =
         approxThicknessMm(_size, _piecesPerBox, _boxWeightKg, _tileType) ?? 0;
 
-    // â”€â”€ Phase B: build ONE atomic batch payload. The DB find-or-creates each
+    // ── Phase B: build ONE atomic batch payload. The DB find-or-creates each
     // design, adds stock and grows the Library (master + brand alias + photo,
-    // first-writer-wins) in a single transaction â€” never a half-import, and a
+    // first-writer-wins) in a single transaction — never a half-import, and a
     // reused batch id can't double-add on retry. design_id honours THIS screen's
     // (fuzzy) match so a previewed "update" stays an update.
     final rows = <Map<String, dynamic>>[];
@@ -915,7 +915,7 @@ class _State extends State<UploadStockScreen> {
       });
     }
 
-    setState(() => _loadingStep = 'Saving to your catalogueâ€¦');
+    setState(() => _loadingStep = 'Saving to your catalogue…');
     if (_batchId.isEmpty) _batchId = const Uuid().v4();
     try {
       final res = await _dataSvc.importStockBatch(
@@ -932,14 +932,14 @@ class _State extends State<UploadStockScreen> {
       if (!mounted) return;
       setState(() { _importing = false; _loadingStep = ''; });
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Nothing was saved â€” $e. Please try again.'),
+        content: Text('Nothing was saved — $e. Please try again.'),
         backgroundColor: Colors.red,
         duration: const Duration(seconds: 6),
       ));
       return;
     }
 
-    // Learn finish alignments: remember each raw PDF surface word â†’ the finish
+    // Learn finish alignments: remember each raw PDF surface word → the finish
     // it ended up as, so the next PDF from this stockist auto-aligns. Deduped
     // (last choice wins); 'None' and empty keys are not worth remembering.
     final learned = <String, String>{};
@@ -956,10 +956,10 @@ class _State extends State<UploadStockScreen> {
 
     final total = updated + created;
     final libNote = imagesFromLibrary > 0
-        ? ' Â· $imagesFromLibrary from library'
+        ? ' · $imagesFromLibrary from library'
         : '';
     final imageNote =
-        imagesUploaded > 0 ? ' Â· $imagesUploaded photos added$libNote' : libNote;
+        imagesUploaded > 0 ? ' · $imagesUploaded photos added$libNote' : libNote;
     // Name the destination stock list so the stockist knows where it landed.
     StockCatalog? cat;
     for (final c in _catalogs) {
@@ -967,7 +967,7 @@ class _State extends State<UploadStockScreen> {
     }
     final catNote = cat == null ? '' : '\nUploaded to "${cat.name}".';
     // If photos were extracted but none uploaded, the upload itself is failing
-    // (e.g. Cloudinary preset not set to "unsigned") â€” tell the user why.
+    // (e.g. Cloudinary preset not set to "unsigned") — tell the user why.
     final failNote = imagesFailed > 0
         ? '\n$imagesFailed photo(s) failed to upload'
             '${lastImageError != null ? ': $lastImageError' : ''}.'
@@ -985,7 +985,7 @@ class _State extends State<UploadStockScreen> {
     if (total > 0) Navigator.of(context).pop();
   }
 
-  // â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -1015,7 +1015,7 @@ class _State extends State<UploadStockScreen> {
     );
   }
 
-  // â”€â”€ Loading â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Loading ───────────────────────────────────────────────────────────────
 
   Widget _buildLoading() => Center(
         child: Column(
@@ -1028,7 +1028,7 @@ class _State extends State<UploadStockScreen> {
                     fontSize: 15, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
             Text(
-              'Large PDFs may take 5â€“15 seconds.\nThe screen will not freeze.',
+              'Large PDFs may take 5–15 seconds.\nThe screen will not freeze.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
             ),
@@ -1036,7 +1036,7 @@ class _State extends State<UploadStockScreen> {
         ),
       );
 
-  // â”€â”€ Brand-blocked notice â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Brand-blocked notice ──────────────────────────────────────────────────
   // PDF upload is the default brand's only ([[project_stockist_library]] #5).
   // When opened from another brand's list, send the stockist to Excel instead.
   Widget _buildBrandBlocked() => Center(
@@ -1053,7 +1053,7 @@ class _State extends State<UploadStockScreen> {
                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               Text(
-                'Other brands add stock by Excel â€” their photos come from your '
+                'Other brands add stock by Excel — their photos come from your '
                 'Design Library. Import an Excel list for this brand instead.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
@@ -1076,7 +1076,7 @@ class _State extends State<UploadStockScreen> {
         ),
       );
 
-  // â”€â”€ Picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Picker ────────────────────────────────────────────────────────────────
 
   Widget _buildPicker() => Center(
         child: GestureDetector(
@@ -1113,7 +1113,7 @@ class _State extends State<UploadStockScreen> {
         ),
       );
 
-  // â”€â”€ File info bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── File info bar ─────────────────────────────────────────────────────────
 
   Widget _buildFileBar() => Container(
         width: double.infinity,
@@ -1130,7 +1130,7 @@ class _State extends State<UploadStockScreen> {
                   Text(_filename,
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                   Text(
-                    'Size: $_size  Â·  Quality: $_quality',
+                    'Size: $_size  ·  Quality: $_quality',
                     style: const TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
@@ -1145,9 +1145,9 @@ class _State extends State<UploadStockScreen> {
         ),
       );
 
-  // â”€â”€ Count checksum warning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Count checksum warning ────────────────────────────────────────────────
   // Surfaced when the stockist's expected design count differs from what the
-  // parser found â€” a hint that a design row was missed or duplicated.
+  // parser found — a hint that a design row was missed or duplicated.
 
   Widget _buildCountWarning() {
     final expected = _expectedCount;
@@ -1168,7 +1168,7 @@ class _State extends State<UploadStockScreen> {
             child: Text(
               'You expected $expected designs, but the PDF parsed '
               '${_rows.length}. ${fewer ? 'A design may be missing' : 'There may be an extra row'} '
-              'â€” review before saving.',
+              '— review before saving.',
               style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
             ),
           ),
@@ -1177,7 +1177,7 @@ class _State extends State<UploadStockScreen> {
     );
   }
 
-  // â”€â”€ Stats bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Stats bar ─────────────────────────────────────────────────────────────
 
   Widget _buildStatsBar() {
     final updateCount = _rows.where((r) => r.isUpdate).length;
@@ -1208,13 +1208,13 @@ class _State extends State<UploadStockScreen> {
             ],
           ),
         ),
-        // Debug row â€” shows raw text stats to diagnose parsing issues
+        // Debug row — shows raw text stats to diagnose parsing issues
         Container(
           width: double.infinity,
           color: Colors.grey.shade100,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Text(
-            'Debug: $rawLines lines in PDF text Â· $digitLines start with digit',
+            'Debug: $rawLines lines in PDF text · $digitLines start with digit',
             style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
             textAlign: TextAlign.center,
           ),
@@ -1238,7 +1238,7 @@ class _State extends State<UploadStockScreen> {
         ],
       );
 
-  // â”€â”€ Summary list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Summary list ──────────────────────────────────────────────────────────
 
   Widget _buildSummaryList() {
     final updates = _rows.where((r) =>  r.isUpdate).toList();
@@ -1250,7 +1250,7 @@ class _State extends State<UploadStockScreen> {
         // UPDATE section
         if (updates.isNotEmpty) ...[
           _sectionHeader(
-            '${updates.length} designs â€” add to existing stock',
+            '${updates.length} designs — add to existing stock',
             Icons.add_circle_outline,
             const Color(0xFF2E7D32),
             const Color(0xFFE8F5E9),
@@ -1263,7 +1263,7 @@ class _State extends State<UploadStockScreen> {
         // CREATE section
         if (creates.isNotEmpty) ...[
           _sectionHeader(
-            '${creates.length} new designs â€” will be created',
+            '${creates.length} new designs — will be created',
             Icons.add_box_outlined,
             const Color(0xFF6A1B9A),
             const Color(0xFFF3E5F5),
@@ -1432,7 +1432,7 @@ class _State extends State<UploadStockScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // Mapped admin finish â€” tap to change.
+            // Mapped admin finish — tap to change.
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -1543,7 +1543,7 @@ class _State extends State<UploadStockScreen> {
     if (name != null && name.isNotEmpty) setState(() => row.name = name);
   }
 
-  // â”€â”€ Bottom bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Bottom bar ────────────────────────────────────────────────────────────
 
   Widget _buildBottomBar() {
     final total = _rows.length;
@@ -1572,7 +1572,7 @@ class _State extends State<UploadStockScreen> {
               : const Icon(Icons.check_circle_outline),
           label: Text(
             _importing
-                ? 'Processingâ€¦'
+                ? 'Processing…'
                 : total == 0
                     ? 'No designs found in PDF'
                     : 'Confirm All ($total designs)',

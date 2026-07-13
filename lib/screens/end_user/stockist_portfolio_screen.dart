@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -59,7 +59,7 @@ class _State extends State<StockistPortfolioScreen> {
   Set<String> _selectedTypes    = {};
   Set<String> _selectedThickness = {};
   Set<String> _selectedStockTypes = {};
-  // Design DNA (image DNA) â€” chips/bottom-sheet + facet filter + search.
+  // Design DNA (image DNA) — chips/bottom-sheet + facet filter + search.
   final _dna = BuyerDna();
   final Set<String> _selectedDna = {};
   final _minQtyCtrl  = TextEditingController();
@@ -143,7 +143,7 @@ class _State extends State<StockistPortfolioScreen> {
     final mx = _maxQtyCtrl.text.trim();
     if (mn.isNotEmpty || mx.isNotEmpty) {
       out.add(ActiveFilter(
-          'Qty ${mn.isEmpty ? '0' : mn}â€“${mx.isEmpty ? 'âˆž' : mx}',
+          'Qty ${mn.isEmpty ? '0' : mn}–${mx.isEmpty ? '∞' : mx}',
           () => setState(() {
                 _minQtyCtrl.clear();
                 _maxQtyCtrl.clear();
@@ -234,7 +234,7 @@ class _State extends State<StockistPortfolioScreen> {
     });
   }
 
-  // â”€â”€ Quality filter + search + filter button row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Quality filter + search + filter button row ───────────────────────────
 
   Widget _buildQualityFilter() {
     return Container(
@@ -256,8 +256,8 @@ class _State extends State<StockistPortfolioScreen> {
             onChanged: (v) => setState(() => _searchQuery = v),
             decoration: InputDecoration(
               hintText: smartSearch
-                  ? 'Smart: white = bianco, carraraâ€¦'
-                  : 'Search design nameâ€¦',
+                  ? 'Smart: white = bianco, carrara…'
+                  : 'Search design name…',
               prefixIcon: const Icon(Icons.search, size: 20),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8)),
@@ -444,7 +444,7 @@ class _State extends State<StockistPortfolioScreen> {
     );
   }
 
-  // â”€â”€ Design detail sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Design detail sheet ───────────────────────────────────────────────────
 
   void _openDesign(int startIndex) {
     // Page across the merged cards' representative holdings (matches the grid).
@@ -511,7 +511,7 @@ class _State extends State<StockistPortfolioScreen> {
                       ],
                     ),
                   ),
-                  // 2. Image (240 px, cached) â†’ medium thumbnail
+                  // 2. Image (240 px, cached) → medium thumbnail
                   SizedBox(
                     height: 240,
                     width: double.infinity,
@@ -526,7 +526,7 @@ class _State extends State<StockistPortfolioScreen> {
                       ),
                     ),
                   ),
-                  // 3. Prev Â· counter Â· Next (right after image)
+                  // 3. Prev · counter · Next (right after image)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
                     child: Row(
@@ -741,7 +741,7 @@ class _State extends State<StockistPortfolioScreen> {
         ),
       );
 
-  // â”€â”€ Send order sheet (same layout as My Choice) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Send order sheet (same layout as My Choice) ───────────────────────────
 
   String _buildMessage(List<TileDesign> designs) => buildOrderMessage([
         for (final d in designs)
@@ -851,7 +851,7 @@ class _State extends State<StockistPortfolioScreen> {
     );
   }
 
-  // â”€â”€ Sticky send bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Sticky send bar ───────────────────────────────────────────────────────
 
   Widget? _buildSendBar() {
     final chosen = _chosenFromThisStockist;
@@ -909,7 +909,7 @@ class _State extends State<StockistPortfolioScreen> {
     );
   }
 
-  // â”€â”€ Filter sheet â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Filter sheet ──────────────────────────────────────────────────────────
 
   void _showFilterSheet() {
     FocusManager.instance.primaryFocus?.unfocus();
@@ -1125,7 +1125,7 @@ class _State extends State<StockistPortfolioScreen> {
               ),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Text('â€“',
+                child: Text('–',
                     style: TextStyle(color: Colors.grey, fontSize: 18)),
               ),
               Expanded(
@@ -1200,7 +1200,7 @@ class _State extends State<StockistPortfolioScreen> {
                   ),
                 ),
                 const Divider(height: 1),
-                // Pinned Quantity â€” always visible at the top.
+                // Pinned Quantity — always visible at the top.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
                   child: Column(
@@ -1219,7 +1219,7 @@ class _State extends State<StockistPortfolioScreen> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                     children: [
-                      // Essentials â€” always visible.
+                      // Essentials — always visible.
                       FilterSection(
                         title: 'Size',
                         summary: filterSummary(localSizes),
@@ -1235,7 +1235,7 @@ class _State extends State<StockistPortfolioScreen> {
                         summary: localStockTypes.isEmpty ? 'All' : localStockTypes.join(', '),
                         child: stockTypeRow(),
                       ),
-                      // Advanced â€” behind the "More filters" toggle.
+                      // Advanced — behind the "More filters" toggle.
                       MoreFiltersToggle(
                         expanded: showMore,
                         activeHidden: (localTypes.isNotEmpty ? 1 : 0) +
@@ -1308,7 +1308,7 @@ class _State extends State<StockistPortfolioScreen> {
     });
   }
 
-  // â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -1367,7 +1367,7 @@ class _State extends State<StockistPortfolioScreen> {
             await showQualityChoiceSheet(context, m);
             if (mounted) setState(() {});
           },
-          // DNA chips on each card â†’ tap opens the DNA bottom sheet.
+          // DNA chips on each card → tap opens the DNA bottom sheet.
           dnaTagsFor: (id) => _dna.tagsFor(id),
         ),
       );
