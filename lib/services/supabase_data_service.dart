@@ -382,6 +382,40 @@ class SupabaseDataService {
     }
   }
 
+  /// Which PRODUCT does a box of [pieces] × [weightKg] belong to?
+  ///
+  /// A stockist never opens Add-design for a tile already in the library — they open ADD STOCK,
+  /// because what is new is a BATCH. So a different box weight surfaces here, and they report a
+  /// fact off the box; they never pick a thickness and never decide whether it is a new product.
+  /// The 1 mm rule does that:
+  ///
+  ///   ≤ 1 mm apart → the SAME tile (ordinary drift: a 600x1200 2-pc box went 28 kg → 26 kg, which
+  ///                  is 0.62 mm). The stock joins the existing product; its box weight is NOT
+  ///                  overwritten — the first weight stays the reference.
+  ///   > 1 mm apart → a genuinely DIFFERENT tile. The server FORKS a new product off the same
+  ///                  print (same size/surface/body) with its own box, and the stock goes there.
+  ///
+  /// Returns `{library_id, forked, thickness_mm, matched_thickness_mm}` — feed `library_id` straight
+  /// into [addDesign]. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+  Future<Map<String, dynamic>> libraryForBox({
+    required String libraryId,
+    String? brandId,
+    required int pieces,
+    required double weightKg,
+  }) async {
+    try {
+      final res = await supabase.rpc('library_for_box', params: {
+        'p_library_id': libraryId,
+        'p_brand_id': brandId,
+        'p_pieces': pieces,
+        'p_weight': weightKg,
+      });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   Future<String?> addDesign({
     required String libraryId,
     required String quality,
