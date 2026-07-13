@@ -9,6 +9,7 @@ import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/dna_chains.dart';
+import '../../utils/platform_kind.dart';
 import 'dna_editor_sheet.dart';
 
 /// "24.0" -> "24", "10.1" -> "10.1". Used by both the card chips and the editor.
@@ -847,21 +848,25 @@ class _State extends State<MyDesignLibraryScreen> {
       appBar: AppBar(
         title: const Text('My Design Library'),
         actions: [
-          // M only: PDF import builds the library (design identity + photos, no stock).
-          if (currentStockistBusinessType == 'M')
+          // 🚫 THE PDF IMPORT IS GONE FROM HERE — deliberately, not by accident.
+          //
+          // A supplier PDF prints the name stamped on the BOX (`brand_design_name`): the
+          // FACTORY'S word, per-brand, free text ("1001", "CARRARA GOLD"). It is NOT the
+          // stockist's own word for the artwork — and `print_name` is exactly that. Feeding a
+          // PDF label into print_name forges a WRONG PRINT for every row, and the print sits at
+          // the top of the identity chain, so the damage runs all the way down.
+          //
+          // A FOLDER is the honest source: HE NAMED THE FILES. The route and the parser survive
+          // for re-use elsewhere; only the way in is closed.
+          //
+          // Windows only — it reads a folder tree with dart:io, and his images live on his PC.
+          if (isWindowsDesktop)
             IconButton(
-              icon: const Icon(Icons.picture_as_pdf),
-              tooltip: 'Import PDF (add designs)',
+              icon: const Icon(Icons.drive_folder_upload_outlined),
+              tooltip: 'Import images from a folder (add designs)',
               onPressed: () async {
-                final brands = _brands;
-                final defaultBrand = brands.isEmpty
-                    ? null
-                    : brands.firstWhere((b) => b.isDefault,
-                        orElse: () => brands.first);
-                if (defaultBrand == null) return;
-                final done = await context.push<bool>(
-                    '/stockist/stock/import-supplier-pdf',
-                    extra: defaultBrand.id);
+                final done =
+                    await context.push<bool>('/stockist/library/import-images');
                 if (done == true) _load();
               },
             ),

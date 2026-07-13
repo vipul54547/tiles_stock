@@ -891,6 +891,46 @@ class SupabaseDataService {
     }
   }
 
+  /// The STOCKIST'S OWN folder import — one image file → one product.
+  ///
+  /// [name] is the FILENAME, and it becomes the PRINT NAME: his own word for the artwork. That is
+  /// the whole reason the folder replaced the PDF — a PDF only ever knows the name stamped on the
+  /// BOX (`brand_design_name`), which is the factory's word, not his.
+  ///
+  /// Re-importing the same folder is safe: it finds the same product, KEEPS the photo it already
+  /// has, and never overwrites a box weight already on record (that weight is the reference the
+  /// 1 mm thickness rule measures drift against).
+  ///
+  /// ⚠️ NOT `libraryUpsertMaster` — that one DELETES every brand alias absent from its payload
+  /// (it backs the Library editor, where the alias list IS the truth). A folder import knows about
+  /// one brand only, so it would wipe every other brand's box. `library_image_upsert` only merges.
+  Future<String> libraryImageUpsert({
+    required String size,
+    required String name,
+    required String imageUrl,
+    required String brandId,
+    required String surface,
+    String? tileType,
+    int? pieces,
+    double? weight,
+  }) async {
+    try {
+      final res = await supabase.rpc('library_image_upsert', params: {
+        'p_size': size,
+        'p_name': name,
+        'p_image_url': imageUrl,
+        'p_brand_id': brandId,
+        'p_surface': surfaceForImport(surface),
+        'p_tile_type': tileType,
+        'p_pieces': pieces,
+        'p_weight': weight,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Admin-on-behalf library upsert for the bulk image-folder import. Creates or
   /// matches a master for stockist [seq] (sequential_id); always sets the brand
   /// alias = [masterName] under [brandId] (so the design carries its name in that

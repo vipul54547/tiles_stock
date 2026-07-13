@@ -47,6 +47,19 @@ Don't infer a function's signature from its call site.
   Colour). **A print has no thickness and no weight — you cannot hold it.** It becomes a product only
   once a surface, a body and a box are declared. A print may exist with **no product**.
   🔑 `print_upsert()` is the **only** way one is created; the image is **first-writer-wins**.
+- 📁 **THE FOLDER IS THE ONLY HONEST SOURCE OF A PRINT NAME — never a PDF.**
+  A supplier PDF prints the name stamped on the **BOX** (`brand_design_name`): the **factory's**
+  word, per-brand, free text (`1001`, `CARRARA GOLD`, `DHORO KHIMO`). That is **not** the stockist's
+  own word for the artwork, and `print_name` is exactly that. Feeding a PDF label into `print_name`
+  **forges a wrong PRINT for every row** — and the print is the top of the identity chain, so the
+  damage runs all the way down. **In a folder, HE NAMED THE FILES.** The filename **is** his word.
+  - Stockist folder import: `SIZE / [SURFACE] / design.jpg` → `library_image_upsert` (his own).
+    No SURFACE level → **`Special`**. **Windows only** (it walks a folder tree with `dart:io`).
+  - ⚠️ It must **NOT** call `library_upsert_master` — that **DELETES** every brand alias absent from
+    its payload (it backs the Library editor, where the alias list IS the truth). A folder knows one
+    brand, so it would **wipe every other brand's BOX**. `library_image_upsert` only **merges**.
+  - 🚫 **The PDF importer is HIDDEN from the platform** (no entry point). The route + parser survive
+    for re-use elsewhere. **Do not re-add a way in.**
 - **PRODUCT** = `stockist_library` — **ONE PIECE of tile.** **This is what "a design" means.**
   It has **no name, no size and no image of its own** — it points at a print (`print_id`, NOT NULL).
   Its identity is:

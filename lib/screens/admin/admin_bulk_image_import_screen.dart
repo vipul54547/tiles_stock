@@ -11,15 +11,34 @@ import '../../utils/finishes.dart';
 import '../../utils/tile_types.dart';
 
 // ADMIN-ONLY bulk image-folder import (concierge onboarding). Reads a brand's
-// image folder from disk → builds the stockist's Design Library:
-//   folder layout = <brand folder> / <SIZE> / [<SURFACE>] / <design>.jpg
+// image folder from disk → builds a Design Library:
+//   folder layout = <root> / <SIZE> / [<SURFACE>] / <design>.jpg
 //   size folder   → admin size (inch→mm mapped + confirmed)
-//   surface folder→ admin surface (confirmed)
-//   filename      → design name; the image is EXIF-baked + downscaled, uploaded,
-//                   then admin_library_upsert creates/matches the master.
-// Desktop-only (recursive folder reads); never shown to stockists.
+//   surface folder→ admin surface (confirmed); none → 'Special'
+//   filename      → THE PRINT NAME; the image is EXIF-baked + downscaled, uploaded,
+//                   then the library upsert creates/matches the print + product + box.
+//
+// 🔑 THE FOLDER IS THE ONLY HONEST SOURCE OF A PRINT NAME.
+//    A supplier PDF prints the name stamped on the BOX — `brand_design_name`. That is the
+//    FACTORY'S word, it is per-brand and it is free text ("1001", "CARRARA GOLD"). It is NOT the
+//    stockist's own word for the artwork, and `print_name` is exactly that. Feeding a PDF label
+//    into print_name forges a WRONG PRINT for every row — and the print sits at the top of the
+//    identity chain, so the damage runs all the way down.
+//    In a folder, THE STOCKIST NAMED THE FILES HIMSELF. The filename IS his word.
+//    → this replaced the PDF importer, which is now hidden from the platform.
+//
+// Runs in BOTH roles off one screen:
+//   admin       — picks a stockist, then his brand   → admin_library_upsert
+//   forStockist — it is his own library, he picks the brand → library_image_upsert
+//
+// DESKTOP-ONLY: it reads a folder tree with dart:io, so it is offered on Windows only. The
+// stockist's images live on his PC anyway, and Android's scoped storage makes a picked directory
+// unreadable often enough that it cannot be trusted.
 class AdminBulkImageImportScreen extends StatefulWidget {
-  const AdminBulkImageImportScreen({super.key});
+  /// true = the signed-in STOCKIST is importing into his own library (no stockist picker,
+  /// his own brands, and the write goes through the stockist-facing RPC).
+  final bool forStockist;
+  const AdminBulkImageImportScreen({super.key, this.forStockist = false});
   @override
   State<AdminBulkImageImportScreen> createState() => _State();
 }
@@ -179,15 +198,30 @@ class _State extends State<AdminBulkImageImportScreen> {
   TextEditingController _weightCtrl(_ImgDesign d) =>
       _weightCtrls.putIfAbsent(d.path, () => TextEditingController(text: d.weight));
 
+  bool get _forStockist => widget.forStockist;
+
+  /// True once we know WHOSE library we're filling — a stockist always does.
+  bool get _haveOwner => _forStockist || _stockist != null;
+
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final stk = await _data.getAllStockists(activeOnly: true);
       final sizes = await _data.getActiveSizeNames();
       final surfaces = await _data.getSurfaceTypes(activeOnly: true);
+      // A stockist is importing into his OWN library: no picker, and his own brands.
+      final stk = _forStockist
+          ? <Stockist>[]
+          : (await _data.getAllStockists(activeOnly: true));
+      final myBrands = _forStockist
+          ? [for (final b in await _data.getMyBrands()) {'id': b.id, 'name': b.name}]
+          : <Map<String, dynamic>>[];
       if (!mounted) return;
       setState(() {
         _stockists = stk..sort((a, b) => a.name.compareTo(b.name));
+        _brands = myBrands;
+        _brandId = _forStockist && myBrands.isNotEmpty
+            ? myBrands.first['id'] as String
+            : null;
         _adminSizes = sizes;
         _adminSurfaces = surfaces.map((s) => s.name).toList();
         _loading = false;
@@ -269,13 +303,22 @@ class _State extends State<AdminBulkImageImportScreen> {
           });
         }
       }
-      // Preload the stockist's existing library keys → flag NEW vs already-in.
-      final lib = await _data.adminStockistLibrary(_stockist!.id);
-      _existingKeys = {
-        for (final m in lib)
-          '${(m['master_design_name'] ?? '').toString().toLowerCase()}'
-          '|${m['size']}|${m['brand_id']}'
-      };
+      // Preload the existing library keys → flag NEW vs already-in. (A stockist reads his own;
+      // only an admin may read someone else's.)
+      if (_forStockist) {
+        final lib = await _data.getMyLibrary();
+        _existingKeys = {
+          for (final e in lib)
+            '${e.masterName.toLowerCase()}|${e.size}|${e.brandId}'
+        };
+      } else {
+        final lib = await _data.adminStockistLibrary(_stockist!.id);
+        _existingKeys = {
+          for (final m in lib)
+            '${(m['master_design_name'] ?? '').toString().toLowerCase()}'
+            '|${m['size']}|${m['brand_id']}'
+        };
+      }
       setState(() => _phase = _Phase.map);
     } catch (e) {
       setState(() => _error = 'Could not read the folder — $e');
@@ -370,7 +413,7 @@ class _State extends State<AdminBulkImageImportScreen> {
       _phase = _Phase.committing;
       _done = 0; _failed = 0; _total = todo.length;
     });
-    final seq = _stockist!.id;
+    final seq = _forStockist ? '' : _stockist!.id;
 
     // Worker pool: _kCommitConcurrency workers pull the next design off a shared
     // cursor and run its full decode→upload→DB pipeline. Dart runs one isolate
@@ -408,17 +451,36 @@ class _State extends State<AdminBulkImageImportScreen> {
           : _surfaceMap[d.surfaceFolder]);
       final weightStr = d.weight.trim().isNotEmpty ? d.weight : pack.weight;
       final weight = double.tryParse(weightStr.trim()) ?? 0;
-      await _data.adminLibraryUpsert(
-        seq: seq,
-        size: pack.adminSize!,
-        masterName: d.name,
-        brandId: _brandId!,
-        imageUrl: res.url!,
-        surface: surface,
-        tileType: (d.tileType ?? '').isNotEmpty ? d.tileType : pack.tileType,
-        pieces: d.pieces ?? pack.pieces,
-        weight: weight,
-      );
+      final tileType =
+          (d.tileType ?? '').isNotEmpty ? d.tileType : pack.tileType;
+      final pieces = d.pieces ?? pack.pieces;
+
+      if (_forStockist) {
+        // The FILENAME is the print name — his own word for the artwork. The stamp on the box
+        // starts equal to it; he corrects it per brand in the Library afterwards.
+        await _data.libraryImageUpsert(
+          size: pack.adminSize!,
+          name: d.name,
+          imageUrl: res.url!,
+          brandId: _brandId!,
+          surface: surface,
+          tileType: tileType,
+          pieces: pieces,
+          weight: weight,
+        );
+      } else {
+        await _data.adminLibraryUpsert(
+          seq: seq,
+          size: pack.adminSize!,
+          masterName: d.name,
+          brandId: _brandId!,
+          imageUrl: res.url!,
+          surface: surface,
+          tileType: tileType,
+          pieces: pieces,
+          weight: weight,
+        );
+      }
       d.error = null;
       _done++;
     } catch (e) {
@@ -444,15 +506,15 @@ class _State extends State<AdminBulkImageImportScreen> {
         // Once a stockist+brand are picked, keep them in the header for the rest
         // of the flow (map→preview→upload→done) so the admin never loses track of
         // which library they're filling.
-        title: (_stockist != null && _phase != _Phase.pick)
+        title: (_haveOwner && _phase != _Phase.pick)
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Bulk image import (admin)',
-                      style: TextStyle(fontSize: 16)),
+                  Text(_forStockist ? 'Import images' : 'Bulk image import (admin)',
+                      style: const TextStyle(fontSize: 16)),
                   Text(
-                    '${_stockist!.name}'
+                    '${_forStockist ? 'My Library' : _stockist!.name}'
                     '${_selectedBrandName.isNotEmpty ? '  ·  $_selectedBrandName' : ''}',
                     style: const TextStyle(
                         fontSize: 12.5,
@@ -461,7 +523,7 @@ class _State extends State<AdminBulkImageImportScreen> {
                   ),
                 ],
               )
-            : const Text('Bulk image import (admin)'),
+            : Text(_forStockist ? 'Import images' : 'Bulk image import (admin)'),
         actions: [
           if (_phase != _Phase.pick && _phase != _Phase.committing)
             TextButton.icon(
@@ -504,21 +566,23 @@ class _State extends State<AdminBulkImageImportScreen> {
   Widget _buildPick() => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('1. Choose stockist & brand',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          Text(_forStockist ? '1. Choose the brand' : '1. Choose stockist & brand',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 12),
-          DropdownButtonFormField<Stockist>(
-            initialValue: _stockist,
-            isExpanded: true,
-            decoration: const InputDecoration(
-                labelText: 'Stockist', border: OutlineInputBorder()),
-            items: _stockists
-                .map((s) => DropdownMenuItem(
-                    value: s, child: Text('${s.name}  (${s.id} · ${s.businessType})')))
-                .toList(),
-            onChanged: (s) { if (s != null) _pickBrands(s); },
-          ),
-          const SizedBox(height: 12),
+          if (!_forStockist) ...[
+            DropdownButtonFormField<Stockist>(
+              initialValue: _stockist,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  labelText: 'Stockist', border: OutlineInputBorder()),
+              items: _stockists
+                  .map((s) => DropdownMenuItem(
+                      value: s, child: Text('${s.name}  (${s.id} · ${s.businessType})')))
+                  .toList(),
+              onChanged: (s) { if (s != null) _pickBrands(s); },
+            ),
+            const SizedBox(height: 12),
+          ],
           DropdownButtonFormField<String>(
             initialValue: _brandId,
             isExpanded: true,
@@ -537,8 +601,16 @@ class _State extends State<AdminBulkImageImportScreen> {
           ],
           const SizedBox(height: 20),
           const Text(
-              'Folder layout expected:  <brand folder> / SIZE / [SURFACE] / design.jpg',
+              'Folder layout expected:   SIZE / [SURFACE] / design.jpg',
               style: TextStyle(fontSize: 12, color: Colors.black54)),
+          if (_forStockist) ...[
+            const SizedBox(height: 8),
+            const Text(
+                'The FILE NAME becomes the design name — your own name for the tile. '
+                'A folder with no SURFACE level is saved as “Special”; you set the real '
+                'surface afterwards in your Library.',
+                style: TextStyle(fontSize: 12, color: Colors.black54)),
+          ],
           const SizedBox(height: 10),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
@@ -555,7 +627,7 @@ class _State extends State<AdminBulkImageImportScreen> {
           const SizedBox(height: 12),
           FilledButton.icon(
             style: FilledButton.styleFrom(backgroundColor: _navy),
-            onPressed: (_stockist != null && _brandId != null) ? _pickFolder : null,
+            onPressed: (_haveOwner && _brandId != null) ? _pickFolder : null,
             icon: const Icon(Icons.folder_open),
             label: const Text('Pick image folder & scan'),
           ),
@@ -887,8 +959,8 @@ class _State extends State<AdminBulkImageImportScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (_stockist != null) ...[
-              Text(_stockist!.name,
+            if (_haveOwner) ...[
+              Text(_forStockist ? 'My Library' : _stockist!.name,
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 16)),
               if (_selectedBrandName.isNotEmpty)

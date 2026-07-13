@@ -215,6 +215,13 @@ final GoRouter _router = GoRouter(
           path: '/stockist/library/import-mapping',
           builder: (_, __) => const ImportMappingExcelScreen(),
         ),
+        // The stockist's OWN folder import — the only honest source of a print name (he named
+        // the files). Windows-only: it reads a folder tree with dart:io.
+        GoRoute(
+          path: '/stockist/library/import-images',
+          builder: (_, __) =>
+              const AdminBulkImageImportScreen(forStockist: true),
+        ),
         GoRoute(
           path: '/stockist/stock/import-excel',
           builder: (_, state) =>
