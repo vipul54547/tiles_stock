@@ -3371,6 +3371,25 @@ class SupabaseDataService {
     }
   }
 
+  /// The NOMINAL thicknesses a product may declare — part of product identity.
+  /// Same best-effort contract as [refreshTileTypes]: on failure the built-in
+  /// [kThicknessOptions] fallback stands rather than leaving the picker empty.
+  Future<void> refreshThicknessOptions() async {
+    try {
+      final data = await supabase
+          .from('thickness_options')
+          .select('mm')
+          .eq('is_active', true)
+          .order('sort', ascending: true);
+      applyThicknessOptions([
+        for (final r in data)
+          if ((r['mm'] as num?) != null) (r['mm'] as num).toDouble(),
+      ]);
+    } catch (e) {
+      debugPrint('refreshThicknessOptions failed (keeping the built-in list): $e');
+    }
+  }
+
   // ── tile sizes (admin-managed master) ───────────────────────────────────────
 
   Future<List<TileSize>> getTileSizes({bool activeOnly = false}) async {

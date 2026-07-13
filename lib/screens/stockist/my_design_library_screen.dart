@@ -1944,6 +1944,10 @@ class _EditorState extends State<_LibraryEditorScreen> {
   final _colourCtrl = TextEditingController();
   final _finishCtrl = TextEditingController();
   String _tileType = tileTypeNames.first;
+  // 🔑 DECLARED nominal thickness — part of the product's identity, so it is REQUIRED on a new
+  // design and never guessed. Null on the legacy rows that predate CHAPTER 3; editing one of
+  // those does not force a value, so an image or name can still be fixed.
+  double? _thickness;
   String _stockType = 'Uncertain';
   static const _stockTypes = ['Continuous', 'One Time', 'Uncertain'];
   // True once the user edits the master name by hand — until then it mirrors the
@@ -2039,6 +2043,11 @@ class _EditorState extends State<_LibraryEditorScreen> {
         _aliasCtrls[bid]?.text = name;
       });
       _tileType = tileTypeNames.contains(e.tileType) ? e.tileType : tileTypeNames.first;
+      // Legacy rows predate CHAPTER 3 and carry no declared thickness — leave it blank rather
+      // than guessing one into the identity key.
+      _thickness = thicknessOptions.contains(e.nominalThicknessMm)
+          ? e.nominalThicknessMm
+          : null;
       _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
       final surf = e.surfaceType.trim();
       _surface = (surf.isEmpty || surf.toLowerCase() == 'none') ? '' : surf;
@@ -2221,6 +2230,13 @@ class _EditorState extends State<_LibraryEditorScreen> {
       setState(() => _error = 'Pick a surface — it is part of the design.');
       return;
     }
+    // Thickness is identity too: an 8 mm and a 12 mm of the same print are two products at two
+    // rates. Required on a NEW design; an existing legacy row (declared before CHAPTER 3, so
+    // blank) can still be edited without one, or its image could never be fixed.
+    if (widget.existing == null && _thickness == null) {
+      setState(() => _error = 'Pick a thickness — it is part of the design.');
+      return;
+    }
     final dup = _dupMatch;
     if (dup != null) {
       // M, adding: the same tile already exists — offer to ADD this brand's
@@ -2242,11 +2258,14 @@ class _EditorState extends State<_LibraryEditorScreen> {
       for (final e in _aliasCtrls.entries) e.key: e.value.text.trim(),
     };
     try {
-      // pieces/weight are NOT sent from here any more. They are BOX facts (product × brand)
-      // and each brand may pack differently — this form has one value for the whole product,
-      // so sending it would flatten every brand's packing back to a single number. The
-      // Library card's BOX CHIP owns them, per brand. Thickness is derived server-side and is
-      // never sent at all. (docs/BOX_AND_DERIVED_THICKNESS_PLAN.md)
+      // pieces/weight are NOT sent from here. They are BOX facts (product × brand) and each
+      // brand may pack differently — this form has one value for the whole product, so sending
+      // it would flatten every brand's packing into a single number. The Library card's BOX
+      // CHIP owns them, per brand.
+      //
+      // Thickness IS sent: it is the DECLARED nominal and part of the product's identity. The
+      // figure derived from the box is only evidence.
+      // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
       final id = await _data.upsertLibraryMaster(
         id: widget.existing?.id,
         size: _size,
@@ -2257,6 +2276,7 @@ class _EditorState extends State<_LibraryEditorScreen> {
         surfaceType: _surfaceToSave,
         stockType: _stockType,
         tileType: _tileType,
+        thicknessMm: _thickness,
         colour: _colourCtrl.text.trim(),
         finishLabel: _finishCtrl.text.trim(),
       );
@@ -2505,6 +2525,31 @@ class _EditorState extends State<_LibraryEditorScreen> {
                   _tileType = v ?? _tileType;
                   _dirty = true;
                 })),
+        const SizedBox(height: 12),
+        // 🔑 Identity, like size and surface — an 8 mm and a 12 mm of the same print cover the
+        // same sq ft but sell at a different rate, so they are two products. A FIXED list: a
+        // free number would make 8 and 8.0 two products.
+        DropdownButtonFormField<double>(
+          initialValue: _thickness,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: 'Thickness',
+            border: const OutlineInputBorder(),
+            isDense: true,
+            helperText: widget.existing == null
+                ? 'Part of the design — an 8 mm and a 12 mm are two products.'
+                : (_thickness == null ? 'Not declared yet — please set it.' : null),
+          ),
+          hint: const Text('Pick a thickness'),
+          items: [
+            for (final mm in thicknessOptions)
+              DropdownMenuItem(value: mm, child: Text(thicknessLabel(mm))),
+          ],
+          onChanged: (v) => setState(() {
+            _thickness = v ?? _thickness;
+            _dirty = true;
+          }),
+        ),
         const SizedBox(height: 12),
         _dropdown('Restock type', _stockTypes, _stockType,
             (v) => setState(() {

@@ -47,6 +47,35 @@ void applyTileTypes(List<({String name, double densityKgM3})> types) {
 /// The body types on offer — the table's, once loaded; [kTileTypes] until then.
 List<String> get tileTypeNames => _liveTypes;
 
+/// 🔑 The NOMINAL thicknesses a product may DECLARE. Part of product identity, alongside
+/// print + size + surface + body: an 8 mm and a 12 mm of the same print cover the same sq ft
+/// but sell at a different rate, so they are two products.
+///
+/// A FIXED list on purpose — a free number would make `8` and `8.0` two different products.
+/// The real list lives in the admin-managed `thickness_options` table; this const is the
+/// fallback until it loads. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
+const List<double> kThicknessOptions = [5, 6, 7, 8, 9, 10, 12, 15, 16, 18, 20];
+
+List<double> _liveThickness = List<double>.from(kThicknessOptions);
+
+/// Feed in what `SupabaseDataService.getThicknessOptions()` returned. Ignores an empty list —
+/// a failed fetch must never wipe the fallback and leave every product undeclarable.
+void applyThicknessOptions(List<double> mm) {
+  if (mm.isEmpty) return;
+  _liveThickness = List<double>.from(mm);
+}
+
+/// The nominal thicknesses on offer — the table's once loaded, [kThicknessOptions] until then.
+List<double> get thicknessOptions => _liveThickness;
+
+/// A declared nominal reads exactly — "8 mm", never a band. The 0.5 mm BAND belonged to the
+/// DERIVED figure, which was fuzzy; a declared value is not.
+String thicknessLabel(double? mm) {
+  if (mm == null) return '';
+  final s = mm == mm.roundToDouble() ? mm.toStringAsFixed(0) : mm.toStringAsFixed(1);
+  return '$s mm';
+}
+
 double densityFor(String tileType) =>
     _liveDensity[tileType] ?? kTileDensity[tileType] ?? 2350;
 

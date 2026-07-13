@@ -44,10 +44,22 @@ Don't infer a function's signature from its call site.
 - **PRODUCT** = `stockist_library` — the tile itself, one piece. **This is what "a design" means.**
   Its identity is the `stockist_library_uniq` index:
 
-      (stockist_id, lower(master_design_name), size, surface_type)
+      (stockist_id, lower(master_design_name), size, surface_type,
+       tile_type, nominal_thickness_mm)   NULLS NOT DISTINCT
 
-  It carries `image_url`, `surface_type` + `surface_label`, **`thickness_mm`**, `colour`,
-  `tile_type`, and its **DNA tags** (via `library_id`). Faces/closelook/mockup all hang here.
+  It carries `image_url`, `surface_type` + `surface_label`, `colour`, and its **DNA tags**
+  (via `library_id`). Faces/closelook/mockup all hang here.
+- 🔑 **The test for identity:** a dimension is in the key **iff two of its values are things a buyer
+  chooses between, can sit in the godown together, at different rates, and are not substitutes.**
+  Tiles sell **BY AREA AT A RATE** (₹/sq ft) — weight is freight, not commerce. So an 8 mm and a
+  12 mm of one print cover the same sq ft but sell at **different rates** → **two products**. Same
+  for body. **Brand FAILS the test** (same tile, different sticker → BOX). **Quality FAILS it**
+  (same tile, graded → HOLDING).
+- ⚠️ **`tile_type` and `nominal_thickness_mm` are DECLARED, or honestly NULL — never guessed.**
+  `NULLS NOT DISTINCT` is what keeps the key safe while they are blank: two *unknown* products of
+  one print/size/surface still **collide** instead of duplicating. (The 930 rows that predate this
+  carry NULL. A wrong value in the identity key is worse than a blank.) `tile_type` must not carry
+  a `''` default — `''` was the OLD "unknown" and would defeat the NULL key.
 - **HOLDING** = `designs` — **quantity on hand, NOT the design.** `designs_holding_uniq` is
   `(stockist, library, brand, quality, surface_type)`. It carries `box_quantity`,
   `control_quantity`, `quality`, `status`. One product → many holdings.
@@ -58,10 +70,17 @@ Don't infer a function's signature from its call site.
   stamped on that brand's box (`brand_design_name`) plus **how that brand packs it**
   (`pieces_per_box`, `box_weight_kg`). One print under two brands packs two ways, independently.
   `library_set_box` is the **only** writer of the packing.
-- 📏 **`thickness_mm` is DERIVED from the BOX by trigger, never typed** — `weight / (pieces × area ×
-  density)`. **Unknown thickness is `NULL`, never `0`** (a tile is never 0 mm thick); the column is
-  nullable and `TileDesign.thicknessMm` is `double?`. Always display the **0.5 mm band**
-  (`8.5–9.0 mm`) via `thicknessBandLabel`, never a bare figure.
+- 📏 **THICKNESS — two columns, do not confuse them:**
+  - **`nominal_thickness_mm` — DECLARED**, from the fixed `thickness_options` list (a free number
+    would make `8` and `8.0` two products). **This is IDENTITY and this is the truth.** Show it
+    exactly: **`8 mm`**. Buyers filter on it exactly.
+  - **`thickness_mm` — DERIVED** from the BOX by trigger (`weight / (pieces × area × density)`).
+    **EVIDENCE ONLY** — it validates the declaration and warns on mismatch. **It is NOT identity.**
+    Unknown is `NULL`, never `0` (a tile is never 0 mm thick).
+  - 🔑 **Why declared, not derived:** the BOX hangs off the PRODUCT, so a derived value in the
+    identity key would mean **editing a box weight silently changes which product it is**.
+  - ⚠️ **SUPERSEDED:** ~~"thickness is always derived, never typed"~~ and ~~"always show the 0.5 mm
+    BAND"~~. The band existed *only* because the number was fuzzy; a declared nominal is not.
 - ⚠️ A product with **no box spec** resolves `pieces_per_box` / `box_weight_kg` to **NULL**
   (`_box_pieces` / `_box_weight`). Dart lands those on **`0`**, which every display site already
   reads as "unknown" and hides. Parse defensively — a bare `json['pieces_per_box']` crashes.
