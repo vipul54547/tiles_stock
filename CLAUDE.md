@@ -54,9 +54,17 @@ Don't infer a function's signature from its call site.
 - ⚠️ **The table named `designs` is STOCK.** The word "design" is overloaded in this codebase:
   `TileDesign`, `addDesign()` (really `stock_add_holding`), `deleteDesign()` all operate on the
   **holding**. When it matters, say **product** or **holding**, never bare "design".
-- **BOX** (`product × brand` → `pieces_per_box`, `box_weight_kg`) is the missing entity. Those two
-  columns currently sit on `stockist_library`, which is the **wrong level** — a box holds N pieces
-  and its weight follows from the piece count. Planned, not built.
+- **BOX** = `stockist_library_brand_names` (`product × brand`) — **BUILT.** It carries the name
+  stamped on that brand's box (`brand_design_name`) plus **how that brand packs it**
+  (`pieces_per_box`, `box_weight_kg`). One print under two brands packs two ways, independently.
+  `library_set_box` is the **only** writer of the packing.
+- 📏 **`thickness_mm` is DERIVED from the BOX by trigger, never typed** — `weight / (pieces × area ×
+  density)`. **Unknown thickness is `NULL`, never `0`** (a tile is never 0 mm thick); the column is
+  nullable and `TileDesign.thicknessMm` is `double?`. Always display the **0.5 mm band**
+  (`8.5–9.0 mm`) via `thicknessBandLabel`, never a bare figure.
+- ⚠️ A product with **no box spec** resolves `pieces_per_box` / `box_weight_kg` to **NULL**
+  (`_box_pieces` / `_box_weight`). Dart lands those on **`0`**, which every display site already
+  reads as "unknown" and hides. Parse defensively — a bare `json['pieces_per_box']` crashes.
 
 ### Surface and brand
 

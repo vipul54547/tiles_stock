@@ -5,9 +5,53 @@
 //
 // This test exists because the BOX chapter shipped a chip that printed a bare "8.8 mm".
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiles_stock/models/tile_design.dart';
 import 'package:tiles_stock/utils/tile_types.dart';
 
+/// A product with no BOX spec resolves pieces/weight/thickness to NULL server-side.
+/// Before the BOX chapter these columns were NOT NULL and came back as 0, so the model
+/// parsed them unguarded — and the first NULL crashed the buyer app on 27 live rows.
+Map<String, dynamic> _json({
+  Object? pieces,
+  Object? weight,
+  Object? thickness,
+}) => {
+      'id': 'd1',
+      'name': 'ANT BIANCO',
+      'size': '600x1200 mm',
+      'box_quantity': 12,
+      'surface_type': 'Glossy',
+      'pieces_per_box': pieces,
+      'box_weight_kg': weight,
+      'thickness_mm': thickness,
+      'colour': 'White',
+      'face_image_urls': <String>[],
+      'stockist_id': 's1',
+      'updated_at': '2026-07-13T00:00:00Z',
+    };
+
 void main() {
+  group('a product with no BOX spec parses, and stays honest', () {
+    test('NULL pieces/weight/thickness do not throw', () {
+      final d = TileDesign.fromJson(_json());
+      expect(d.piecesPerBox, 0);   // 0 is the app's "unknown" — every chip hides it
+      expect(d.boxWeightKg, 0);
+      expect(d.thicknessMm, isNull); // but a tile is never 0 mm THICK: unknown is null
+    });
+
+    test('an unknown thickness yields no band, not a bogus one', () {
+      expect(thicknessBandLabel(TileDesign.fromJson(_json()).thicknessMm), isNull);
+    });
+
+    test('a real box spec still comes through intact', () {
+      final d = TileDesign.fromJson(
+          _json(pieces: 2, weight: 27.0, thickness: 8.4));
+      expect(d.piecesPerBox, 2);
+      expect(d.boxWeightKg, 27.0);
+      expect(thicknessBandLabel(d.thicknessMm), '8.0–8.5 mm');
+    });
+  });
+
   group('thicknessBandLabel — always a 0.5 mm range, never a bare number', () {
     test('bands to the 0.5 mm floor, like the generated column', () {
       expect(thicknessBandLabel(8.8), '8.5–9.0 mm');

@@ -35,7 +35,9 @@ class TileDesign {
   final String? finishLabel;
   final int piecesPerBox;
   final double boxWeightKg;
-  final double thicknessMm;
+  /// Null when the product has no box spec yet — a tile is never 0 mm thick.
+  /// Derived server-side from the BOX; never typed.
+  final double? thicknessMm;
   final String colour;
   /// Body type (PGVT & GVT, Porcelain, Ceramic, Full Body, DC, Colour Body).
   /// Empty for legacy designs uploaded before this field existed.
@@ -130,9 +132,11 @@ class TileDesign {
         surfaceType: json['surface_type'],
         surfaceLabel: (json['surface_label'] ?? '').toString(),
         finishLabel: json['finish_label'],
-        piecesPerBox: json['pieces_per_box'],
-        boxWeightKg: (json['box_weight_kg'] as num).toDouble(),
-        thicknessMm: (json['thickness_mm'] as num).toDouble(),
+        // A product with no BOX spec resolves pieces/weight to NULL, not 0 — every display
+        // site already reads 0 as "unknown" and hides the chip, so land it on 0 here.
+        piecesPerBox: (json['pieces_per_box'] as num?)?.toInt() ?? 0,
+        boxWeightKg: (json['box_weight_kg'] as num?)?.toDouble() ?? 0,
+        thicknessMm: (json['thickness_mm'] as num?)?.toDouble(),
         colour: json['colour'],
         tileType: json['tile_type'] ?? '',
         faceImageUrls: List<String>.from(json['face_image_urls']),

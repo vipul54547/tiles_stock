@@ -81,8 +81,8 @@ class SupabaseDataService {
             as int,
         boxWeightKg:  ((lib?['box_weight_kg'] ?? d['box_weight_kg'] ?? 0) as num)
             .toDouble(),
-        thicknessMm:  ((lib?['thickness_mm'] ?? d['thickness_mm'] ?? 0) as num)
-            .toDouble(),
+        thicknessMm:  ((lib?['thickness_mm'] ?? d['thickness_mm']) as num?)
+            ?.toDouble(),
         colour:       (lib?['colour'] ?? d['colour'] ?? '').toString(),
         tileType:     (lib?['tile_type'] ?? d['tile_type'] ?? '').toString(),
         faceImageUrls: faceImages,
@@ -206,7 +206,7 @@ class SupabaseDataService {
       finishLabel:  d['finish_label'] as String?,
       piecesPerBox: (d['pieces_per_box'] ?? 0) as int,
       boxWeightKg:  ((d['box_weight_kg'] ?? 0) as num).toDouble(),
-      thicknessMm:  ((d['thickness_mm'] ?? 0) as num).toDouble(),
+      thicknessMm:  (d['thickness_mm'] as num?)?.toDouble(),
       colour:       (d['colour'] ?? '').toString(),
       tileType:     (d['tile_type'] ?? '').toString(),
       faceImageUrls: img.isEmpty ? const [] : [img],

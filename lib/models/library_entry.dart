@@ -40,7 +40,8 @@ class LibraryEntry {
   final String tileType;
   final int piecesPerBox;
   final double boxWeightKg;
-  final double thicknessMm;
+  /// Null when no box carries a spec yet — a tile is never 0 mm thick.
+  final double? thicknessMm;
   final String colour;
   final String? finishLabel;
 
@@ -59,7 +60,7 @@ class LibraryEntry {
     this.tileType = '',
     this.piecesPerBox = 0,
     this.boxWeightKg = 0,
-    this.thicknessMm = 0,
+    this.thicknessMm,
     this.colour = '',
     this.finishLabel,
   });
@@ -99,7 +100,7 @@ class LibraryEntry {
       tileType: (j['tile_type'] ?? '').toString(),
       piecesPerBox: (j['pieces_per_box'] as num?)?.toInt() ?? 0,
       boxWeightKg: (j['box_weight_kg'] as num?)?.toDouble() ?? 0,
-      thicknessMm: (j['thickness_mm'] as num?)?.toDouble() ?? 0,
+      thicknessMm: (j['thickness_mm'] as num?)?.toDouble(),
       colour: (j['colour'] ?? '').toString(),
       finishLabel: (j['finish_label'] as String?)?.trim().isEmpty ?? true
           ? null

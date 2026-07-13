@@ -53,7 +53,7 @@ class _State extends State<AddEditStockScreen> {
   String? _finishLabel;
   int    _pieces     = 0;
   double _weight     = 0;
-  double _thickness  = 0;
+  double? _thickness;
   // Base restock nature on the master; displayed effective value is clamped by
   // the chosen quality.
   String _stockTypeBase = 'Uncertain';
