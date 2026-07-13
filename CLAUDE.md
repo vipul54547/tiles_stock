@@ -39,27 +39,43 @@ Don't infer a function's signature from its call site.
 
 ## Vocabulary (these are load-bearing — the DB uses them)
 
-### The layering: PRODUCT → (BOX) → HOLDING
+### The layering: PRINT → PRODUCT → (BOX) → HOLDING
 
-- **PRODUCT** = `stockist_library` — the tile itself, one piece. **This is what "a design" means.**
-  Its identity is the `stockist_library_uniq` index:
+- 🖼️ **PRINT** = `print_master` — **the ARTWORK, and it is stored ONCE.** Its key is
+  `(stockist_id, lower(print_name), size)`. It owns the **name**, the **size** and the **one image**,
+  plus the artwork-side DNA (`print_dna`: Look Type ▸ Natural Name · Print Type · Design Joint ·
+  Colour). **A print has no thickness and no weight — you cannot hold it.** It becomes a product only
+  once a surface, a body and a box are declared. A print may exist with **no product**.
+  🔑 `print_upsert()` is the **only** way one is created; the image is **first-writer-wins**.
+- **PRODUCT** = `stockist_library` — **ONE PIECE of tile.** **This is what "a design" means.**
+  It has **no name, no size and no image of its own** — it points at a print (`print_id`, NOT NULL).
+  Its identity is:
 
-      (stockist_id, lower(master_design_name), size, surface_type, tile_type)
+      print_id + surface_type + tile_type
       + thickness, which separates products ONLY when it differs by MORE THAN 1 mm
+      (EXCLUDE stockist_library_thickness_apart · UNIQUE stockist_library_uniq_no_thickness)
 
-  It carries `image_url`, `surface_type` + `surface_label`, `colour`, and its **DNA tags**
-  (via `library_id`). Faces/closelook/mockup all hang here.
+  It carries `surface_type` + `surface_label`, `tile_type`, `thickness_mm`, and the piece-side
+  **DNA tags** (`library_dna`, via `library_id`).
+  ⚠️ `stockist_library.size` still exists as a **trigger-maintained MIRROR** of its print
+  (`_trg_library_size_from_print`) — one writer, cannot drift. It is a cache, **not** a second source
+  of truth, and it is dropped once the remaining `l.size` readers move. **Never write to it.**
+  ⚠️ **`master_design_name`, `image_url` and `colour` are GONE from this table.** The RPCs still
+  **return** those keys (sourced from the print / from DNA), so the Dart contract is unchanged —
+  but there is no such column to select.
 - 🔑 **The test for identity:** a dimension is in the key **iff two of its values are things a buyer
   chooses between, can sit in the godown together, at different rates, and are not substitutes.**
   Tiles sell **BY AREA AT A RATE** (₹/sq ft) — weight is freight, not commerce. So an 8 mm and a
   12 mm of one print cover the same sq ft but sell at **different rates** → **two products**. Same
   for body. **Brand FAILS the test** (same tile, different sticker → BOX). **Quality FAILS it**
   (same tile, graded → HOLDING).
-- ⚠️ **`tile_type` and `nominal_thickness_mm` are DECLARED, or honestly NULL — never guessed.**
-  `NULLS NOT DISTINCT` is what keeps the key safe while they are blank: two *unknown* products of
-  one print/size/surface still **collide** instead of duplicating. (The 930 rows that predate this
+- ⚠️ **`tile_type` is DECLARED, or honestly NULL — never guessed.**
+  `NULLS NOT DISTINCT` is what keeps the key safe while it is blank: two *unknown* products of
+  one print/surface still **collide** instead of duplicating. (The 444 rows that predate this
   carry NULL. A wrong value in the identity key is worse than a blank.) `tile_type` must not carry
   a `''` default — `''` was the OLD "unknown" and would defeat the NULL key.
+- 🎨 **`colour` is DNA now** (multi-value, on the PRINT). `_dna_colour(library_id)` renders it as text
+  for the RPCs' `colour` key. The old free-text column is gone.
 - **HOLDING** = `designs` — **quantity on hand, NOT the design.** `designs_holding_uniq` is
   `(stockist, library, brand, quality, surface_type)`. It carries `box_quantity`,
   `control_quantity`, `quality`, `status`. One product → many holdings.
