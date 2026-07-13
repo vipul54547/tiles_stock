@@ -1209,15 +1209,18 @@ class _State extends State<MyDesignLibraryScreen> {
     _load();
   }
 
-  /// THE BOX chip — `4 pcs · 24 kg · 8.8 mm`. Tap to set how each brand packs this print.
+  /// THE BOX chip — `4 pcs · 24 kg · 8.5–9.0 mm`. Tap to set how each brand packs this print.
   ///
   /// Pieces + weight live on the BOX (product × brand), because brands can pack differently.
-  /// Thickness is DERIVED from them and never typed.
+  /// Thickness is DERIVED from them and never typed — and shown as a 0.5 mm BAND, never a
+  /// bare "8.8 mm": it is inferred from box weight, not measured, and every thickness filter
+  /// in the app chips on these bands.
   Widget _boxChip(LibraryEntry e) {
+    final band = thicknessBandLabel(e.thicknessMm);
     final bits = <String>[
       if (e.piecesPerBox > 0) '${e.piecesPerBox} pcs',
       if (e.boxWeightKg > 0) '${_trimNum(e.boxWeightKg)} kg',
-      if (e.thicknessMm > 0) '${_trimNum(e.thicknessMm)} mm',
+      if (band != null) band,
     ];
     return InkWell(
       onTap: () => _editBox(e),
@@ -1289,13 +1292,13 @@ class _State extends State<MyDesignLibraryScreen> {
       context: context,
       isScrollControlled: true,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
+        // The 0.5 mm BAND, not a bare number — same rule as the chip, and the same
+        // formula the server will derive on save, so the preview and the stored value
+        // agree.
         String derived(String brandId) {
           final p = int.tryParse(pieceCtrls[brandId]!.text.trim()) ?? 0;
           final w = double.tryParse(weightCtrls[brandId]!.text.trim()) ?? 0;
-          final t = approxThicknessMm(e.size, p, w, e.tileType);
-          return (t == null || t <= 0)
-              ? '—'
-              : '${t.toStringAsFixed(1)} mm';
+          return thicknessRangeLabel(e.size, p, w, e.tileType) ?? '—';
         }
 
         return Padding(

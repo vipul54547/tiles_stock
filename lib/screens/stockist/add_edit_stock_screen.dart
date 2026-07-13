@@ -9,6 +9,7 @@ import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import '../../models/library_entry.dart';
+import '../../utils/tile_types.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/unsaved_changes.dart';
 import 'edit_design_image_screen.dart';
@@ -564,7 +565,9 @@ class _State extends State<AddEditStockScreen> {
       if (_colour.isNotEmpty) _colour,
       if (_pieces > 0) '$_pieces pcs/box',
       if (_weight > 0) '${_weight.toStringAsFixed(_weight % 1 == 0 ? 0 : 1)} kg',
-      if (_thickness > 0) '~${_thickness.toStringAsFixed(1)} mm',
+      // A 0.5 mm BAND, never a bare figure — thickness is inferred from box weight,
+      // not measured, and every thickness filter chips on these bands.
+      if (thicknessBandLabel(_thickness) != null) thicknessBandLabel(_thickness)!,
       if (eff.isNotEmpty) eff,
     ];
     if (chips.isEmpty) return const SizedBox.shrink();

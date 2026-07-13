@@ -71,16 +71,28 @@ double? approxThicknessMm(
   return boxWeightKg / (totalAreaM2 * densityFor(tileType)) * 1000.0;
 }
 
-/// Thickness shown as a 0.5 mm band (e.g. "8.5–9.0 mm") rather than a single
-/// number, since real tiles vary slightly. Returns null when not computable.
-String? thicknessRangeLabel(
-    String size, int piecesPerBox, double boxWeightKg, String tileType) {
-  final t = approxThicknessMm(size, piecesPerBox, boxWeightKg, tileType);
-  if (t == null || t <= 0) return null;
-  final low = (t / 0.5).floor() * 0.5;
+/// 🔑 A thickness is ALWAYS shown as a 0.5 mm BAND — "8.5–9.0 mm", never a bare
+/// "8.8 mm". Real tiles vary, the figure is derived from box weight rather than
+/// measured, and every thickness filter in the app (buyer, stockist, `/s/`) chips on
+/// these bands. The DB agrees: `stockist_library.thickness_band` is a GENERATED column
+/// with exactly this `floor(mm / 0.5) * 0.5`.
+///
+/// This takes a thickness that has ALREADY been derived — the server derives it by
+/// trigger and stores it on the product, and that value is authoritative.
+String? thicknessBandLabel(double? mm) {
+  if (mm == null || mm <= 0) return null;
+  final low = (mm / 0.5).floor() * 0.5;
   final high = low + 0.5;
   return '${low.toStringAsFixed(1)}–${high.toStringAsFixed(1)} mm';
 }
+
+/// The band for a box that hasn't been saved yet — derives the thickness from the
+/// pieces/weight being typed, then bands it. Same formula as the server's
+/// `_derive_thickness`, so the live preview and the stored value agree.
+String? thicknessRangeLabel(
+        String size, int piecesPerBox, double boxWeightKg, String tileType) =>
+    thicknessBandLabel(
+        approxThicknessMm(size, piecesPerBox, boxWeightKg, tileType));
 
 /// The thickness band a single design falls in (or null when its weight is
 /// missing, so no thickness can be derived).
