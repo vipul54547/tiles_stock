@@ -1403,6 +1403,33 @@ class _State extends State<MyDesignLibraryScreen> {
     _load();
   }
 
+  /// The thickness to show in brackets beside [e]'s name, or null for a plain name.
+  ///
+  /// A print+size+surface+body can hold more than one product only when their thicknesses are more
+  /// than 1 mm apart — a genuinely different tile. The FIRST one created is the original and reads
+  /// plainly; anything forked off it later carries its thickness so the two are distinguishable.
+  String? _forkedThicknessOf(LibraryEntry e) {
+    if (e.thicknessMm == null) return null;
+    final siblings = _entries.where((o) =>
+        o.masterName.toLowerCase() == e.masterName.toLowerCase() &&
+        o.size == e.size &&
+        o.surfaceType == e.surfaceType &&
+        o.tileType == e.tileType);
+    if (siblings.length < 2) return null; // the only one of its kind — nothing to tell apart
+
+    // The oldest is the original. Anything without a date sorts as oldest-unknown and keeps its
+    // plain name rather than being mislabelled.
+    DateTime? oldest;
+    for (final o in siblings) {
+      if (o.createdAt == null) continue;
+      if (oldest == null || o.createdAt!.isBefore(oldest)) oldest = o.createdAt;
+    }
+    if (oldest == null || e.createdAt == null) return null;
+    if (!e.createdAt!.isAfter(oldest)) return null; // this IS the original
+
+    return thicknessBandLabel(e.thicknessMm);
+  }
+
   Widget _tile(LibraryEntry e) {
     // When the library is filtered to a SINGLE brand, the stockist is viewing it
     // "as that brand", so the title shows THAT brand's name for the tile (e.g.
@@ -1412,6 +1439,12 @@ class _State extends State<MyDesignLibraryScreen> {
     final brandAlias = singleBrand == null ? null : e.aliases[singleBrand];
     final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
     final titleName = showBrandName ? brandAlias : e.masterName;
+    // 🔑 A print may be carried in two thicknesses — but ONLY when they differ by more than 1 mm
+    // (box weight drifts in the trade: a 600x1200 2-pc box went 28 kg → 26 kg, which is just
+    // 0.62 mm, and that is the SAME tile). When that genuinely happens, the product that was
+    // forked off the original wears its thickness in brackets so the two can be told apart.
+    // The original keeps its plain name.
+    final forkedThickness = _forkedThicknessOf(e);
     final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
     // Size only — the SURFACE gets its own tappable chip below (it is part of the
     // product's identity, and the Library is the only place to change it once Add Stock
@@ -1472,6 +1505,16 @@ class _State extends State<MyDesignLibraryScreen> {
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14)),
                                 ),
+                                // Only on a product forked off by a genuinely different thickness
+                                // (>1 mm). The original of the print reads plainly.
+                                if (forkedThickness != null) ...[
+                                  const SizedBox(width: 5),
+                                  Text('($forkedThickness)',
+                                      style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.teal.shade700)),
+                                ],
                                 if (currentStockistBusinessType == 'M' &&
                                     !showBrandName) ...[
                                   const SizedBox(width: 6),

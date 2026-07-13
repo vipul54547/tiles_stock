@@ -44,6 +44,10 @@ class LibraryEntry {
   /// thickness is known; it is never typed. Its 0.5 mm BAND is part of product identity
   /// (`thickness_band`). Null when no box carries a spec yet.
   final double? thicknessMm;
+  /// When this product was created. Used to tell the ORIGINAL of a print from a product that was
+  /// later forked off it by a genuinely different thickness (>1 mm apart) — only the forked one
+  /// wears the thickness in brackets.
+  final DateTime? createdAt;
   final String colour;
   final String? finishLabel;
 
@@ -63,6 +67,7 @@ class LibraryEntry {
     this.piecesPerBox = 0,
     this.boxWeightKg = 0,
     this.thicknessMm,
+    this.createdAt,
     this.colour = '',
     this.finishLabel,
   });
@@ -103,6 +108,9 @@ class LibraryEntry {
       piecesPerBox: (j['pieces_per_box'] as num?)?.toInt() ?? 0,
       boxWeightKg: (j['box_weight_kg'] as num?)?.toDouble() ?? 0,
       thicknessMm: (j['thickness_mm'] as num?)?.toDouble(),
+      createdAt: j['created_at'] == null
+          ? null
+          : DateTime.tryParse(j['created_at'].toString()),
       colour: (j['colour'] ?? '').toString(),
       finishLabel: (j['finish_label'] as String?)?.trim().isEmpty ?? true
           ? null

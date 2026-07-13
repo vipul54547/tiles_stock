@@ -44,8 +44,8 @@ Don't infer a function's signature from its call site.
 - **PRODUCT** = `stockist_library` — the tile itself, one piece. **This is what "a design" means.**
   Its identity is the `stockist_library_uniq` index:
 
-      (stockist_id, lower(master_design_name), size, surface_type,
-       tile_type, thickness_band)   NULLS NOT DISTINCT
+      (stockist_id, lower(master_design_name), size, surface_type, tile_type)
+      + thickness, which separates products ONLY when it differs by MORE THAN 1 mm
 
   It carries `image_url`, `surface_type` + `surface_label`, `colour`, and its **DNA tags**
   (via `library_id`). Faces/closelook/mockup all hang here.
@@ -73,9 +73,20 @@ Don't infer a function's signature from its call site.
 - 📏 **THICKNESS IS DERIVED — NEVER TYPED, AND THERE IS NO PICKER.**
   - `thickness_mm` = `box_weight / (pieces × area × density)`, written **by trigger** from the BOX.
     Unknown is `NULL`, never `0` (a tile is never 0 mm thick).
-  - `thickness_band` = its **0.5 mm band** (`4.0–4.5` … `19.5–20.0`, stored as the band's LOW EDGE),
-    a **GENERATED** column. **This is what is in the identity key.** Outside 4–20 mm it is NULL —
-    that is a bad box weight, not a thin tile. Display it as **`8.5–9.0 mm`**.
+  - 🔑 **Thickness makes a DIFFERENT PRODUCT only when it differs by MORE THAN 1 mm.** Enforced by
+    the `stockist_library_thickness_apart` **EXCLUDE** constraint (btree_gist): two products of one
+    print+size+surface+body may not have overlapping `[t−0.5, t+0.5)` ranges.
+    ⚠️ **Never key identity on the 0.5 mm band.** **Box weight DRIFTS in the trade** — a 600x1200
+    2-piece PGVT & GVT box was **28 kg in 2024 and is 26 kg now**. That is only **0.62 mm**, but it
+    crosses a band edge, so a band key would **false-split one product into two**. (It takes
+    **3.22 kg** to move that tile a full 1 mm; 800x1600 needs 5.72 kg — so the threshold must be in
+    **millimetres, not kilos**.)
+  - `thickness_band` = the 0.5 mm band, a GENERATED column — **display + the buyer's filter only.**
+    NOT identity. Outside 4–20 mm it is NULL (a bad box weight, not a thin tile).
+  - A product with **no box** has no thickness; two such twins still collide
+    (`stockist_library_uniq_no_thickness`).
+  - 🖼️ When a print really is carried in two thicknesses, the product **forked off** the original
+    shows its thickness **in brackets** on the Library card. The original reads plainly.
   - 🚫 **Never add a thickness field to any form.** A stockist reads **PIECES and WEIGHT** off the
     box; they do **not** know "8.5–9.0 mm". A typed thickness is a guess, and it would go straight
     into the identity key. **The BOX is the source of truth for thickness.**
