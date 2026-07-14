@@ -306,10 +306,11 @@ class _State extends State<AdminBulkImageImportScreen> {
       // Preload the existing library keys → flag NEW vs already-in. (A stockist reads his own;
       // only an admin may read someone else's.)
       if (_forStockist) {
+        // Keyed WITHOUT a brand — a PRINT is brand-free, so "have I got this artwork at this size?"
+        // is a brand-free question.
         final lib = await _data.getMyLibrary();
         _existingKeys = {
-          for (final e in lib)
-            '${e.masterName.toLowerCase()}|${e.size}|${e.brandId}'
+          for (final e in lib) '${e.masterName.toLowerCase()}|${e.size}'
         };
       } else {
         final lib = await _data.adminStockistLibrary(_stockist!.id);
@@ -348,24 +349,28 @@ class _State extends State<AdminBulkImageImportScreen> {
     }
   }
 
-  bool get _mapReady =>
-      _sizePacks.values.every((p) =>
-          p.adminSize != null &&
-          p.tileType.isNotEmpty &&
-          p.pieces > 0 &&
-          (double.tryParse(p.weight.trim()) ?? 0) > 0);
+  /// The stockist folder import carries NO BOX, so pieces/weight are not its business and cannot
+  /// hold it up. It needs the size and the body — the two facts that make the piece.
+  bool get _mapReady => _sizePacks.values.every((p) =>
+      p.adminSize != null &&
+      p.tileType.isNotEmpty &&
+      (_forStockist ||
+          (p.pieces > 0 && (double.tryParse(p.weight.trim()) ?? 0) > 0)));
 
-  // Already in the stockist's library? Matches admin_library_upsert's key
-  // (name + mapped size + the chosen brand) so it predicts create-vs-match.
+  // Already in the library? A stockist's PRINT is brand-free (name + size). The admin path still
+  // keys on the brand, because admin_library_upsert does.
   bool _isExisting(_ImgDesign d) {
     final size = _sizePacks[d.sizeFolder]?.adminSize;
     if (size == null) return false;
-    return _existingKeys.contains('${d.name.toLowerCase()}|$size|$_brandId');
+    final key = '${d.name.toLowerCase()}|$size';
+    return _existingKeys.contains(_forStockist ? key : '$key|$_brandId');
   }
 
   // Name of the currently-selected brand (for the header), looked up from the
-  // loaded brand list by its id. '' until a brand is chosen.
+  // loaded brand list by its id. '' until a brand is chosen. Admin path only —
+  // the stockist folder import has no brand.
   String get _selectedBrandName {
+    if (_forStockist) return '';
     final m = _brands.where((b) => b['id'] == _brandId);
     return m.isNotEmpty ? (m.first['name'] ?? '').toString() : '';
   }
@@ -398,12 +403,14 @@ class _State extends State<AdminBulkImageImportScreen> {
     setState(() => _phase = _Phase.preview);
   }
 
-  // An included design is importable when its packing is fully filled.
+  // Importable once the piece is fully described: a surface and a body. The BOX (pieces, weight)
+  // is not part of a folder import — see _mapReady.
   bool _designReady(_ImgDesign d) =>
       (d.surface ?? '').isNotEmpty &&
       (d.tileType ?? '').isNotEmpty &&
-      (d.pieces ?? 0) > 0 &&
-      (double.tryParse(d.weight.trim()) ?? 0) > 0;
+      (_forStockist ||
+          ((d.pieces ?? 0) > 0 &&
+              (double.tryParse(d.weight.trim()) ?? 0) > 0));
 
   // ── Commit ───────────────────────────────────────────────────────────────
   Future<void> _commit() async {
@@ -456,17 +463,16 @@ class _State extends State<AdminBulkImageImportScreen> {
       final pieces = d.pieces ?? pack.pieces;
 
       if (_forStockist) {
-        // The FILENAME is the print name — his own word for the artwork. The stamp on the box
-        // starts equal to it; he corrects it per brand in the Library afterwards.
+        // BRAND-FREE. The FILENAME is the PRINT's name — his own word for the artwork, which is
+        // exactly why a folder is an honest source and a supplier PDF is not. It builds the print
+        // and the piece; it writes NO BOX, because a folder cannot know what a brand stamps on its
+        // box or how it packs it. That is declared per brand afterwards (Set box packing).
         await _data.libraryImageUpsert(
           size: pack.adminSize!,
           name: d.name,
           imageUrl: res.url!,
-          brandId: _brandId!,
           surface: surface,
           tileType: tileType,
-          pieces: pieces,
-          weight: weight,
         );
       } else {
         await _data.adminLibraryUpsert(
@@ -566,7 +572,7 @@ class _State extends State<AdminBulkImageImportScreen> {
   Widget _buildPick() => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(_forStockist ? '1. Choose the brand' : '1. Choose stockist & brand',
+          Text(_forStockist ? '1. Pick the folder' : '1. Choose stockist & brand',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 12),
           if (!_forStockist) ...[
@@ -582,19 +588,37 @@ class _State extends State<AdminBulkImageImportScreen> {
               onChanged: (s) { if (s != null) _pickBrands(s); },
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _brandId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  labelText: 'Brand', border: OutlineInputBorder()),
+              items: _brands
+                  .map((b) => DropdownMenuItem(
+                      value: b['id'] as String,
+                      child: Text((b['name'] ?? '').toString())))
+                  .toList(),
+              onChanged: (v) => setState(() => _brandId = v),
+            ),
           ],
-          DropdownButtonFormField<String>(
-            initialValue: _brandId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-                labelText: 'Brand', border: OutlineInputBorder()),
-            items: _brands
-                .map((b) => DropdownMenuItem(
-                    value: b['id'] as String,
-                    child: Text((b['name'] ?? '').toString())))
-                .toList(),
-            onChanged: (v) => setState(() => _brandId = v),
-          ),
+          // 🚫 NO BRAND. A folder of images knows the ARTWORK and the PIECE, and neither has a
+          // brand: identity is brand-free, and the brand belongs to the BOX. Asking for one here
+          // is asking a question this step cannot answer — and the old code answered it anyway, by
+          // stamping the FILENAME into the box's name. Set the box afterwards, per brand.
+          if (_forStockist)
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B4F72).withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'This builds your DESIGNS — the artwork and its surfaces. No brand, and no box: '
+                'a folder cannot know what a brand prints on its box or how it packs it.\n'
+                'Set the box afterwards (Library ▸ Set box packing) — the thickness comes from it.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF1B4F72), height: 1.45),
+              ),
+            ),
           if (_error.isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(_error, style: const TextStyle(color: Colors.red, fontSize: 12.5)),
@@ -627,7 +651,9 @@ class _State extends State<AdminBulkImageImportScreen> {
           const SizedBox(height: 12),
           FilledButton.icon(
             style: FilledButton.styleFrom(backgroundColor: _navy),
-            onPressed: (_haveOwner && _brandId != null) ? _pickFolder : null,
+            onPressed: (_haveOwner && (_forStockist || _brandId != null))
+                ? _pickFolder
+                : null,
             icon: const Icon(Icons.folder_open),
             label: const Text('Pick image folder & scan'),
           ),
@@ -702,30 +728,35 @@ class _State extends State<AdminBulkImageImportScreen> {
                   ),
                 ),
               ]),
-              const SizedBox(height: 8),
-              Row(children: [
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    initialValue: p.pieces,
-                    decoration: const InputDecoration(
-                        isDense: true, labelText: 'Pieces/box', border: OutlineInputBorder()),
-                    items: const [1, 2, 3, 4, 5, 6, 8, 10, 12]
-                        .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
-                        .toList(),
-                    onChanged: (v) => setState(() => p.pieces = v ?? 1),
+              // 📦 THE BOX IS NOT ASKED HERE. Pieces and weight are per BRAND — the same tile ships
+              // 4/box under one brand and 6/box under another — and this step has no brand. Set the
+              // box afterwards, per brand, and the thickness derives from it.
+              if (!_forStockist) ...[
+                const SizedBox(height: 8),
+                Row(children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      initialValue: p.pieces,
+                      decoration: const InputDecoration(
+                          isDense: true, labelText: 'Pieces/box', border: OutlineInputBorder()),
+                      items: const [1, 2, 3, 4, 5, 6, 8, 10, 12]
+                          .map((n) => DropdownMenuItem(value: n, child: Text('$n')))
+                          .toList(),
+                      onChanged: (v) => setState(() => p.pieces = v ?? 1),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: TextFormField(
-                    initialValue: p.weight,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(
-                        isDense: true, labelText: 'Box weight (kg)', border: OutlineInputBorder()),
-                    onChanged: (v) => setState(() => p.weight = v),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: TextFormField(
+                      initialValue: p.weight,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                          isDense: true, labelText: 'Box weight (kg)', border: OutlineInputBorder()),
+                      onChanged: (v) => setState(() => p.weight = v),
+                    ),
                   ),
-                ),
-              ]),
+                ]),
+              ],
             ],
           ),
         ),

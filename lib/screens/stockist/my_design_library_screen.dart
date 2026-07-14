@@ -81,6 +81,149 @@ class _State extends State<MyDesignLibraryScreen> {
     return s;
   }
 
+  // ── 📦 THE BOX, per brand, per size ────────────────────────────────────────
+  /// The folder import builds the print and the piece, and stops there — it has no brand, so it
+  /// cannot know what a brand stamps on its box or how it packs it. This is where that is declared.
+  ///
+  /// A brand packs one size the same way every time (a 600x1200 box is 2 pieces at 27 kg whatever
+  /// design is printed on it), so it is typed ONCE per (brand, size) and lands on every design of
+  /// that size. **The thickness derives from it** — never typed, and there is no picker for it.
+  ///
+  /// A weight already on record is left alone: it is the reference the 1 mm rule measures drift
+  /// against, so a bulk pass must not silently move it.
+  Future<void> _openSetBoxForSize() async {
+    if (_brands.isEmpty) {
+      _snack('You have no brands yet — add one first.', error: true);
+      return;
+    }
+    final sizes = _sizesInUse;
+    if (sizes.isEmpty) {
+      _snack('Your library is empty — import some designs first.', error: true);
+      return;
+    }
+
+    var brandId = _brands.first.id;
+    var size = sizes.first;
+    final piecesCtrl = TextEditingController();
+    final weightCtrl = TextEditingController();
+    var saving = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) {
+          Future<void> save() async {
+            final pieces = int.tryParse(piecesCtrl.text.trim()) ?? 0;
+            final weight = double.tryParse(weightCtrl.text.trim()) ?? 0;
+            if (pieces <= 0 || weight <= 0) {
+              _snack('Enter the pieces per box and the box weight.', error: true);
+              return;
+            }
+            setLocal(() => saving = true);
+            try {
+              final n = await _data.librarySetBoxForSize(
+                brandId: brandId, size: size, pieces: pieces, weightKg: weight);
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              _snack('Box set on $n design${n == 1 ? '' : 's'} — '
+                  'their thickness comes from it.');
+              await _load();
+            } catch (e) {
+              setLocal(() => saving = false);
+              _snack('$e', error: true);
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('Set box packing'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'How does this brand pack this size? Read it off the box — the thickness is '
+                    'worked out from it.',
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                  ),
+                  const SizedBox(height: 14),
+                  DropdownButtonFormField<String>(
+                    initialValue: brandId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                        labelText: 'Brand', border: OutlineInputBorder(), isDense: true),
+                    items: _brands
+                        .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
+                        .toList(),
+                    onChanged: saving ? null : (v) => setLocal(() => brandId = v ?? brandId),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: size,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                        labelText: 'Size', border: OutlineInputBorder(), isDense: true),
+                    items: sizes
+                        .map((s) => DropdownMenuItem(
+                            value: s, child: Text(s.replaceAll(' mm', ''))))
+                        .toList(),
+                    onChanged: saving ? null : (v) => setLocal(() => size = v ?? size),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: piecesCtrl,
+                        enabled: !saving,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: 'Pieces per box',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: weightCtrl,
+                        enabled: !saving,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Box weight (kg)',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Applies to every design of this size. A box weight already on record is kept '
+                    '— change one by hand from its card if you really mean to.',
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: saving ? null : save,
+                child: Text(saving ? 'Saving…' : 'Set box'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    piecesCtrl.dispose();
+    weightCtrl.dispose();
+  }
+
   // Entries after search + size/brand filters.
   List<LibraryEntry> get _filtered {
     final q = _query.trim().toLowerCase();
@@ -870,6 +1013,13 @@ class _State extends State<MyDesignLibraryScreen> {
                 if (done == true) _load();
               },
             ),
+          // 📦 THE BOX — per brand, per size. The folder import cannot know it (a folder has no
+          // brand), so this is where it is declared, and the THICKNESS derives from it.
+          IconButton(
+            icon: const Icon(Icons.inventory_2_outlined),
+            tooltip: 'Set box packing (per brand, per size)',
+            onPressed: _openSetBoxForSize,
+          ),
           // M only: surface likely-duplicate masters (pre-#7 leftovers) for the
           // human to review + merge. Badge = how many groups are waiting.
           if (currentStockistBusinessType == 'M' && _duplicateGroups.isNotEmpty)

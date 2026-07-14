@@ -904,28 +904,61 @@ class SupabaseDataService {
   /// ⚠️ NOT `libraryUpsertMaster` — that one DELETES every brand alias absent from its payload
   /// (it backs the Library editor, where the alias list IS the truth). A folder import knows about
   /// one brand only, so it would wipe every other brand's box. `library_image_upsert` only merges.
+  /// THE FOLDER BUILDS THE LIBRARY — and it is **BRAND-FREE**.
+  ///
+  /// A folder of images knows two things, and neither has a brand: the **PRINT** (the artwork —
+  /// brand-free by definition) and the **PRODUCT** (the piece — brand-free by rule; identity is
+  /// brand-free, brand belongs to the BOX).
+  ///
+  /// 🚫 It writes **NO BOX**. It used to, stamping the FILENAME into `brand_design_name` — but that
+  /// column is what the FACTORY prints on that brand's box (`1001` under FAMOUS, `601001` under
+  /// ANUJ), and the filename is the stockist's own word for the artwork. It was forging a label he
+  /// never typed. The box — stamped name, pieces, weight — is declared per brand afterwards, by
+  /// him: see [librarySetBoxForSize]. Until then the product has no box and no thickness, and the
+  /// Library says so. (20260714e_folder_import_is_brand_free)
   Future<String> libraryImageUpsert({
     required String size,
     required String name,
     required String imageUrl,
-    required String brandId,
     required String surface,
     String? tileType,
-    int? pieces,
-    double? weight,
   }) async {
     try {
       final res = await supabase.rpc('library_image_upsert', params: {
         'p_size': size,
         'p_name': name,
         'p_image_url': imageUrl,
-        'p_brand_id': brandId,
         'p_surface': surfaceForImport(surface),
         'p_tile_type': tileType,
-        'p_pieces': pieces,
-        'p_weight': weight,
       });
       return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// THE BOX — declared per brand, per size, by HIM. Returns how many designs it landed on.
+  ///
+  /// A brand packs one size the same way every time (a 600x1200 box is 2 pieces at 27 kg whatever
+  /// design is printed on it), so this is typed ONCE per (brand, size) and applies to every product
+  /// of that size. **The thickness derives from it** — never typed.
+  ///
+  /// A weight already on record is left alone: it is the reference the 1 mm rule measures drift
+  /// against, so a bulk pass must not silently move it.
+  Future<int> librarySetBoxForSize({
+    required String brandId,
+    required String size,
+    required int pieces,
+    required double weightKg,
+  }) async {
+    try {
+      final res = await supabase.rpc('library_set_box_for_size', params: {
+        'p_brand_id': brandId,
+        'p_size': size,
+        'p_pieces': pieces,
+        'p_weight': weightKg,
+      });
+      return (res as num?)?.toInt() ?? 0;
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
