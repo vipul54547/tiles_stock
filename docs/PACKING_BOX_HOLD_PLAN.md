@@ -148,10 +148,10 @@ that is worth a lot: no backfill, no reconciliation, no guessing at old rows.
 
 | # | step | notes |
 |---|---|---|
-| **1** | `packings` table + `packing_add(library_id, pieces, weight)` | derives thickness; **REFUSES a packing >1 mm off the tile's** |
-| **2** | Reshape `boxes`: drop pieces/weight, point at `packing_id` | `_box_pieces` / `_box_weight` re-source from the packing |
-| **3** | `designs.box_id`; rewrite every stock/dispatch/catalog reader | **the big one** — `my_stock`, `public_catalog`, F_Stock, dispatch, `stock_add_holding`, `add_inventory_batch` |
-| **4** | DNA: Punch Type → free text · Series → free text, default `Regular` | Use Type / Behaviour Type: **build nothing** — they are derived |
+| ~~1~~ | ✅ **DONE** `packings` + `packing_add` | derives thickness; **REFUSES a packing >1 mm off the tile's** |
+| ~~2~~ | ✅ **DONE** pieces/weight leave the brand; `boxes` = packing × cover | the NAME stays per (tile, brand) — a brand prints one word on every cover |
+| ~~3~~ | ✅ **DONE** `designs.box_id` | `library_id`/`brand_id` are now **trigger-maintained MIRRORS** of it — 40 readers untouched. ⚠️ **NEVER write them by hand.** |
+| ~~4~~ | ✅ **DONE** Punch Type + Series free text; Series defaults to `Regular` | Use Type / Behaviour Type **deactivated** — no picker, no import column |
 | **5** | Folder import asks **body + pieces + weight** (no brand) → tile + first packing | this is what he asked for at the tile step |
 | **6** | Library: add a packing · put a brand's cover on a packing (the stamped name) | replaces "Set box packing" |
 | **7** | Add Stock picks a **BOX** (tile + packing + cover), not a tile + brand | the picker must show the packing — 10 boxes of 5 ≠ 10 boxes of 4 |
