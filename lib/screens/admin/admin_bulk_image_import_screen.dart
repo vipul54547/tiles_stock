@@ -781,21 +781,27 @@ class _State extends State<AdminBulkImageImportScreen> {
                     onChanged: (v) => setState(() => p.adminSize = v),
                   ),
                 ),
-                const SizedBox(width: 6),
-                Expanded(
-                  flex: 5,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: tileTypeNames.contains(p.tileType) ? p.tileType : null,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                        isDense: true, labelText: 'Tile type', border: OutlineInputBorder()),
-                    items: tileTypeNames
-                        .map((t) => DropdownMenuItem(
-                            value: t, child: Text(t, style: const TextStyle(fontSize: 12))))
-                        .toList(),
-                    onChanged: (v) => setState(() => p.tileType = v ?? ''),
+                // 🚫 The BODY is not part of an ARTWORK. It is what the tile is MADE OF, and it
+                // belongs to the TILE — which he cuts from the artwork afterwards, in the Library.
+                // Nothing on the disk knows it, and this screen must not pretend to.
+                // (The admin concierge path still declares the tile, so it still asks.)
+                if (!_forStockist) ...[
+                  const SizedBox(width: 6),
+                  Expanded(
+                    flex: 5,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: tileTypeNames.contains(p.tileType) ? p.tileType : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                          isDense: true, labelText: 'Tile type', border: OutlineInputBorder()),
+                      items: tileTypeNames
+                          .map((t) => DropdownMenuItem(
+                              value: t, child: Text(t, style: const TextStyle(fontSize: 12))))
+                          .toList(),
+                      onChanged: (v) => setState(() => p.tileType = v ?? ''),
+                    ),
                   ),
-                ),
+                ],
               ]),
               // 📦 The BODY and the PACKING are NOT part of an artwork import — neither is on the
               // disk. He types the body and reads the packing off a box, and both belong to the
