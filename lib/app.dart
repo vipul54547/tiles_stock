@@ -65,6 +65,7 @@ import 'screens/end_user/dispatch_history_screen.dart';
 import 'screens/stockist/import_supplier_pdf_screen.dart';
 import 'screens/stockist/my_design_library_screen.dart';
 import 'screens/stockist/import_excel_stock_screen.dart';
+import 'screens/stockist/my_artworks_screen.dart';
 import 'screens/stockist/manual_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
 import 'screens/stockist/stock_lists_screen.dart';
@@ -209,6 +210,13 @@ final GoRouter _router = GoRouter(
         GoRoute(
           path: '/stockist/library',
           builder: (_, __) => const MyDesignLibraryScreen(),
+        ),
+        // 🖼️ MY ARTWORKS — print_master. The Design Library's twin, one level up: a PRINT and its
+        // IMAGE DNA (Look Type ▸ Natural Name · Print Type · Design Joint · Colour), mapped
+        // straight from the card. Newest first.
+        GoRoute(
+          path: '/stockist/artworks',
+          builder: (_, __) => const MyArtworksScreen(),
         ),
         // TWO DOORS. One import BUILDS PRODUCTS, one ADDS STOCK — neither does the other's job.
         // The product door creates the print + product + box and no stock at all; the stock door

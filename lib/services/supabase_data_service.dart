@@ -989,6 +989,46 @@ class SupabaseDataService {
     }
   }
 
+  /// 🖼️ EVERY artwork, **newest first**, with its image DNA:
+  /// `[{print_id, name, size, image_url, tiles, dna:{attributeId:[valueId]}}]`
+  ///
+  /// `tiles` = how many designs have been cut from it. **0 is honest, not broken** — he has the
+  /// picture and has not yet said what he sells from it.
+  Future<List<Map<String, dynamic>>> myArtworks() async {
+    try {
+      final res = await supabase.rpc('my_artworks');
+      return [
+        for (final a in (res as List?) ?? const [])
+          Map<String, dynamic>.from(a as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myArtworks failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Tags an artwork's IMAGE DNA **directly on the print** — Look Type ▸ Natural Name · Print Type ·
+  /// Design Joint · Colour.
+  ///
+  /// ⚠️ Why not [setDesignDna]: that routes by scope but resolves the print **from a tile**. After a
+  /// folder import an artwork has **no tile** — that is now the normal state — so there is no
+  /// `library_id` to route through. The server refuses anything that is not image DNA.
+  Future<void> printDnaSet({
+    required String printId,
+    required String attributeId,
+    required List<String> valueIds,
+  }) async {
+    try {
+      await supabase.rpc('print_dna_set', params: {
+        'p_print_id': printId,
+        'p_attribute_id': attributeId,
+        'p_value_ids': valueIds,
+      });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Makes a TILE from an artwork: **artwork + surface + body**.
   ///
   /// No thickness here — that comes from the PACKING, which he adds next. A tile with no packing

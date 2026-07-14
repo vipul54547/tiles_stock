@@ -130,6 +130,10 @@ class _StockistShellState extends State<StockistShell> {
               ),
             ),
             _item(Icons.grid_view_rounded, 'My Stock', '/stockist/dashboard'),
+            // 🖼️ THE ARTWORK sits ABOVE the design, so it sits above it here too:
+            //   My Artworks      a PRINT  → its IMAGE DNA
+            //   Design Library   a TILE   → surface · body · packing · covers
+            _item(Icons.image_outlined, 'My Artworks', '/stockist/artworks'),
             _item(Icons.collections_bookmark_outlined, 'Design Library',
                 '/stockist/library'),
             _item(Icons.receipt_long_outlined, 'Inquiries',

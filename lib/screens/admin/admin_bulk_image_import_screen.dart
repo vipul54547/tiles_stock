@@ -975,7 +975,11 @@ class _State extends State<AdminBulkImageImportScreen> {
                     setState(() => d.rotation = (d.rotation + 90) % 360),
               ),
             ]),
-            // Per-design packing — pre-filled from the size/surface defaults,
+            // 🚫 NO SURFACE · NO BODY · NO PACKING on an ARTWORK import. None of them is on the
+            // disk: the surface makes a TILE, the body is what it is MADE of, and the packing is
+            // read off a box. All three belong to the design he cuts from this picture, afterwards.
+            // (The admin concierge path still declares the tile, so it still asks.)
+            if (!_forStockist) ...[
             // overridable so two designs of one size can differ.
             const SizedBox(height: 6),
             Row(children: [
@@ -1055,6 +1059,7 @@ class _State extends State<AdminBulkImageImportScreen> {
                 ),
               ),
             ]),
+            ],
           ],
         ),
       ),
