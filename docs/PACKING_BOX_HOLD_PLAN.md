@@ -152,7 +152,7 @@ that is worth a lot: no backfill, no reconciliation, no guessing at old rows.
 | ~~2~~ | ✅ **DONE** pieces/weight leave the brand; `boxes` = packing × cover | the NAME stays per (tile, brand) — a brand prints one word on every cover |
 | ~~3~~ | ✅ **DONE** `designs.box_id` | `library_id`/`brand_id` are now **trigger-maintained MIRRORS** of it — 40 readers untouched. ⚠️ **NEVER write them by hand.** |
 | ~~4~~ | ✅ **DONE** Punch Type + Series free text; Series defaults to `Regular` | Use Type / Behaviour Type **deactivated** — no picker, no import column |
-| **5** | Folder import asks **body + pieces + weight** (no brand) → tile + first packing | this is what he asked for at the tile step |
+| ~~5~~ | ✅ **DONE** folder import asks **body + pieces + weight**, no brand | artwork + tile + its PACKING; the thickness falls out. Writes NO box. |
 | **6** | Library: add a packing · put a brand's cover on a packing (the stamped name) | replaces "Set box packing" |
 | **7** | Add Stock picks a **BOX** (tile + packing + cover), not a tile + brand | the picker must show the packing — 10 boxes of 5 ≠ 10 boxes of 4 |
 

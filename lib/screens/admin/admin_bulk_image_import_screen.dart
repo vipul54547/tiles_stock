@@ -31,11 +31,20 @@ import '../../utils/tile_types.dart';
 //    In a folder, THE STOCKIST NAMED THE FILES HIMSELF. The filename IS his word.
 //    → this replaced the PDF importer, which is now hidden from the platform.
 //
-// 🚫 AND IT IS BRAND-FREE (stockist path). A folder knows the PRINT (the artwork — brand-free by
-//    definition) and the PRODUCT (the piece — brand-free by rule: identity is brand-free, the brand
-//    belongs to the BOX). It writes NO box: it cannot know what a brand stamps on its box or how it
-//    packs it. That is declared afterwards, per brand — Library ▸ Set box packing — and the
-//    THICKNESS derives from it. (20260714e_folder_import_is_brand_free)
+// 🚫 AND IT IS BRAND-FREE (stockist path). It builds:
+//
+//     ARTWORK   the print — name (the FILENAME), size, one photo
+//     TILE      artwork + surface + BODY  (he confirms the body; the disk cannot know it)
+//     PACKING   pieces + weight  → and the THICKNESS falls out of it
+//
+//    📦 It asks for pieces and weight precisely BECAUSE A PACKING HAS NO BRAND. A factory packs
+//    once and covers differently, so the packing belongs to the tile. (This was the objection:
+//    "why are we importing under brand?" — pieces/weight used to live on the box, per brand, so
+//    asking for them meant asking for a brand. They do not any more.)
+//
+//    🚫 It writes NO BOX. A folder cannot know what a brand prints on its cover (`1001` on FAMOUS,
+//    `601001` on ANUJ). The cover goes on later, by him.
+//    (docs/PACKING_BOX_HOLD_PLAN.md · 20260714j_folder_import_makes_the_packing)
 //
 // Runs in BOTH roles off one screen:
 //   admin       — picks a stockist, then his brand   → admin_library_upsert (unchanged)
@@ -389,13 +398,14 @@ class _State extends State<AdminBulkImageImportScreen> {
     }
   }
 
-  /// The stockist folder import carries NO BOX, so pieces/weight are not its business and cannot
-  /// hold it up. It needs the size and the body — the two facts that make the piece.
+  /// The size, the BODY and the PACKING. The body and the packing are what make the thickness —
+  /// `weight / (pieces × area × DENSITY)`, and the density comes from the body — so all of them are
+  /// needed, and none may be guessed. Still no brand: a packing has none.
   bool get _mapReady => _sizePacks.values.every((p) =>
       p.adminSize != null &&
       p.tileType.isNotEmpty &&
-      (_forStockist ||
-          (p.pieces > 0 && (double.tryParse(p.weight.trim()) ?? 0) > 0)));
+      p.pieces > 0 &&
+      (double.tryParse(p.weight.trim()) ?? 0) > 0);
 
   // Already in the library? A stockist's PRINT is brand-free (name + size). The admin path still
   // keys on the brand, because admin_library_upsert does.
@@ -443,14 +453,12 @@ class _State extends State<AdminBulkImageImportScreen> {
     setState(() => _phase = _Phase.preview);
   }
 
-  // Importable once the piece is fully described: a surface and a body. The BOX (pieces, weight)
-  // is not part of a folder import — see _mapReady.
+  // Importable once the tile is fully described: a surface, a body, and a packing.
   bool _designReady(_ImgDesign d) =>
       (d.surface ?? '').isNotEmpty &&
       (d.tileType ?? '').isNotEmpty &&
-      (_forStockist ||
-          ((d.pieces ?? 0) > 0 &&
-              (double.tryParse(d.weight.trim()) ?? 0) > 0));
+      (d.pieces ?? 0) > 0 &&
+      (double.tryParse(d.weight.trim()) ?? 0) > 0;
 
   // ── Commit ───────────────────────────────────────────────────────────────
   Future<void> _commit() async {
@@ -503,16 +511,23 @@ class _State extends State<AdminBulkImageImportScreen> {
       final pieces = d.pieces ?? pack.pieces;
 
       if (_forStockist) {
-        // BRAND-FREE. The FILENAME is the PRINT's name — his own word for the artwork, which is
-        // exactly why a folder is an honest source and a supplier PDF is not. It builds the print
-        // and the piece; it writes NO BOX, because a folder cannot know what a brand stamps on its
-        // box or how it packs it. That is declared per brand afterwards (Set box packing).
+        // BRAND-FREE. The FILENAME is the ARTWORK's name — his own word for it, which is exactly
+        // why a folder is an honest source and a supplier PDF is not.
+        //
+        // It builds the artwork, the tile, and the tile's PACKING (pieces + weight) — and the
+        // THICKNESS falls out of the packing. It can ask for pieces/weight precisely BECAUSE a
+        // packing has no brand: a factory packs once and covers differently.
+        //
+        // 🚫 NO BOX. A folder cannot know what a brand prints on its cover; the cover goes on
+        // later, by him. (docs/PACKING_BOX_HOLD_PLAN.md)
         await _data.libraryImageUpsert(
           size: pack.adminSize!,
           name: d.name,
           imageUrl: res.url!,
           surface: surface,
           tileType: tileType,
+          pieces: pieces,
+          weightKg: weight,
         );
       } else {
         await _data.adminLibraryUpsert(
@@ -653,9 +668,10 @@ class _State extends State<AdminBulkImageImportScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Text(
-                'This builds your DESIGNS — the artwork and its surfaces. No brand, and no box: '
-                'a folder cannot know what a brand prints on its box or how it packs it.\n'
-                'Set the box afterwards (Library ▸ Set box packing) — the thickness comes from it.',
+                'This builds your DESIGNS — the artwork, its surfaces, and how it is PACKED '
+                '(pieces + weight). The thickness is worked out from the packing; you never type it.\n'
+                'NO BRAND: a packing has none. A factory packs once and covers differently — the '
+                'brand is the COVER, and you put that on afterwards.',
                 style: TextStyle(fontSize: 12, color: Color(0xFF1B4F72), height: 1.45),
               ),
             ),
@@ -704,9 +720,7 @@ class _State extends State<AdminBulkImageImportScreen> {
   Widget _buildMap() => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text(_forStockist
-              ? '2. Check the size & body   (${_designs.length} images)'
-              : '2. Map sizes & packing   (${_designs.length} images)',
+          Text('2. Size, body & packing   (${_designs.length} images)',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 4),
           Text(
@@ -715,8 +729,8 @@ class _State extends State<AdminBulkImageImportScreen> {
                   // what makes a piece a piece (print + surface + BODY + thickness), and the
                   // thickness is later derived as weight / (pieces × area × DENSITY) — where the
                   // density comes from the body. No body, no thickness, whatever the box weight is.
-                  ? 'Confirm the size, and say what the tile is made of — the body is part of the '
-                      'design, and the thickness is worked out from it later.'
+                  ? 'Confirm the size, say what the tile is MADE OF, and how it is PACKED. The '
+                      'thickness is worked out from the packing and the body — you never type it.'
                   : 'Each folder size → an admin size, plus its packing.',
               style: const TextStyle(fontSize: 12, color: Colors.black54)),
           const SizedBox(height: 10),
@@ -734,9 +748,7 @@ class _State extends State<AdminBulkImageImportScreen> {
             onPressed: _mapReady ? _enterPreview : null,
             child: Text(_mapReady
                 ? 'Continue to preview'
-                : _forStockist
-                    ? 'Pick the admin size and the tile type'
-                    : 'Fill every size: admin size, tile type, pieces, weight'),
+                : 'Fill in: admin size, tile type, pieces, weight'),
           ),
         ],
       );
@@ -781,10 +793,10 @@ class _State extends State<AdminBulkImageImportScreen> {
                   ),
                 ),
               ]),
-              // 📦 THE BOX IS NOT ASKED HERE. Pieces and weight are per BRAND — the same tile ships
-              // 4/box under one brand and 6/box under another — and this step has no brand. Set the
-              // box afterwards, per brand, and the thickness derives from it.
-              if (!_forStockist) ...[
+              // 📦 THE PACKING — pieces + weight, and it has NO BRAND. A factory packs once and
+              // covers differently, so this belongs here, with the tile. The THICKNESS falls out of
+              // it, and the tile keeps only that.
+              ...[
                 const SizedBox(height: 8),
                 Row(children: [
                   Expanded(

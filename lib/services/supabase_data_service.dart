@@ -911,18 +911,23 @@ class SupabaseDataService {
   /// brand-free by definition) and the **PRODUCT** (the piece — brand-free by rule; identity is
   /// brand-free, brand belongs to the BOX).
   ///
-  /// 🚫 It writes **NO BOX**. It used to, stamping the FILENAME into `brand_design_name` — but that
-  /// column is what the FACTORY prints on that brand's box (`1001` under FAMOUS, `601001` under
-  /// ANUJ), and the filename is the stockist's own word for the artwork. It was forging a label he
-  /// never typed. The box — stamped name, pieces, weight — is declared per brand afterwards, by
-  /// him: see [librarySetBoxForSize]. Until then the product has no box and no thickness, and the
-  /// Library says so. (20260714e_folder_import_is_brand_free)
+  /// It also makes the tile's **PACKING** — [pieces] + [weightKg] — and the **thickness falls out of
+  /// it**. It can, precisely because **a packing has no brand**: a factory packs once and covers
+  /// differently. That was the whole objection to asking for pieces/weight here before, when they
+  /// still lived on the box.
+  ///
+  /// 🚫 It writes **NO BOX**. A folder cannot know what a brand prints on its cover (`1001` on
+  /// FAMOUS, `601001` on ANUJ) — the filename is the stockist's own word for the ARTWORK, and
+  /// writing it there forged a label he never typed. The cover goes on later, by him.
+  /// (20260714j_folder_import_makes_the_packing)
   Future<String> libraryImageUpsert({
     required String size,
     required String name,
     required String imageUrl,
     required String surface,
     String? tileType,
+    int? pieces,
+    double? weightKg,
   }) async {
     try {
       final res = await supabase.rpc('library_image_upsert', params: {
@@ -931,6 +936,8 @@ class SupabaseDataService {
         'p_image_url': imageUrl,
         'p_surface': surfaceForImport(surface),
         'p_tile_type': tileType,
+        'p_pieces': pieces,
+        'p_weight': weightKg,
       });
       return (res ?? '').toString();
     } catch (e) {
