@@ -937,6 +937,63 @@ class SupabaseDataService {
     }
   }
 
+  // ── 📦 PACKING — pieces + weight, and it has NO BRAND ──────────────────────────────────────
+  //
+  //   ARTWORK → TILE → PACKING → BOX → HOLD
+  //
+  // A factory PACKS ONCE and COVERS DIFFERENTLY: the packing is the pieces and the weight; the BOX
+  // is the corrugated cover you wrap round it, and the cover is what carries the brand. So pieces
+  // and weight were never the brand's. (docs/PACKING_BOX_HOLD_PLAN.md)
+  //
+  // 🔑 THE THICKNESS DERIVES FROM THE PACKING — never typed, and no picker, ever.
+  // 🔑 A TILE MAY HAVE SEVERAL PACKINGS (5-a-box for one market, 4-a-box for another) — but they
+  //    must all AGREE on the thickness. 5 × 10.5 kg and 4 × 8.4 kg are both 2.1 kg a piece: one
+  //    tile. More than 1 mm apart is not another packing, it is a DIFFERENT TILE, and the server
+  //    REFUSES it with that message.
+
+  /// Adds a packing to a tile. Returns `{packing_id, thickness_mm, first}`.
+  /// Throws in plain English when the packing belongs to a different tile, or when the tile has no
+  /// body yet (no body → no density → no thickness, however good the packing is).
+  Future<Map<String, dynamic>> packingAdd({
+    required String libraryId,
+    required int pieces,
+    required double weightKg,
+  }) async {
+    try {
+      final res = await supabase.rpc('packing_add', params: {
+        'p_library_id': libraryId,
+        'p_pieces': pieces,
+        'p_weight': weightKg,
+      });
+      return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  Future<void> packingRemove(String packingId) async {
+    try {
+      await supabase.rpc('packing_remove', params: {'p_packing_id': packingId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// A tile's packings: `[{id, pieces, weight_kg}]`, oldest first (the first one set the thickness).
+  Future<List<Map<String, dynamic>>> myPackings(String libraryId) async {
+    try {
+      final res = await supabase
+          .rpc('my_packings', params: {'p_library_id': libraryId});
+      return [
+        for (final p in (res as List?) ?? const [])
+          Map<String, dynamic>.from(p as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myPackings failed: $e\n$st');
+      return [];
+    }
+  }
+
   /// THE BOX — declared per brand, per size, by HIM. Returns how many designs it landed on.
   ///
   /// A brand packs one size the same way every time (a 600x1200 box is 2 pieces at 27 kg whatever
