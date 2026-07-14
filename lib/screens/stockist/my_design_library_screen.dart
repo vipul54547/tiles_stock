@@ -43,6 +43,15 @@ class _State extends State<MyDesignLibraryScreen> {
   final _data = SupabaseDataService();
   List<Brand> _brands = [];
   List<LibraryEntry> _entries = [];
+
+  /// 🖼️ ARTWORKS WITH NO TILE YET — `[{print_id, name, size, image_url}]`.
+  ///
+  /// The folder import makes artworks and stops (size + name + image is all a folder knows), so
+  /// right after one this is EVERY artwork he owns. `my_library` is built from TILES and joins
+  /// through them, so these would be invisible — the import would land and show nothing.
+  ///
+  /// Each becomes a card that says what it is: an artwork with no design cut from it yet.
+  List<Map<String, dynamic>> _artworks = [];
   List<String> _sizes = [];
   // Surface is part of the PRODUCT's identity — Glossy and Matt of one print are two
   // products — so the editor must be able to pick one. (product identity migration)
@@ -72,6 +81,196 @@ class _State extends State<MyDesignLibraryScreen> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  /// Artworks matching the search box. (They have no surface/brand, so the other filters do not
+  /// apply to them — an artwork has none of those things yet.)
+  List<Map<String, dynamic>> get _filteredArtworks {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _artworks;
+    return _artworks
+        .where((a) => (a['name'] ?? '').toString().toLowerCase().contains(q))
+        .toList();
+  }
+
+  /// 🖼️ AN ARTWORK WITH NO TILE YET.
+  ///
+  /// This is what a folder import produces, and it is an honest state, not a broken one: he has the
+  /// picture, its size and his name for it — and he has not yet said what it is MADE of, or in which
+  /// SURFACE he sells it. Until he does, there is no tile, no packing and no thickness.
+  ///
+  /// The card says exactly that, and offers the one thing that moves it forward.
+  Widget _artworkCard(Map<String, dynamic> a) {
+    final name = (a['name'] ?? '').toString();
+    final size = (a['size'] ?? '').toString();
+    final img = (a['image_url'] ?? '').toString();
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.orange.shade200),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 60,
+                height: 60,
+                child: img.isEmpty
+                    ? Container(
+                        color: Colors.grey.shade100,
+                        child: Icon(Icons.image_outlined,
+                            color: Colors.grey.shade400))
+                    : CachedNetworkImage(
+                        imageUrl: CloudinaryService.thumbUrl(img, width: 160),
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) =>
+                            Container(color: Colors.grey.shade200),
+                        errorWidget: (_, __, ___) =>
+                            Container(color: Colors.grey.shade200)),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15)),
+                  const SizedBox(height: 1),
+                  Text(size.replaceAll(' mm', ''),
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  const SizedBox(height: 7),
+                  Text(
+                    'No design yet — say which SURFACE you sell it in, and what it is MADE of.',
+                    style: TextStyle(
+                        fontSize: 11.5, color: Colors.orange.shade900),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            FilledButton.tonalIcon(
+              onPressed: () => _addTileFromArtwork(a),
+              icon: const Icon(Icons.add, size: 17),
+              label: const Text('Add design'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Cut a TILE from an artwork: **artwork + surface + body**.
+  ///
+  /// 🚫 The surface is compulsory and is NEVER defaulted. It is identity — a wrong one forges a
+  /// different tile — and he is standing right here, so he says it. The body may be left blank
+  /// (honestly NULL, never guessed); without it there is no thickness, and the card will say so.
+  ///
+  /// The PACKING comes next, from the card. A tile with no packing has no thickness.
+  Future<void> _addTileFromArtwork(Map<String, dynamic> a) async {
+    final printId = (a['print_id'] ?? '').toString();
+    SurfaceOption? surface;
+    String? body;
+    var saving = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        Future<void> save() async {
+          if (surface == null) {
+            _snack('Pick a surface — every design has one.', error: true);
+            return;
+          }
+          setLocal(() => saving = true);
+          try {
+            await _data.tileAdd(
+                printId: printId,
+                surface: surface!.canonical,
+                tileType: body);
+            if (!ctx.mounted) return;
+            Navigator.pop(ctx);
+            _snack('Design added — now set its packing (pieces + weight).');
+            await _load();
+          } catch (e) {
+            setLocal(() => saving = false);
+            _snack('$e', error: true);
+          }
+        }
+
+        return AlertDialog(
+          title: Text('Add a design from “${a['name']}”'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'The artwork is the picture. A DESIGN is that picture in a surface, made of '
+                  'something — and that is what you sell.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 14),
+                // His OWN WORD, shown with the admin canonical it means ("Raindrops (Sugar)").
+                // The tile stores the canonical — that is what identity is keyed on — while the
+                // word is only how he reads it.
+                DropdownButtonFormField<SurfaceOption>(
+                  initialValue: surface,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                      labelText: 'Surface *',
+                      border: OutlineInputBorder(),
+                      isDense: true),
+                  items: [
+                    for (final o in _surfaces)
+                      DropdownMenuItem(
+                          value: o, child: Text(_surfaceOptionText(o)))
+                  ],
+                  onChanged:
+                      saving ? null : (v) => setLocal(() => surface = v),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  initialValue: body,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                      labelText: 'Made of (body)',
+                      border: OutlineInputBorder(),
+                      isDense: true),
+                  items: [
+                    for (final t in tileTypeNames)
+                      DropdownMenuItem(value: t, child: Text(t))
+                  ],
+                  onChanged: saving ? null : (v) => setLocal(() => body = v),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Leave the body blank if you do not know it yet — it stays blank, and the '
+                  'thickness simply cannot be worked out until you say.',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: saving ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: saving ? null : save,
+                child: Text(saving ? 'Adding…' : 'Add design')),
+          ],
+        );
+      }),
+    );
   }
 
   // Distinct sizes present in the library, for the size filter.
@@ -244,6 +443,7 @@ class _State extends State<MyDesignLibraryScreen> {
       _data.getActiveSizeNames(),
       _data.dnaMyLibraryTags(),
       _data.getMySurfaceOptions(),
+      _data.myArtworksWithoutTiles(),
     ]);
     if (!mounted) return;
     final brands = results[0] as List<Brand>;
@@ -255,6 +455,7 @@ class _State extends State<MyDesignLibraryScreen> {
     setState(() {
       _brands = brands;
       _entries = results[1] as List<LibraryEntry>;
+      _artworks = results[5] as List<Map<String, dynamic>>;
       _sizes = results[2] as List<String>;
       _dnaTags = results[3] as Map<String, List<DnaTag>>;
       // De-duplicated by word: two of their aliases can share a display word, and a
@@ -1057,24 +1258,28 @@ class _State extends State<MyDesignLibraryScreen> {
                 if (_entries.isNotEmpty) _searchBar(),
                 if (_showFilters && _entries.isNotEmpty) _filterChips(),
                 Expanded(
-                  child: _entries.isEmpty
+                  child: _entries.isEmpty && _artworks.isEmpty
                       ? _empty()
                       : Builder(builder: (_) {
                           final list = _filtered;
-                          if (list.isEmpty) {
+                          // One card per PRINT, not per tile. (_byPrint)
+                          final prints = _byPrint(list);
+                          // Artworks with no tile come FIRST: they are the ones waiting for him.
+                          final waiting = _filteredArtworks;
+                          if (prints.isEmpty && waiting.isEmpty) {
                             return const Center(
                                 child: Text('No designs match.',
                                     style: TextStyle(color: Colors.grey)));
                           }
-                          // One card per PRINT, not per product. (_byPrint)
-                          final prints = _byPrint(list);
                           return ListView.separated(
                             padding: EdgeInsets.fromLTRB(12, 4, 12,
                                 90 + MediaQuery.viewPaddingOf(context).bottom),
-                            itemCount: prints.length,
+                            itemCount: waiting.length + prints.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),
-                            itemBuilder: (_, i) => _printCard(prints[i]),
+                            itemBuilder: (_, i) => i < waiting.length
+                                ? _artworkCard(waiting[i])
+                                : _printCard(prints[i - waiting.length]),
                           );
                         }),
                 ),

@@ -911,15 +911,9 @@ class SupabaseDataService {
   /// brand-free by definition) and the **PRODUCT** (the piece — brand-free by rule; identity is
   /// brand-free, brand belongs to the BOX).
   ///
-  /// It also makes the tile's **PACKING** — [pieces] + [weightKg] — and the **thickness falls out of
-  /// it**. It can, precisely because **a packing has no brand**: a factory packs once and covers
-  /// differently. That was the whole objection to asking for pieces/weight here before, when they
-  /// still lived on the box.
-  ///
-  /// 🚫 It writes **NO BOX**. A folder cannot know what a brand prints on its cover (`1001` on
-  /// FAMOUS, `601001` on ANUJ) — the filename is the stockist's own word for the ARTWORK, and
-  /// writing it there forged a label he never typed. The cover goes on later, by him.
-  /// (20260714j_folder_import_makes_the_packing)
+  /// ⚠️ **The stockist folder import no longer uses this** — see [artworkImport]. A folder gives
+  /// SIZE + NAME + IMAGE and nothing else, so it makes an **artwork** and stops. This is kept for
+  /// the admin concierge path, which still declares the tile on the stockist's behalf.
   Future<String> libraryImageUpsert({
     required String size,
     required String name,
@@ -938,6 +932,80 @@ class SupabaseDataService {
         'p_tile_type': tileType,
         'p_pieces': pieces,
         'p_weight': weightKg,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  // ── 🖼️ THE ARTWORK — size + name + image, and that is ALL ──────────────────────────────────
+  //
+  //     300x450 / 1001.jpg
+  //     ^^^^^^^   ^^^^  ^^^
+  //     size      name  image
+  //
+  // That is exactly what a folder can honestly give: the size is the folder, the name is what HE
+  // called the file, the image is the file. Nothing else on the disk is a fact about the tile.
+  //
+  // 🚫 NO SURFACE FOLDERS · NO BODY · NO PACKING · NO BRAND. The body is not on the disk (he types
+  // it); the packing is not on the disk (he reads it off a box); and the SURFACE makes a TILE, not
+  // an artwork — `1001` at 300x450 is ONE artwork whether he later cuts a Matt tile, a Carving
+  // tile, or both from it. The TILE is made afterwards, from an artwork he already has.
+
+  /// Imports ONE artwork. Idempotent: the key is (stockist, name, size) and the photo is
+  /// FIRST-WRITER-WINS, so re-importing the same folder never duplicates and never swaps an image.
+  Future<String> artworkImport({
+    required String size,
+    required String name,
+    required String imageUrl,
+  }) async {
+    try {
+      final res = await supabase.rpc('artwork_import', params: {
+        'p_size': size,
+        'p_name': name,
+        'p_image_url': imageUrl,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// The artworks he has no tile for yet: `[{print_id, name, size, image_url}]`.
+  ///
+  /// Right after a folder import this is **all of them** — so the Library must show them, or the
+  /// import lands and he sees nothing (`my_library` is built from tiles and joins through them).
+  Future<List<Map<String, dynamic>>> myArtworksWithoutTiles() async {
+    try {
+      final res = await supabase.rpc('my_artworks_without_tiles');
+      return [
+        for (final a in (res as List?) ?? const [])
+          Map<String, dynamic>.from(a as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myArtworksWithoutTiles failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Makes a TILE from an artwork: **artwork + surface + body**.
+  ///
+  /// No thickness here — that comes from the PACKING, which he adds next. A tile with no packing
+  /// has no thickness, and the Library says so.
+  ///
+  /// 🚫 The surface is compulsory and is never defaulted: it is identity, and a wrong one forges a
+  /// different tile. He is standing right there, so he says it.
+  Future<String> tileAdd({
+    required String printId,
+    required String surface,
+    String? tileType,
+  }) async {
+    try {
+      final res = await supabase.rpc('tile_add', params: {
+        'p_print_id': printId,
+        'p_surface': surface,
+        'p_tile_type': tileType,
       });
       return (res ?? '').toString();
     } catch (e) {
