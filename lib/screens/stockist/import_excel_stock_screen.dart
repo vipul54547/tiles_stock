@@ -2509,14 +2509,21 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                    '$incomplete new design${incomplete == 1 ? '' : 's'} need Tile Type, '
-                    'Pieces and Box Weight. Fill them below (or untick the row) to import.',
+                    _products
+                        ? '$incomplete design${incomplete == 1 ? '' : 's'} need Surface, '
+                            'Tile Type, Pieces and Box Weight. Fill them below (or untick '
+                            'the row) to import.'
+                        : '$incomplete new design${incomplete == 1 ? '' : 's'} need Tile Type, '
+                            'Pieces and Box Weight. Fill them below (or untick the row) to import.',
                     style:
                         TextStyle(fontSize: 11.5, color: Colors.orange.shade900)),
                 const SizedBox(height: 3),
                 Text(
-                    'Tip: add “Tile Type”, “Pieces/Box” and “Weight (kg)” columns to your '
-                    'file and they’ll import automatically — no filling needed.',
+                    _products
+                        ? 'Tip: fill “Surface”, “Tile Type”, “Pieces/Box” and “Weight (kg)” in '
+                            'the sheet and they’ll import automatically — no filling needed.'
+                        : 'Tip: add “Tile Type”, “Pieces/Box” and “Weight (kg)” columns to your '
+                            'file and they’ll import automatically — no filling needed.',
                     style: TextStyle(
                         fontSize: 11,
                         fontStyle: FontStyle.italic,
@@ -2836,11 +2843,16 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   // prominently so a multi-quality design never reads as a duplicate.
   Widget _qualityLine(_XlsRow r) {
     final st = _rowStyle(r);
+    // On the PRODUCT door there is no quality and no box count — showing "(no quality)
+    // · 0 boxes" against every design is noise about fields the sheet doesn't have. The
+    // surface leads instead, because it is the identity fact the row is judged on.
     final rest = [
       if (r.surfaceRaw.trim().isNotEmpty) _surfaceShown(r),
-      if (r.qty >= 0) '${r.qty} boxes',
+      if (!_products && r.qty >= 0) '${r.qty} boxes',
     ].join('  ·  ');
-    final quality = r.quality.isNotEmpty ? r.quality : r.qualityRaw;
+    final quality = _products
+        ? ''
+        : (r.quality.isNotEmpty ? r.quality : r.qualityRaw);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2865,17 +2877,24 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                       style: TextStyle(fontSize: 12, color: Colors.black54))
                   : Text.rich(
                       TextSpan(children: [
-                        TextSpan(
-                            text: quality.isEmpty ? '(no quality)' : quality,
-                            style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1B4F72))),
+                        if (!_products)
+                          TextSpan(
+                              text: quality.isEmpty ? '(no quality)' : quality,
+                              style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1B4F72))),
                         if (rest.isNotEmpty)
                           TextSpan(
-                              text: '   $rest',
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.black54)),
+                              text: _products ? rest : '   $rest',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: _products
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: _products
+                                      ? const Color(0xFF1B4F72)
+                                      : Colors.black54)),
                       ]),
                       overflow: TextOverflow.ellipsis),
             ),
@@ -2944,6 +2963,30 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 fontWeight: FontWeight.w600,
                 color: Colors.black54)),
         const SizedBox(height: 4),
+        // SURFACE is identity too, and on the product door it is compulsory. A design
+        // sheet with a blank Surface cell used to be unfillable: the row was blocked on
+        // a surface, and this editor offered no way to give it one. It is deliberately
+        // NOT defaulted — he is sitting right here, so ask him.
+        if (_products) ...[
+          DropdownButtonFormField<String>(
+            key: ValueKey('sf_$id'),
+            initialValue:
+                _finishes.contains(first.surface) ? first.surface : null,
+            isExpanded: true,
+            decoration: const InputDecoration(
+                isDense: true,
+                labelText: 'Surface',
+                border: OutlineInputBorder()),
+            items: _finishes
+                .map((s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(s, style: const TextStyle(fontSize: 12))))
+                .toList(),
+            onChanged:
+                _importing ? null : (v) => setAll((r) => r.surface = v ?? ''),
+          ),
+          const SizedBox(height: 6),
+        ],
         Row(children: [
           Expanded(
             flex: 4,
@@ -3005,7 +3048,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 3),
             child: Text(
-                'New design — fill tile type, pieces and weight (or untick).',
+                _products
+                    ? 'New design — fill surface, tile type, pieces and weight (or untick).'
+                    : 'New design — fill tile type, pieces and weight (or untick).',
                 style: TextStyle(
                     fontSize: 10.5,
                     color: Colors.orange.shade800,
