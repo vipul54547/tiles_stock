@@ -399,17 +399,18 @@ class SupabaseDataService {
   ///                  print (same size/surface/body) with its own box, and the stock goes there.
   ///
   /// Returns `{library_id, forked, thickness_mm, matched_thickness_mm}` — feed `library_id` straight
-  /// into [addDesign]. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
-  Future<Map<String, dynamic>> libraryForBox({
+  /// into [addDesign]. The packing is RECORDED on whichever tile it lands on.
+  ///
+  /// 🚫 **No brand.** The answer depends on the WEIGHT PER PIECE, which is a property of the tile —
+  /// a packing has no brand at all. (docs/PACKING_BOX_HOLD_PLAN.md)
+  Future<Map<String, dynamic>> tileForPacking({
     required String libraryId,
-    String? brandId,
     required int pieces,
     required double weightKg,
   }) async {
     try {
-      final res = await supabase.rpc('library_for_box', params: {
+      final res = await supabase.rpc('tile_for_packing', params: {
         'p_library_id': libraryId,
-        'p_brand_id': brandId,
         'p_pieces': pieces,
         'p_weight': weightKg,
       });
@@ -994,23 +995,21 @@ class SupabaseDataService {
     }
   }
 
-  /// THE BOX — declared per brand, per size, by HIM. Returns how many designs it landed on.
+  /// THE PACKING, typed ONCE for a whole size. Returns how many designs it landed on.
   ///
-  /// A brand packs one size the same way every time (a 600x1200 box is 2 pieces at 27 kg whatever
-  /// design is printed on it), so this is typed ONCE per (brand, size) and applies to every product
-  /// of that size. **The thickness derives from it** — never typed.
+  /// 🚫 **No brand** — a packing has none. A factory packs a 300x450 the same way whatever design is
+  /// printed on it, and whatever cover goes round it afterwards. Every tile of that size gets the
+  /// packing, and **the thickness derives from it**.
   ///
-  /// A weight already on record is left alone: it is the reference the 1 mm rule measures drift
-  /// against, so a bulk pass must not silently move it.
-  Future<int> librarySetBoxForSize({
-    required String brandId,
+  /// Each tile is put through `packing_add`, so the **1 mm rule applies to every one**: a packing
+  /// that would belong to a different tile is refused rather than quietly recorded.
+  Future<int> packingAddForSize({
     required String size,
     required int pieces,
     required double weightKg,
   }) async {
     try {
-      final res = await supabase.rpc('library_set_box_for_size', params: {
-        'p_brand_id': brandId,
+      final res = await supabase.rpc('packing_add_for_size', params: {
         'p_size': size,
         'p_pieces': pieces,
         'p_weight': weightKg,
@@ -1142,29 +1141,6 @@ class SupabaseDataService {
         'p_surface': surface,
         'p_label': label,
       });
-    } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
-    }
-  }
-
-  /// Set how ONE BRAND packs this print — pieces per box and box weight — straight from the
-  /// Library card's box chip.
-  ///
-  /// Brands can pack differently (the same print may ship 4/box under one brand and 6/box
-  /// under another), which is why the spec lives on the box `(library_id, brand_id)` and not
-  /// on the product. Returns the newly DERIVED thickness
-  /// (`weight / (pieces × area × density_of(tile_type))`), which the server recomputes by
-  /// trigger — thickness is never typed.
-  Future<double?> setLibraryBox(String libraryId, String brandId,
-      {int? pieces, double? weightKg}) async {
-    try {
-      final res = await supabase.rpc('library_set_box', params: {
-        'p_library_id': libraryId,
-        'p_brand_id': brandId,
-        'p_pieces': pieces,
-        'p_weight': weightKg,
-      });
-      return (res as num?)?.toDouble();
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }

@@ -102,7 +102,6 @@ class _State extends State<MyDesignLibraryScreen> {
       return;
     }
 
-    var brandId = _brands.first.id;
     var size = sizes.first;
     final piecesCtrl = TextEditingController();
     final weightCtrl = TextEditingController();
@@ -121,11 +120,13 @@ class _State extends State<MyDesignLibraryScreen> {
             }
             setLocal(() => saving = true);
             try {
-              final n = await _data.librarySetBoxForSize(
-                brandId: brandId, size: size, pieces: pieces, weightKg: weight);
+              // No brand: a packing has none. A factory packs a 300x450 the same way whatever
+              // design is on it, and whatever cover goes round it afterwards.
+              final n = await _data.packingAddForSize(
+                  size: size, pieces: pieces, weightKg: weight);
               if (!ctx.mounted) return;
               Navigator.pop(ctx);
-              _snack('Box set on $n design${n == 1 ? '' : 's'} — '
+              _snack('Packing set on $n design${n == 1 ? '' : 's'} — '
                   'their thickness comes from it.');
               await _load();
             } catch (e) {
@@ -135,7 +136,7 @@ class _State extends State<MyDesignLibraryScreen> {
           }
 
           return AlertDialog(
-            title: const Text('Set box packing'),
+            title: const Text('Set the packing'),
             content: SizedBox(
               width: 420,
               child: Column(
@@ -143,22 +144,14 @@ class _State extends State<MyDesignLibraryScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'How does this brand pack this size? Read it off the box — the thickness is '
-                    'worked out from it.',
-                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                    'How is this size packed? Read the pieces and the weight off the box — the '
+                    'thickness is worked out from them.\n'
+                    'No brand: a factory packs a size the same way whatever design is on it, and '
+                    'whatever cover goes round it afterwards.',
+                    style: TextStyle(
+                        fontSize: 12.5, color: Colors.grey.shade700, height: 1.4),
                   ),
                   const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: brandId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                        labelText: 'Brand', border: OutlineInputBorder(), isDense: true),
-                    items: _brands
-                        .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
-                        .toList(),
-                    onChanged: saving ? null : (v) => setLocal(() => brandId = v ?? brandId),
-                  ),
-                  const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     initialValue: size,
                     isExpanded: true,
@@ -199,8 +192,8 @@ class _State extends State<MyDesignLibraryScreen> {
                   ]),
                   const SizedBox(height: 10),
                   Text(
-                    'Applies to every design of this size. A box weight already on record is kept '
-                    '— change one by hand from its card if you really mean to.',
+                    'Applies to every design of this size. Each one is held to the 1 mm rule: a '
+                    'packing that would belong to a different tile is refused, not quietly saved.',
                     style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
                   ),
                 ],
@@ -1017,7 +1010,7 @@ class _State extends State<MyDesignLibraryScreen> {
           // brand), so this is where it is declared, and the THICKNESS derives from it.
           IconButton(
             icon: const Icon(Icons.inventory_2_outlined),
-            tooltip: 'Set box packing (per brand, per size)',
+            tooltip: 'Set the packing for a whole size (pieces + weight)',
             onPressed: _openSetBoxForSize,
           ),
           // M only: surface likely-duplicate masters (pre-#7 leftovers) for the
@@ -1374,21 +1367,26 @@ class _State extends State<MyDesignLibraryScreen> {
     _load();
   }
 
-  /// THE BOX chip — `4 pcs · 24 kg · 8.5–9.0 mm`. Tap to set how each brand packs this print.
+  /// 📦 THE TILE'S PACKING — pieces + weight, and **NO BRAND**.
   ///
-  /// Pieces + weight live on the BOX (product × brand), because brands can pack differently.
-  /// Thickness is DERIVED from them and never typed — and shown as a 0.5 mm BAND, never a
-  /// bare "8.8 mm": it is inferred from box weight, not measured, and every thickness filter
-  /// in the app chips on these bands.
+  /// A factory **PACKS ONCE and COVERS DIFFERENTLY**: the packing is the pieces and the weight; a
+  /// BOX is the corrugated cover wrapped round it, and the cover is what carries the brand. So
+  /// pieces/weight are not the brand's, and they are not shown against one.
+  ///
+  /// A tile may have SEVERAL packings (5-a-box for one market, 4-a-box for another) — but they all
+  /// agree on its thickness. Thickness is DERIVED from them and never typed, and it shows as a
+  /// 0.5 mm BAND rather than a bare "8.8 mm": it is inferred from a weight, not measured.
   Widget _boxChip(LibraryEntry e) {
     final band = thicknessBandLabel(e.thicknessMm);
+    final first = e.packings.isNotEmpty ? e.packings.first : null;
+    final more = e.packings.length - 1;
     final bits = <String>[
-      if (e.piecesPerBox > 0) '${e.piecesPerBox} pcs',
-      if (e.boxWeightKg > 0) '${_trimNum(e.boxWeightKg)} kg',
+      if (first != null) '${first.pieces} pcs · ${_trimNum(first.weightKg)} kg',
+      if (more > 0) '+$more more',
       if (band != null) band,
     ];
     return InkWell(
-      onTap: () => _editBox(e),
+      onTap: () => _editPackings(e),
       borderRadius: BorderRadius.circular(4),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
@@ -1402,7 +1400,7 @@ class _State extends State<MyDesignLibraryScreen> {
           children: [
             Icon(Icons.inventory_2_outlined, size: 11, color: Colors.grey.shade700),
             const SizedBox(width: 4),
-            Text(bits.isEmpty ? 'Set box' : bits.join(' · '),
+            Text(bits.isEmpty ? 'Set packing' : bits.join(' · '),
                 style: TextStyle(
                     fontSize: 11,
                     color: Colors.grey.shade800,
@@ -1413,159 +1411,178 @@ class _State extends State<MyDesignLibraryScreen> {
     );
   }
 
-  /// Per-brand box editor. One row per brand that carries this print, because the same print
-  /// may ship 4/box under one brand and 6/box under another. Thickness is shown live as they
-  /// type — derived, never entered.
-  Future<void> _editBox(LibraryEntry e) async {
-    // Only the brands that actually carry this print (its boxes); fall back to the product's
-    // own brand so a single-brand print is still editable.
-    final brandIds = e.boxes.keys.toSet();
-    if (brandIds.isEmpty && e.brandId.isNotEmpty) brandIds.add(e.brandId);
-    final brands =
-        _brands.where((b) => brandIds.contains(b.id)).toList();
-    if (brands.isEmpty) {
-      _snack('This design has no brand yet — add one first.', error: true);
-      return;
-    }
+  /// The tile's packings: list them, add one, remove one. **No brand anywhere in here.**
+  ///
+  /// The server holds every packing to the **1 mm rule** — 5 pcs at 10.5 kg and 4 pcs at 8.4 kg are
+  /// both 2.1 kg a piece, so they are two packings of ONE tile. One that works out more than 1 mm
+  /// away is not another packing at all: it is a **different tile**, and `packing_add` refuses it
+  /// in those words. So the stockist can type freely here; he cannot corrupt the identity.
+  Future<void> _editPackings(LibraryEntry e) async {
+    final pcsCtrl = TextEditingController();
+    final kgCtrl = TextEditingController();
+    var busy = false;
+    var changed = false;
 
-    // Prefill from this brand's OTHER boxes at the same size: packing does not vary within a
-    // brand, so the stockist should type it once per (brand, size), not once per design.
-    ({int pieces, double weightKg})? sameSizeDefault(String brandId) {
-      for (final o in _entries) {
-        if (o.id == e.id || o.size != e.size) continue;
-        final b = o.boxes[brandId];
-        if (b != null && b.pieces > 0 && b.weightKg > 0) return b;
-      }
-      return null;
-    }
-
-    final pieceCtrls = <String, TextEditingController>{};
-    final weightCtrls = <String, TextEditingController>{};
-    for (final b in brands) {
-      final cur = e.boxes[b.id];
-      final def = sameSizeDefault(b.id);
-      final p = (cur != null && cur.pieces > 0) ? cur.pieces : (def?.pieces ?? 0);
-      final w =
-          (cur != null && cur.weightKg > 0) ? cur.weightKg : (def?.weightKg ?? 0);
-      pieceCtrls[b.id] =
-          TextEditingController(text: p > 0 ? '$p' : '');
-      weightCtrls[b.id] =
-          TextEditingController(text: w > 0 ? _trimNum(w) : '');
-    }
-
-    final saved = await showModalBottomSheet<bool>(
+    await showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setSheet) {
-        // The 0.5 mm BAND, not a bare number — same rule as the chip, and the same
-        // formula the server will derive on save, so the preview and the stored value
-        // agree.
-        String derived(String brandId) {
-          final p = int.tryParse(pieceCtrls[brandId]!.text.trim()) ?? 0;
-          final w = double.tryParse(weightCtrls[brandId]!.text.trim()) ?? 0;
-          return thicknessRangeLabel(e.size, p, w, e.tileType) ?? '—';
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        // Re-read the tile each rebuild so the list and the thickness stay true after an add/remove.
+        final tile = _entries.firstWhere((x) => x.id == e.id, orElse: () => e);
+        final band = thicknessBandLabel(tile.thicknessMm);
+
+        Future<void> add() async {
+          final p = int.tryParse(pcsCtrl.text.trim()) ?? 0;
+          final w = double.tryParse(kgCtrl.text.trim()) ?? 0;
+          if (p <= 0 || w <= 0) {
+            _snack('Enter the pieces and the weight.', error: true);
+            return;
+          }
+          setLocal(() => busy = true);
+          try {
+            final res = await _data.packingAdd(
+                libraryId: e.id, pieces: p, weightKg: w);
+            changed = true;
+            pcsCtrl.clear();
+            kgCtrl.clear();
+            await _load();
+            if (res['needs_body'] == true) {
+              _snack('Packing saved — but this design has no body yet, so its thickness '
+                  'still cannot be worked out.');
+            }
+          } catch (err) {
+            // The plain-English refusal: "that packing works out at 14.18 mm, but this design is
+            // 9.30 mm — more than 1 mm apart is a DIFFERENT TILE, not another packing."
+            _snack('$err', error: true);
+          } finally {
+            if (ctx.mounted) setLocal(() => busy = false);
+          }
         }
 
-        return Padding(
-          padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: MediaQuery.viewInsetsOf(ctx).bottom + 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Box for "${e.masterName}"  ·  ${e.size.replaceAll(' mm', '')}',
-                  style:
-                      const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              const SizedBox(height: 4),
-              Text(
-                  'Each brand can pack the same tile differently. Thickness is worked out '
-                  'from the weight — you never type it.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-              const Divider(height: 20),
-              for (final b in brands) ...[
-                Text(b.name,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, fontSize: 13, color: _navy)),
-                const SizedBox(height: 6),
+        Future<void> remove(String id) async {
+          setLocal(() => busy = true);
+          try {
+            await _data.packingRemove(id);
+            changed = true;
+            await _load();
+          } catch (err) {
+            _snack('$err', error: true);
+          } finally {
+            if (ctx.mounted) setLocal(() => busy = false);
+          }
+        }
+
+        return AlertDialog(
+          title: const Text('Packing'),
+          content: SizedBox(
+            width: 460,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'How the tiles are packed — pieces and weight. It has no brand: the brand is the '
+                  'cover that goes round it.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 12),
+                if (tile.packings.isEmpty)
+                  Text('No packing yet — the thickness comes from it.',
+                      style: TextStyle(
+                          fontSize: 12.5, color: Colors.orange.shade800))
+                else
+                  for (final p in tile.packings)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(children: [
+                        const Icon(Icons.inventory_2_outlined,
+                            size: 15, color: Colors.grey),
+                        const SizedBox(width: 7),
+                        Text('${p.pieces} pcs  ·  ${_trimNum(p.weightKg)} kg',
+                            style: const TextStyle(
+                                fontSize: 13.5, fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.close,
+                              size: 17, color: Colors.red),
+                          tooltip: 'Remove this packing',
+                          onPressed: busy ? null : () => remove(p.id),
+                        ),
+                      ]),
+                    ),
+                const Divider(height: 20),
                 Row(children: [
                   Expanded(
                     child: TextField(
-                      controller: pieceCtrls[b.id],
+                      controller: pcsCtrl,
+                      enabled: !busy,
                       keyboardType: TextInputType.number,
-                      onChanged: (_) => setSheet(() {}),
                       decoration: const InputDecoration(
-                          labelText: 'Pieces / box',
-                          isDense: true,
-                          border: OutlineInputBorder()),
+                          labelText: 'Pieces',
+                          border: OutlineInputBorder(),
+                          isDense: true),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
-                      controller: weightCtrls[b.id],
+                      controller: kgCtrl,
+                      enabled: !busy,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (_) => setSheet(() {}),
                       decoration: const InputDecoration(
-                          labelText: 'Box weight (kg)',
-                          isDense: true,
-                          border: OutlineInputBorder()),
+                          labelText: 'Weight (kg)',
+                          border: OutlineInputBorder(),
+                          isDense: true),
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  SizedBox(
-                    width: 74,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Thickness',
-                            style: TextStyle(
-                                fontSize: 10, color: Colors.grey.shade600)),
-                        Text(derived(b.id),
-                            style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: _navy)),
-                      ],
-                    ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: busy ? null : add,
+                    child: const Text('Add'),
                   ),
                 ]),
-                const SizedBox(height: 14),
-              ],
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Save'),
+                const SizedBox(height: 12),
+                // The thickness is DERIVED. It is shown, never typed, and there is no picker.
+                Row(children: [
+                  const Icon(Icons.straighten, size: 15, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text(
+                    band == null
+                        ? (tile.tileType.trim().isEmpty
+                            ? 'No thickness — set the body first (the density comes from it).'
+                            : 'No thickness yet — add a packing.')
+                        : 'Thickness $band  (worked out from the packing)',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: band == null
+                            ? Colors.orange.shade800
+                            : Colors.grey.shade700),
+                  ),
+                ]),
+                const SizedBox(height: 6),
+                Text(
+                  'A tile can be packed several ways — 5-a-box for one market, 4-a-box for another. '
+                  'They must all work out to the same thickness; one more than 1 mm away is a '
+                  'different tile, and it will be refused.',
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: busy ? null : () => Navigator.pop(ctx),
+              child: const Text('Done'),
+            ),
+          ],
         );
       }),
     );
 
-    if (saved != true || !mounted) return;
-
-    try {
-      for (final b in brands) {
-        final p = int.tryParse(pieceCtrls[b.id]!.text.trim()) ?? 0;
-        final w = double.tryParse(weightCtrls[b.id]!.text.trim()) ?? 0;
-        if (p <= 0 && w <= 0) continue;
-        await _data.setLibraryBox(e.id, b.id,
-            pieces: p > 0 ? p : null, weightKg: w > 0 ? w : null);
-      }
-    } catch (err) {
-      if (!mounted) return;
-      _snack('$err', error: true);
-      return;
-    }
-    if (!mounted) return;
-    _snack('Box saved.');
-    _load();
+    pcsCtrl.dispose();
+    kgCtrl.dispose();
+    if (changed && mounted) await _load();
   }
 
   /// The thickness to show in brackets beside [e]'s name, or null for a plain name.
@@ -1749,7 +1766,8 @@ class _State extends State<MyDesignLibraryScreen> {
     final forked = _forkedThicknessOf(e);
     final dnaChains = buildDnaChainMap(
         (_dnaTags[e.id] ?? const <DnaTag>[]).where((t) => !t.isPrintDna).toList());
-    final brandIds = <String>{...e.aliases.keys, ...e.boxes.keys};
+    // The brands that have a WORD for this tile. Their packing is not theirs — it is the tile's.
+    final brandIds = <String>{...e.aliases.keys};
     return Container(
       decoration: BoxDecoration(
         // A tinted, ruled band only when the print carries more than one product —
@@ -1922,11 +1940,10 @@ class _State extends State<MyDesignLibraryScreen> {
       // and the density comes from the BODY — so a product with a perfectly good box but
       // no body still has no thickness, and telling him to "set a box" sends him to fix
       // the one thing that isn't broken.
-      final hasBox = e.boxes.values
-          .any((b) => b.pieces > 0 && b.weightKg > 0);
+      final hasPacking = e.packings.isNotEmpty;
       final String why;
-      if (!hasBox) {
-        why = 'no thickness — set a box';
+      if (!hasPacking) {
+        why = 'no thickness — set the packing';
       } else if (e.tileType.trim().isEmpty) {
         why = 'no thickness — set the body';
       } else {
@@ -1957,18 +1974,14 @@ class _State extends State<MyDesignLibraryScreen> {
     );
   }
 
-  /// ONE BOX = one brand's row: the name it STAMPS on the box, and how it PACKS it.
-  /// Two brands carrying the same product pack independently, which is exactly why
-  /// pieces/weight live here and not on the product. Tap to edit the packing.
+  /// ONE BRAND'S COVER: the word that brand prints on it — `1001` on a FAMOUS cover, `601001` on
+  /// an ANUJ cover. **The packing is NOT here.** A factory packs once and covers differently, so
+  /// pieces/weight belong to the TILE, not to a brand. Tap to fix the word.
   Widget _brandBoxRow(LibraryEntry e, String brandId) {
     final name = e.aliases[brandId] ?? '';
-    final box = e.boxes[brandId];
-    final packing = <String>[
-      if ((box?.pieces ?? 0) > 0) '${box!.pieces} pcs',
-      if ((box?.weightKg ?? 0) > 0) '${_trimNum(box!.weightKg)} kg',
-    ].join(' · ');
     return InkWell(
-      onTap: () => _editBox(e),
+      // The word on the cover is the brand's, and only he knows it — it is edited with the design.
+      onTap: () => _openEditor(e),
       borderRadius: BorderRadius.circular(4),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
@@ -1976,19 +1989,12 @@ class _State extends State<MyDesignLibraryScreen> {
           children: [
             _brandNamePill(brandId, name),
             const SizedBox(width: 7),
-            Flexible(
-              child: Text(
-                // No packing = no thickness. Say so where it can be fixed.
-                packing.isEmpty ? 'set pieces + weight' : packing,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: packing.isEmpty
-                        ? Colors.orange.shade800
-                        : Colors.grey.shade700),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
+            if (name.isEmpty)
+              Text('name this brand’s cover',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange.shade800)),
           ],
         ),
       ),

@@ -27,14 +27,18 @@ class LibraryEntry {
   /// + the brand+name+size image lookup).
   final Map<String, String> aliases;
 
-  /// THE BOX, per brand: brand_id -> how that brand packs this print.
+  /// 📦 THE TILE'S PACKINGS — pieces + weight, and **NO BRAND**.
   ///
-  /// An alias IS a box (`stockist_library_brand_names` is keyed `(library_id, brand_id)`),
-  /// so the same row carries the name stamped on it AND its packing. Brands can pack
-  /// differently — the same print may ship 4/box under one brand and 6/box under another —
-  /// which is exactly why pieces/weight are NOT on the product.
-  /// (docs/BOX_AND_DERIVED_THICKNESS_PLAN.md)
-  final Map<String, ({int pieces, double weightKg})> boxes;
+  /// A factory **PACKS ONCE and COVERS DIFFERENTLY**: the packing is the pieces and the weight; the
+  /// BOX is the corrugated cover wrapped round it, and the cover is what carries the brand. So
+  /// pieces/weight were never the brand's — the old model had them on the box, per brand, and that
+  /// was wrong.
+  ///
+  /// A tile may have **several** packings (5-a-box for one market, 4-a-box for another) — but they
+  /// all agree on its thickness: 5 × 10.5 kg and 4 × 8.4 kg are both 2.1 kg a piece. One more than
+  /// 1 mm away is not another packing, it is a **different tile**.
+  /// (docs/PACKING_BOX_HOLD_PLAN.md)
+  final List<({String id, int pieces, double weightKg})> packings;
 
   // ── Identity attributes (describe the DESIGN; set once, here in the Library).
   // The stock row (designs) carries only quality + quantity. (identity split)
@@ -67,7 +71,7 @@ class LibraryEntry {
     this.brandId = '',
     this.brandName = '',
     this.aliases = const {},
-    this.boxes = const {},
+    this.packings = const [],
     this.surfaceType = 'None',
     this.surfaceLabel = '',
     this.stockType = 'Uncertain',
@@ -86,20 +90,23 @@ class LibraryEntry {
       brandName.trim().isEmpty ? masterName : '${brandName.trim()} $masterName';
 
   factory LibraryEntry.fromJson(Map<String, dynamic> j) {
-    // One `aliases` row IS one box: the name stamped on it + how that brand packs it.
+    // An alias row is the brand's NAME for this tile — the word it prints on its cover. Nothing
+    // else: how the tile is PACKED has no brand.
     final aliases = <String, String>{};
-    final boxes = <String, ({int pieces, double weightKg})>{};
     for (final a in (j['aliases'] as List?) ?? const []) {
       final m = Map<String, dynamic>.from(a as Map);
       final bid = (m['brand_id'] ?? '').toString();
       final name = (m['name'] ?? '').toString();
-      if (bid.isEmpty) continue;
-      if (name.isNotEmpty) aliases[bid] = name;
-      boxes[bid] = (
-        pieces: (m['pieces_per_box'] as num?)?.toInt() ?? 0,
-        weightKg: (m['box_weight_kg'] as num?)?.toDouble() ?? 0,
-      );
+      if (bid.isNotEmpty && name.isNotEmpty) aliases[bid] = name;
     }
+    final packings = <({String id, int pieces, double weightKg})>[
+      for (final p in (j['packings'] as List?) ?? const [])
+        (
+          id: ((p as Map)['id'] ?? '').toString(),
+          pieces: (p['pieces'] as num?)?.toInt() ?? 0,
+          weightKg: (p['weight_kg'] as num?)?.toDouble() ?? 0,
+        )
+    ];
     return LibraryEntry(
       id: (j['id'] ?? '').toString(),
       size: (j['size'] ?? '').toString(),
@@ -109,7 +116,7 @@ class LibraryEntry {
       brandId: (j['brand_id'] ?? '').toString(),
       brandName: (j['brand_name'] ?? '').toString(),
       aliases: aliases,
-      boxes: boxes,
+      packings: packings,
       surfaceType: (j['surface_type'] ?? 'None').toString(),
       surfaceLabel: (j['surface_label'] ?? '').toString(),
       stockType: (j['stock_type'] ?? 'Uncertain').toString(),

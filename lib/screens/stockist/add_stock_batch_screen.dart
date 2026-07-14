@@ -526,9 +526,10 @@ class _State extends State<AddStockBatchScreen> {
       for (final e in _entries) {
         var libraryId = e.master.id;
         if (e.hasBoxOverride) {
-          final r = await _svc.libraryForBox(
+          // Which TILE does a packing of this many pieces at this weight belong to? No brand —
+          // the answer is the weight PER PIECE, which is a property of the tile.
+          final r = await _svc.tileForPacking(
             libraryId: e.master.id,
-            brandId: e.brandId,
             pieces: e.boxPieces!,
             weightKg: e.boxWeightKg!,
           );
@@ -1350,9 +1351,11 @@ class _State extends State<AddStockBatchScreen> {
   Future<void> _editSelBox() async {
     final m = _selMaster;
     if (m == null) return;
-    final box = m.boxes[(_isM ? _selBrandId : null) ?? m.brandId];
-    final origPcs = box?.pieces ?? m.piecesPerBox;
-    final origKg = box?.weightKg ?? m.boxWeightKg;
+    // The tile's PACKING — brand-free. A tile may have several; the first is the reference the
+    // 1 mm rule measures drift against.
+    final pk = m.packings.isNotEmpty ? m.packings.first : null;
+    final origPcs = pk?.pieces ?? m.piecesPerBox;
+    final origKg = pk?.weightKg ?? m.boxWeightKg;
 
     final pcsCtrl = TextEditingController(
         text: _selBoxPieces != null ? '$_selBoxPieces' : '');
