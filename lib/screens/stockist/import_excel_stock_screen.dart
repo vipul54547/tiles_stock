@@ -1501,10 +1501,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
               orElse: () => '');
       if (sz.isEmpty) { r.error = "Size '${r.sizeRaw}' is not in your size list"; continue; }
       r.size = sz;
-      if (r.qualityRaw.isEmpty) { r.error = 'Missing quality'; continue; }
       // The PRODUCT door has no quality and no quantity — there is no stock on that
-      // sheet at all. Only the stock door validates them.
+      // sheet at all, so neither is a column and neither can be "missing". Only the
+      // stock door validates them.
       if (!_products) {
+        if (r.qualityRaw.isEmpty) { r.error = 'Missing quality'; continue; }
         final q = _normQuality(r.qualityRaw);
         if (q.isEmpty) { r.error = "Unknown quality '${r.qualityRaw}'"; continue; }
         r.quality = q;
@@ -2411,29 +2412,34 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           ),
         // Quantity mode is chosen HERE, with the stock decision (not up-front) —
         // mirrors the PDF flow. Only affects rows that carry a box quantity.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
-          child: Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 6,
-            runSpacing: 4,
-            children: [
-              Text('Box numbers:',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
-              for (final m in UploadMode.values)
-                ChoiceChip(
-                  label: Text(m.label, style: const TextStyle(fontSize: 11.5)),
-                  selected: _mode == m,
-                  onSelected: _importing ? null : (_) => _pickQtyMode(m),
-                  selectedColor:
-                      m.isDestructive ? Colors.red.shade700 : const Color(0xFF1B4F72),
-                  labelStyle: TextStyle(
-                      color:
-                          _mode == m ? Colors.white : const Color(0xFF1B4F72)),
-                ),
-            ],
+        // The PRODUCT door has no box quantity to add, replace or keep, so the whole
+        // control is meaningless there — and "Fully new" is destructive.
+        if (!_products)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+            child: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                Text('Box numbers:',
+                    style:
+                        TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+                for (final m in UploadMode.values)
+                  ChoiceChip(
+                    label: Text(m.label, style: const TextStyle(fontSize: 11.5)),
+                    selected: _mode == m,
+                    onSelected: _importing ? null : (_) => _pickQtyMode(m),
+                    selectedColor: m.isDestructive
+                        ? Colors.red.shade700
+                        : const Color(0xFF1B4F72),
+                    labelStyle: TextStyle(
+                        color:
+                            _mode == m ? Colors.white : const Color(0xFF1B4F72)),
+                  ),
+              ],
+            ),
           ),
-        ),
         // Wipe scope — only while "Fully new" is selected.
         //  • Per-row multi-brand file: no toggle — the file already covers
         //    several brands, so it wipes exactly those (shown as a note).
@@ -2549,9 +2555,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           color: const Color(0xFF1B4F72).withValues(alpha: 0.06),
           child: Row(
             children: [
-              _chip('$updates', 'Update', const Color(0xFF1B4F72)),
-              const SizedBox(width: 10),
-              _chip('$news', 'New', const Color(0xFF2E7D32)),
+              // On the PRODUCT door "Update / New" would read as stock lines. There are
+              // none: every row is a design, so count designs.
+              if (!_products) ...[
+                _chip('$updates', 'Update', const Color(0xFF1B4F72)),
+                const SizedBox(width: 10),
+                _chip('$news', 'New', const Color(0xFF2E7D32)),
+              ] else
+                _chip('${updates + news}', 'Designs', const Color(0xFF2E7D32)),
               if (maps > 0) ...[
                 const SizedBox(width: 10),
                 _chip('$maps', 'Map only', const Color(0xFF6A1B9A)),
