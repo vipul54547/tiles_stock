@@ -42,11 +42,23 @@ Don't infer a function's signature from its call site.
 ### The layering: PRINT → PRODUCT → (BOX) → HOLDING
 
 - 🖼️ **PRINT** = `print_master` — **the ARTWORK, and it is stored ONCE.** Its key is
-  `(stockist_id, lower(print_name), size)`. It owns the **name**, the **size** and the **one image**,
-  plus the artwork-side DNA (`print_dna`: Look Type ▸ Natural Name · Print Type · Design Joint ·
-  Colour). **A print has no thickness and no weight — you cannot hold it.** It becomes a product only
-  once a surface, a body and a box are declared. A print may exist with **no product**.
+  `(stockist_id, lower(print_name), size)`. It owns the **name**, the **size** and the **one image**.
+  **A print has no thickness and no weight — you cannot hold it.** It becomes a product only once a
+  surface, a body and a box are declared. A print may exist with **no product**.
   🔑 `print_upsert()` is the **only** way one is created; the image is **first-writer-wins**.
+  - 🧬 **THE IMAGE DNA IS THE PRINT'S** (`print_dna`) — **Look Type ▸ Natural Name · Design Joint ·
+    Print Type · Colour**. It describes the **artwork**, so it belongs to the artwork and **not** to
+    a piece cut from it. Tag `1001` once and **all three of its pieces (Matt · Carving · GHR) carry
+    it**; the Matt cannot be *"white marble, bookmatch"* while the Carving is something else. A
+    thickness **fork inherits it for free** — it shares the print.
+  - 🔑 **An attribute declares its own home: `dna_attributes.scope` = `'print' | 'product'`.** Every
+    writer routes on that one column (`dna_set_design`, `_dna_tag_import`), so a caller **cannot**
+    put it in the wrong table. Every reader goes through **`_dna_of_library(library_id)`** = the
+    piece's own tags **∪** its print's. Never read `library_dna` directly — you will miss the print's.
+  - Everything else (**Punch ▸ Punch Type · Application · Use Type · Behaviour Type**) describes the
+    **PIECE** and stays on it (`library_dna`).
+  - 🖼️ On the Library card the image DNA renders **once, in the print header**, with its own editor
+    (`showDnaEditor(scope: 'print')`). The piece rows show only the piece's own.
 - 📁 **THE FOLDER IS THE ONLY HONEST SOURCE OF A PRINT NAME — never a PDF.**
   A supplier PDF prints the name stamped on the **BOX** (`brand_design_name`): the **factory's**
   word, per-brand, free text (`1001`, `CARRARA GOLD`, `DHORO KHIMO`). That is **not** the stockist's

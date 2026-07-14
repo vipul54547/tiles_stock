@@ -14,6 +14,11 @@ class DnaTag {
   final String? parentValueId;
   final int attrSort;
   final int valSort;
+
+  /// `'print'` = this tag describes the ARTWORK and is stored on the print, so every piece of that
+  /// print carries it. `'product'` = it describes this piece alone. (`dna_attributes.scope`)
+  final String scope;
+
   const DnaTag({
     required this.valueId,
     required this.label,
@@ -21,7 +26,11 @@ class DnaTag {
     this.parentValueId,
     this.attrSort = 0,
     this.valSort = 0,
+    this.scope = 'product',
   });
+
+  /// Belongs to the PRINT — render it once, under the print, not under each piece.
+  bool get isPrintDna => scope == 'print';
 
   factory DnaTag.fromJson(Map<String, dynamic> j) => DnaTag(
         valueId: (j['value_id'] ?? j['id'] ?? '').toString(),
@@ -30,6 +39,7 @@ class DnaTag {
         parentValueId: (j['parent_value_id'] as String?),
         attrSort: (j['attr_sort'] as num?)?.toInt() ?? 0,
         valSort: (j['val_sort'] as num?)?.toInt() ?? 0,
+        scope: (j['scope'] ?? 'product').toString(),
       );
 }
 

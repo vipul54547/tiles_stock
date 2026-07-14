@@ -12,21 +12,33 @@ import 'manage_my_dna_values_screen.dart';
 /// (My Words; falls back to the admin's canonical name) while the hidden
 /// canonical value_id is what gets stored, so all stockists' wording unifies
 /// under one search key. (project_design_dna_engine)
+/// [scope] picks WHICH DNA is being edited, and the two are different things:
+///
+/// * `'print'` — the **IMAGE DNA**: Look Type ▸ Natural Name · Design Joint · Print Type · Colour.
+///   It describes the ARTWORK, so it is stored on the print and **every piece of that print carries
+///   it**. Tag `1001` once and its Matt, Carving and GHR all have it.
+/// * `'product'` — what describes **this piece alone**.
+///
+/// Null shows everything (the old behaviour). The server routes the write either way — the scope
+/// here only decides what is worth *offering*, so the two icons don't both present the same list.
 Future<void> showDnaEditor(BuildContext context,
-    {required String libraryId, required String designName}) {
+    {required String libraryId, required String designName, String? scope}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-    builder: (_) => _DnaEditor(libraryId: libraryId, designName: designName),
+    builder: (_) =>
+        _DnaEditor(libraryId: libraryId, designName: designName, scope: scope),
   );
 }
 
 class _DnaEditor extends StatefulWidget {
   final String libraryId;
   final String designName;
-  const _DnaEditor({required this.libraryId, required this.designName});
+  final String? scope;
+  const _DnaEditor(
+      {required this.libraryId, required this.designName, this.scope});
 
   @override
   State<_DnaEditor> createState() => _DnaEditorState();
@@ -61,7 +73,12 @@ class _DnaEditorState extends State<_DnaEditor> {
   }
 
   Future<void> _load() async {
-    final attrs = await _data.dnaCatalog();
+    final all = await _data.dnaCatalog();
+    // Offer only the DNA this editor is for. The image DNA belongs to the artwork and the rest to
+    // the piece — showing both lists under both icons is how you end up tagging the wrong thing.
+    final attrs = widget.scope == null
+        ? all
+        : all.where((a) => a.scope == widget.scope).toList();
     final cur = await _data.dnaForDesign(widget.libraryId);
     final words = await _data.dnaMyWords();
     if (!mounted) return;

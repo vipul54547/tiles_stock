@@ -49,6 +49,18 @@ class DnaAttribute {
   /// Forces mapping off. (project_dna_cascade_mapping)
   final bool freeTextDetail;
 
+  /// 🖼️ WHERE this attribute is STORED — `'print'` or `'product'`.
+  ///
+  /// **IMAGE DNA lives on the PRINT** (`print_dna`): Look Type ▸ Natural Name · Design Joint ·
+  /// Print Type · Colour. They describe the ARTWORK, so they belong to the artwork and not to a
+  /// piece cut from it. Tag the print `1001` once and **all three of its pieces (Matt, Carving,
+  /// GHR) carry it** — the Matt cannot be "white marble, bookmatch" while the Carving is something
+  /// else. A fork (a second thickness of one print) inherits it for free.
+  ///
+  /// Everything else describes the PIECE and stays on it (`library_dna`).
+  /// (20260714d_image_dna_lives_on_the_print · `dna_attributes.scope`)
+  final String scope;
+
   final List<DnaValue> values;
 
   const DnaAttribute({
@@ -61,10 +73,14 @@ class DnaAttribute {
     this.allowMapping = true,
     this.parentAttributeId,
     this.freeTextDetail = false,
+    this.scope = 'product',
     this.values = const [],
   });
 
   bool get isDependent => parentAttributeId != null;
+
+  /// This attribute describes the ARTWORK, not the piece. See [scope].
+  bool get isPrintDna => scope == 'print';
 
   factory DnaAttribute.fromJson(Map<String, dynamic> j) => DnaAttribute(
         id: j['id'] as String,
@@ -76,6 +92,7 @@ class DnaAttribute {
         allowMapping: j['allow_mapping'] != false, // default true
         parentAttributeId: (j['parent_attribute_id'] as String?),
         freeTextDetail: j['free_text_detail'] == true,
+        scope: (j['scope'] ?? 'product').toString(),
         values: ((j['values'] as List?) ?? const [])
             .map((v) => DnaValue.fromJson(Map<String, dynamic>.from(v as Map)))
             .toList(),

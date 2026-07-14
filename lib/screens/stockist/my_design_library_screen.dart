@@ -1479,6 +1479,10 @@ class _State extends State<MyDesignLibraryScreen> {
   Widget _printCard(List<LibraryEntry> products) {
     final print = products.first; // name · size · photo belong to the PRINT
     final many = products.length > 1;
+    // The IMAGE DNA is the print's, so every piece reports the same tags. Read them off the first
+    // piece and show them ONCE, up here with the artwork they describe.
+    final imageDna = buildDnaChainMap(
+        (_dnaTags[print.id] ?? const <DnaTag>[]).where((t) => t.isPrintDna).toList());
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1545,8 +1549,36 @@ class _State extends State<MyDesignLibraryScreen> {
                                   color: _navy)),
                         ),
                       ],
+                      // 🖼️ THE IMAGE DNA — Look Type ▸ Natural Name · Design Joint ·
+                      // Print Type · Colour. It describes the ARTWORK, so it sits with the
+                      // artwork and every piece below carries it. Tag it once, here.
+                      if (imageDna.isNotEmpty) ...[
+                        const SizedBox(height: 7),
+                        for (final grp in imageDna.entries)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: _dnaChainRow(grp.key, grp.value),
+                          ),
+                      ],
                     ],
                   ),
+                ),
+                // Tag the artwork. Opens on the print's first piece — the server routes an
+                // image-DNA value to the PRINT whichever piece it came through.
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.science_outlined,
+                      size: 19, color: Color(0xFFB9770E)),
+                  tooltip: 'Image DNA — describes the artwork (all its designs)',
+                  onPressed: () async {
+                    await showDnaEditor(context,
+                        libraryId: print.id,
+                        designName: print.masterName,
+                        scope: 'print');
+                    await _reloadDnaTags();
+                  },
                 ),
               ],
             ),
@@ -1558,10 +1590,15 @@ class _State extends State<MyDesignLibraryScreen> {
     );
   }
 
-  /// One PRODUCT: surface · body · thickness, its per-brand BOXES, its DNA, its actions.
+  /// One PRODUCT: surface · body · thickness, its per-brand BOXES, its PIECE DNA, its actions.
+  ///
+  /// The IMAGE DNA is not here — it belongs to the print and is rendered once, up in the header.
+  /// Showing it under each piece would print the same three tags three times and imply that a
+  /// piece could carry a different artwork DNA from its own print. It cannot.
   Widget _productRow(LibraryEntry e, {required bool indent}) {
     final forked = _forkedThicknessOf(e);
-    final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
+    final dnaChains = buildDnaChainMap(
+        (_dnaTags[e.id] ?? const <DnaTag>[]).where((t) => !t.isPrintDna).toList());
     final brandIds = <String>{...e.aliases.keys, ...e.boxes.keys};
     return Container(
       decoration: BoxDecoration(
@@ -1597,46 +1634,13 @@ class _State extends State<MyDesignLibraryScreen> {
                   const SizedBox(height: 6),
                   _boxChip(e), // no brand yet → the "Set box" affordance
                 ],
+                // The PIECE's own DNA only — the artwork's is up in the header.
                 if (dnaChains.isNotEmpty) ...[
                   const SizedBox(height: 7),
                   for (final grp in dnaChains.entries)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(top: 3, right: 6),
-                            child: Text('${grp.key}:',
-                                style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.grey.shade600)),
-                          ),
-                          Expanded(
-                            child: Wrap(
-                              spacing: 5,
-                              runSpacing: 4,
-                              children: grp.value
-                                  .map((chain) => Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 7, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFB9770E)
-                                              .withValues(alpha: 0.10),
-                                          borderRadius:
-                                              BorderRadius.circular(6),
-                                        ),
-                                        child: Text(chain,
-                                            style: const TextStyle(
-                                                fontSize: 11,
-                                                color: Color(0xFF8A5A09))),
-                                      ))
-                                  .toList(),
-                            ),
-                          ),
-                        ],
-                      ),
+                      child: _dnaChainRow(grp.key, grp.value),
                     ),
                 ],
               ],
@@ -1651,10 +1655,12 @@ class _State extends State<MyDesignLibraryScreen> {
                 constraints: const BoxConstraints(),
                 icon: const Icon(Icons.science_outlined,
                     size: 19, color: Color(0xFFB9770E)),
-                tooltip: 'Design DNA (for search)',
+                tooltip: 'DNA of THIS design (the artwork\'s is on the print above)',
                 onPressed: () async {
                   await showDnaEditor(context,
-                      libraryId: e.id, designName: e.masterName);
+                      libraryId: e.id,
+                      designName: e.masterName,
+                      scope: 'product');
                   await _reloadDnaTags();
                 },
               ),
@@ -1701,6 +1707,41 @@ class _State extends State<MyDesignLibraryScreen> {
       ),
     );
   }
+
+  /// One DNA row — `Look Type: Marble › Carara`. Shared by the print header (image DNA) and the
+  /// piece rows (piece DNA), so the two can never drift into looking like different things.
+  Widget _dnaChainRow(String attribute, List<String> chains) => Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 3, right: 6),
+            child: Text('$attribute:',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey.shade600)),
+          ),
+          Expanded(
+            child: Wrap(
+              spacing: 5,
+              runSpacing: 4,
+              children: chains
+                  .map((chain) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFB9770E).withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(chain,
+                            style: const TextStyle(
+                                fontSize: 11, color: Color(0xFF8A5A09))),
+                      ))
+                  .toList(),
+            ),
+          ),
+        ],
+      );
 
   /// The BODY (tile_type). Honestly blank when undeclared — never guessed.
   Widget _bodyChip(LibraryEntry e) {
