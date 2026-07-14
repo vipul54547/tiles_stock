@@ -10,6 +10,7 @@ import '../../services/cloudinary_service.dart';
 import '../../widgets/save_bar.dart';
 import '../../widgets/combo_field.dart';
 import '../../utils/tile_types.dart';
+import '../../utils/piece_label.dart';
 
 /// Batch manual stock entry. The stockist builds a list of rows — each a
 /// Design + (M:) Brand + Quality + Quantity — and commits them together. Only
@@ -78,6 +79,13 @@ class _State extends State<AddStockBatchScreen> {
   List<LibraryEntry> _masters = [];
   List<Brand> _brands = [];
   bool get _isM => currentStockistBusinessType == 'M';
+
+  /// libraryId -> `" — Raindrops (11.5–12.0 mm)"`. A piece has no name of its own, so picking one
+  /// by name alone is ambiguous the moment a print carries two: cura's two `6003 (SV)` pieces
+  /// (8.4 mm and 11.8 mm) were TWO IDENTICAL ROWS in this picker — and choosing the wrong one adds
+  /// boxes to the wrong tile. The suffix (not a whole label) so the name in front can still be the
+  /// BOX's word for an M. Rebuilt whenever the library reloads. (utils/piece_label)
+  Map<String, String> _pieceSuffix = const {};
 
   // The entry currently being built.
   LibraryEntry? _selMaster;
@@ -174,6 +182,7 @@ class _State extends State<AddStockBatchScreen> {
     if (!mounted) return;
     setState(() {
       _masters = masters;
+      _pieceSuffix = pieceSuffixes(masters);
       _brands = brands;
       // surface_mode is loaded once at login — no need to re-fetch the profile here.
       _stockistUsesSurface = currentStockistAsksSurface;
@@ -238,9 +247,15 @@ class _State extends State<AddStockBatchScreen> {
       .any((e) => e.surface.isNotEmpty && e.surface.toLowerCase() != 'none');
 
   // A master's name under a brand (alias) when present, else its master name.
+  /// Names ONE PIECE of tile. The name in front is the BOX's word when a brand is chosen (an M
+  /// reads what is stamped on that brand's box), else the PRINT's. Either way the surface — and,
+  /// on a fork, the thickness — is appended, because the name alone does NOT identify a piece:
+  /// a print carrying two pieces gives two rows with the same name. (utils/piece_label)
   String _displayName(LibraryEntry m, String? brandId) {
     final alias = brandId == null ? null : m.aliases[brandId];
-    return (alias != null && alias.trim().isNotEmpty) ? alias.trim() : m.masterName;
+    final name =
+        (alias != null && alias.trim().isNotEmpty) ? alias.trim() : m.masterName;
+    return '$name${_pieceSuffix[m.id] ?? ''}';
   }
 
   List<LibraryEntry> _filteredMasters(String query, String? brandFilter) {
@@ -252,7 +267,13 @@ class _State extends State<AddStockBatchScreen> {
         return false;
       }
       if (q.isEmpty) return true;
-      final names = [m.masterName, ...m.aliases.values];
+      // The print's word, every box's word, AND the surface — a stockist looking for the Matt one
+      // will type "matt", and it is what tells the pieces of a print apart.
+      final names = [
+        m.masterName,
+        ...m.aliases.values,
+        pieceSurfaceWord(m),
+      ];
       return names.any((n) => n.toLowerCase().contains(q));
     }).toList()
       ..sort((a, b) => a.masterName.compareTo(b.masterName));
@@ -333,8 +354,11 @@ class _State extends State<AddStockBatchScreen> {
                                                     color:
                                                         Colors.grey.shade200)),
                                   ),
-                                  title: Text(m.masterName),
-                                  // A print has no surface — size only.
+                                  // The PIECE, not the print: two pieces of one print used to be
+                                  // two identical rows here. (utils/piece_label)
+                                  title: Text(_displayName(m, _isM ? _selBrandId : null)),
+                                  // The size belongs to the print; the surface is already in the
+                                  // title, because it is what makes this piece a piece.
                                   subtitle: Text(m.size.replaceAll(' mm', '')),
                                   onTap: () => Navigator.pop(ctx, m),
                                 );
