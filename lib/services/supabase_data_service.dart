@@ -987,7 +987,11 @@ class SupabaseDataService {
     }
   }
 
-  /// A tile's packings: `[{id, pieces, weight_kg}]`, oldest first (the first one set the thickness).
+  /// A tile's packings, oldest first (the first one set the thickness):
+  /// `[{id, pieces, weight_kg, covers:[{box_id, brand_id}], held}]`
+  ///
+  /// `covers` = which brands wrap THIS packing (each one is a BOX). `held` = how many boxes of it
+  /// are actually in the godown — a cover with stock behind it cannot be taken off.
   Future<List<Map<String, dynamic>>> myPackings(String libraryId) async {
     try {
       final res = await supabase
@@ -999,6 +1003,52 @@ class SupabaseDataService {
     } catch (e, st) {
       debugPrint('myPackings failed: $e\n$st');
       return [];
+    }
+  }
+
+  /// 🎁 Put a brand's corrugated COVER round a packing — that is what makes it a BOX. Returns the
+  /// box id. A brand may cover one packing and not another.
+  Future<String> boxPutCover(
+      {required String packingId, required String brandId}) async {
+    try {
+      final res = await supabase.rpc('box_put_cover',
+          params: {'p_packing_id': packingId, 'p_brand_id': brandId});
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Take a cover off. **Refused while stock is held in it** — those boxes are in the godown
+  /// whatever the app thinks, and the hold points at this box.
+  Future<void> boxRemoveCover(String boxId) async {
+    try {
+      await supabase.rpc('box_remove_cover', params: {'p_box_id': boxId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// The word a brand prints on its cover — `1001` on FAMOUS, `601001` on ANUJ.
+  ///
+  /// Per **(tile, brand)**, not per packing: a brand prints the same word on every cover of a
+  /// design, whatever packing is inside. Blank clears it (a brand may have no word for a design).
+  ///
+  /// ⚠️ This is HIS to give. It must never be defaulted from a filename — that is his own word for
+  /// the ARTWORK, and passing it off as a factory's box label is a forgery.
+  Future<void> coverNameSet({
+    required String libraryId,
+    required String brandId,
+    required String name,
+  }) async {
+    try {
+      await supabase.rpc('cover_name_set', params: {
+        'p_library_id': libraryId,
+        'p_brand_id': brandId,
+        'p_name': name,
+      });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
 

@@ -153,7 +153,7 @@ that is worth a lot: no backfill, no reconciliation, no guessing at old rows.
 | ~~3~~ | ✅ **DONE** `designs.box_id` | `library_id`/`brand_id` are now **trigger-maintained MIRRORS** of it — 40 readers untouched. ⚠️ **NEVER write them by hand.** |
 | ~~4~~ | ✅ **DONE** Punch Type + Series free text; Series defaults to `Regular` | Use Type / Behaviour Type **deactivated** — no picker, no import column |
 | ~~5~~ | ✅ **DONE** folder import asks **body + pieces + weight**, no brand | artwork + tile + its PACKING; the thickness falls out. Writes NO box. |
-| **6** | Library: add a packing · put a brand's cover on a packing (the stamped name) | replaces "Set box packing" |
+| ~~6~~ | ✅ **DONE** Library ▸ Packing & covers | packings + which brands cover each + **the word each brand prints**. A cover with stock in it cannot be removed. |
 | **7** | Add Stock picks a **BOX** (tile + packing + cover), not a tile + brand | the picker must show the packing — 10 boxes of 5 ≠ 10 boxes of 4 |
 
 ### Readers that must move in step 3 (from `pg_proc`)

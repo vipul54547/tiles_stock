@@ -1010,7 +1010,7 @@ class _State extends State<MyDesignLibraryScreen> {
           // brand), so this is where it is declared, and the THICKNESS derives from it.
           IconButton(
             icon: const Icon(Icons.inventory_2_outlined),
-            tooltip: 'Set the packing for a whole size (pieces + weight)',
+            tooltip: 'Set the packing for a whole size (pieces + weight, no brand)',
             onPressed: _openSetBoxForSize,
           ),
           // M only: surface likely-duplicate masters (pre-#7 leftovers) for the
@@ -1400,7 +1400,7 @@ class _State extends State<MyDesignLibraryScreen> {
           children: [
             Icon(Icons.inventory_2_outlined, size: 11, color: Colors.grey.shade700),
             const SizedBox(width: 4),
-            Text(bits.isEmpty ? 'Set packing' : bits.join(' · '),
+            Text(bits.isEmpty ? 'Set the packing' : bits.join(' · '),
                 style: TextStyle(
                     fontSize: 11,
                     color: Colors.grey.shade800,
@@ -1411,60 +1411,54 @@ class _State extends State<MyDesignLibraryScreen> {
     );
   }
 
-  /// The tile's packings: list them, add one, remove one. **No brand anywhere in here.**
+  /// 📦🎁 THE PACKING and THE COVERS — the middle of the chain, in one place.
   ///
-  /// The server holds every packing to the **1 mm rule** — 5 pcs at 10.5 kg and 4 pcs at 8.4 kg are
-  /// both 2.1 kg a piece, so they are two packings of ONE tile. One that works out more than 1 mm
-  /// away is not another packing at all: it is a **different tile**, and `packing_add` refuses it
-  /// in those words. So the stockist can type freely here; he cannot corrupt the identity.
+  ///     TILE  →  PACKING (pieces + weight, NO BRAND)  →  BOX (a packing in a brand's cover)
+  ///
+  /// Two different facts, deliberately kept apart:
+  ///
+  ///   • **The cover** — "does FAMOUS wrap this packing?" — is per **(packing, brand)**. FAMOUS may
+  ///     cover the 5-piece packing and not the 4-piece one. Each cover IS a box.
+  ///   • **The word on it** — "FAMOUS prints `1001`" — is per **(tile, brand)**. A brand prints the
+  ///     same word on every cover of a design, whatever packing is inside. Storing it per packing
+  ///     would repeat it and let it drift.
+  ///
+  /// The server holds every packing to the **1 mm rule**, so he can type freely here and cannot
+  /// corrupt the identity: a packing that would belong to a different tile is refused by name.
   Future<void> _editPackings(LibraryEntry e) async {
     final pcsCtrl = TextEditingController();
     final kgCtrl = TextEditingController();
+    final nameCtrls = <String, TextEditingController>{
+      for (final b in _brands)
+        b.id: TextEditingController(text: e.aliases[b.id] ?? '')
+    };
+
+    var packings = await _data.myPackings(e.id);
     var busy = false;
     var changed = false;
+    if (!mounted) return;
 
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
-        // Re-read the tile each rebuild so the list and the thickness stay true after an add/remove.
         final tile = _entries.firstWhere((x) => x.id == e.id, orElse: () => e);
         final band = thicknessBandLabel(tile.thicknessMm);
 
-        Future<void> add() async {
-          final p = int.tryParse(pcsCtrl.text.trim()) ?? 0;
-          final w = double.tryParse(kgCtrl.text.trim()) ?? 0;
-          if (p <= 0 || w <= 0) {
-            _snack('Enter the pieces and the weight.', error: true);
-            return;
-          }
-          setLocal(() => busy = true);
-          try {
-            final res = await _data.packingAdd(
-                libraryId: e.id, pieces: p, weightKg: w);
-            changed = true;
-            pcsCtrl.clear();
-            kgCtrl.clear();
-            await _load();
-            if (res['needs_body'] == true) {
-              _snack('Packing saved — but this design has no body yet, so its thickness '
-                  'still cannot be worked out.');
-            }
-          } catch (err) {
-            // The plain-English refusal: "that packing works out at 14.18 mm, but this design is
-            // 9.30 mm — more than 1 mm apart is a DIFFERENT TILE, not another packing."
-            _snack('$err', error: true);
-          } finally {
-            if (ctx.mounted) setLocal(() => busy = false);
-          }
+        Future<void> reload() async {
+          packings = await _data.myPackings(e.id);
+          if (ctx.mounted) setLocal(() {});
         }
 
-        Future<void> remove(String id) async {
+        Future<void> run(Future<void> Function() action) async {
           setLocal(() => busy = true);
           try {
-            await _data.packingRemove(id);
+            await action();
             changed = true;
             await _load();
+            await reload();
           } catch (err) {
+            // The plain-English refusals land here: "that packing works out at 14.18 mm, but this
+            // design is 9.30 mm…" / "you are holding 10 boxes in this cover."
             _snack('$err', error: true);
           } finally {
             if (ctx.mounted) setLocal(() => busy = false);
@@ -1472,107 +1466,245 @@ class _State extends State<MyDesignLibraryScreen> {
         }
 
         return AlertDialog(
-          title: const Text('Packing'),
+          title: const Text('Packing & covers'),
           content: SizedBox(
-            width: 460,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'How the tiles are packed — pieces and weight. It has no brand: the brand is the '
-                  'cover that goes round it.',
-                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
-                ),
-                const SizedBox(height: 12),
-                if (tile.packings.isEmpty)
-                  Text('No packing yet — the thickness comes from it.',
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'The PACKING is how the tiles are packed — pieces and weight. It has no brand.\n'
+                    'The BRAND is the COVER you wrap round it.',
+                    style: TextStyle(
+                        fontSize: 12.5, color: Colors.grey.shade700, height: 1.4),
+                  ),
+                  const SizedBox(height: 14),
+
+                  if (packings.isEmpty)
+                    Text('No packing yet — the thickness comes from it.',
+                        style: TextStyle(
+                            fontSize: 12.5, color: Colors.orange.shade800)),
+
+                  for (final p in packings)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7F9FB),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            const Icon(Icons.inventory_2_outlined,
+                                size: 16, color: Colors.grey),
+                            const SizedBox(width: 7),
+                            Text(
+                                '${p['pieces']} pcs  ·  '
+                                '${_trimNum((p['weight_kg'] as num).toDouble())} kg',
+                                style: const TextStyle(
+                                    fontSize: 13.5, fontWeight: FontWeight.w700)),
+                            const Spacer(),
+                            if (((p['held'] as num?)?.toInt() ?? 0) > 0)
+                              Text('${p['held']} boxes held',
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Colors.grey.shade600)),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.close,
+                                  size: 17, color: Colors.red),
+                              tooltip: 'Remove this packing',
+                              onPressed: busy
+                                  ? null
+                                  : () => run(() => _data
+                                      .packingRemove(p['id'].toString())),
+                            ),
+                          ]),
+                          const SizedBox(height: 6),
+                          // 🎁 THE COVERS on this packing. Each ticked brand is a BOX.
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
+                              for (final b in _brands)
+                                Builder(builder: (_) {
+                                  final covers = [
+                                    for (final c
+                                        in (p['covers'] as List?) ?? const [])
+                                      Map<String, dynamic>.from(c as Map)
+                                  ];
+                                  final on = covers.any(
+                                      (c) => c['brand_id'] == b.id);
+                                  final boxId = on
+                                      ? covers
+                                          .firstWhere(
+                                              (c) => c['brand_id'] == b.id)['box_id']
+                                          .toString()
+                                      : null;
+                                  return FilterChip(
+                                    label: Text(b.name,
+                                        style: const TextStyle(fontSize: 11.5)),
+                                    selected: on,
+                                    showCheckmark: true,
+                                    visualDensity: VisualDensity.compact,
+                                    onSelected: busy
+                                        ? null
+                                        : (v) => run(() => v
+                                            ? _data.boxPutCover(
+                                                packingId: p['id'].toString(),
+                                                brandId: b.id)
+                                            : _data.boxRemoveCover(boxId!)),
+                                  );
+                                }),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  // Add a packing
+                  const SizedBox(height: 2),
+                  Row(children: [
+                    Expanded(
+                      child: TextField(
+                        controller: pcsCtrl,
+                        enabled: !busy,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: 'Pieces',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: kgCtrl,
+                        enabled: !busy,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                            labelText: 'Weight (kg)',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: busy
+                          ? null
+                          : () {
+                              final p = int.tryParse(pcsCtrl.text.trim()) ?? 0;
+                              final w =
+                                  double.tryParse(kgCtrl.text.trim()) ?? 0;
+                              if (p <= 0 || w <= 0) {
+                                _snack('Enter the pieces and the weight.',
+                                    error: true);
+                                return;
+                              }
+                              run(() async {
+                                final res = await _data.packingAdd(
+                                    libraryId: e.id, pieces: p, weightKg: w);
+                                pcsCtrl.clear();
+                                kgCtrl.clear();
+                                if (res['needs_body'] == true) {
+                                  _snack(
+                                      'Packing saved — but this design has no body yet, '
+                                      'so its thickness still cannot be worked out.');
+                                }
+                              });
+                            },
+                      child: const Text('Add packing'),
+                    ),
+                  ]),
+
+                  const SizedBox(height: 10),
+                  // The thickness is DERIVED. Shown, never typed — there is no picker.
+                  Row(children: [
+                    const Icon(Icons.straighten, size: 15, color: Colors.grey),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        band == null
+                            ? (tile.tileType.trim().isEmpty
+                                ? 'No thickness — set the body first (the density comes from it).'
+                                : 'No thickness yet — add a packing.')
+                            : 'Thickness $band  (worked out from the packing)',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: band == null
+                                ? Colors.orange.shade800
+                                : Colors.grey.shade700),
+                      ),
+                    ),
+                  ]),
+
+                  const Divider(height: 24),
+                  // 🏷️ THE WORD each brand prints on its cover. Per TILE, not per packing.
+                  Text('What each brand prints on its cover',
                       style: TextStyle(
-                          fontSize: 12.5, color: Colors.orange.shade800))
-                else
-                  for (final p in tile.packings)
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.grey.shade800)),
+                  const SizedBox(height: 2),
+                  Text(
+                    'The factory’s word — 1001 on a FAMOUS cover, 601001 on an ANUJ one. It is '
+                    'yours to give; nothing guesses it.',
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final b in _brands)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: 6),
                       child: Row(children: [
-                        const Icon(Icons.inventory_2_outlined,
-                            size: 15, color: Colors.grey),
-                        const SizedBox(width: 7),
-                        Text('${p.pieces} pcs  ·  ${_trimNum(p.weightKg)} kg',
-                            style: const TextStyle(
-                                fontSize: 13.5, fontWeight: FontWeight.w600)),
-                        const Spacer(),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.close,
-                              size: 17, color: Colors.red),
-                          tooltip: 'Remove this packing',
-                          onPressed: busy ? null : () => remove(p.id),
+                        SizedBox(width: 96, child: _brandNamePill(b.id, '')),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: nameCtrls[b.id],
+                            enabled: !busy,
+                            decoration: InputDecoration(
+                              hintText: 'no word for this design',
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                              hintStyle: TextStyle(
+                                  fontSize: 12.5, color: Colors.grey.shade500),
+                            ),
+                            onSubmitted: (v) => run(() => _data.coverNameSet(
+                                libraryId: e.id, brandId: b.id, name: v)),
+                          ),
                         ),
                       ]),
                     ),
-                const Divider(height: 20),
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: pcsCtrl,
-                      enabled: !busy,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                          labelText: 'Pieces',
-                          border: OutlineInputBorder(),
-                          isDense: true),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: kgCtrl,
-                      enabled: !busy,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(
-                          labelText: 'Weight (kg)',
-                          border: OutlineInputBorder(),
-                          isDense: true),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: busy ? null : add,
-                    child: const Text('Add'),
-                  ),
-                ]),
-                const SizedBox(height: 12),
-                // The thickness is DERIVED. It is shown, never typed, and there is no picker.
-                Row(children: [
-                  const Icon(Icons.straighten, size: 15, color: Colors.grey),
-                  const SizedBox(width: 6),
-                  Text(
-                    band == null
-                        ? (tile.tileType.trim().isEmpty
-                            ? 'No thickness — set the body first (the density comes from it).'
-                            : 'No thickness yet — add a packing.')
-                        : 'Thickness $band  (worked out from the packing)',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: band == null
-                            ? Colors.orange.shade800
-                            : Colors.grey.shade700),
-                  ),
-                ]),
-                const SizedBox(height: 6),
-                Text(
-                  'A tile can be packed several ways — 5-a-box for one market, 4-a-box for another. '
-                  'They must all work out to the same thickness; one more than 1 mm away is a '
-                  'different tile, and it will be refused.',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           actions: [
             TextButton(
-              onPressed: busy ? null : () => Navigator.pop(ctx),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      // Save any word he typed but did not press Enter on.
+                      for (final b in _brands) {
+                        final typed = nameCtrls[b.id]!.text.trim();
+                        if (typed != (e.aliases[b.id] ?? '')) {
+                          try {
+                            await _data.coverNameSet(
+                                libraryId: e.id, brandId: b.id, name: typed);
+                            changed = true;
+                          } catch (err) {
+                            if (ctx.mounted) _snack('$err', error: true);
+                          }
+                        }
+                      }
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
               child: const Text('Done'),
             ),
           ],
@@ -1582,6 +1714,9 @@ class _State extends State<MyDesignLibraryScreen> {
 
     pcsCtrl.dispose();
     kgCtrl.dispose();
+    for (final c in nameCtrls.values) {
+      c.dispose();
+    }
     if (changed && mounted) await _load();
   }
 
@@ -1980,8 +2115,9 @@ class _State extends State<MyDesignLibraryScreen> {
   Widget _brandBoxRow(LibraryEntry e, String brandId) {
     final name = e.aliases[brandId] ?? '';
     return InkWell(
-      // The word on the cover is the brand's, and only he knows it — it is edited with the design.
-      onTap: () => _openEditor(e),
+      // The word on the cover is the brand's, and only he knows it. It lives with the packing and
+      // the covers, because that is where the whole box is assembled.
+      onTap: () => _editPackings(e),
       borderRadius: BorderRadius.circular(4),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
