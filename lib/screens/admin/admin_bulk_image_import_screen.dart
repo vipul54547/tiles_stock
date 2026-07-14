@@ -10,13 +10,17 @@ import '../../models/stockist.dart';
 import '../../utils/finishes.dart';
 import '../../utils/tile_types.dart';
 
-// ADMIN-ONLY bulk image-folder import (concierge onboarding). Reads a brand's
-// image folder from disk → builds a Design Library:
-//   folder layout = <root> / <SIZE> / [<SURFACE>] / <design>.jpg
-//   size folder   → admin size (inch→mm mapped + confirmed)
-//   surface folder→ admin surface (confirmed); none → 'Special'
-//   filename      → THE PRINT NAME; the image is EXIF-baked + downscaled, uploaded,
-//                   then the library upsert creates/matches the print + product + box.
+// Image-folder import → builds a Design Library from a folder on disk.
+//
+// 🔑 ONE SIZE AT A TIME. The folder he picks IS the size:
+//
+//     300x450 / MATTE / 1001.jpg      surface folder  → admin surface (confirmed)
+//     300x450 / 1001.jpg              no surface folder → 'Special'
+//                                     FILENAME → THE PRINT NAME
+//
+//    There is no "parent of all sizes" mode — he asked for it gone. It was also a trap: picking
+//    `300x450` (the obvious thing) put every image one level above where the parser looked, and
+//    the scan silently reported "0 images".
 //
 // 🔑 THE FOLDER IS THE ONLY HONEST SOURCE OF A PRINT NAME.
 //    A supplier PDF prints the name stamped on the BOX — `brand_design_name`. That is the
@@ -27,9 +31,15 @@ import '../../utils/tile_types.dart';
 //    In a folder, THE STOCKIST NAMED THE FILES HIMSELF. The filename IS his word.
 //    → this replaced the PDF importer, which is now hidden from the platform.
 //
+// 🚫 AND IT IS BRAND-FREE (stockist path). A folder knows the PRINT (the artwork — brand-free by
+//    definition) and the PRODUCT (the piece — brand-free by rule: identity is brand-free, the brand
+//    belongs to the BOX). It writes NO box: it cannot know what a brand stamps on its box or how it
+//    packs it. That is declared afterwards, per brand — Library ▸ Set box packing — and the
+//    THICKNESS derives from it. (20260714e_folder_import_is_brand_free)
+//
 // Runs in BOTH roles off one screen:
-//   admin       — picks a stockist, then his brand   → admin_library_upsert
-//   forStockist — it is his own library, he picks the brand → library_image_upsert
+//   admin       — picks a stockist, then his brand   → admin_library_upsert (unchanged)
+//   forStockist — his own library, NO brand          → library_image_upsert
 //
 // DESKTOP-ONLY: it reads a folder tree with dart:io, so it is offered on Windows only. The
 // stockist's images live on his PC anyway, and Android's scoped storage makes a picked directory
@@ -55,6 +65,14 @@ const _kCommitConcurrency = 4;
 
 // Common inch tile-size folder names → admin mm size. Best-effort pre-fill; the
 // admin confirms/overrides each in the Sizes step.
+/// Does this folder name read as a SIZE (`600x1200`, `24x48`, `800 X 800`)? Used only to catch the
+/// mistake of picking the parent folder — a "surface" folder called `600x1200` is not a surface.
+bool _looksLikeSize(String name) {
+  final n = name.trim().toUpperCase().replaceAll(' ', '');
+  if (_inchToMm.containsKey(n)) return true;
+  return RegExp(r'^\d{2,4}X\d{2,4}(MM)?$').hasMatch(n);
+}
+
 const _inchToMm = {
   '12X12': '300x300', '16X16': '400x400', '24X24': '600x600',
   '12X18': '300x450', '18X12': '300x450', '12X24': '300x600', '24X12': '300x600',
@@ -241,7 +259,7 @@ class _State extends State<AdminBulkImageImportScreen> {
   // ── Folder pick + parse ─────────────────────────────────────────────────────
   Future<void> _pickFolder() async {
     final dir = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Pick the brand image folder');
+        dialogTitle: 'Pick ONE size folder (e.g. 300x450)');
     if (dir == null) return;
     setState(() { _error = ''; });
     try {
@@ -267,21 +285,43 @@ class _State extends State<AdminBulkImageImportScreen> {
       _sizePacks.clear();
       _surfaceMap.clear();
       final sep = Platform.pathSeparator;
+
+      // 🔑 ONE SIZE AT A TIME. The folder he picks IS the size — its own name is the size folder.
+      //
+      //     300x450 / MATTE / 1001.jpg     ← surface folders inside
+      //     300x450 / 1001.jpg             ← no surface folder → Special
+      //
+      // There is no "parent of all sizes" mode. It was the source of the bug he hit: he picked
+      // 300x450 (the obvious thing to do), every image sat one level up from where the parser
+      // looked, and the scan silently reported 0 images.
+      final rootName =
+          dir.split(sep).where((x) => x.trim().isNotEmpty).last;
+
       for (final f in files) {
-        // Path segments relative to the picked root: [SIZE]/[SURFACE?]/file
         var rel = f.path.substring(dir.length);
         if (rel.startsWith(sep)) rel = rel.substring(1);
         final parts = rel.split(sep);
-        if (parts.length < 2) continue; // need at least SIZE/file
-        final sizeFolder = parts[0];
-        final surfaceFolder = parts.length >= 3 ? parts[parts.length - 2] : '';
-        final filename = parts.last;
         _designs.add(_ImgDesign(
           path: f.path,
-          sizeFolder: sizeFolder,
-          surfaceFolder: surfaceFolder,
-          name: _designName(filename),
+          sizeFolder: rootName,
+          // Whatever folder the image sits in, if any. Nothing → Special.
+          surfaceFolder: parts.length >= 2 ? parts[parts.length - 2] : '',
+          name: _designName(parts.last),
         ));
+      }
+
+      // A "surface" folder whose name is really a SIZE means he picked the parent by mistake.
+      // Say so, rather than importing every design under a surface called "600x1200".
+      final sizeShaped = _designs
+          .map((d) => d.surfaceFolder)
+          .where((s) => s.isNotEmpty && _looksLikeSize(s))
+          .toSet();
+      if (sizeShaped.isNotEmpty) {
+        _designs.clear();
+        setState(() => _error =
+            'That folder holds SIZE folders (${sizeShaped.take(3).join(', ')}), not images.\n'
+            'Pick ONE size folder at a time — e.g. "${sizeShaped.first}".');
+        return;
       }
       // Distinct size folders → packing rows (with inch→mm guess).
       for (final d in _designs) {
@@ -625,7 +665,8 @@ class _State extends State<AdminBulkImageImportScreen> {
           ],
           const SizedBox(height: 20),
           const Text(
-              'Folder layout expected:   SIZE / [SURFACE] / design.jpg',
+              'Pick ONE SIZE folder at a time. Inside it:   [SURFACE] / design.jpg\n'
+              'No surface folder → the surface is Special.   The FILENAME is the design name.',
               style: TextStyle(fontSize: 12, color: Colors.black54)),
           if (_forStockist) ...[
             const SizedBox(height: 8),
@@ -655,7 +696,7 @@ class _State extends State<AdminBulkImageImportScreen> {
                 ? _pickFolder
                 : null,
             icon: const Icon(Icons.folder_open),
-            label: const Text('Pick image folder & scan'),
+            label: const Text('Pick a size folder & scan'),
           ),
         ],
       );
@@ -663,7 +704,9 @@ class _State extends State<AdminBulkImageImportScreen> {
   Widget _buildMap() => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('2. Map sizes & packing   (${_designs.length} images)',
+          Text(_forStockist
+              ? '2. Check the size & body   (${_designs.length} images)'
+              : '2. Map sizes & packing   (${_designs.length} images)',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 4),
           const Text('Each folder size → an admin size, plus its packing.',
@@ -695,7 +738,7 @@ class _State extends State<AdminBulkImageImportScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Folder size: "$folder"',
+              Text('Size folder: "$folder"',
                   style: const TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
               Row(children: [
