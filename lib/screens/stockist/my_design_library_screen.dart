@@ -1727,7 +1727,23 @@ class _State extends State<MyDesignLibraryScreen> {
   Widget _thicknessChip(LibraryEntry e, String? forked) {
     final band = thicknessBandLabel(e.thicknessMm);
     if (band == null) {
-      return Text('no thickness — set a box',
+      // Say what is ACTUALLY missing. thickness = weight / (pieces × area × DENSITY),
+      // and the density comes from the BODY — so a product with a perfectly good box but
+      // no body still has no thickness, and telling him to "set a box" sends him to fix
+      // the one thing that isn't broken.
+      final hasBox = e.boxes.values
+          .any((b) => b.pieces > 0 && b.weightKg > 0);
+      final String why;
+      if (!hasBox) {
+        why = 'no thickness — set a box';
+      } else if (e.tileType.trim().isEmpty) {
+        why = 'no thickness — set the body';
+      } else {
+        // Box and body are both there, so the weight itself is out of range (the band is
+        // NULL outside 4–20 mm). That is a bad box weight, not a thin tile.
+        why = 'no thickness — check the box weight';
+      }
+      return Text(why,
           style: TextStyle(fontSize: 11, color: Colors.orange.shade800));
     }
     return Container(
