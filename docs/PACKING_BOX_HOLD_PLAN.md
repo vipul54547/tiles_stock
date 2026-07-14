@@ -56,9 +56,20 @@ PACKING, and the packing is brand-free. The brand enters only at the cover.
 | **Application** | value list, as today |
 | **Series** | **FREE TEXT**, set by the M, **defaults to `Regular`** |
 
-⚠️ **OPEN — he has not answered.** **Use Type** (Floor/Wall/Outdoor…) and **Behaviour Type**
-(Antiskid/Scratch-proof/Slippery) are **not on his list**. Are they deleted, or do they move up to
-the ARTWORK? **Ask before building step 4.** Do not guess.
+### 🚫 Use Type and Behaviour Type are **DERIVED — never entered, never stored**
+
+**ANSWERED 14 Jul.** His words: *"use type and behaviour type we will not come from anywhere, we
+will define condition and we will show this both field by condition — so do not worry about this
+both."*
+
+- **Nobody types them.** They are **not** tile fields, **not** DNA to be tagged, and **not** import
+  columns. There is **no picker** for them anywhere.
+- They are **worked out by CONDITION** from what the tile already knows — surface · body ·
+  thickness · size — and **shown by condition**.
+- **The rules are not defined yet.** Until he gives them, **build nothing.** Do not invent a
+  mapping (a guessed rule in a displayed field is the same disease as a guessed surface).
+- 🗑️ Their `dna_attributes` rows are therefore dead weight for tagging. **Leave the rows alone**
+  (deactivating them is a separate decision) — just never offer them in an editor or an importer.
 
 ---
 
@@ -140,7 +151,7 @@ that is worth a lot: no backfill, no reconciliation, no guessing at old rows.
 | **1** | `packings` table + `packing_add(library_id, pieces, weight)` | derives thickness; **REFUSES a packing >1 mm off the tile's** |
 | **2** | Reshape `boxes`: drop pieces/weight, point at `packing_id` | `_box_pieces` / `_box_weight` re-source from the packing |
 | **3** | `designs.box_id`; rewrite every stock/dispatch/catalog reader | **the big one** — `my_stock`, `public_catalog`, F_Stock, dispatch, `stock_add_holding`, `add_inventory_batch` |
-| **4** | DNA: Punch Type → free text · Series → free text, default `Regular` | ⚠️ **blocked on the Use Type / Behaviour Type answer** |
+| **4** | DNA: Punch Type → free text · Series → free text, default `Regular` | Use Type / Behaviour Type: **build nothing** — they are derived |
 | **5** | Folder import asks **body + pieces + weight** (no brand) → tile + first packing | this is what he asked for at the tile step |
 | **6** | Library: add a packing · put a brand's cover on a packing (the stamped name) | replaces "Set box packing" |
 | **7** | Add Stock picks a **BOX** (tile + packing + cover), not a tile + brand | the picker must show the packing — 10 boxes of 5 ≠ 10 boxes of 4 |
@@ -164,6 +175,8 @@ has already emptied every Library once (`1b47acd`).
   for the artwork.
 - 🚫 **Nothing guesses a surface, a body, or a name.** Blank stays blank and says so.
 - 🚫 **No stock path may create a tile** — the law from `20260714b` / `20260714c` still holds.
+- 🚫 **No field, picker or import column for Use Type / Behaviour Type.** They are DERIVED by
+  condition. Until he gives the rules, they do not exist in the UI at all.
 
 Related: `CLAUDE.md` (vocabulary — **must be rewritten when step 3 lands**) ·
 `docs/PRODUCT_IDENTITY_MIGRATION_PLAN.md` · `docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md`
