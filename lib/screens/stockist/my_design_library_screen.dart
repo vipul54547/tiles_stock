@@ -923,13 +923,15 @@ class _State extends State<MyDesignLibraryScreen> {
                                 child: Text('No designs match.',
                                     style: TextStyle(color: Colors.grey)));
                           }
+                          // One card per PRINT, not per product. (_byPrint)
+                          final prints = _byPrint(list);
                           return ListView.separated(
                             padding: EdgeInsets.fromLTRB(12, 4, 12,
                                 90 + MediaQuery.viewPaddingOf(context).bottom),
-                            itemCount: list.length,
+                            itemCount: prints.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),
-                            itemBuilder: (_, i) => _tile(list[i]),
+                            itemBuilder: (_, i) => _printCard(prints[i]),
                           );
                         }),
                 ),
@@ -940,6 +942,7 @@ class _State extends State<MyDesignLibraryScreen> {
 
   Widget _searchBar() {
     final shown = _filtered.length;
+    final shownPrints = _byPrint(_filtered).length;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
       child: Column(
@@ -1011,7 +1014,12 @@ class _State extends State<MyDesignLibraryScreen> {
             padding: const EdgeInsets.only(top: 4),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('$shown of ${_entries.length} designs',
+              // Designs (products) is the honest count — but the cards are PRINTS, so
+              // say how many prints they sit in whenever the two differ.
+              child: Text(
+                  shownPrints == shown
+                      ? '$shown of ${_entries.length} designs'
+                      : '$shown of ${_entries.length} designs · $shownPrints prints',
                   style: const TextStyle(fontSize: 11.5, color: Colors.grey)),
             ),
           ),
@@ -1437,26 +1445,40 @@ class _State extends State<MyDesignLibraryScreen> {
     return thicknessBandLabel(e.thicknessMm);
   }
 
-  Widget _tile(LibraryEntry e) {
-    // When the library is filtered to a SINGLE brand, the stockist is viewing it
-    // "as that brand", so the title shows THAT brand's name for the tile (e.g.
-    // ANUJ's "601001") instead of the master name. Only designs carrying that
-    // brand's alias are shown when filtered, so the alias is always present here.
-    final singleBrand = _fBrands.length == 1 ? _fBrands.first : null;
-    final brandAlias = singleBrand == null ? null : e.aliases[singleBrand];
-    final showBrandName = brandAlias != null && brandAlias.isNotEmpty;
-    final titleName = showBrandName ? brandAlias : e.masterName;
-    // 🔑 A print may be carried in two thicknesses — but ONLY when they differ by more than 1 mm
-    // (box weight drifts in the trade: a 600x1200 2-pc box went 28 kg → 26 kg, which is just
-    // 0.62 mm, and that is the SAME tile). When that genuinely happens, the product that was
-    // forked off the original wears its thickness in brackets so the two can be told apart.
-    // The original keeps its plain name.
-    final forkedThickness = _forkedThicknessOf(e);
-    final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
-    // Size only — the SURFACE gets its own tappable chip below (it is part of the
-    // product's identity, and the Library is the only place to change it once Add Stock
-    // stopped asking).
-    final sizeLine = e.size.replaceAll(' mm', '');
+  // ── THE LIBRARY CARD = ONE PRINT ────────────────────────────────────────────
+  // The card mirrors the model, top to bottom:
+  //
+  //   PRINT    the ARTWORK — one name, one size, one photo, stored ONCE.
+  //     └ PRODUCT   one PIECE of tile: surface · body · thickness. A print can carry
+  //                 several (a Glossy and a Matt; an 8 mm and a 12 mm).
+  //         └ BOX   per brand: the name that brand STAMPS on the box, and how that
+  //                 brand PACKS it (pieces, weight). Two brands pack independently.
+  //
+  // Before this, the Library showed one flat card per PRODUCT, so two surfaces of one
+  // artwork looked like two unrelated designs sharing a photo by coincidence.
+
+  /// Group the (already filtered) products into their prints, in list order.
+  List<List<LibraryEntry>> _byPrint(List<LibraryEntry> list) {
+    final groups = <String, List<LibraryEntry>>{};
+    for (final e in list) {
+      // A product always points at a print. The name|size fallback only guards against
+      // a blank print_id — a row must never vanish from the Library.
+      final key =
+          e.printId.isNotEmpty ? e.printId : '${e.masterName}|${e.size}';
+      (groups[key] ??= <LibraryEntry>[]).add(e);
+    }
+    // Oldest first inside a print: the ORIGINAL leads and the product later forked off
+    // it by a genuinely different thickness follows — which is what wears the brackets.
+    for (final g in groups.values) {
+      g.sort((a, b) => (a.createdAt ?? DateTime(0))
+          .compareTo(b.createdAt ?? DateTime(0)));
+    }
+    return groups.values.toList();
+  }
+
+  Widget _printCard(List<LibraryEntry> products) {
+    final print = products.first; // name · size · photo belong to the PRINT
+    final many = products.length > 1;
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1464,204 +1486,301 @@ class _State extends State<MyDesignLibraryScreen> {
         border: Border.all(color: Colors.grey.shade200),
       ),
       clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Thumbnail + identity (name · size/surface · brand pills).
-                  Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── THE PRINT ──────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    width: 60,
+                    height: 60,
+                    child: print.imageUrl.isEmpty
+                        ? Container(
+                            color: Colors.grey.shade100,
+                            child: Icon(Icons.image_outlined,
+                                color: Colors.grey.shade400))
+                        : CachedNetworkImage(
+                            imageUrl: CloudinaryService.thumbUrl(print.imageUrl,
+                                width: 160),
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) =>
+                                Container(color: Colors.grey.shade200),
+                            errorWidget: (_, __, ___) =>
+                                Container(color: Colors.grey.shade200)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: SizedBox(
-                          width: 56,
-                          height: 56,
-                          child: e.imageUrl.isEmpty
-                              ? Container(
-                                  color: Colors.grey.shade100,
-                                  child: Icon(Icons.image_outlined,
-                                      color: Colors.grey.shade400))
-                              : CachedNetworkImage(
-                                  imageUrl: CloudinaryService.thumbUrl(
-                                      e.imageUrl,
-                                      width: 160),
-                                  fit: BoxFit.cover,
-                                  placeholder: (_, __) =>
-                                      Container(color: Colors.grey.shade200),
-                                  errorWidget: (_, __, ___) =>
-                                      Container(color: Colors.grey.shade200)),
+                      Text(print.masterName,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 15)),
+                      const SizedBox(height: 1),
+                      Text(print.size.replaceAll(' mm', ''),
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600)),
+                      // Only worth saying when the print really is carried more than
+                      // once — it is the whole reason the card is grouped.
+                      if (many) ...[
+                        const SizedBox(height: 5),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _navy.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text('${products.length} designs',
+                              style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _navy)),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Master identity name + a small "Master" tag.
-                            Row(
-                              children: [
-                                Flexible(
-                                  child: Text(titleName,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 14)),
-                                ),
-                                // Only on a product forked off by a genuinely different thickness
-                                // (>1 mm). The original of the print reads plainly.
-                                if (forkedThickness != null) ...[
-                                  const SizedBox(width: 5),
-                                  Text('($forkedThickness)',
-                                      style: TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.teal.shade700)),
-                                ],
-                                if (currentStockistBusinessType == 'M' &&
-                                    !showBrandName) ...[
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.shade200,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text('Master',
-                                        style: TextStyle(
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.grey.shade600)),
-                                  ),
-                                ],
-                              ],
-                            ),
-                            Text(sizeLine,
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey.shade600)),
-                            // SURFACE chip — tap to change it. Surface is part of the
-                            // product's identity and Add Stock no longer asks for it
-                            // (unless the boxes are stamped with it), so this is where a
-                            // stockist sets or corrects it.
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 4,
-                              children: [_surfaceChip(e), _boxChip(e)],
-                            ),
-                            // Per-brand chips: solid navy = the BRAND, light =
-                            // that brand's design name.
-                            if (e.aliases.isNotEmpty) ...[
-                              const SizedBox(height: 6),
-                              Wrap(
-                                spacing: 6,
-                                runSpacing: 4,
-                                children: e.aliases.entries
-                                    .map((a) => _brandNamePill(a.key, a.value))
-                                    .toList(),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
+                      ],
                     ],
                   ),
-                  // DNA below — grouped by root attribute, each shown as a
-                  // parent › child › detail breadcrumb. (project_dna_cascade_mapping)
-                  if (dnaChains.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    for (final grp in dnaChains.entries)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 3, right: 6),
-                              child: Text('${grp.key}:',
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.grey.shade600)),
-                            ),
-                            Expanded(
-                              child: Wrap(
-                                spacing: 5,
-                                runSpacing: 4,
-                                children: grp.value
-                                    .map((chain) => Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 7, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFFB9770E)
-                                                .withValues(alpha: 0.10),
-                                            borderRadius:
-                                                BorderRadius.circular(6),
-                                          ),
-                                          child: Text(chain,
-                                              style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: Color(0xFF8A5A09))),
-                                        ))
-                                    .toList(),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 6),
-            Column(
-              children: [
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.science_outlined,
-                      size: 20, color: Color(0xFFB9770E)),
-                  tooltip: 'Design DNA (for search)',
-                  onPressed: () async {
-                    await showDnaEditor(context,
-                        libraryId: e.id, designName: e.masterName);
-                    await _reloadDnaTags();
-                  },
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.edit_outlined, size: 20),
-                  tooltip: 'Edit',
-                  onPressed: () => _openEditor(e),
-                ),
-                if (_sameSizeSiblings(e).isNotEmpty)
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.call_merge, size: 20, color: _navy),
-                    tooltip: currentStockistBusinessType == 'M'
-                        ? 'Merge a duplicate into this'
-                        : 'Merge a duplicate design into this one',
-                    onPressed: () => _openMergeSheet(e),
-                  ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.grid_view_outlined,
-                      size: 20, color: _navy),
-                  tooltip: 'Design family (concept group)',
-                  onPressed: () => _openFamilySheet(e),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.delete_outline,
-                      size: 20, color: Colors.red),
-                  tooltip: 'Delete',
-                  onPressed: () => _confirmDelete(e),
                 ),
               ],
+            ),
+          ),
+          // ── ITS PRODUCTS ───────────────────────────────────────────────────
+          for (final e in products) _productRow(e, indent: many),
+        ],
+      ),
+    );
+  }
+
+  /// One PRODUCT: surface · body · thickness, its per-brand BOXES, its DNA, its actions.
+  Widget _productRow(LibraryEntry e, {required bool indent}) {
+    final forked = _forkedThicknessOf(e);
+    final dnaChains = buildDnaChainMap(_dnaTags[e.id] ?? const <DnaTag>[]);
+    final brandIds = <String>{...e.aliases.keys, ...e.boxes.keys};
+    return Container(
+      decoration: BoxDecoration(
+        // A tinted, ruled band only when the print carries more than one product —
+        // otherwise the single product IS the card and a box around it is just noise.
+        color: indent ? const Color(0xFFF7F9FB) : null,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // IDENTITY: surface (tap to change) · body · thickness.
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _surfaceChip(e),
+                    _bodyChip(e),
+                    _thicknessChip(e, forked),
+                  ],
+                ),
+                // THE BOXES: one row per brand — the name it stamps + how it packs.
+                if (brandIds.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  for (final bid in brandIds) _brandBoxRow(e, bid),
+                ] else ...[
+                  const SizedBox(height: 6),
+                  _boxChip(e), // no brand yet → the "Set box" affordance
+                ],
+                if (dnaChains.isNotEmpty) ...[
+                  const SizedBox(height: 7),
+                  for (final grp in dnaChains.entries)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 3, right: 6),
+                            child: Text('${grp.key}:',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.grey.shade600)),
+                          ),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 5,
+                              runSpacing: 4,
+                              children: grp.value
+                                  .map((chain) => Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 7, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFB9770E)
+                                              .withValues(alpha: 0.10),
+                                          borderRadius:
+                                              BorderRadius.circular(6),
+                                        ),
+                                        child: Text(chain,
+                                            style: const TextStyle(
+                                                fontSize: 11,
+                                                color: Color(0xFF8A5A09))),
+                                      ))
+                                  .toList(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+          // Every action here acts on the PRODUCT (library_id), never on the print.
+          Column(
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.science_outlined,
+                    size: 19, color: Color(0xFFB9770E)),
+                tooltip: 'Design DNA (for search)',
+                onPressed: () async {
+                  await showDnaEditor(context,
+                      libraryId: e.id, designName: e.masterName);
+                  await _reloadDnaTags();
+                },
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.edit_outlined, size: 19),
+                tooltip: 'Edit',
+                onPressed: () => _openEditor(e),
+              ),
+              if (_sameSizeSiblings(e).isNotEmpty)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  icon: const Icon(Icons.call_merge, size: 19, color: _navy),
+                  tooltip: currentStockistBusinessType == 'M'
+                      ? 'Merge a duplicate into this'
+                      : 'Merge a duplicate design into this one',
+                  onPressed: () => _openMergeSheet(e),
+                ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(),
+                icon:
+                    const Icon(Icons.grid_view_outlined, size: 19, color: _navy),
+                tooltip: 'Design family (concept group)',
+                onPressed: () => _openFamilySheet(e),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(4),
+                constraints: const BoxConstraints(),
+                icon: const Icon(Icons.delete_outline,
+                    size: 19, color: Colors.red),
+                tooltip: 'Delete',
+                onPressed: () => _confirmDelete(e),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The BODY (tile_type). Honestly blank when undeclared — never guessed.
+  Widget _bodyChip(LibraryEntry e) {
+    final has = e.tileType.trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: has ? Colors.grey.shade100 : const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+            color: has ? Colors.grey.shade300 : Colors.orange.shade200),
+      ),
+      child: Text(has ? e.tileType : 'no body',
+          style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: has ? Colors.grey.shade800 : Colors.orange.shade900)),
+    );
+  }
+
+  /// The THICKNESS — DERIVED from the box, never typed. A product forked off the
+  /// original by a genuinely different thickness (>1 mm) is marked, so two products of
+  /// one print can be told apart at a glance.
+  Widget _thicknessChip(LibraryEntry e, String? forked) {
+    final band = thicknessBandLabel(e.thicknessMm);
+    if (band == null) {
+      return Text('no thickness — set a box',
+          style: TextStyle(fontSize: 11, color: Colors.orange.shade800));
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: forked != null
+            ? Colors.teal.withValues(alpha: 0.10)
+            : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+            color: forked != null ? Colors.teal.shade200 : Colors.grey.shade300),
+      ),
+      child: Text(band,
+          style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: forked != null
+                  ? Colors.teal.shade800
+                  : Colors.grey.shade800)),
+    );
+  }
+
+  /// ONE BOX = one brand's row: the name it STAMPS on the box, and how it PACKS it.
+  /// Two brands carrying the same product pack independently, which is exactly why
+  /// pieces/weight live here and not on the product. Tap to edit the packing.
+  Widget _brandBoxRow(LibraryEntry e, String brandId) {
+    final name = e.aliases[brandId] ?? '';
+    final box = e.boxes[brandId];
+    final packing = <String>[
+      if ((box?.pieces ?? 0) > 0) '${box!.pieces} pcs',
+      if ((box?.weightKg ?? 0) > 0) '${_trimNum(box!.weightKg)} kg',
+    ].join(' · ');
+    return InkWell(
+      onTap: () => _editBox(e),
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            _brandNamePill(brandId, name),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                // No packing = no thickness. Say so where it can be fixed.
+                packing.isEmpty ? 'set pieces + weight' : packing,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: packing.isEmpty
+                        ? Colors.orange.shade800
+                        : Colors.grey.shade700),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),

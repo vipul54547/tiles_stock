@@ -7,7 +7,14 @@ class LibraryEntry {
   final String id;
   final String size;
 
+  /// THE PRINT this product is made from (`print_master.id`) — the artwork, stored ONCE.
+  /// [masterName], [size] and [imageUrl] all belong to IT, not to this row: several
+  /// products (a Glossy and a Matt, an 8 mm and a 12 mm) share one print and therefore
+  /// share a name, a size and a photo. This is what the Library groups its cards by.
+  final String printId;
+
   /// The clean DESIGN name only (e.g. "AVORIO ROSA") — never brand-prefixed.
+  /// Lives on the PRINT.
   final String masterName;
   final String imageUrl;
 
@@ -55,6 +62,7 @@ class LibraryEntry {
     required this.id,
     required this.size,
     required this.masterName,
+    this.printId = '',
     this.imageUrl = '',
     this.brandId = '',
     this.brandName = '',
@@ -96,6 +104,7 @@ class LibraryEntry {
       id: (j['id'] ?? '').toString(),
       size: (j['size'] ?? '').toString(),
       masterName: (j['master_design_name'] ?? '').toString(),
+      printId: (j['print_id'] ?? '').toString(),
       imageUrl: (j['image_url'] ?? '').toString(),
       brandId: (j['brand_id'] ?? '').toString(),
       brandName: (j['brand_name'] ?? '').toString(),
