@@ -720,6 +720,20 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
           chosenBrandCol != null ? cellAt(row, chosenBrandCol!) : '';
       final nameVal = cell(row, 'name');
 
+      // A GHOST ROW. The all-cells-empty check above doesn't catch these: a cell that
+      // was typed into and then cleared, or one left holding a stray style, keeps the
+      // row alive in the .xlsx forever. It names nothing and sizes nothing, so it says
+      // nothing — drop it silently rather than reporting "Missing design name" against
+      // a row the stockist never filled in. A row with a name but no size is still a
+      // real mistake and still surfaces as an error.
+      if (masterVal.isEmpty &&
+          chosenName.isEmpty &&
+          nameVal.isEmpty &&
+          brandNames.isEmpty &&
+          cell(row, 'size').isEmpty) {
+        continue;
+      }
+
       // Option 2 (stock direct): brand cols present → brand is per-row, not
       // global. M uses master col as name (brand-agnostic library key); T/W
       // uses the one filled brand col value. Library mapping is separate.
