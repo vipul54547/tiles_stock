@@ -709,8 +709,16 @@ class _State extends State<AdminBulkImageImportScreen> {
               : '2. Map sizes & packing   (${_designs.length} images)',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           const SizedBox(height: 4),
-          const Text('Each folder size → an admin size, plus its packing.',
-              style: TextStyle(fontSize: 12, color: Colors.black54)),
+          Text(
+              _forStockist
+                  // The BODY is not on the disk anywhere, and it cannot be guessed: it is part of
+                  // what makes a piece a piece (print + surface + BODY + thickness), and the
+                  // thickness is later derived as weight / (pieces × area × DENSITY) — where the
+                  // density comes from the body. No body, no thickness, whatever the box weight is.
+                  ? 'Confirm the size, and say what the tile is made of — the body is part of the '
+                      'design, and the thickness is worked out from it later.'
+                  : 'Each folder size → an admin size, plus its packing.',
+              style: const TextStyle(fontSize: 12, color: Colors.black54)),
           const SizedBox(height: 10),
           ..._sizePacks.entries.map((e) => _sizeRow(e.key, e.value)),
           if (_surfaceMap.isNotEmpty) ...[
@@ -726,7 +734,9 @@ class _State extends State<AdminBulkImageImportScreen> {
             onPressed: _mapReady ? _enterPreview : null,
             child: Text(_mapReady
                 ? 'Continue to preview'
-                : 'Fill every size: admin size, tile type, pieces, weight'),
+                : _forStockist
+                    ? 'Pick the admin size and the tile type'
+                    : 'Fill every size: admin size, tile type, pieces, weight'),
           ),
         ],
       );
