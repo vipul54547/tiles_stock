@@ -60,6 +60,28 @@ Don't infer a function's signature from its call site.
     brand, so it would **wipe every other brand's BOX**. `library_image_upsert` only **merges**.
   - 🚫 **The PDF importer is HIDDEN from the platform** (no entry point). The route + parser survive
     for re-use elsewhere. **Do not re-add a way in.**
+- 🚪🚪 **TWO DOORS. An import either BUILDS PRODUCTS or ADDS STOCK — never both.** (14 Jul 2026)
+  - **PRODUCT door** — 📁 the folder (`/stockist/library/import-images`, Windows) **or** an Excel
+    sheet (`/stockist/library/import-products`). Creates print + product + BOX. **Imports NO stock.**
+    Server: `import_stock_batch(p_library_only => true)`. Every identity column is **compulsory** on
+    every row (surface · tile type · pieces/box · box weight) — this sheet is what MAKES the product,
+    so a blank one would make an incomplete one. It has **no quantity column at all**.
+  - **STOCK door** — `/stockist/stock/import-excel`. Adds quantities to products that **already
+    exist**. **Creates NO product.** Server: `import_stock_batch(p_match_only => true)` →
+    `library_map_resolve()`, the **read-only twin** of `library_map_upsert`: it returns NULL rather
+    than creating, and NULL again when the row is **ambiguous** (one print in two surfaces, no
+    surface on the row — a stock row must never guess which product it means). An unresolved row
+    comes back in `unmatched_rows` and is **reported, never minted**. The sheet has **no identity
+    block**; Surface survives on it only to pick *which* product, and **stock inherits the product's
+    surface** once resolved. The two flags are **mutually exclusive** — the server raises on both.
+  - ⚠️ **This is where the 444 came from.** `import_stock_batch` used to call `library_map_upsert` on
+    **every** row, so the stock importer was a product FACTORY: an unrecognised name silently minted
+    a product with surface `'Special'`, a **NULL body** and **no box**. Enforcing NOT NULL was
+    impossible while any stock path could create a product. **Never let a stock import create one.**
+  - 🗑️ **The Library ▸ 🌳 mapping importer is DELETED** (`import_mapping_excel_screen.dart`,
+    `buildMappingTemplate`, `libraryMapUpsert`, `/stockist/library/import-mapping`). It was a third,
+    **broken** product door: it could not express surface / body / box, so every product it made was
+    incomplete by construction. **Do not rebuild it** — the product Excel door is a strict superset.
 - **PRODUCT** = `stockist_library` — **ONE PIECE of tile.** **This is what "a design" means.**
   It has **no name, no size and no image of its own** — it points at a print (`print_id`, NOT NULL).
   Its identity is:
@@ -148,12 +170,20 @@ Don't infer a function's signature from its call site.
   *permanent* answer for a stockist whose surfaces cannot sensibly be enumerated. Stock **inherits**
   a product's surface rather than asking for one, so it cannot spawn a twin, and `library_set_surface`
   cascades a later correction onto every holding.
-  - **PDF / Excel / bulk-image import → `Special`.** We never ask mid-parse, so we must not **guess**
-    mid-parse either. One chokepoint: **`surfaceForImport()`** in `lib/utils/finishes.dart` — every
-    RPC that can CREATE a product goes through it. (`library_map_upsert` **RAISES** on a blank *and*
-    on `'None'`, and one bad row throws the WHOLE batch.)
+  - **`Special` is the LAST RESORT of a machine that cannot ask** — the folder import (no SURFACE
+    level) and the hidden PDF parser. We never ask mid-parse, so we must not **guess** mid-parse
+    either. One chokepoint: **`surfaceForImport()`** in `lib/utils/finishes.dart` — every RPC that
+    can CREATE a product goes through it. (`library_map_upsert` **RAISES** on a blank *and* on
+    `'None'`, and one bad row throws the WHOLE batch.)
   - **A HUMAN is never defaulted.** In the Library editor the surface is **blank and compulsory** —
-    he is standing right there, so ask him.
+    he is standing right there, so ask him. ⚠️ **The product Excel door is a human too**: he is at
+    his desk filling a sheet, and there is a **review step** before anything is written. So a blank
+    surface there is **not** silently `Special` — it is a `needsFill` row that **blocks Import**
+    until he fills it or drops the row. Only a machine with no human in the loop gets `Special`.
+  - **The STOCK door never writes a surface at all** — it *resolves* one. The word on a stock row
+    only picks WHICH product; the holding then **inherits the product's** `surface_type`. Sending
+    `Special` for a blank there would filter the match against a surface the product hasn't got and
+    leave every row unmatched.
   - 🚫 **No free text under `Special`.** `surface_label` is not identity, so two `Special` tiles told
     apart only by a label would **collide into one product**.
 - 🔑 **Stock entry asks for a surface ONLY when `surface_mode = 'attribute'`** (rare). Otherwise the

@@ -1080,36 +1080,6 @@ class SupabaseDataService {
     }
   }
 
-  Future<String> libraryMapUpsert({
-    required String size,
-    required String masterName,
-    Map<String, String> aliases = const {},
-    // Surface is part of the product's identity — the server rejects a missing one.
-    required String surface,
-    // Body is identity too. Null = not declared: the server then ADOPTS an undeclared row rather
-    // than spawning a duplicate beside it. There is NO thickness here on purpose — it is DERIVED
-    // from the box and may never be handed in.
-    // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
-    String? tileType,
-  }) async {
-    final aliasJson = aliases.entries
-        .where((e) => e.value.trim().isNotEmpty)
-        .map((e) => {'brand_id': e.key, 'name': e.value.trim()})
-        .toList();
-    try {
-      final res = await supabase.rpc('library_map_upsert', params: {
-        'p_size': size,
-        'p_master_name': masterName,
-        'p_aliases': aliasJson,
-        'p_surface': surfaceForImport(surface),
-        'p_tile_type': tileType,
-      });
-      return (res ?? '').toString();
-    } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
-    }
-  }
-
   /// Sets a brand's logo (Cloudinary URL); pass '' to clear.
   Future<void> setBrandLogo(String id, String logoUrl) async {
     try {
@@ -1946,8 +1916,12 @@ class SupabaseDataService {
     // (single-brand upload).
     bool wipeAllBrands = false,
     List<String>? wipeBrandIds,
-    // M PDF import: build the library (+ images) only, create NO stock rows.
+    // THE PRODUCT DOOR: build the library (+ images) only, create NO stock rows.
     bool libraryOnly = false,
+    // THE STOCK DOOR: match every row against the existing library and create NO product.
+    // A row that resolves to nothing comes back in the summary's `unmatched_rows` for the human
+    // to fix — it is never minted. The two flags are mutually exclusive; the server rejects both.
+    bool matchOnly = false,
   }) async {
     try {
       final res = await supabase.rpc('import_stock_batch', params: {
@@ -1960,6 +1934,7 @@ class SupabaseDataService {
         'p_wipe_all_brands': wipeAllBrands,
         'p_wipe_brand_ids': wipeBrandIds,
         'p_library_only': libraryOnly,
+        'p_match_only': matchOnly,
       });
       return res is Map
           ? Map<String, dynamic>.from(res)

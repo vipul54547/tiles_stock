@@ -23,6 +23,17 @@ import '../models/brand.dart';
 ///   • single brand (T/W) → Design Name + Quality + Box Qty.
 /// The header wording matches the importer's column synonyms, so a filled
 /// template imports with no Map steps.
+///
+/// And two PURPOSES, because an import either builds products or adds stock —
+/// never both ([ImportPurpose]):
+///   • products = true  → the identity columns only (Surface, Tile Type,
+///     Pieces/Box, Weight, DNA), and they are COMPULSORY: this sheet creates the
+///     product, so a blank one would create an incomplete product. No quantity
+///     columns at all.
+///   • products = false → the quantity columns only. This sheet cannot create a
+///     product, so the identity block is not offered; Surface stays, because for
+///     a stockist who stamps one name across several surfaces it is what picks
+///     WHICH product the row means.
 class ExcelTemplateService {
   static List<int> buildStockTemplate({
     required bool multiBrand,
@@ -31,6 +42,7 @@ class ExcelTemplateService {
     required List<String> tileTypes,
     required List<DnaAttribute> dnaAttrs,
     required List<Brand> brands,
+    bool products = false,
     int dataRows = 200,
   }) {
     final wb = Workbook();
@@ -88,30 +100,38 @@ class ExcelTemplateService {
         headerColor.add(color);
       }
 
+      // On the PRODUCT sheet the identity block is navy: it is not "fill once and
+      // then leave blank", it is the whole point of the sheet.
+      final idColor = products ? dailyColor : onceColor;
+
       if (multiBrand) {
         col('Master Design', null, dailyColor);
         for (final b in brands) {
           col(b.name, null, brandColor);
         }
         col('Size', 'Size', dailyColor);
-        col('Premium', null, dailyColor);
-        col('Standard', null, dailyColor);
-        col('Surface', 'Surface', onceColor);
-        col('Tile Type', 'Tile Type', onceColor);
-        col('Pieces/Box', null, onceColor);
-        col('Weight (kg)', null, onceColor);
+        if (!products) {
+          col('Premium', null, dailyColor);
+          col('Standard', null, dailyColor);
+        }
       } else {
         col('Design Name', null, dailyColor);
         col('Size', 'Size', dailyColor);
-        col('Quality', 'Quality', dailyColor);
-        col('Box Qty', null, dailyColor);
-        col('Surface', 'Surface', onceColor);
-        col('Tile Type', 'Tile Type', onceColor);
-        col('Pieces/Box', null, onceColor);
-        col('Weight (kg)', null, onceColor);
+        if (!products) {
+          col('Quality', 'Quality', dailyColor);
+          col('Box Qty', null, dailyColor);
+        }
       }
-      for (final a in dnaUsable) {
-        col(a.name, a.name, onceColor);
+      // Surface is on BOTH sheets — on the product sheet it is identity, on the
+      // stock sheet it is what disambiguates one stamped name across two surfaces.
+      col('Surface', 'Surface', idColor);
+      if (products) {
+        col('Tile Type', 'Tile Type', idColor);
+        col('Pieces/Box', null, idColor);
+        col('Weight (kg)', null, idColor);
+        for (final a in dnaUsable) {
+          col(a.name, a.name, onceColor);
+        }
       }
 
       for (var i = 0; i < headers.length; i++) {
@@ -151,17 +171,20 @@ class ExcelTemplateService {
       final legendCol = lc + 1;
       lists.getRangeByIndex(1, legendCol).setText('Colour guide');
       lists.getRangeByIndex(1, legendCol).cellStyle.bold = true;
-      lists
-          .getRangeByIndex(2, legendCol)
-          .setText('Navy = fill every time (identity + quantity)');
-      lists
-          .getRangeByIndex(3, legendCol)
-          .setText('Grey = fill ONCE for a new design, then leave blank');
+      lists.getRangeByIndex(2, legendCol).setText(products
+          ? 'Navy = COMPULSORY. A design is not a design without all of these.'
+          : 'Navy = fill every time (identity + quantity)');
+      lists.getRangeByIndex(3, legendCol).setText(products
+          ? 'Grey = Design DNA (optional — how the tile looks)'
+          : 'Grey = optional. Surface only if you stock one name in two surfaces.');
       if (multiBrand) {
         lists
             .getRangeByIndex(4, legendCol)
             .setText("Purple = this design's name under each brand");
       }
+      lists.getRangeByIndex(5, legendCol).setText(products
+          ? 'This sheet creates DESIGNS. It imports NO stock — use the stock sheet for that.'
+          : 'This sheet adds STOCK to designs you already have. It creates NO design.');
       lists.autoFitColumn(legendCol);
 
       return wb.saveAsStream();
@@ -459,91 +482,6 @@ class ExcelTemplateService {
           .setText('Navy = fill every time');
       lists.getRangeByIndex(4, legendCol)
           .setText('Grey = fill once for a new design, then leave blank');
-      lists.autoFitColumn(legendCol);
-
-      return wb.saveAsStream();
-    } finally {
-      wb.dispose();
-    }
-  }
-
-  /// M stockist name-mapping template: Master Design + one col per brand + Size.
-  /// Used by ImportMappingExcelScreen to seed the bulk name-mapping import.
-  static List<int> buildMappingTemplate({
-    required List<String> sizes,
-    required List<Brand> brands,
-    int dataRows = 200,
-  }) {
-    final wb = Workbook();
-    try {
-      final stock = wb.worksheets[0];
-      stock.name = 'Mapping';
-      final lists = wb.worksheets.addWithName('Lists');
-
-      final listCols = <String, List<String>>{'Size': sizes};
-      final localRange = <String, String>{};
-      var lc = 1;
-      listCols.forEach((header, values) {
-        lists.getRangeByIndex(1, lc).setText(header);
-        for (var i = 0; i < values.length; i++) {
-          lists.getRangeByIndex(i + 2, lc).setText(values[i]);
-        }
-        final letter = _colLetter(lc);
-        final last = values.isEmpty ? 2 : values.length + 1;
-        localRange[header] = '${letter}2:$letter$last';
-        lc++;
-      });
-
-      const masterColor = '#1B4F72';
-      const brandColor  = '#6A1B9A';
-      const sizeColor   = '#6C7A89';
-
-      final headers     = <String>[];
-      final validateWith= <String?>[];
-      final headerColor = <String>[];
-      void col(String h, String? listH, String color) {
-        headers.add(h); validateWith.add(listH); headerColor.add(color);
-      }
-
-      col('Master Design', null, masterColor);
-      for (final b in brands) { col(b.name, null, brandColor); }
-      col('Size', 'Size', sizeColor);
-
-      for (var i = 0; i < headers.length; i++) {
-        final cell = stock.getRangeByIndex(1, i + 1);
-        cell.setText(headers[i]);
-        cell.cellStyle
-          ..bold = true
-          ..fontColor = '#FFFFFF'
-          ..backColor = headerColor[i]
-          ..hAlign = HAlignType.center;
-      }
-
-      final lastRow = dataRows + 1;
-      for (var i = 0; i < validateWith.length; i++) {
-        final lh = validateWith[i];
-        if (lh == null) continue;
-        final letter = _colLetter(i + 1);
-        final target = stock.getRangeByName('${letter}2:$letter$lastRow');
-        target.dataValidation
-          ..allowType = ExcelDataValidationType.user
-          ..dataRange = lists.getRangeByName(localRange[lh]!)
-          ..errorBoxText = 'Pick a value from the list.'
-          ..showErrorBox = true;
-      }
-
-      for (var i = 1; i <= headers.length; i++) { stock.autoFitColumn(i); }
-      stock.getRangeByName('A2').freezePanes();
-
-      final legendCol = lc + 1;
-      lists.getRangeByIndex(1, legendCol).setText('Colour guide');
-      lists.getRangeByIndex(1, legendCol).cellStyle.bold = true;
-      lists.getRangeByIndex(2, legendCol)
-          .setText('Navy = Master Design (brand-agnostic library key)');
-      lists.getRangeByIndex(3, legendCol)
-          .setText('Purple = this tile\'s name under each brand (fill all that apply)');
-      lists.getRangeByIndex(4, legendCol)
-          .setText('Grey = Size (pick from dropdown)');
       lists.autoFitColumn(legendCol);
 
       return wb.saveAsStream();

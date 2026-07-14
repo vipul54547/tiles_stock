@@ -30,11 +30,38 @@ import '../../widgets/upload_mode.dart';
 // row that doesn't match is added as a NEW holding (a different surface is simply a
 // different stock line, never a "conflict"). Surface is aligned to the admin
 // finishes first via Map Finishes (which also learns the alias).
+/// TWO DOORS. An import either BUILDS PRODUCTS or ADDS STOCK — never both.
+///
+/// This one screen backs both, because the parsing, the brand matching and the
+/// review table are identical; only the purpose differs, and the purpose decides
+/// which of the two mutually-exclusive server modes runs.
+///
+///   • [ImportPurpose.products] → `library_only`. Creates the print + product +
+///     box. Imports NO stock. The identity columns (surface, tile type,
+///     pieces/box, weight) are COMPULSORY on every row: this sheet is what makes
+///     the product, so a blank one would make an incomplete product.
+///   • [ImportPurpose.stock] → `match_only`. Adds quantities to products that
+///     ALREADY exist. Creates NO product: a row that matches nothing is reported
+///     back as unmatched, never minted.
+///
+/// Before 14 Jul 2026 the stock importer did both, so an unrecognised name
+/// silently minted a product with surface `Special`, a NULL body and no box.
+/// That is where the 444 incomplete rows came from.
+enum ImportPurpose { products, stock }
+
 class ImportExcelStockScreen extends StatefulWidget {
   /// Brand chosen at the Upload tap; upload fills P_Stock for this brand (lists are
   /// curated separately). Null falls back to the default brand.
   final String? initialBrandId;
-  const ImportExcelStockScreen({super.key, this.initialBrandId});
+
+  /// Which door this is. See [ImportPurpose].
+  final ImportPurpose purpose;
+
+  const ImportExcelStockScreen({
+    super.key,
+    this.initialBrandId,
+    this.purpose = ImportPurpose.stock,
+  });
   @override
   State<ImportExcelStockScreen> createState() => _ImportExcelStockScreenState();
 }
@@ -101,11 +128,21 @@ class _XlsRow {
   bool include = true;    // unchecked = excluded from import
   bool editing = false;   // per-cell editor expanded for this row
   bool isNewDesign = false; // name+size not yet in the library (needs identity)
-  // New design missing compulsory identity (tile type / pieces / weight) — blocks
-  // Save until filled (in-app) or the row is excluded. Existing designs skip this.
+  // This row came through the PRODUCT door, so it is going to CREATE a product.
+  bool productDoor = false;
+  // A row that will create a product must carry the whole identity: the surface and
+  // the body it is keyed on, and the box the thickness is derived from. Blank is not
+  // an error — it is a "needs fill" row that blocks Save until it is completed in-app
+  // or excluded.
+  //
+  // On the STOCK door this is always false: a stock row creates no product, so it
+  // needs no identity. It only has to MATCH one.
   bool get needsFill =>
-      isNewDesign &&
-      (tileType.trim().isEmpty || (pieces ?? 0) <= 0 || (weight ?? 0) <= 0);
+      productDoor &&
+      (surface.trim().isEmpty ||
+          tileType.trim().isEmpty ||
+          (pieces ?? 0) <= 0 ||
+          (weight ?? 0) <= 0);
   // Combined sheet (brand-name columns): the per-brand names on this row and the
   // master name, written into the Library during the same import. mapOnly = the
   // chosen brand has no name here (tile not sold under it) → map, but no stock.
@@ -138,6 +175,10 @@ class _XlsRow {
 class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   final _dataSvc = SupabaseDataService();
   String _batchId = ''; // idempotency key per parsed file (reused on retry)
+
+  /// The PRODUCT door. Everything that differs between the two imports hangs off
+  /// this one getter.
+  bool get _products => widget.purpose == ImportPurpose.products;
 
   List<_XlsRow> _rows = [];
   // This stockist's OWN Design Library photos matched for the preview
@@ -304,6 +345,7 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         tileTypes: tileTypeNames,
         dnaAttrs: _dnaAttrs,
         brands: _brands,
+        products: _products,
       );
       final safeBrand = _brandName.trim().isEmpty
           ? 'stock'
@@ -631,10 +673,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     // Tile Type is NOT a required column: a quantity-only / restock sheet (all
     // existing designs) needs no identity, and a NEW design without it is caught
     // per-row by needsFill (filled in-app or excluded) — same as pieces/weight.
+    // The PRODUCT sheet carries no quantity at all — not a Quality/Qty pair, not the
+    // wide Premium/Standard pair. Demanding them would block every valid design sheet.
     final missing = [
       'size',
-      if (!wideQty) 'quality',
-      if (!wideQty) 'qty',
+      if (!_products && !wideQty) 'quality',
+      if (!_products && !wideQty) 'qty',
     ].where((f) => (colOf[f] ?? -1) < 0).toList();
     if (!hasNameSource) missing.insert(0, 'name');
     if (missing.isNotEmpty) {
@@ -703,7 +747,15 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             : (chosenName.isNotEmpty
                 ? chosenName
                 : (brandNames.isNotEmpty ? brandNames.values.first : nameVal));
-        mapOnly = hasBrandCols && chosenName.isEmpty && brandNames.isNotEmpty;
+        // mapOnly = "the chosen brand doesn't sell this tile → map the name, add no
+        // stock". It is a STOCK-door idea, and its payload deliberately omits the
+        // identity block. On the PRODUCT door that would be the old bug back again: a
+        // design created with no surface, no body and no box. Every product row carries
+        // its full identity, whichever brand's cell happens to be filled.
+        mapOnly = !_products &&
+            hasBrandCols &&
+            chosenName.isEmpty &&
+            brandNames.isNotEmpty;
         perRowBrandId = null;
       }
 
@@ -733,7 +785,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       // wide mode emits a part for each Premium/Standard column that has a value;
       // otherwise the single quality + qty columns (unchanged behaviour).
       final parts = <({String quality, int qty})>[];
-      if (mapOnly) {
+      if (_products) {
+        // The PRODUCT door. One sheet row = one design, and it never fans out into
+        // holdings, because it carries no quantity to fan out with.
+        parts.add((quality: '', qty: 0));
+      } else if (mapOnly) {
         parts.add((quality: '', qty: 0));
       } else if (wideQty) {
         if (premCol >= 0) {
@@ -1432,16 +1488,27 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       if (sz.isEmpty) { r.error = "Size '${r.sizeRaw}' is not in your size list"; continue; }
       r.size = sz;
       if (r.qualityRaw.isEmpty) { r.error = 'Missing quality'; continue; }
-      final q = _normQuality(r.qualityRaw);
-      if (q.isEmpty) { r.error = "Unknown quality '${r.qualityRaw}'"; continue; }
-      r.quality = q;
-      if (r.qty < 0) { r.error = 'Missing / invalid box quantity'; continue; }
-      // Brand-new design? (name+size not yet in the library.) Only new designs must
-      // carry identity (tile type / pieces / weight); existing designs already have
-      // it. A new design left blank is NOT an error — it's a "needs fill" row that
-      // blocks Save until completed or excluded (see needsFill).
+      // The PRODUCT door has no quality and no quantity — there is no stock on that
+      // sheet at all. Only the stock door validates them.
+      if (!_products) {
+        final q = _normQuality(r.qualityRaw);
+        if (q.isEmpty) { r.error = "Unknown quality '${r.qualityRaw}'"; continue; }
+        r.quality = q;
+        if (r.qty < 0) { r.error = 'Missing / invalid box quantity'; continue; }
+      }
+      r.productDoor = _products;
+      // Brand-new design? (name+size not yet in the library — master name OR any brand
+      // alias.) On the PRODUCT door that is the normal case, and the row must carry the
+      // full identity (see needsFill).
       r.isNewDesign =
           !_libKeys.contains('${r.name.trim().toLowerCase()}|${_sizeKey(r.size)}');
+      // On the STOCK door a design we don't have is not something we invent — that is
+      // exactly how the 444 surface-less, body-less, box-less products got made. Catch it
+      // HERE, in the review, rather than letting the server report it back as unmatched.
+      if (!_products && r.isNewDesign && !r.mapOnly) {
+        r.error = "Not in your Library — import the design first";
+        continue;
+      }
       // Tile type: validate the wording if given; never block on blank here.
       if (r.tileType.trim().isNotEmpty) {
         final tt = tileTypeNames.firstWhere(
@@ -1805,9 +1872,17 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         'name': r.name,
         'size': r.size,
         'quality': r.quality,
-        // A sheet with no surface column leaves the row unknown → 'Special'. No raw word means
-        // the stockist has no word of his own for it either, so the label stays blank.
-        'surface': surfaceForImport(r.surface),
+        // PRODUCT door: the surface is identity, so it is compulsory — needsFill already
+        // blocked a blank one, and surfaceForImport is the last-resort 'Special'.
+        //
+        // STOCK door: send the word ONLY if the sheet actually gave one, because there it
+        // does not DESCRIBE the row, it CHOOSES which product the row means. Defaulting a
+        // blank to 'Special' here would filter the match against a surface the product
+        // hasn't got and leave every row unmatched. Blank = "the product knows its own
+        // surface, inherit it" — which is what the server does.
+        'surface': _products
+            ? surfaceForImport(r.surface)
+            : (r.surface.trim().isEmpty ? null : r.surface.trim()),
         'surface_label': r.surfaceRaw.trim(),
         'colour': r.colour,
         'qty': r.qty,
@@ -1829,9 +1904,12 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         row['master_name'] = r.masterName.trim();
         row['aliases'] = aliasJson;
         mapped++;
-      } else if (!hasDna && !r.isNewDesign) {
+      } else if (!_products && !hasDna && !r.isNewDesign) {
         // EXISTING plain design, no DNA → leave the Library untouched. A NEW design
         // must keep skip_master OFF so its identity (tile type/pieces/weight) is set.
+        //
+        // Never on the PRODUCT door: writing the identity IS that sheet's job, and a
+        // re-import is how a corrected box weight (and so the thickness) gets in.
         row['skip_master'] = true;
       }
       // A plain row WITH DNA keeps skip_master off so a master exists to tag it.
@@ -1868,12 +1946,18 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
         brandId: brandId,
         pdfFilename: _filename,
         rows: rows,
-        mode: _mode.api,
+        // The product door imports nothing but products; the stock door creates no
+        // product. The server rejects both flags together.
+        libraryOnly: _products,
+        matchOnly: !_products,
+        mode: _products ? UploadMode.add.api : _mode.api,
         // Per-row multi-brand file → wipe exactly the brands it covers;
         // single-brand file → the this-brand / all-brands toggle.
-        wipeAllBrands:
-            _mode == UploadMode.fullyNew && !_perRowBrand && _wipeAllBrands,
-        wipeBrandIds: _mode == UploadMode.fullyNew && _perRowBrand
+        wipeAllBrands: !_products &&
+            _mode == UploadMode.fullyNew &&
+            !_perRowBrand &&
+            _wipeAllBrands,
+        wipeBrandIds: !_products && _mode == UploadMode.fullyNew && _perRowBrand
             ? _fileBrandIds()
             : null,
       );
@@ -1894,13 +1978,35 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
     setState(() { _importing = false; _done = willImport; });
     final created = (res['created'] as num?)?.toInt() ?? news;
     final updated = (res['updated'] as num?)?.toInt() ?? 0;
+    final masters = (res['masters'] as num?)?.toInt() ?? 0;
     final dnaTagged = (res['dna_tagged'] as num?)?.toInt() ?? 0;
+    // Stock door only: rows that matched no product. They were NOT created.
+    final unmatched = (res['unmatched'] as num?)?.toInt() ?? 0;
     final libNote = imagesFromLibrary > 0
         ? ' · $imagesFromLibrary photos from library'
         : '';
-    final mapNote = mapped > 0 ? ' · $mapped mapped to library' : '';
     final dnaNote = dnaTagged > 0 ? ' · $dnaTagged DNA tagged' : '';
     final brandNote = _brandName.isEmpty ? '' : ' → $_brandName';
+
+    if (_products) {
+      _snack(
+          'Done — $masters designs in your Library$dnaNote$libNote. '
+          'No stock was imported; use Import Stock for that.',
+          Colors.green);
+      if (masters > 0) Navigator.of(context).pop();
+      return;
+    }
+
+    final mapNote = mapped > 0 ? ' · $mapped mapped to library' : '';
+    if (unmatched > 0) {
+      // Never silently minted. Say so plainly, and stay on the screen so he can fix it.
+      _snack(
+          '$updated updated, $created new$mapNote$libNote$brandNote — but $unmatched '
+          "row${unmatched == 1 ? '' : 's'} matched no design and were NOT imported. "
+          'Import those designs first, then upload this again.',
+          Colors.orange.shade800);
+      return;
+    }
     _snack(
         'Done — $updated updated, $created new$mapNote$dnaNote$libNote$brandNote. '
         'Add designs to a stock list to show buyers.',
@@ -1920,7 +2026,9 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Import Stock from Excel'),
+        title: Text(_products
+            ? 'Import Designs from Excel'
+            : 'Import Stock from Excel'),
         actions: [
           if (_parsed)
             TextButton.icon(
@@ -2010,7 +2118,10 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
             _colTable(),
             const SizedBox(height: 22),
             // Template download — multi-brand gets two options; single-brand gets one.
-            if (_brands.length > 1) ...[
+            // The PRODUCT door always gets the one sheet: the Option-2/3 skins are
+            // stock-direct shapes (they are built around the quantity columns), and the
+            // product sheet has no quantities at all.
+            if (!_products && _brands.length > 1) ...[
               const Text('Download blank template',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(height: 6),
@@ -2068,7 +2179,11 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                               strokeWidth: 2, color: Color(0xFF1B4F72)))
                       : const Icon(Icons.download_rounded),
                   label: Text(
-                      _downloading ? 'Preparing…' : 'Download blank template',
+                      _downloading
+                          ? 'Preparing…'
+                          : _products
+                              ? 'Download blank design sheet'
+                              : 'Download blank template',
                       style: const TextStyle(fontSize: 14.5)),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF1B4F72),
@@ -2079,10 +2194,14 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Pre-filled headers with dropdowns for size, quality, surface, '
-                'tile type and DNA — pick values instead of typing.',
-                style: TextStyle(fontSize: 11, color: Colors.black54),
+              Text(
+                _products
+                    ? 'Dropdowns for size, surface, tile type and DNA — pick values '
+                        'instead of typing. Every column is compulsory: this sheet '
+                        'creates the design.'
+                    : 'Pre-filled headers with dropdowns for size, quality, surface, '
+                        'tile type and DNA — pick values instead of typing.',
+                style: const TextStyle(fontSize: 11, color: Colors.black54),
               ),
             ],
           ],
@@ -2090,20 +2209,33 @@ class _ImportExcelStockScreenState extends State<ImportExcelStockScreen> {
       );
 
   Widget _colTable() {
-    const cols = [
+    // The two doors want two different sheets. The product sheet has no quantity at
+    // all and every identity column is compulsory (it is what MAKES the design). The
+    // stock sheet has no identity block, because it can no longer create a design —
+    // an unknown name is reported, not invented.
+    const productCols = [
       ('Design Name', 'required — or a brand / master column', true),
+      ('Size', 'required — must match your sizes', true),
+      ('Surface / Finish', 'required — two surfaces = two designs', true),
+      ('Tile Type', 'required — the body', true),
+      ('Pieces/Box', 'required — off the box', true),
+      ('Box Weight', 'required — off the box; the thickness comes from it', true),
+      ('Master design name', 'optional — links your brands in the Library', false),
+      ('<Brand name> columns', 'optional — one per brand; the design name printed '
+          'on that brand\'s box.', false),
+      ('DNA columns', 'optional — how the tile looks', false),
+    ];
+    const stockCols = [
+      ('Design Name', 'required — must already be in your Library', true),
       ('Size', 'required — must match your sizes', true),
       ('Quality', 'required — Premium / Standard', true),
       ('Box Quantity', 'required — the boxes to add', true),
-      ('Tile Type', 'new designs only — else taken from your library', false),
-      ('Surface / Finish', 'optional — mapped after upload', false),
-      ('Box Weight', 'optional — for thickness', false),
-      ('Pieces/Box', 'optional — for sq.ft', false),
-      ('Colour', 'optional', false),
+      ('Surface / Finish', 'only if you stock one name in two surfaces', false),
       ('Master design name', 'optional — links your brands in the Library', false),
       ('<Brand name> columns', 'optional — one per brand; the design name under '
           'each. The chosen brand\'s name becomes the stock; all are mapped.', false),
     ];
+    final cols = _products ? productCols : stockCols;
     return Container(
       decoration: BoxDecoration(
         border: Border.all(color: Colors.grey.shade200),

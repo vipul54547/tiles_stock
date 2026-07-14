@@ -886,16 +886,18 @@ class _State extends State<MyDesignLibraryScreen> {
             tooltip: 'My Words (DNA terms)',
             onPressed: () => context.push('/stockist/dna-words'),
           ),
-          if (_brands.length > 1)
-            IconButton(
-              icon: const Icon(Icons.account_tree_outlined),
-              tooltip: 'Import name mapping (Excel)',
-              onPressed: () async {
-                final done = await context
-                    .push<bool>('/stockist/library/import-mapping');
-                if (done == true) _load();
-              },
-            ),
+          // PRODUCT DOOR (b) — the Excel sheet. It carries the four facts the old mapping
+          // importer could not express (surface, tile type, pieces/box, box weight), so a
+          // product it creates is COMPLETE. It imports no stock; that is the other door.
+          IconButton(
+            icon: const Icon(Icons.table_chart_outlined),
+            tooltip: 'Import products from Excel (no stock)',
+            onPressed: () async {
+              final done = await context
+                  .push<bool>('/stockist/library/import-products');
+              if (done == true) _load();
+            },
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

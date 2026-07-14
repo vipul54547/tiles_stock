@@ -64,7 +64,6 @@ import 'screens/end_user/my_profile_screen.dart';
 import 'screens/end_user/dispatch_history_screen.dart';
 import 'screens/stockist/import_supplier_pdf_screen.dart';
 import 'screens/stockist/my_design_library_screen.dart';
-import 'screens/stockist/import_mapping_excel_screen.dart';
 import 'screens/stockist/import_excel_stock_screen.dart';
 import 'screens/stockist/manual_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
@@ -211,21 +210,35 @@ final GoRouter _router = GoRouter(
           path: '/stockist/library',
           builder: (_, __) => const MyDesignLibraryScreen(),
         ),
-        GoRoute(
-          path: '/stockist/library/import-mapping',
-          builder: (_, __) => const ImportMappingExcelScreen(),
-        ),
-        // The stockist's OWN folder import — the only honest source of a print name (he named
-        // the files). Windows-only: it reads a folder tree with dart:io.
+        // TWO DOORS. One import BUILDS PRODUCTS, one ADDS STOCK — neither does the other's job.
+        // The product door creates the print + product + box and no stock at all; the stock door
+        // matches every row against the Library and creates NO product (an unmatched row is
+        // reported, not minted). The old mapping importer was a third, broken product door: it
+        // could not express surface / body / box, so every row it made was `Special` + NULL body
+        // + no box. Deleted 14 Jul 2026.
+
+        // PRODUCT DOOR (a) — the stockist's OWN folder: the only honest source of a print name
+        // (he named the files). Windows-only: it reads a folder tree with dart:io.
         GoRoute(
           path: '/stockist/library/import-images',
           builder: (_, __) =>
               const AdminBulkImageImportScreen(forStockist: true),
         ),
+        // PRODUCT DOOR (b) — an Excel sheet. Same screen as the stock door, different purpose.
+        GoRoute(
+          path: '/stockist/library/import-products',
+          builder: (_, state) => ImportExcelStockScreen(
+            initialBrandId: state.extra as String?,
+            purpose: ImportPurpose.products,
+          ),
+        ),
+        // STOCK DOOR — quantities onto products that already exist.
         GoRoute(
           path: '/stockist/stock/import-excel',
-          builder: (_, state) =>
-              ImportExcelStockScreen(initialBrandId: state.extra as String?),
+          builder: (_, state) => ImportExcelStockScreen(
+            initialBrandId: state.extra as String?,
+            purpose: ImportPurpose.stock,
+          ),
         ),
         // The ONE dispatch screen. Opened empty (walk-in) from the dashboard, or
         // with an order pre-attached from Inquiries → Dispatch.
