@@ -141,7 +141,7 @@ both identity constraints (`stockist_library_thickness_apart` EXCLUDE, `stockist
 
 ---
 
-## 5. BUILD ORDER
+## 5. BUILD ORDER  —  ✅ **ALL 7 STEPS SHIPPED 14 Jul 2026** (DB-verified; **not yet run in the app**)
 
 Nothing here is a data migration — **the DB is EMPTY** (clean slate, 14 Jul). This is a rebuild, and
 that is worth a lot: no backfill, no reconciliation, no guessing at old rows.
@@ -154,7 +154,7 @@ that is worth a lot: no backfill, no reconciliation, no guessing at old rows.
 | ~~4~~ | ✅ **DONE** Punch Type + Series free text; Series defaults to `Regular` | Use Type / Behaviour Type **deactivated** — no picker, no import column |
 | ~~5~~ | ✅ **DONE** folder import asks **body + pieces + weight**, no brand | artwork + tile + its PACKING; the thickness falls out. Writes NO box. |
 | ~~6~~ | ✅ **DONE** Library ▸ Packing & covers | packings + which brands cover each + **the word each brand prints**. A cover with stock in it cannot be removed. |
-| **7** | Add Stock picks a **BOX** (tile + packing + cover), not a tile + brand | the picker must show the packing — 10 boxes of 5 ≠ 10 boxes of 4 |
+| ~~7~~ | ✅ **DONE** Add Stock picks the **PACKING** | shown only when the design has more than one. 10 boxes of 5 + 10 of 4 = **two holds, 90 pieces** — not 20 boxes of one packing. |
 
 ### Readers that must move in step 3 (from `pg_proc`)
 `_box_pieces` · `_box_weight` · `_derive_thickness` · `_library_apply_identity` · `my_library` ·

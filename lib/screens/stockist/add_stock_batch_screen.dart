@@ -35,6 +35,14 @@ class _Entry {
   final String quality;
   int qty;
 
+  /// 📦 WHICH PACKING these boxes are. Null = the tile's first (one tile, one packing — the
+  /// overwhelmingly common case).
+  ///
+  /// 🔑 TEN BOXES OF A 5-PIECE PACKING AND TEN OF A 4-PIECE PACKING ARE NOT THE SAME AMOUNT OF
+  /// TILE. A box count means nothing without the packing inside it, so the hold points at a BOX
+  /// (a packing in a brand's cover) and this is what says which.
+  final String? packingId;
+
   /// 🔑 THIS BATCH's box, when the stockist says it is packed differently from the design's.
   /// Null = same as always (the overwhelmingly common case).
   ///
@@ -53,17 +61,18 @@ class _Entry {
     required this.brandName,
     required this.quality,
     required this.qty,
+    this.packingId,
     this.boxPieces,
     this.boxWeightKg,
   });
 
-  /// Same PIECE + brand + quality = the same holding.
+  /// Same BOX + quality = the same holding — and the box is the PACKING in a brand's COVER.
   ///
-  /// The surface is NOT in this key any more, and must not be: it belongs to the piece, and
-  /// `master.id` already is the piece. It used to be here because the surface picker could send
-  /// the stock to a different product than the one chosen — the two could disagree, so both had
-  /// to be in the key. The picker now names the piece, and the surface is inherited.
-  String get key => '${master.id}|${brandId ?? ''}|$quality';
+  /// The packing is in the key because it has to be: ten boxes of a 5-piece packing and ten of a
+  /// 4-piece one are different amounts of tile, and merging them into one row of "20 boxes" says
+  /// nothing. (The surface is not in the key — it belongs to the piece, and `master.id` already IS
+  /// the piece.)
+  String get key => '${master.id}|${brandId ?? ''}|${packingId ?? ''}|$quality';
 }
 
 class _State extends State<AddStockBatchScreen> {
@@ -91,6 +100,10 @@ class _State extends State<AddStockBatchScreen> {
   /// Whether it becomes a new stock line is the 1 mm rule's decision, not theirs.
   int? _selBoxPieces;
   double? _selBoxWeight;
+
+  /// 📦 The PACKING of the selected design that he is holding boxes of. Null until a design with
+  /// more than one packing is chosen — with a single packing there is nothing to ask.
+  String? _selPackingId;
   final _qtyCtrl = TextEditingController();
 
   // Desktop entry bar: one focus node per field, so Tab walks Brand → Design → Quality → Qty and
@@ -100,6 +113,16 @@ class _State extends State<AddStockBatchScreen> {
   final _fDesign = FocusNode();
   final _fQuality = FocusNode();
   final _fQty = FocusNode();
+
+  /// The packing of an ENTRY, for the review table — the box he is counting.
+  String _packingShown(_Entry e) {
+    final list = e.master.packings;
+    if (list.isEmpty) return '';
+    final p = e.packingId == null
+        ? list.first
+        : list.firstWhere((x) => x.id == e.packingId, orElse: () => list.first);
+    return '${p.pieces} pcs · ${_trimKg(p.weightKg)} kg';
+  }
 
   /// The surface to SHOW for an entry. It belongs to the PIECE and is inherited — nobody chose it
   /// here, and nothing here can change it. His own word when he has one, else the canonical.
@@ -310,6 +333,10 @@ class _State extends State<AddStockBatchScreen> {
   void _onDesignChosen(LibraryEntry chosen) {
     setState(() {
       _selMaster = chosen;
+      // Default to its FIRST packing. When a design has only one there is no question to ask, and
+      // the Packing field is not shown at all.
+      _selPackingId =
+          chosen.packings.isNotEmpty ? chosen.packings.first.id : null;
       _selBoxPieces = null;   // the override belonged to the previous design
       _selBoxWeight = null;
       // For M, default the brand to the master's own brand if none picked.
@@ -408,6 +435,7 @@ class _State extends State<AddStockBatchScreen> {
       brandName: _isM ? _brandNameOf(_selBrandId) : null,
       quality: _selQuality,
       qty: qty,
+      packingId: _selPackingId,
       boxPieces: _selBoxPieces,
       boxWeightKg: _selBoxWeight,
     );
@@ -541,6 +569,10 @@ class _State extends State<AddStockBatchScreen> {
           'quality': e.quality,
           'quantity': e.qty,
           'brand_id': e.brandId,
+          // 📦 WHICH PACKING these boxes are. The server turns (design + brand + packing) into a
+          // BOX — a packing in that brand's cover — and the hold points at it. Null = the tile's
+          // first packing. (docs/PACKING_BOX_HOLD_PLAN.md)
+          'packing_id': e.packingId,
           // 🚫 NO SURFACE. The piece already knows its own, and the server inherits it. Sending
           // one that contradicts `library_id` is now REFUSED rather than quietly moving the stock
           // to a different product. (20260714c)
@@ -769,6 +801,28 @@ class _State extends State<AddStockBatchScreen> {
               width: 260,
             ),
             _hField('Size (auto)', _hReadonly(sizeText), width: 100),
+            // 📦 WHICH PACKING? Only asked when this design really has more than one — with a
+            // single packing there is nothing to choose, and a field with one option is noise.
+            //
+            // 🔑 It has to be asked when there IS more than one: ten boxes of a 5-piece packing and
+            // ten of a 4-piece packing are NOT the same amount of tile.
+            if ((_selMaster?.packings.length ?? 0) > 1)
+              _hField(
+                'Packing *',
+                ComboField<String>(
+                  value: _selPackingId,
+                  options: [for (final p in _selMaster!.packings) p.id],
+                  labelOf: (id) {
+                    final p =
+                        _selMaster!.packings.firstWhere((x) => x.id == id);
+                    return '${p.pieces} pcs · ${_trimKg(p.weightKg)} kg';
+                  },
+                  hint: 'Which box?',
+                  hasError: _selPackingId == null,
+                  onSelected: (id) => setState(() => _selPackingId = id),
+                ),
+                width: 170,
+              ),
             // 🚫 NO SURFACE FIELD. The design picker already named the PIECE
             // (`1001 — MATTE`), so the surface is decided; the stock inherits it.
             _hField(
@@ -915,7 +969,11 @@ class _State extends State<AddStockBatchScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       child: _tableRow(
-        design: _displayName(e.master, e.brandId),
+        // The design carries its PACKING, because that is what he is counting boxes of. Without it
+        // a row saying "10 boxes" does not say how much tile.
+        design: _packingShown(e).isEmpty
+            ? _displayName(e.master, e.brandId)
+            : '${_displayName(e.master, e.brandId)}   ·   ${_packingShown(e)}',
         brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
         size: e.master.size.replaceAll(' mm', ''),
         surface: _surfShown(e).isEmpty ? '—' : _surfShown(e),
