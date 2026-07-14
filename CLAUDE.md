@@ -186,28 +186,39 @@ Don't infer a function's signature from its call site.
     leave every row unmatched.
   - 🚫 **No free text under `Special`.** `surface_label` is not identity, so two `Special` tiles told
     apart only by a label would **collide into one product**.
-- 🔑 **Stock entry asks for a surface ONLY when `surface_mode = 'attribute'`** (rare). Otherwise the
-  field is not shown at all: the product already knows its surface and **the stock inherits it**
-  (`stock_add_holding` with no surface = "use the product's own"). Asking a surface at Add Stock is
-  really asking **which product** — and that is only a question for an `attribute` stockist, whose
-  one stamped name covers several surfaces. See `currentStockistAsksSurface`.
+- 🚫 **ADD STOCK NEVER ASKS FOR A SURFACE — from anyone. There is no surface field.** (14 Jul 2026)
+  The stock **inherits the piece's own** (`stock_add_holding` with no surface = "use the product's").
+  - It used to ask, for an `attribute` stockist. That was a **WORKAROUND**: the design picker showed
+    only the **PRINT's** name (`1001`) and could not tell that print's three pieces apart, so the
+    surface dropdown was really asking **which product**. 🔑 **The picker now names the PIECE**
+    (`1001 — MATTE`, see `utils/piece_label.dart`), so the question is answered when he chooses.
+  - ⚠️ **Asking it twice let the two answers DISAGREE.** Choose `1001 — MATTE`, pick surface `CARV`,
+    and `stock_add_holding` **threw the chosen product away** and put the boxes on the **Carving**
+    product — and if no such product existed it **INSERTED ONE**. **Adding stock could MINT a
+    design** (famous's surface list even offers `Golden Series`, which is not a surface).
+  - Now `p_surface` may only **CONFIRM** the piece's surface; a contradiction **RAISES**, and there
+    is **no path from stock to a new product** — the same law as the stock import door.
+  - **Surface is still product identity.** What changed is only **WHERE it is asked**: in the
+    **Library**, where a product is made — never at the stock counter.
 - 🔑 **Brand is NOT product identity.** For an M, a different brand is only a different **NAME** for
   the same print. Brand belongs to the **box**; identity is brand-free. `stockist_library.brand_id`
   survives as a *default/first-seen hint only*. A product's brand names live in
   `stockist_library_brand_names (library_id, brand_id, brand_design_name)`, and **stock is still
   per-brand** (`designs.brand_id`). **Identity is brand-free; commerce is per-brand.**
-- **surface_mode** (`stockists.surface_mode`) describes **how that factory STAMPS ITS BOXES** — the
-  physical box, nothing else. **It has NO influence on identity.**
-  - `attribute` — the stamp carries name **and** surface as two fields (`ANT BIANCO | GLOSSY`). One
-    stamped name covers several surfaces → **stock entry must ask which surface**. **Rare.**
-  - `in_name` — the stamp carries the name only. The name alone identifies one product: they make a
-    single surface, or they encode it in the number range (10001-19999 = Glossy, 20001-29999 = Matt).
-    **Stock entry must NOT ask.** *(Do not read this as "the surface word is inside the name" — it
-    usually isn't. It is simply the default, and it means "don't ask".)*
-  - It once gated a surface *stamp* onto `stockist_library`. That was a **workaround for the old
-    broken key**, not a design — and it left `famous "1001"` carrying a stale `Sugar` label while its
-    stock was Carving/GHR/Matt. Deleted. **Never branch on stockist type to decide identity.**
-  - `brands.surface_mode` still exists but nothing reads it.
+- ⚰️ **surface_mode is DEAD. NOTHING reads it. Do not branch on it, ever.** (`stockists.surface_mode`,
+  `brands.surface_mode`, `currentStockistAsksSurface` — all inert. The columns survive; ignore them.)
+  It described **how a factory STAMPS ITS BOXES** — the physical box, nothing else — and it **never
+  had any influence on identity**. Both of the jobs it was given turned out to be workarounds, and
+  both are gone:
+  1. It gated a surface *stamp* onto `stockist_library` — a workaround for the old broken key. It
+     left `famous "1001"` carrying a stale `Sugar` label while its stock was Carving/GHR/Matt.
+  2. It gated the **surface question at Add Stock** — a workaround for a picker that showed only
+     the print's name. Deleted 14 Jul; the picker names the piece now.
+  - 🔑 **What tells two pieces of one print apart is NOT predictable from the mode.** Live proof:
+    **famous** is `attribute` and forks by **SURFACE** (`1001` = Matt/Carving/GHR); **cura** is
+    `in_name` and forks by **THICKNESS** (`6003 (SV)` = 8.4 mm vs 11.8 mm, same surface). Any code
+    that branches on the mode gets one of them wrong.
+  - **NEVER branch on stockist type to decide identity — or to decide how to DISPLAY identity.**
 - **design_name** is verbatim truth — display the name as stored, never concatenate surface,
   size, or quality into it. (An `in_name` factory's name may *contain* a surface word. Leave it.)
 

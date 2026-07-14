@@ -33,13 +33,6 @@ class _Entry {
   final String? brandId;   // M only; null → the master's own brand
   final String? brandName;
   final String quality;
-
-  /// The admin canonical surface stored on the holding (for filter/dispatch).
-  final String surface;
-
-  /// The stockist's OWN word they picked for it (shown; stored as surface_label).
-  /// (project_per_brand_surface_mode)
-  final String surfaceLabel;
   int qty;
 
   /// 🔑 THIS BATCH's box, when the stockist says it is packed differently from the design's.
@@ -59,16 +52,18 @@ class _Entry {
     required this.brandId,
     required this.brandName,
     required this.quality,
-    required this.surface,
-    this.surfaceLabel = '',
     required this.qty,
     this.boxPieces,
     this.boxWeightKg,
   });
 
-  /// Same design + brand + quality + SURFACE + WORD = the same holding. Includes
-  /// the word so two aliases of one finish stay separate rows.
-  String get key => '${master.id}|${brandId ?? ''}|$quality|$surface|$surfaceLabel';
+  /// Same PIECE + brand + quality = the same holding.
+  ///
+  /// The surface is NOT in this key any more, and must not be: it belongs to the piece, and
+  /// `master.id` already is the piece. It used to be here because the surface picker could send
+  /// the stock to a different product than the one chosen — the two could disagree, so both had
+  /// to be in the key. The picker now names the piece, and the surface is inherited.
+  String get key => '${master.id}|${brandId ?? ''}|$quality';
 }
 
 class _State extends State<AddStockBatchScreen> {
@@ -91,10 +86,6 @@ class _State extends State<AddStockBatchScreen> {
   LibraryEntry? _selMaster;
   String? _selBrandId;
   String _selQuality = 'Premium';
-  /// The stockist's picked WORD (their alias) — the dropdown value. Stored as
-  /// surface_label; its admin canonical (via _canonicalOf) is stored as
-  /// surface_type. (project_per_brand_surface_mode)
-  String _selSurfaceLabel = '';
   /// 🔑 THIS batch's box, when the stockist says these boxes are packed differently. Set in the
   /// form BEFORE Add, because that is when they are looking at the box. Null = same as always.
   /// Whether it becomes a new stock line is the 1 mm rule's decision, not theirs.
@@ -102,50 +93,17 @@ class _State extends State<AddStockBatchScreen> {
   double? _selBoxWeight;
   final _qtyCtrl = TextEditingController();
 
-  // Desktop entry bar: one focus node per field, so Tab walks Brand → Design →
-  // Surface → Quality → Qty and Enter on Qty adds the line. (Size is read-only
-  // and takes no focus, so Tab flows straight past it.)
+  // Desktop entry bar: one focus node per field, so Tab walks Brand → Design → Quality → Qty and
+  // Enter on Qty adds the line. (Size is read-only and takes no focus, so Tab flows straight past
+  // it. There is no Surface field — the design picker already named the piece.)
   final _fBrand = FocusNode();
   final _fDesign = FocusNode();
-  final _fSurface = FocusNode();
   final _fQuality = FocusNode();
   final _fQty = FocusNode();
 
-  /// The stockist's pickable surface options: each alias word with its admin
-  /// finish, plus admin finishes they have no word for yet.
-  List<({String label, String canonical})> _surfOptions = const [];
-
-  /// libraryId → the surface this print was last stocked in, for prefill.
-  Map<String, ({String label, String canonical})> _lastSurfaces = const {};
-
-  /// Distinct labels for the dropdown (first wins on a repeat).
-  List<String> get _surfLabels {
-    final seen = <String>{};
-    final out = <String>[];
-    for (final o in _surfOptions) {
-      if (seen.add(o.label)) out.add(o.label);
-    }
-    return out;
-  }
-
-  /// The admin canonical for a picked word ('None' when None/empty).
-  String _canonicalOf(String label) {
-    final l = label.trim();
-    if (l.isEmpty || l.toLowerCase() == 'none') return 'None';
-    for (final o in _surfOptions) {
-      if (o.label == l) return o.canonical;
-    }
-    return l;
-  }
-
-  /// The word to show for an entry, '' when None.
-  String _surfShown(String label) {
-    final t = label.trim();
-    return t.isEmpty || t.toLowerCase() == 'none' ? '' : t;
-  }
-
-  /// M only: the factory's own convention (its brands share it).
-  bool _stockistUsesSurface = false;
+  /// The surface to SHOW for an entry. It belongs to the PIECE and is inherited — nobody chose it
+  /// here, and nothing here can change it. His own word when he has one, else the canonical.
+  String _surfShown(_Entry e) => pieceSurfaceWord(e.master);
 
   // Top brand filter — narrows the Design picker (M).
   String? _brandFilter;
@@ -168,7 +126,6 @@ class _State extends State<AddStockBatchScreen> {
     _qtyCtrl.dispose();
     _fBrand.dispose();
     _fDesign.dispose();
-    _fSurface.dispose();
     _fQuality.dispose();
     _fQty.dispose();
     super.dispose();
@@ -177,17 +134,11 @@ class _State extends State<AddStockBatchScreen> {
   Future<void> _load() async {
     final masters = await _svc.getMyLibrary();
     final brands = await _svc.getMyBrands();
-    final options = await _svc.getMySurfaceOptions();
-    final lastSurfaces = await _svc.getLastSurfaceByLibrary();
     if (!mounted) return;
     setState(() {
       _masters = masters;
       _pieceSuffix = pieceSuffixes(masters);
       _brands = brands;
-      // surface_mode is loaded once at login — no need to re-fetch the profile here.
-      _stockistUsesSurface = currentStockistAsksSurface;
-      _surfOptions = options;
-      _lastSurfaces = lastSurfaces;
       _loading = false;
     });
   }
@@ -203,48 +154,27 @@ class _State extends State<AddStockBatchScreen> {
     return m.isEmpty ? null : m.first;
   }
 
-  // ── Surface (project_per_brand_surface_mode) ──────────────────────────────
-  // The library holds the PRINT; the surface is chosen HERE, when the tile is
-  // made. Only an M has a convention worth enforcing: it IS the factory, so
-  // 'attribute' means every entry must name a surface.
-  //
-  // A T/W has NO mode. It carries other factories' brands and just records what
-  // the dispatch note said — a factory that ships "Satva White" + "Glossy" gets
-  // the word picked; one that ships "m.satva white" gets None. The picker,
-  // always shown and always offering None, serves both without a setting.
+  // ── Surface ───────────────────────────────────────────────────────────────
 
-  /// Whether the CURRENT selection REQUIRES a surface. M + attribute only.
-  bool get _selNeedsSurface => _selMaster != null && _isM && _stockistUsesSurface;
-
-  /// The surface picker is shown ONLY when the stockist's boxes are stamped with the
-  /// surface as a separate field (M + `attribute` — e.g. famous ceramic). Only then does
-  /// one stamped name cover several surfaces, so only then is "which surface?" a real
-  /// question — and what it is really asking is **which product**.
+  /// 🚫 **ADD STOCK NO LONGER ASKS FOR A SURFACE — nobody sees a surface field here.**
   ///
-  /// Everyone else does NOT see it. Their design name already identifies exactly one
-  /// product (a single surface, or the surface encoded in the number range:
-  /// 10001-19999 = Glossy, 20001-29999 = Matt), so the product already knows its surface
-  /// and the stock inherits it. Asking them to re-state it on every entry is noise.
-  /// These attribute stockists are RARE. (product identity migration)
-  bool get _selShowSurface => _selNeedsSurface;
+  /// It used to, for an M whose boxes stamp the surface as a separate field (`attribute`, e.g.
+  /// famous). But that picker was a WORKAROUND: the design picker showed only the PRINT's name
+  /// (`1001`), which could not tell that print's three pieces apart, so the surface dropdown was
+  /// really asking **which product**. The picker now names the PIECE — `1001 — MATTE` — so the
+  /// question is already answered, and asking it twice meant the two answers could DISAGREE:
+  /// choose `1001 — MATTE`, pick surface `CARV`, and the boxes landed on the **Carving** product
+  /// instead. It could also MINT a product outright (famous's list offers `Golden Series`, which
+  /// is not a surface at all).
+  ///
+  /// The stock now INHERITS the piece's own surface, which is what every other stockist already
+  /// did. Surface is still product identity — the question just belongs in the Library, where a
+  /// product is made, not at the stock counter.
+  /// (20260714c_stock_add_holding_never_creates_a_product)
 
-  /// The admin canonical to send. **Empty when we did not ask** — an empty surface tells
-  /// `stock_add_holding` to INHERIT the product's own surface. It must never be 'None':
-  /// 'None' is not a surface, and sending it would look up a product that no longer
-  /// exists and create a phantom beside the real one.
-  String get _surfaceForEntry =>
-      _selNeedsSurface ? _canonicalOf(_selSurfaceLabel) : '';
-
-  /// The stockist's word to store as surface_label ('' when we did not ask).
-  String get _labelForEntry {
-    if (!_selNeedsSurface) return '';
-    final l = _selSurfaceLabel.trim();
-    return (l.isEmpty || l.toLowerCase() == 'none') ? '' : l;
-  }
-
-  /// Any row in the running list carries a real surface → show the SURFACE column.
-  bool get _showSurfaceCol => _entries
-      .any((e) => e.surface.isNotEmpty && e.surface.toLowerCase() != 'none');
+  /// Show the SURFACE column when any row has one. Every piece has a surface (`surface_type` is
+  /// NOT NULL), so in practice this is always true — it is read from the PIECE, not chosen here.
+  bool get _showSurfaceCol => _entries.any((e) => _surfShown(e).isNotEmpty);
 
   // A master's name under a brand (alias) when present, else its master name.
   /// Names ONE PIECE of tile. The name in front is the BOX's word when a brand is chosen (an M
@@ -386,37 +316,7 @@ class _State extends State<AddStockBatchScreen> {
       if (_isM && _selBrandId == null && chosen.brandId.isNotEmpty) {
         _selBrandId = chosen.brandId;
       }
-      // Prefill the surface this print was last stocked in, so restocking is
-      // one tap. Falls back to the library's own word (M + surface-in-name,
-      // where the surface really is part of the print), then 'None'. Always
-      // editable. When a surface is REQUIRED we leave the last pick standing.
-      if (!_selNeedsSurface) {
-        _selSurfaceLabel = _rememberedSurface(chosen);
-      }
     });
-  }
-
-  /// The surface to prefill for [m]: the one this print was last stocked in,
-  /// else the word on the library row (M + surface-in-name), else 'None'.
-  ///
-  /// Only ever returns something the picker can actually show. The dropdown
-  /// falls back to 'None' for a value it doesn't hold, which would leave the UI
-  /// saying "None" while the entry silently saved something else.
-  String _rememberedSurface(LibraryEntry m) {
-    final labels = _surfLabels;
-    final last = _lastSurfaces[m.id];
-    if (last != null) {
-      final w = last.label.trim();
-      if (labels.contains(w)) return w;
-      // Stock entered before this stockist had a word for that finish: prefill
-      // THEIR word for the same admin canonical, never the bare canonical.
-      final c = last.canonical.trim();
-      for (final o in _surfOptions) {
-        if (o.canonical == c && labels.contains(o.label)) return o.label;
-      }
-    }
-    final w = m.surfaceLabel.trim();
-    return labels.contains(w) ? w : 'None';
   }
 
   Future<void> _pickBrand() async {
@@ -497,12 +397,6 @@ class _State extends State<AddStockBatchScreen> {
       _snack('Pick a brand.', Colors.red);
       return;
     }
-    if (_selNeedsSurface &&
-        (_selSurfaceLabel.trim().isEmpty ||
-            _selSurfaceLabel.toLowerCase() == 'none')) {
-      _snack('Pick a surface.', Colors.red);
-      return;
-    }
     final qty = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
     if (qty <= 0) {
       _snack('Enter a quantity.', Colors.red);
@@ -513,8 +407,6 @@ class _State extends State<AddStockBatchScreen> {
       brandId: _isM ? _selBrandId : null,
       brandName: _isM ? _brandNameOf(_selBrandId) : null,
       quality: _selQuality,
-      surface: _surfaceForEntry,
-      surfaceLabel: _labelForEntry,
       qty: qty,
       boxPieces: _selBoxPieces,
       boxWeightKg: _selBoxWeight,
@@ -537,7 +429,7 @@ class _State extends State<AddStockBatchScreen> {
     final existing = _entries[existingIdx];
     final label =
         '${_displayName(existing.master, existing.brandId)} · '
-        '${_surfShown(existing.surfaceLabel).isNotEmpty ? '${_surfShown(existing.surfaceLabel)} · ' : ''}'
+        '${_surfShown(existing).isNotEmpty ? '${_surfShown(existing)} · ' : ''}'
         '${existing.brandName?.isNotEmpty == true ? '${existing.brandName} · ' : ''}'
         '${existing.quality}';
     final choice = await showDialog<String>(
@@ -648,8 +540,9 @@ class _State extends State<AddStockBatchScreen> {
           'quality': e.quality,
           'quantity': e.qty,
           'brand_id': e.brandId,
-          'surface': e.surface,
-          'surface_label': e.surfaceLabel,
+          // 🚫 NO SURFACE. The piece already knows its own, and the server inherits it. Sending
+          // one that contradicts `library_id` is now REFUSED rather than quietly moving the stock
+          // to a different product. (20260714c)
         });
       }
       final res = await _svc.addInventoryBatch(payload);
@@ -698,7 +591,7 @@ class _State extends State<AddStockBatchScreen> {
                               Expanded(
                                 child: Text(
                                   '${_displayName(e.master, e.brandId)}'
-                                  '${_surfShown(e.surfaceLabel).isNotEmpty ? ' · ${_surfShown(e.surfaceLabel)}' : ''}'
+                                  '${_surfShown(e).isNotEmpty ? ' · ${_surfShown(e)}' : ''}'
                                   '${e.brandName?.isNotEmpty == true ? ' · ${e.brandName}' : ''}'
                                   ' · ${e.quality}',
                                   maxLines: 1,
@@ -835,9 +728,6 @@ class _State extends State<AddStockBatchScreen> {
   Widget _desktopEntryBar() {
     final sizeText =
         _selMaster == null ? '—' : _selMaster!.size.replaceAll(' mm', '');
-    final surfMissing = _selNeedsSurface &&
-        (_selSurfaceLabel.trim().isEmpty ||
-            _selSurfaceLabel.toLowerCase() == 'none');
 
     return Card(
       margin: EdgeInsets.zero,
@@ -878,28 +768,8 @@ class _State extends State<AddStockBatchScreen> {
               width: 260,
             ),
             _hField('Size (auto)', _hReadonly(sizeText), width: 100),
-            // Always in the bar, even before a design is picked — greyed, and
-            // skipped by Tab. It used to appear only once a design was chosen,
-            // which re-flowed the whole row under the stockist's hands.
-            // Only an `attribute` stockist sees this — for everyone else the product
-            // already carries its surface and the stock inherits it.
-            if (_selShowSurface)
-              _hField(
-                'Surface *',
-                ComboField<String>(
-                  focusNode: _fSurface,
-                  enabled: true,
-                  value: _surfaceOptions.contains(_selSurfaceLabel)
-                      ? _selSurfaceLabel
-                      : null,
-                  options: _surfaceOptions,
-                  labelOf: (s) => s,
-                  hint: 'Select',
-                  hasError: surfMissing,
-                  onSelected: (s) => setState(() => _selSurfaceLabel = s),
-                ),
-                width: 150,
-              ),
+            // 🚫 NO SURFACE FIELD. The design picker already named the PIECE
+            // (`1001 — MATTE`), so the surface is decided; the stock inherits it.
             _hField(
               'Quality',
               ComboField<String>(
@@ -936,10 +806,6 @@ class _State extends State<AddStockBatchScreen> {
       ),
     );
   }
-
-  /// The surface words on offer. **'None' is gone** — a tile always has a surface, and
-  /// the picker only appears at all when a surface is genuinely required.
-  List<String> get _surfaceOptions => _surfLabels;
 
   /// Add the line, then put the cursor back on Design — the stockist is always
   /// entering another one.
@@ -1051,7 +917,7 @@ class _State extends State<AddStockBatchScreen> {
         design: _displayName(e.master, e.brandId),
         brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
         size: e.master.size.replaceAll(' mm', ''),
-        surface: _surfShown(e.surfaceLabel).isEmpty ? '—' : _surfShown(e.surfaceLabel),
+        surface: _surfShown(e).isEmpty ? '—' : _surfShown(e),
         quality: e.quality,
         qty: '${e.qty}',
         onQty: () => _editQty(e),
@@ -1236,30 +1102,7 @@ class _State extends State<AddStockBatchScreen> {
                 ),
               ),
             ],
-            // Attribute → required pick; in_name → optional (may tag a surface).
-            if (_selShowSurface) ...[
-              const SizedBox(height: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(_selNeedsSurface ? 'Surface *' : 'Surface',
-                      style: const TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  ComboField<String>(
-                    value: _surfaceOptions.contains(_selSurfaceLabel)
-                        ? _selSurfaceLabel
-                        : (_selNeedsSurface ? null : 'None'),
-                    options: _surfaceOptions,
-                    labelOf: (s) => s,
-                    hasError: _selNeedsSurface &&
-                        (_selSurfaceLabel.trim().isEmpty ||
-                            _selSurfaceLabel.toLowerCase() == 'none'),
-                    onSelected: (s) => setState(() => _selSurfaceLabel = s),
-                  ),
-                ],
-              ),
-            ],
+            // 🚫 NO SURFACE FIELD — see the desktop bar. The piece is already chosen.
             // Each control sits beside the button it belongs with: pick the
             // quality of a design you may still need to create, then type the
             // boxes and Add.
@@ -1675,7 +1518,7 @@ class _State extends State<AddStockBatchScreen> {
                   Text(
                     [
                       e.master.size.replaceAll(' mm', ''),
-                      if (_surfShown(e.surfaceLabel).isNotEmpty) _surfShown(e.surfaceLabel),
+                      if (_surfShown(e).isNotEmpty) _surfShown(e),
                       if (e.brandName?.isNotEmpty == true) e.brandName!,
                       e.quality,
                     ].join(' · '),
