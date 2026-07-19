@@ -42,10 +42,17 @@ Don't infer a function's signature from its call site.
 ### The layering: PRINT → PRODUCT → (BOX) → HOLDING
 
 - 🖼️ **PRINT** = `print_master` — **the ARTWORK, and it is stored ONCE.** Its key is
-  `(stockist_id, lower(print_name), size)`. It owns the **name**, the **size** and the **one image**.
+  `(stockist_id, lower(print_name), size)`. It owns the **name**, the **size** and the **image**.
   **A print has no thickness and no weight — you cannot hold it.** It becomes a product only once a
   surface, a body and a box are declared. A print may exist with **no product**.
   🔑 `print_upsert()` is the **only** way one is created; the image is **first-writer-wins**.
+  - 🖼️ **FACES** — a design ships with 2/3/4 different prints, its **faces**. `print_master.image_url`
+    is **Faces-1** (the card/primary image); the **extra faces (2, 3, 4 …)** live in `print_faces`
+    `(print_id, position≥2, image_url)`. Faces belong to the **artwork** — every tile cut from it
+    carries all of them — and are **portfolio media, NOT identity** (nothing keys on a face). The
+    name is composed **"<print_name> faces-N"**, never stored. Writers: `print_face_add` (appends the
+    next position) · `print_face_delete` (removes one, then re-sequences to stay contiguous). Read
+    via the `faces` array on `my_artworks()`. Managed from the **My Artworks** card only.
   - 🧬 **THE IMAGE DNA IS THE PRINT'S** (`print_dna`) — **Look Type ▸ Natural Name · Design Joint ·
     Print Type · Colour**. It describes the **artwork**, so it belongs to the artwork and **not** to
     a piece cut from it. Tag `1001` once and **all three of its pieces (Matt · Carving · GHR) carry

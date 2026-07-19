@@ -1029,6 +1029,32 @@ class SupabaseDataService {
     }
   }
 
+  /// Adds a **face** to an artwork — Faces-2, 3, 4 … The picture already on the artwork is Faces-1
+  /// (`print_master.image_url`); this appends the next one. The display name is composed
+  /// "<print> faces-N", never stored. [imageUrl] is a Cloudinary secure URL.
+  Future<void> printFaceAdd({
+    required String printId,
+    required String imageUrl,
+  }) async {
+    try {
+      await supabase.rpc('print_face_add', params: {
+        'p_print_id': printId,
+        'p_image_url': imageUrl,
+      });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Removes one extra face and re-sequences the rest so positions stay contiguous (2, 3, 4 …).
+  Future<void> printFaceDelete(String faceId) async {
+    try {
+      await supabase.rpc('print_face_delete', params: {'p_face_id': faceId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Makes a TILE from an artwork: **artwork + surface + body**.
   ///
   /// No thickness here — that comes from the PACKING, which he adds next. A tile with no packing

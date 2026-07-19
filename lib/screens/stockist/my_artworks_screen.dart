@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../models/dna.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
@@ -36,6 +37,10 @@ const _dnaGold = Color(0xFFB9770E);
 
 class _State extends State<MyArtworksScreen> {
   final _data = SupabaseDataService();
+  final _picker = ImagePicker();
+
+  /// The print_id whose faces are mid-upload/delete — its strip shows a spinner and locks.
+  String? _busyFace;
 
   List<Map<String, dynamic>> _artworks = [];
 
@@ -119,6 +124,81 @@ class _State extends State<MyArtworksScreen> {
     } catch (e) {
       // "Pick the parent value first" lands here — Natural Name before its Look Type.
       if (mounted) _snack('$e', error: true);
+    }
+  }
+
+  /// Add a FACE to the artwork — Faces-2, 3, 4 … Faces-1 is the artwork's own image. On desktop we
+  /// open the file dialog straight away (no camera); on a phone we offer camera or gallery.
+  Future<void> _addFace(Map<String, dynamic> a) async {
+    final printId = (a['print_id'] ?? '').toString();
+    ImageSource? source = ImageSource.gallery;
+    if (!isWindowsDesktop) {
+      source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined, color: _navy),
+                title: const Text('Take a photo'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: _navy),
+                title: const Text('Choose from gallery'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (source == null) return;
+    final x = await _picker.pickImage(
+        source: source, maxWidth: 1600, imageQuality: 88);
+    if (x == null || !mounted) return;
+
+    setState(() => _busyFace = printId);
+    try {
+      final url = await CloudinaryService.uploadImage(x.path);
+      if (url == null) throw 'Image upload failed. Try again.';
+      await _data.printFaceAdd(printId: printId, imageUrl: url);
+      await _load();
+    } catch (e) {
+      if (mounted) _snack('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _busyFace = null);
+    }
+  }
+
+  /// Remove one extra face (Faces-1 cannot be removed here — it is the artwork's own image).
+  Future<void> _deleteFace(Map<String, dynamic> a, Map<String, dynamic> face) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove this face?'),
+        content: Text(
+            'Faces-${face['position']} will be removed. The remaining faces renumber.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove', style: TextStyle(color: Colors.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _busyFace = (a['print_id'] ?? '').toString());
+    try {
+      await _data.printFaceDelete((face['id'] ?? '').toString());
+      await _load();
+    } catch (e) {
+      if (mounted) _snack('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _busyFace = null);
     }
   }
 
@@ -317,6 +397,9 @@ class _State extends State<MyArtworksScreen> {
                   const SizedBox(height: 8),
                   // 🧬 THE IMAGE DNA — mapped straight from here.
                   for (final attr in _attrs) _attrRow(a, attr),
+                  const SizedBox(height: 6),
+                  // 🖼️ THE FACES — Faces-1 is the artwork's own image; add the rest here.
+                  _facesStrip(a),
                 ],
               ),
             ),
@@ -326,13 +409,152 @@ class _State extends State<MyArtworksScreen> {
     );
   }
 
+  /// The faces row: Faces-1 (the artwork's own image) + every extra face, each labelled
+  /// "faces-N", each extra with a delete ×, and a trailing "+ Add face" tile.
+  Widget _facesStrip(Map<String, dynamic> a) {
+    final printId = (a['print_id'] ?? '').toString();
+    final face1 = (a['image_url'] ?? '').toString();
+    final extras = [
+      for (final f in (a['faces'] as List?) ?? const [])
+        Map<String, dynamic>.from(f as Map)
+    ];
+    final busy = _busyFace == printId;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(
+          width: 96,
+          child: Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text('Faces:',
+                style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey)),
+          ),
+        ),
+        Expanded(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _faceTile(imageUrl: face1, label: 'faces-1'),
+              for (final f in extras)
+                _faceTile(
+                  imageUrl: (f['image_url'] ?? '').toString(),
+                  label: 'faces-${f['position']}',
+                  onDelete: busy ? null : () => _deleteFace(a, f),
+                ),
+              _addFaceTile(busy: busy, onTap: () => _addFace(a)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _faceTile(
+      {required String imageUrl, required String label, VoidCallback? onDelete}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 48,
+          height: 48,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: imageUrl.isEmpty
+                      ? Container(
+                          color: Colors.grey.shade100,
+                          child: Icon(Icons.image_outlined,
+                              size: 18, color: Colors.grey.shade400))
+                      : CachedNetworkImage(
+                          imageUrl: CloudinaryService.thumbUrl(imageUrl, width: 140),
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) =>
+                              Container(color: Colors.grey.shade200),
+                          errorWidget: (_, __, ___) =>
+                              Container(color: Colors.grey.shade200)),
+                ),
+              ),
+              if (onDelete != null)
+                Positioned(
+                  top: -6,
+                  right: -6,
+                  child: InkWell(
+                    onTap: onDelete,
+                    child: Container(
+                      decoration: const BoxDecoration(
+                          color: Colors.red, shape: BoxShape.circle),
+                      padding: const EdgeInsets.all(2),
+                      child: const Icon(Icons.close,
+                          size: 12, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(label,
+            style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600)),
+      ],
+    );
+  }
+
+  Widget _addFaceTile({required bool busy, required VoidCallback onTap}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: busy ? null : onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: _navy.withValues(alpha: 0.4)),
+              color: _navy.withValues(alpha: 0.04),
+            ),
+            child: busy
+                ? const Center(
+                    child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2)))
+                : const Icon(Icons.add_a_photo_outlined, size: 20, color: _navy),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text('add', style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600)),
+      ],
+    );
+  }
+
   /// One attribute, mapped in place. Multi-value (Colour) is check-chips; single-value is a
   /// dropdown. A CHILD is greyed out until its parent is picked — that is the cascade, and the
   /// server enforces it too ("pick the parent value first").
   Widget _attrRow(Map<String, dynamic> a, DnaAttribute attr) {
     final options = _optionsFor(a, attr);
     final tagged = _tagged(a, attr);
-    final blockedByParent = attr.parentAttributeId != null && options.isEmpty;
+    // Two very different empty states, and they must NOT say the same thing:
+    //   • parent not chosen yet   → "pick a Look Type first"
+    //   • parent chosen, but it simply has no children of this attribute (e.g. no Natural Name
+    //     is defined under "Wood") → say so, don't pretend nothing was picked.
+    final parent = attr.parentAttributeId == null
+        ? null
+        : _attrs.where((x) => x.id == attr.parentAttributeId).firstOrNull;
+    final parentTagged = parent != null && _tagged(a, parent).isNotEmpty;
+    final waitingForParent = parent != null && !parentTagged;
+    final noneForParent = parentTagged && options.isEmpty;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
@@ -351,14 +573,24 @@ class _State extends State<MyArtworksScreen> {
             ),
           ),
           Expanded(
-            child: blockedByParent
+            child: waitingForParent
                 ? Padding(
                     padding: const EdgeInsets.only(top: 7),
                     child: Text('pick a ${_parentName(attr)} first',
                         style: TextStyle(
                             fontSize: 11, color: Colors.grey.shade400)),
                   )
-                : attr.isMulti
+                : noneForParent
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 7),
+                        child: Text(
+                            'no ${attr.name} for ${_parentValueNames(a, parent)}',
+                            style: TextStyle(
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                                color: Colors.grey.shade400)),
+                      )
+                    : attr.isMulti
                     ? Wrap(
                         spacing: 5,
                         runSpacing: 4,
@@ -413,4 +645,14 @@ class _State extends State<MyArtworksScreen> {
           .map((x) => x.name)
           .firstOrNull ??
       'parent';
+
+  /// The name(s) of the parent value(s) this artwork carries — e.g. "Wood" — for the
+  /// "no Natural Name for Wood" hint.
+  String _parentValueNames(Map<String, dynamic> a, DnaAttribute parent) {
+    final ids = _tagged(a, parent).toSet();
+    return parent.values
+        .where((v) => ids.contains(v.id))
+        .map((v) => v.name)
+        .join(', ');
+  }
 }
