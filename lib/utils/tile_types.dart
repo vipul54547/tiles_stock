@@ -47,6 +47,13 @@ void applyTileTypes(List<({String name, double densityKgM3})> types) {
 /// The body types on offer — the table's, once loaded; [kTileTypes] until then.
 List<String> get tileTypeNames => _liveTypes;
 
+/// A THROUGH-BODY tile — coloured all the way through, so the body itself has a colour. Only these
+/// bodies carry a "Body Colour"; a glazed tile's colour is only on the printed face.
+bool bodyHasColour(String tileType) {
+  final t = tileType.trim().toLowerCase();
+  return t == 'full body' || t == 'colour body' || t == 'color body';
+}
+
 /// 🔑 There is NO list of declarable thicknesses, and there must never be one.
 /// Thickness is DERIVED from the BOX — `box_weight / (pieces × area × density)` — and a stockist
 /// cannot know "8.5–9.0 mm"; they read PIECES and WEIGHT off the box. The 0.5 mm band the derived

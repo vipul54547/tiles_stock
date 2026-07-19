@@ -9,12 +9,21 @@ class DnaValue {
   /// (e.g. "Carara".parentValueId = the "Marble" value). Null otherwise.
   final String? parentValueId;
 
-  const DnaValue({required this.id, required this.name, this.parentValueId});
+  /// True for the STOCKIST'S OWN free-text value (editable / deletable); false for an admin
+  /// canonical. Only the pickers that offer edit/delete care about this.
+  final bool isOwn;
+
+  const DnaValue(
+      {required this.id,
+      required this.name,
+      this.parentValueId,
+      this.isOwn = false});
 
   factory DnaValue.fromJson(Map<String, dynamic> j) => DnaValue(
         id: j['id'] as String,
         name: (j['name'] ?? '') as String,
         parentValueId: (j['parent_value_id'] as String?),
+        isOwn: j['is_own'] == true,
       );
 }
 
@@ -61,6 +70,10 @@ class DnaAttribute {
   /// (20260714d_image_dna_lives_on_the_print · `dna_attributes.scope`)
   final String scope;
 
+  /// When non-null, this attribute applies ONLY to these tile_types (bodies) — e.g. Body Colour is
+  /// for {Full Body, Colour Body} only. Null ⇒ every body. (`dna_attributes.tile_type_gate`)
+  final List<String>? tileTypeGate;
+
   final List<DnaValue> values;
 
   const DnaAttribute({
@@ -74,6 +87,7 @@ class DnaAttribute {
     this.parentAttributeId,
     this.freeTextDetail = false,
     this.scope = 'product',
+    this.tileTypeGate,
     this.values = const [],
   });
 
@@ -81,6 +95,10 @@ class DnaAttribute {
 
   /// This attribute describes the ARTWORK, not the piece. See [scope].
   bool get isPrintDna => scope == 'print';
+
+  /// Does this attribute apply to a tile whose body is [tileType]? A null gate applies to all.
+  bool appliesToBody(String tileType) =>
+      tileTypeGate == null || tileTypeGate!.contains(tileType);
 
   factory DnaAttribute.fromJson(Map<String, dynamic> j) => DnaAttribute(
         id: j['id'] as String,
@@ -93,6 +111,9 @@ class DnaAttribute {
         parentAttributeId: (j['parent_attribute_id'] as String?),
         freeTextDetail: j['free_text_detail'] == true,
         scope: (j['scope'] ?? 'product').toString(),
+        tileTypeGate: (j['tile_type_gate'] as List?)
+            ?.map((e) => e.toString())
+            .toList(),
         values: ((j['values'] as List?) ?? const [])
             .map((v) => DnaValue.fromJson(Map<String, dynamic>.from(v as Map)))
             .toList(),

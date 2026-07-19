@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/brand.dart';
 import '../../models/choice_state.dart';
@@ -10,7 +9,9 @@ import '../../services/cloudinary_service.dart';
 import '../../utils/tile_types.dart';
 import '../../utils/dna_chains.dart';
 import '../../utils/platform_kind.dart';
+import '../../utils/body_colour.dart';
 import 'dna_editor_sheet.dart';
+import 'new_design_screen.dart';
 
 /// "24.0" -> "24", "10.1" -> "10.1". Used by both the card chips and the editor.
 String _trimNum(double v) => v % 1 == 0 ? v.toStringAsFixed(0) : v.toString();
@@ -51,8 +52,6 @@ class _State extends State<MyDesignLibraryScreen> {
   /// through them, so these would be invisible — the import would land and show nothing.
   ///
   /// Each becomes a card that says what it is: an artwork with no design cut from it yet.
-  List<Map<String, dynamic>> _artworks = [];
-  List<String> _sizes = [];
   // Surface is part of the PRODUCT's identity — Glossy and Matt of one print are two
   // products — so the editor must be able to pick one. (product identity migration)
   //
@@ -81,196 +80,6 @@ class _State extends State<MyDesignLibraryScreen> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
-  }
-
-  /// Artworks matching the search box. (They have no surface/brand, so the other filters do not
-  /// apply to them — an artwork has none of those things yet.)
-  List<Map<String, dynamic>> get _filteredArtworks {
-    final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return _artworks;
-    return _artworks
-        .where((a) => (a['name'] ?? '').toString().toLowerCase().contains(q))
-        .toList();
-  }
-
-  /// 🖼️ AN ARTWORK WITH NO TILE YET.
-  ///
-  /// This is what a folder import produces, and it is an honest state, not a broken one: he has the
-  /// picture, its size and his name for it — and he has not yet said what it is MADE of, or in which
-  /// SURFACE he sells it. Until he does, there is no tile, no packing and no thickness.
-  ///
-  /// The card says exactly that, and offers the one thing that moves it forward.
-  Widget _artworkCard(Map<String, dynamic> a) {
-    final name = (a['name'] ?? '').toString();
-    final size = (a['size'] ?? '').toString();
-    final img = (a['image_url'] ?? '').toString();
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.orange.shade200),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 60,
-                height: 60,
-                child: img.isEmpty
-                    ? Container(
-                        color: Colors.grey.shade100,
-                        child: Icon(Icons.image_outlined,
-                            color: Colors.grey.shade400))
-                    : CachedNetworkImage(
-                        imageUrl: CloudinaryService.thumbUrl(img, width: 160),
-                        fit: BoxFit.cover,
-                        placeholder: (_, __) =>
-                            Container(color: Colors.grey.shade200),
-                        errorWidget: (_, __, ___) =>
-                            Container(color: Colors.grey.shade200)),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 15)),
-                  const SizedBox(height: 1),
-                  Text(size.replaceAll(' mm', ''),
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                  const SizedBox(height: 7),
-                  Text(
-                    'No design yet — say which SURFACE you sell it in, and what it is MADE of.',
-                    style: TextStyle(
-                        fontSize: 11.5, color: Colors.orange.shade900),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 6),
-            FilledButton.tonalIcon(
-              onPressed: () => _addTileFromArtwork(a),
-              icon: const Icon(Icons.add, size: 17),
-              label: const Text('Add design'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// Cut a TILE from an artwork: **artwork + surface + body**.
-  ///
-  /// 🚫 The surface is compulsory and is NEVER defaulted. It is identity — a wrong one forges a
-  /// different tile — and he is standing right here, so he says it. The body may be left blank
-  /// (honestly NULL, never guessed); without it there is no thickness, and the card will say so.
-  ///
-  /// The PACKING comes next, from the card. A tile with no packing has no thickness.
-  Future<void> _addTileFromArtwork(Map<String, dynamic> a) async {
-    final printId = (a['print_id'] ?? '').toString();
-    SurfaceOption? surface;
-    String? body;
-    var saving = false;
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
-        Future<void> save() async {
-          if (surface == null) {
-            _snack('Pick a surface — every design has one.', error: true);
-            return;
-          }
-          setLocal(() => saving = true);
-          try {
-            await _data.tileAdd(
-                printId: printId,
-                surface: surface!.canonical,
-                tileType: body);
-            if (!ctx.mounted) return;
-            Navigator.pop(ctx);
-            _snack('Design added — now set its packing (pieces + weight).');
-            await _load();
-          } catch (e) {
-            setLocal(() => saving = false);
-            _snack('$e', error: true);
-          }
-        }
-
-        return AlertDialog(
-          title: Text('Add a design from “${a['name']}”'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'The artwork is the picture. A DESIGN is that picture in a surface, made of '
-                  'something — and that is what you sell.',
-                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
-                ),
-                const SizedBox(height: 14),
-                // His OWN WORD, shown with the admin canonical it means ("Raindrops (Sugar)").
-                // The tile stores the canonical — that is what identity is keyed on — while the
-                // word is only how he reads it.
-                DropdownButtonFormField<SurfaceOption>(
-                  initialValue: surface,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Surface *',
-                      border: OutlineInputBorder(),
-                      isDense: true),
-                  items: [
-                    for (final o in _surfaces)
-                      DropdownMenuItem(
-                          value: o, child: Text(_surfaceOptionText(o)))
-                  ],
-                  onChanged:
-                      saving ? null : (v) => setLocal(() => surface = v),
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: body,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                      labelText: 'Made of (body)',
-                      border: OutlineInputBorder(),
-                      isDense: true),
-                  items: [
-                    for (final t in tileTypeNames)
-                      DropdownMenuItem(value: t, child: Text(t))
-                  ],
-                  onChanged: saving ? null : (v) => setLocal(() => body = v),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Leave the body blank if you do not know it yet — it stays blank, and the '
-                  'thickness simply cannot be worked out until you say.',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: saving ? null : () => Navigator.pop(ctx),
-                child: const Text('Cancel')),
-            FilledButton(
-                onPressed: saving ? null : save,
-                child: Text(saving ? 'Adding…' : 'Add design')),
-          ],
-        );
-      }),
-    );
   }
 
   // Distinct sizes present in the library, for the size filter.
@@ -440,10 +249,8 @@ class _State extends State<MyDesignLibraryScreen> {
     final results = await Future.wait([
       _data.getMyBrands(),
       _data.getMyLibrary(),
-      _data.getActiveSizeNames(),
       _data.dnaMyLibraryTags(),
       _data.getMySurfaceOptions(),
-      _data.myArtworksWithoutTiles(),
     ]);
     if (!mounted) return;
     final brands = results[0] as List<Brand>;
@@ -455,14 +262,12 @@ class _State extends State<MyDesignLibraryScreen> {
     setState(() {
       _brands = brands;
       _entries = results[1] as List<LibraryEntry>;
-      _artworks = results[5] as List<Map<String, dynamic>>;
-      _sizes = results[2] as List<String>;
-      _dnaTags = results[3] as Map<String, List<DnaTag>>;
+      _dnaTags = results[2] as Map<String, List<DnaTag>>;
       // De-duplicated by word: two of their aliases can share a display word, and a
       // dropdown needs its values distinct.
       final seen = <String>{};
       _surfaces = [
-        for (final o in results[4] as List<SurfaceOption>)
+        for (final o in results[3] as List<SurfaceOption>)
           if (o.label.trim().isNotEmpty && seen.add(o.label.trim().toLowerCase())) o
       ];
       _loading = false;
@@ -510,47 +315,38 @@ class _State extends State<MyDesignLibraryScreen> {
         ),
       );
 
-  Future<void> _openEditor([LibraryEntry? entry]) async {
-    if (_brands.isEmpty) {
-      _snack('Add a brand first — designs live under a brand.', error: true);
-      return;
-    }
+  /// ✏️ Edit a design — the SAME New Design page in edit mode. The artwork is read-only; identity
+  /// locks once the design holds stock.
+  Future<void> _openEditor(LibraryEntry entry) async {
+    final artworks = await _data.myArtworks();
+    if (!mounted) return;
+    final art = artworks.firstWhere((a) => a['print_id'] == entry.printId,
+        orElse: () => <String, dynamic>{
+              'print_id': entry.printId,
+              'name': entry.masterName,
+              'size': entry.size,
+              'image_url': entry.imageUrl,
+            });
     final saved = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => _LibraryEditorScreen(
-            brands: _brands,
-            sizes: _sizes,
-            surfaces: _surfaces,
-            all: _entries,
-            existing: entry),
-      ),
+          builder: (_) => NewDesignScreen(artwork: art, existing: entry)),
     );
     if (saved == true) _load();
   }
 
-  // "+ Add design" entry. For M the tile's identity spans brands (one box, many
-  // brand-names), so we lead with a BRAND-FIRST guided step: the human enters
-  // through their brand, then SEES the existing boxes (across all brands, with
-  // photos) before a blank form can spawn a duplicate. T/W are silos — brand IS
-  // the identity — so they go straight to the editor. (project_addflow_redesign)
-  Future<void> _addDesign() async {
-    if (_brands.isEmpty) {
-      _snack('Add a brand first — designs live under a brand.', error: true);
+  // "+ New Design" — a design is always CUT FROM AN ARTWORK: pick the artwork, then the full New
+  // Design page. Any artwork can be chosen, including one that ALREADY has a design — that is how a
+  // SECOND surface of the same print is added.
+  Future<void> _pickArtworkThenAddDesign() async {
+    final artworks = await _data.myArtworks();
+    if (!mounted) return;
+    if (artworks.isEmpty) {
+      _snack('No artworks yet — import a folder, or add one in My Artworks.',
+          error: true);
       return;
     }
-    if (currentStockistBusinessType != 'M') {
-      await _openEditor();
-      return;
-    }
-    await _showBrandFirstSheet();
-  }
-
-  // Brand-first guided add (M): pick the brand context, type the tile's name,
-  // and match it VISUALLY against every existing box (cross-brand). The human
-  // either links their brand's name onto an existing tile, or declares it new.
-  Future<void> _showBrandFirstSheet() async {
-    final result = await showModalBottomSheet<_BrandFirstResult>(
+    final chosen = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -558,56 +354,14 @@ class _State extends State<MyDesignLibraryScreen> {
           maxHeight: MediaQuery.of(context).size.height * 0.9),
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => _BrandFirstSheet(brands: _brands, entries: _entries),
+      builder: (_) => _ArtworkPickSheet(artworks: artworks),
     );
-    if (result == null || !mounted) return;
-    if (result.isLink) {
-      await _linkBrandNameToBox(result.box!, result.brandId, result.name);
-    } else {
-      // New tile: open the editor pre-filled with the typed name + brand alias.
-      final saved = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => _LibraryEditorScreen(
-            brands: _brands,
-            sizes: _sizes,
-            surfaces: _surfaces,
-            all: _entries,
-            existing: null,
-            prefillName: result.name,
-            prefillBrandId: result.brandId,
-          ),
-        ),
-      );
-      if (saved == true) _load();
-    }
-  }
-
-  // One existing-box row in the brand-first search: photo + master name + size/
-
-  // Link the typed brand-name onto an EXISTING box (brand-agnostic for M): merge
-  // the name into the box's aliases, keep everything else. No duplicate master.
-  Future<void> _linkBrandNameToBox(
-      LibraryEntry box, String brandId, String name) async {
-    try {
-      await _data.upsertLibraryMaster(
-        id: box.id,
-        size: box.size,
-        masterName: box.masterName,
-        imageUrl: box.imageUrl,
-        brandId: null, // M boxes are brand-agnostic
-        aliases: {...box.aliases, brandId: name},
-        surfaceType: box.surfaceType,
-        stockType: box.stockType,
-        tileType: box.tileType,
-        colour: box.colour,
-        finishLabel: box.finishLabel,
-      );
-      _snack('Added "$name" to "${box.masterName}".');
-      await _load();
-    } catch (e) {
-      _snack('$e', error: true);
-    }
+    if (chosen == null || !mounted) return;
+    final saved = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => NewDesignScreen(artwork: chosen)),
+    );
+    if (saved == true) _load();
   }
 
   // Open the duplicate-review screen with the current groups; reload on return
@@ -1245,11 +999,11 @@ class _State extends State<MyDesignLibraryScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addDesign,
+        onPressed: _pickArtworkThenAddDesign,
         backgroundColor: _navy,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add),
-        label: const Text('Add design'),
+        label: const Text('New Design'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -1258,15 +1012,14 @@ class _State extends State<MyDesignLibraryScreen> {
                 if (_entries.isNotEmpty) _searchBar(),
                 if (_showFilters && _entries.isNotEmpty) _filterChips(),
                 Expanded(
-                  child: _entries.isEmpty && _artworks.isEmpty
+                  child: _entries.isEmpty
                       ? _empty()
                       : Builder(builder: (_) {
                           final list = _filtered;
-                          // One card per PRINT, not per tile. (_byPrint)
+                          // One card per PRINT, not per tile. Only DESIGNS show here — bare
+                          // artworks (no tile yet) live on My Artworks; add one via "+ New Design".
                           final prints = _byPrint(list);
-                          // Artworks with no tile come FIRST: they are the ones waiting for him.
-                          final waiting = _filteredArtworks;
-                          if (prints.isEmpty && waiting.isEmpty) {
+                          if (prints.isEmpty) {
                             return const Center(
                                 child: Text('No designs match.',
                                     style: TextStyle(color: Colors.grey)));
@@ -1274,12 +1027,10 @@ class _State extends State<MyDesignLibraryScreen> {
                           return ListView.separated(
                             padding: EdgeInsets.fromLTRB(12, 4, 12,
                                 90 + MediaQuery.viewPaddingOf(context).bottom),
-                            itemCount: waiting.length + prints.length,
+                            itemCount: prints.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),
-                            itemBuilder: (_, i) => i < waiting.length
-                                ? _artworkCard(waiting[i])
-                                : _printCard(prints[i - waiting.length]),
+                            itemBuilder: (_, i) => _printCard(prints[i]),
                           );
                         }),
                 ),
@@ -1449,7 +1200,7 @@ class _State extends State<MyDesignLibraryScreen> {
                 style: TextStyle(
                     fontWeight: FontWeight.bold, color: Colors.grey.shade600)),
             const SizedBox(height: 4),
-            Text('Tap "Add design" to create your first master.',
+            Text('Tap "New Design" to cut your first design from an artwork.',
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
           ],
         ),
@@ -2131,7 +1882,30 @@ class _State extends State<MyDesignLibraryScreen> {
                   children: [
                     _surfaceChip(e),
                     _bodyChip(e),
+                    if (e.bodyColour != null) _bodyColourChip(e.bodyColour!),
                     _thicknessChip(e, forked),
+                    // A design is COMPLETE with surface + body + packing. Flag the ones still
+                    // missing a compulsory field so he can finish them.
+                    if (e.tileType.trim().isEmpty || e.thicknessMm == null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          e.tileType.trim().isEmpty && e.thicknessMm == null
+                              ? 'Incomplete · needs body + packing'
+                              : e.tileType.trim().isEmpty
+                                  ? 'Incomplete · needs body'
+                                  : 'Incomplete · needs packing',
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.orange.shade900),
+                        ),
+                      ),
                   ],
                 ),
                 // THE BOXES: one row per brand — the name it stamps + how it packs.
@@ -2168,7 +1942,8 @@ class _State extends State<MyDesignLibraryScreen> {
                   await showDnaEditor(context,
                       libraryId: e.id,
                       designName: e.masterName,
-                      scope: 'product');
+                      scope: 'product',
+                      tileType: e.tileType);
                   await _reloadDnaTags();
                 },
               ),
@@ -2270,6 +2045,37 @@ class _State extends State<MyDesignLibraryScreen> {
     );
   }
 
+  /// 🎨 The BODY COLOUR — identity for a Full/Colour Body, so it is shown as a chip (swatch + name)
+  /// to tell two body-colour products of one print+surface apart.
+  Widget _bodyColourChip(Map<String, dynamic> bc) {
+    final name = (bc['name'] ?? '').toString();
+    return Container(
+      padding: const EdgeInsets.fromLTRB(4, 3, 8, 3),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 13,
+          height: 13,
+          decoration: BoxDecoration(
+            color: bodyColourSwatch(bc),
+            borderRadius: BorderRadius.circular(3),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.12)),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(name,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade800)),
+      ]),
+    );
+  }
+
   /// The THICKNESS — DERIVED from the box, never typed. A product forked off the
   /// original by a genuinely different thickness (>1 mm) is marked, so two products of
   /// one print can be told apart at a glance.
@@ -2343,1083 +2149,120 @@ class _State extends State<MyDesignLibraryScreen> {
   }
 }
 
-// ── Brand-first guided "Add design" sheet ────────────────────────────────────
-// Using a proper StatefulWidget (not StatefulBuilder) so the TextEditingController
-// is disposed in dispose() and the FocusScope inside the modal is torn down in
-// the correct order, preventing the _dependents.isEmpty assertion crash.
-class _BrandFirstSheet extends StatefulWidget {
-  final List<Brand> brands;
-  final List<LibraryEntry> entries;
-  const _BrandFirstSheet({required this.brands, required this.entries});
+// ── Pick an artwork to cut a design from ──────────────────────────
+// A design is always a piece of an artwork, so "Add design" starts here: choose the artwork
+// (search by name), then its surface + body. Any artwork qualifies — one that already has a
+// design is how a SECOND surface of the same print is added.
+class _ArtworkPickSheet extends StatefulWidget {
+  final List<Map<String, dynamic>> artworks;
+  const _ArtworkPickSheet({required this.artworks});
   @override
-  State<_BrandFirstSheet> createState() => _BrandFirstSheetState();
+  State<_ArtworkPickSheet> createState() => _ArtworkPickSheetState();
 }
 
-class _BrandFirstSheetState extends State<_BrandFirstSheet> {
-  final _ctrl = TextEditingController();
-  String? _brandId;
+class _ArtworkPickSheetState extends State<_ArtworkPickSheet> {
+  static const _navy = Color(0xFF1B4F72);
+  String _q = '';
 
-  @override
-  void initState() {
-    super.initState();
-    _brandId = widget.brands.length == 1 ? widget.brands.first.id : null;
+  List<Map<String, dynamic>> get _filtered {
+    final q = _q.trim().toLowerCase();
+    if (q.isEmpty) return widget.artworks;
+    return widget.artworks
+        .where((a) => (a['name'] ?? '').toString().toLowerCase().contains(q))
+        .toList();
   }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  String _brandName(String id) => widget.brands
-      .firstWhere((b) => b.id == id, orElse: () => const Brand(id: '', name: '?'))
-      .name;
 
   @override
   Widget build(BuildContext context) {
-    final brand = _brandId == null
-        ? null
-        : widget.brands.firstWhere((b) => b.id == _brandId,
-            orElse: () => widget.brands.first);
-    final q = _ctrl.text.trim().toLowerCase();
-    final candidates = q.isEmpty
-        ? const <LibraryEntry>[]
-        : (widget.entries.where((e) {
-            final hay =
-                '${e.masterName} ${e.aliases.values.join(' ')}'.toLowerCase();
-            return hay.contains(q);
-          }).toList()
-          ..sort((a, b) => a.masterName
-              .toLowerCase()
-              .compareTo(b.masterName.toLowerCase())));
-
-    final mq = MediaQuery.of(context);
+    final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final list = _filtered;
     return Padding(
-      padding: EdgeInsets.only(
-          bottom: mq.viewInsets.bottom + mq.padding.bottom),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Container(
-              width: 40, height: 4,
-              margin: const EdgeInsets.only(top: 8, bottom: 6),
-              decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          if (brand == null) ...[
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, 6),
-              child: Text('Which brand are you adding for?',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: [
-                  for (final b in widget.brands)
-                    ListTile(
-                      leading:
-                          const Icon(Icons.sell_outlined, color: _navy),
-                      title: Text(b.name),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => setState(() => _brandId = b.id),
-                    ),
-                ],
-              ),
-            ),
+      padding: EdgeInsets.only(bottom: bottom),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        builder: (_, scroll) => Column(
+          children: [
             const SizedBox(height: 8),
-          ] else ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text('Add a design for ${brand.name}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16)),
-                  ),
-                  if (widget.brands.length > 1)
-                    TextButton(
-                      onPressed: () => setState(() => _brandId = null),
-                      child: const Text('Change'),
-                    ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-              child: Text(
-                  'Type the name. If this tile is already yours under '
-                  'another brand, pick it below — don\'t make a duplicate.',
-                  style:
-                      TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+            Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2))),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 10, 16, 6),
+              child: Row(children: [
+                Icon(Icons.image_outlined, color: _navy, size: 20),
+                SizedBox(width: 8),
+                Text('Add a design — pick its artwork',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              ]),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: TextField(
-                controller: _ctrl,
-                textCapitalization: TextCapitalization.words,
-                onChanged: (_) => setState(() {}),
+                autofocus: true,
+                onChanged: (v) => setState(() => _q = v),
                 decoration: InputDecoration(
-                  hintText: 'Tile name in ${brand.name}',
-                  prefixIcon: const Icon(Icons.search),
-                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  hintText: 'Search artwork name…',
                   isDense: true,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10)),
                 ),
               ),
             ),
-            if (q.isNotEmpty)
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  children: [
-                    if (candidates.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                            'No existing tile matches "${_ctrl.text.trim()}".',
-                            style:
-                                TextStyle(color: Colors.grey.shade600)),
-                      )
-                    else
-                      for (final c in candidates)
-                        _candidateCard(context, c, brand.id),
-                  ],
-                ),
-              ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => Navigator.pop(
-                      context,
-                      _BrandFirstResult.create(
-                          brand.id, _ctrl.text.trim())),
-                  icon: const Icon(Icons.add),
-                  label: Text(q.isEmpty
-                      ? 'Create a new tile'
-                      : 'None of these — create new tile'),
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: _navy,
-                      side: const BorderSide(color: _navy),
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 12)),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _candidateCard(
-      BuildContext context, LibraryEntry e, String brandId) {
-    final already = (e.aliases[brandId] ?? '').trim().isNotEmpty;
-    final sub = e.size.replaceAll(' mm', '');
-    void onLink() => Navigator.pop(
-        context, _BrandFirstResult.link(e, brandId, _ctrl.text.trim()));
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: ListTile(
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(6),
-          child: e.imageUrl.isEmpty
-              ? Container(
-                  width: 48, height: 48,
-                  color: Colors.grey.shade200,
-                  child: Icon(Icons.image_outlined,
-                      color: Colors.grey.shade400, size: 22))
-              : CachedNetworkImage(
-                  imageUrl:
-                      CloudinaryService.thumbUrl(e.imageUrl, width: 120),
-                  width: 48, height: 48, fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(
-                      width: 48, height: 48, color: Colors.grey.shade200),
-                  errorWidget: (_, __, ___) => Container(
-                      width: 48, height: 48, color: Colors.grey.shade200),
-                ),
-        ),
-        title: Text(e.masterName,
-            maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(sub,
-                style: TextStyle(
-                    fontSize: 11, color: Colors.grey.shade600)),
-            if (e.aliases.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Wrap(
-                spacing: 4, runSpacing: 4,
-                children: [
-                  for (final a in e.aliases.entries)
-                    _pill(a.key, a.value),
-                ],
-              ),
-            ],
-          ],
-        ),
-        trailing: already
-            ? Tooltip(
-                message:
-                    'This brand already names it "${e.aliases[brandId]}"',
-                child: Icon(Icons.check_circle,
-                    color: Colors.green.shade600))
-            : TextButton(onPressed: onLink, child: const Text('This one')),
-        onTap: already ? null : onLink,
-      ),
-    );
-  }
-
-  Widget _pill(String brandId, String name) => Container(
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: _navy.withValues(alpha: 0.20)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              color: _navy,
-              child: Text(_brandName(brandId),
-                  style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white)),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              color: _navy.withValues(alpha: 0.06),
-              child: Text(name,
-                  style: const TextStyle(fontSize: 11, color: _navy)),
-            ),
-          ],
-        ),
-      );
-}
-
-/// Outcome of the brand-first guided add sheet: either LINK the typed name onto
-/// an existing box, or CREATE a new tile (open the editor pre-filled).
-class _BrandFirstResult {
-  final bool isLink;
-  final LibraryEntry? box; // set when isLink
-  final String brandId;
-  final String name;
-  const _BrandFirstResult._(this.isLink, this.box, this.brandId, this.name);
-  factory _BrandFirstResult.link(
-          LibraryEntry box, String brandId, String name) =>
-      _BrandFirstResult._(true, box, brandId, name);
-  factory _BrandFirstResult.create(String brandId, String name) =>
-      _BrandFirstResult._(false, null, brandId, name);
-}
-
-/// Full-page editor for one master design: image, size, master name, and the
-/// design name under each brand. The only place these are editable.
-class _LibraryEditorScreen extends StatefulWidget {
-  final List<Brand> brands;
-  final List<String> sizes;
-  // The stockist's own surface WORDS + the canonical each means. Surface is product
-  // identity, so the canonical is what gets stored; the word is what they recognise.
-  final List<SurfaceOption> surfaces;
-  final List<LibraryEntry> all; // for live duplicate detection
-  final LibraryEntry? existing;
-  // Brand-first guided add: a new tile arrives pre-filled with the typed name
-  // (master + that brand's alias) so the human doesn't re-type. (null = blank.)
-  final String? prefillName;
-  final String? prefillBrandId;
-  const _LibraryEditorScreen(
-      {required this.brands,
-      required this.sizes,
-      required this.surfaces,
-      required this.all,
-      this.existing,
-      this.prefillName,
-      this.prefillBrandId});
-  @override
-  State<_LibraryEditorScreen> createState() => _EditorState();
-}
-
-class _EditorState extends State<_LibraryEditorScreen> {
-  final _data = SupabaseDataService();
-  final _picker = ImagePicker();
-
-  final _master = TextEditingController();
-  final Map<String, TextEditingController> _aliasCtrls = {};
-  String _size = '';
-  String _imageUrl = '';
-  bool _uploading = false;
-  bool _saving = false;
-  bool _dirty = false;
-
-  // Identity (physical) attributes — the design IS these. Set once, here.
-  // (pieces/box + box weight are NOT here: they are BOX facts, set per brand on the card's
-  //  box chip. Thickness is derived from them.)
-  final _colourCtrl = TextEditingController();
-  final _finishCtrl = TextEditingController();
-  String _tileType = tileTypeNames.first;
-  // 🔑 DECLARED nominal thickness — part of the product's identity, so it is REQUIRED on a new
-  // design and never guessed. Null on the legacy rows that predate CHAPTER 3; editing one of
-  // those does not force a value, so an image or name can still be fixed.
-  // 🔑 There is NO thickness field, and there must never be one. Thickness is DERIVED —
-  // box weight / (pieces x area x density) — and a stockist cannot know "8.5-9.0 mm"; they read
-  // PIECES and WEIGHT off the box. Asking them to pick a thickness would invite a guess into the
-  // identity key. (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
-  //
-  // A NEW design has no box, so it would have no thickness and no complete identity. So Add-design
-  // asks for the three things that ARE on the box — tile type, box weight, pieces — and the
-  // thickness falls out of them the moment it saves. On EDIT these are hidden: by then several
-  // brands may pack the same print differently, and this form has one value for all of them, so
-  // writing it would flatten every brand's packing. The card's per-brand BOX CHIP owns them.
-  final _piecesCtrl = TextEditingController();
-  final _weightCtrl = TextEditingController();
-  String _stockType = 'Uncertain';
-  static const _stockTypes = ['Continuous', 'One Time', 'Uncertain'];
-  // True once the user edits the master name by hand — until then it mirrors the
-  // default brand's name (locked rule: first upload master name = brand-1 name).
-  bool _masterTouched = false;
-  String? _error;
-
-  bool get _isEdit => widget.existing != null;
-  Brand get _defaultBrand => widget.brands.first;
-
-  // A master is bound to ONE brand: the first brand the user named, else the
-  // default brand. (Identity is now per-brand, so this is the design's brand.)
-  String get _targetBrandId => widget.brands
-      .map((b) => b.id)
-      .firstWhere((id) => _aliasCtrls[id]?.text.trim().isNotEmpty ?? false,
-          orElse: () => _defaultBrand.id);
-
-  /// The SURFACE is part of the product's identity: "Glossy Ant Bianco" and "Matt Ant
-  /// Bianco" are two different products made from one print. So the editor asks for it,
-  /// and it is saved as identity — not left empty.
-  ///
-  /// (This replaces the old rule that "a print carries no surface and this editor never
-  /// asks for one". The product key is now
-  /// `(stockist, lower(master_design_name), size, surface_type)`.)
-  /// The ADMIN CANONICAL — this is the identity, and what is stored as `surface_type`.
-  String _surface = '';
-
-  /// The stockist's own WORD for it ("RAINDROP"), stored as `surface_label`. Display
-  /// only, never a key — keying on it would wedge Add Stock against the product index.
-  String _surfaceWord = '';
-
-  String get _surfaceToSave => _surface;
-
-  /// Their own words, each carrying the canonical it means. **'None' is NOT offered** —
-  /// a tile always has a surface. 'None' was never one, it was "we don't know yet"
-  /// wearing one's clothes, and since surface is part of the product key it produced a
-  /// phantom product sitting beside the real one. (my_surface_options excludes it.)
-  List<SurfaceOption> get _surfaceOptions => widget.surfaces;
-
-  /// The option currently selected, matched on their WORD first (a product may carry a
-  /// word whose canonical several words share) and on the canonical otherwise — an
-  /// older product has a surface_type but no word yet.
-  SurfaceOption? get _selectedSurface {
-    for (final o in _surfaceOptions) {
-      if (_surfaceWord.isNotEmpty &&
-          o.label.trim().toLowerCase() == _surfaceWord.trim().toLowerCase()) {
-        return o;
-      }
-    }
-    for (final o in _surfaceOptions) {
-      if (_surface.isNotEmpty &&
-          o.canonical.trim().toLowerCase() == _surface.trim().toLowerCase()) {
-        return o;
-      }
-    }
-    return null;
-  }
-
-  // The SAME product already in the library, or null. Identity = master name + size +
-  // SURFACE. Brand is NOT identity — for an M a different brand is only a different NAME
-  // for the same print — so it no longer splits the match. Two surfaces are two products
-  // and must NOT flag as duplicates, or the editor would block the very thing the
-  // migration exists to allow.
-  LibraryEntry? get _dupMatch {
-    final name = _master.text.trim().toLowerCase();
-    if (name.isEmpty || _size.isEmpty) return null;
-    for (final e in widget.all) {
-      if (e.id == widget.existing?.id) continue;
-      if (e.masterName.trim().toLowerCase() != name || e.size != _size) continue;
-      if (e.surfaceType.trim().toLowerCase() != _surface.trim().toLowerCase()) {
-        continue; // a different surface is a different product, not a duplicate
-      }
-      return e;
-    }
-    return null;
-  }
-
-  bool get _isDuplicate => _dupMatch != null;
-
-  @override
-  void initState() {
-    super.initState();
-    for (final b in widget.brands) {
-      _aliasCtrls[b.id] = TextEditingController();
-    }
-    final e = widget.existing;
-    if (e != null) {
-      _master.text = e.masterName;
-      _masterTouched = true;
-      _size = e.size;
-      _imageUrl = e.imageUrl;
-      e.aliases.forEach((bid, name) {
-        _aliasCtrls[bid]?.text = name;
-      });
-      _tileType = tileTypeNames.contains(e.tileType) ? e.tileType : tileTypeNames.first;
-      _stockType = _stockTypes.contains(e.stockType) ? e.stockType : 'Uncertain';
-      final surf = e.surfaceType.trim();
-      _surface = (surf.isEmpty || surf.toLowerCase() == 'none') ? '' : surf;
-      // Their word for it, if this product already carries one. Blank is fine: the
-      // dropdown then falls back to matching on the canonical.
-      _surfaceWord = e.surfaceLabel.trim();
-      _colourCtrl.text = e.colour;
-      _finishCtrl.text = e.finishLabel ?? '';
-    } else {
-      if (widget.sizes.isNotEmpty) _size = widget.sizes.first;
-      // Brand-first guided add pre-fills the typed name as the master + the
-      // chosen brand's alias, so the human lands on a half-done form, not blank.
-      final pre = widget.prefillName?.trim() ?? '';
-      if (pre.isNotEmpty) {
-        _master.text = pre;
-        _masterTouched = true;
-        final bid = widget.prefillBrandId;
-        if (bid != null && _aliasCtrls.containsKey(bid)) {
-          _aliasCtrls[bid]!.text = pre;
-        }
-      }
-    }
-    _master.addListener(() {
-      if (_master.text != (widget.existing?.masterName ?? '')) _masterTouched = true;
-      if (mounted) setState(() {}); // refresh the live duplicate hint
-    });
-  }
-
-
-  @override
-  void dispose() {
-    _master.dispose();
-    _colourCtrl.dispose();
-    _finishCtrl.dispose();
-    for (final c in _aliasCtrls.values) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _pickImage() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined, color: _navy),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: _navy),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (source == null) return;
-    final x = await _picker.pickImage(
-        source: source, maxWidth: 1600, imageQuality: 88);
-    if (x == null) return;
-    setState(() => _uploading = true);
-    final url = await CloudinaryService.uploadImage(x.path);
-    if (!mounted) return;
-    setState(() {
-      _uploading = false;
-      if (url != null) {
-        _imageUrl = url;
-        _dirty = true;
-      } else {
-        _error = 'Image upload failed. Try again.';
-      }
-    });
-  }
-
-  // Keep the master name mirroring the default brand's name until the user types
-  // a master name of their own.
-  void _onDefaultAliasChanged(String v) {
-    _dirty = true;
-    if (!_masterTouched) {
-      _master.text = v;
-      _master.selection =
-          TextSelection.collapsed(offset: _master.text.length);
-    }
-  }
-
-  // M auto-link: the entered tile already exists — ADD the brand name(s) the
-  // stockist typed onto that existing box (merged with its current names), so a
-  // duplicate master is never created.
-  Future<void> _offerLinkToExisting(LibraryEntry dup) async {
-    const navy = Color(0xFF1B4F72);
-    final entered = <String, String>{
-      for (final e in _aliasCtrls.entries)
-        if (e.value.text.trim().isNotEmpty) e.key: e.value.text.trim()
-    };
-    // Only the names that are genuinely NEW on the existing tile.
-    final adding = <String, String>{
-      for (final e in entered.entries)
-        if ((dup.aliases[e.key] ?? '').trim().toLowerCase() !=
-            e.value.toLowerCase())
-          e.key: e.value
-    };
-    final brandList = adding.keys
-        .map((id) => widget.brands
-            .firstWhere((b) => b.id == id,
-                orElse: () => const Brand(id: '', name: '?'))
-            .name)
-        .join(', ');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('This tile is already in your library'),
-        content: Text(adding.isEmpty
-            ? '"${dup.masterName}" (${dup.size} · $_surface) already exists. There '
-                'is no new brand name to add.\n\nTo stock it in a different surface, '
-                'pick that surface — it is a separate product.'
-            : '"${dup.masterName}" (${dup.size} · $_surface) already exists. Add your '
-                'name${adding.length > 1 ? 's' : ''} ($brandList) to it instead '
-                'of creating a duplicate?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancel')),
-          if (adding.isNotEmpty)
-            FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: navy),
-                onPressed: () => Navigator.pop(c, true),
-                child: const Text('Add to it')),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await _data.upsertLibraryMaster(
-        id: dup.id,
-        size: dup.size,
-        masterName: dup.masterName,
-        imageUrl: dup.imageUrl,
-        brandId: null, // M boxes are brand-agnostic
-        aliases: {...dup.aliases, ...adding},
-        surfaceType: dup.surfaceType,
-        stockType: dup.stockType,
-        tileType: dup.tileType,
-        colour: dup.colour,
-        finishLabel: dup.finishLabel,
-      );
-      if (!mounted) return;
-      Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _error = '$e';
-      });
-    }
-  }
-
-  Future<void> _save() async {
-    final master = _master.text.trim();
-    if (master.isEmpty) {
-      setState(() => _error = 'Master design name is required.');
-      return;
-    }
-    if (_size.trim().isEmpty) {
-      setState(() => _error = 'Pick a size.');
-      return;
-    }
-    // A tile always has a surface, and it is part of the product's identity — so it
-    // cannot be skipped. 'None' no longer exists.
-    if (_surface.trim().isEmpty ||
-        _surface.trim().toLowerCase() == 'none') {
-      setState(() => _error = 'Pick a surface — it is part of the design.');
-      return;
-    }
-    // A new design must arrive with its box facts, because the THICKNESS derives from them and
-    // thickness is part of the identity. Without them the product has no complete identity.
-    if (widget.existing == null) {
-      final pcs = int.tryParse(_piecesCtrl.text.trim()) ?? 0;
-      final kg = double.tryParse(_weightCtrl.text.trim()) ?? 0;
-      if (pcs <= 0) {
-        setState(() => _error = 'Enter the pieces per box — the thickness is worked out from it.');
-        return;
-      }
-      if (kg <= 0) {
-        setState(() => _error = 'Enter the box weight — the thickness is worked out from it.');
-        return;
-      }
-    }
-    final dup = _dupMatch;
-    if (dup != null) {
-      // M, adding: the same tile already exists — offer to ADD this brand's
-      // name onto it (link), instead of spawning a duplicate master.
-      if (widget.existing == null && currentStockistBusinessType == 'M') {
-        await _offerLinkToExisting(dup);
-        return;
-      }
-      // T/W silo, or renaming onto another tile while editing → a real clash.
-      setState(() =>
-          _error = 'You already have "$master" at size $_size in your library.');
-      return;
-    }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    final aliases = {
-      for (final e in _aliasCtrls.entries) e.key: e.value.text.trim(),
-    };
-    try {
-      // pieces/weight are NOT sent from here. They are BOX facts (product × brand) and each
-      // brand may pack differently — this form has one value for the whole product, so sending
-      // it would flatten every brand's packing into a single number. The Library card's BOX
-      // CHIP owns them, per brand.
-      //
-      // Thickness IS sent: it is the DECLARED nominal and part of the product's identity. The
-      // figure derived from the box is only evidence.
-      // (docs/THICKNESS_AND_BODY_IDENTITY_PLAN.md)
-      final id = await _data.upsertLibraryMaster(
-        id: widget.existing?.id,
-        size: _size,
-        masterName: master,
-        imageUrl: _imageUrl,
-        brandId: _targetBrandId,
-        aliases: aliases,
-        surfaceType: _surfaceToSave,
-        stockType: _stockType,
-        tileType: _tileType,
-        // Only used when CREATING — they seed the product's first box, and the server derives the
-        // thickness from them. Ignored on edit (the per-brand box chip owns the packing).
-        piecesPerBox: widget.existing == null
-            ? int.tryParse(_piecesCtrl.text.trim())
-            : null,
-        boxWeightKg: widget.existing == null
-            ? double.tryParse(_weightCtrl.text.trim())
-            : null,
-        colour: _colourCtrl.text.trim(),
-        finishLabel: _finishCtrl.text.trim(),
-      );
-      // Their WORD for the surface. library_upsert_master only carries the canonical
-      // (surface_type = identity); this is what puts "RAINDROP" on the card beside it,
-      // and it cascades the word onto every holding of the product. Only when they
-      // actually have a word of their own — for a surface they don't, the word IS the
-      // admin name and there is nothing to record.
-      if (_surfaceWord.isNotEmpty &&
-          _surfaceWord.trim().toLowerCase() != _surfaceToSave.trim().toLowerCase()) {
-        await _data.setLibrarySurface(id, _surfaceToSave, label: _surfaceWord);
-      }
-      if (!mounted) return;
-      Navigator.pop(context, true);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _error = '$e';
-      });
-    }
-  }
-
-  Future<bool> _confirmDiscard() async {
-    if (!_dirty || _saving) return true;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Discard changes?'),
-        content: const Text('Your edits to this design will be lost.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Keep editing')),
-          FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Discard')),
-        ],
-      ),
-    );
-    return ok ?? false;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        final nav = Navigator.of(context);
-        if (await _confirmDiscard()) nav.pop();
-      },
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF5F5F5),
-        appBar: AppBar(title: Text(_isEdit ? 'Edit design' : 'Add design')),
-        body: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          children: [
-            // Image
-            Center(
-              child: GestureDetector(
-                onTap: _uploading ? null : _pickImage,
-                child: Container(
-                  width: 140,
-                  height: 140,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: _uploading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _imageUrl.isEmpty
-                          ? Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.add_a_photo_outlined,
-                                    color: Colors.grey.shade400, size: 30),
-                                const SizedBox(height: 6),
-                                Text('Add photo',
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade500)),
-                              ],
-                            )
-                          : Image.network(
-                              CloudinaryService.thumbUrl(_imageUrl, width: 400),
-                              fit: BoxFit.cover),
-                ),
-              ),
-            ),
-            if (_imageUrl.isNotEmpty)
-              Center(
-                child: TextButton.icon(
-                  onPressed: _uploading ? null : _pickImage,
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: const Text('Change photo'),
-                ),
-              ),
-            const SizedBox(height: 12),
-            // Size
-            DropdownButtonFormField<String>(
-              initialValue: _size.isEmpty ? null : _size,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                  labelText: 'Size', border: OutlineInputBorder()),
-              items: widget.sizes
-                  .map((s) => DropdownMenuItem(
-                      value: s, child: Text(s.replaceAll(' mm', ''))))
-                  .toList(),
-              onChanged: (v) => setState(() {
-                _size = v ?? '';
-                _dirty = true;
-              }),
-            ),
-            const SizedBox(height: 14),
-            // Master name
-            TextField(
-              controller: _master,
-              textCapitalization: TextCapitalization.words,
-              decoration: InputDecoration(
-                labelText: currentStockistBusinessType == 'M' ? 'Master design name' : 'Design name',
-                // M: a match isn't an error — saving will add the brand name to
-                // the existing tile, so we hint (not red-error). T/W: hard clash.
-                helperText: (_isDuplicate && currentStockistBusinessType == 'M')
-                    ? 'Already in your library at this surface — saving adds your '
-                        'brand name to it'
-                    : 'Your internal name for this tile',
-                border: const OutlineInputBorder(),
-                errorText: (_isDuplicate && currentStockistBusinessType != 'M')
-                    ? 'You already have "${_master.text.trim()}" at this size '
-                        'in $_surface'
-                    : null,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text('Design name under each brand',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: Colors.grey.shade800)),
-            const SizedBox(height: 2),
-            Text(
-                'The name this same tile is sold as in each brand. Leave blank if '
-                'a brand does not carry it.',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-            const SizedBox(height: 10),
-            ...widget.brands.map(_aliasField),
-            if (widget.brands.length == 1)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline,
-                        size: 14, color: Colors.grey.shade500),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                          'Have more brands? Ask the admin to enable them — a '
-                          'field will appear here for each.',
-                          style: TextStyle(
-                              fontSize: 11, color: Colors.grey.shade600)),
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 20),
-            _detailsSection(),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-            ],
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: _saving ? null : _save,
-                style: FilledButton.styleFrom(
-                    backgroundColor: _navy,
-                    padding: const EdgeInsets.symmetric(vertical: 14)),
-                child: _saving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white))
-                    : Text(_isEdit ? 'Save changes' : 'Add to library'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── Tile details (identity attributes) ─────────────────────────────────────
-  Widget _detailsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Tile details',
-            style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
-                color: Colors.grey.shade800)),
-        const SizedBox(height: 2),
-        Text('These describe the design itself — set once. Stock screens only '
-            'ask for quality and quantity.',
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-        const SizedBox(height: 10),
-        // Surface IS identity: the same print in Glossy and in Matt are two products.
-        // REQUIRED — there is no 'None'. (product identity migration)
-        //
-        // Offered in the stockist's OWN words — "RAINDROP (Sugar)" — because that is
-        // what is stamped on their boxes. The word is saved as surface_label; the
-        // canonical beside it is what actually keys the product.
-        DropdownButtonFormField<SurfaceOption>(
-          initialValue: _selectedSurface,
-          isExpanded: true,
-          decoration: InputDecoration(
-            labelText: 'Surface',
-            isDense: true,
-            border: const OutlineInputBorder(),
-            errorText: _surface.trim().isEmpty ? 'Pick a surface' : null,
-            helperText: 'The same print in another surface is a different product — '
-                'add it separately.',
-            helperMaxLines: 2,
-          ),
-          hint: const Text('Pick a surface'),
-          items: _surfaceOptions
-              .map((s) => DropdownMenuItem(
-                  value: s, child: Text(_surfaceOptionText(s))))
-              .toList(),
-          onChanged: (v) => setState(() {
-            if (v == null) return;
-            _surface = v.canonical;
-            _surfaceWord = v.label;
-            _dirty = true;
-          }),
-        ),
-        const SizedBox(height: 12),
-        _dropdown('Tile type', tileTypeNames, _tileType,
-            (v) => setState(() {
-                  _tileType = v ?? _tileType;
-                  _dirty = true;
-                })),
-        const SizedBox(height: 12),
-        // 🔑 NEW design only: the two facts printed on the box. The THICKNESS is worked out from
-        // them (weight / (pieces × area × density)) and is never asked for — a stockist reads
-        // pieces and weight off the box, they do not know "8.5–9.0 mm".
-        //
-        // Hidden when editing: by then the print may be boxed by several brands that pack it
-        // differently, and this form has one value for all of them. The card's per-brand BOX CHIP
-        // owns them from that point on.
-        if (widget.existing == null) ...[
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _piecesCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Pieces / box',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  onChanged: (_) => setState(() => _dirty = true),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: _weightCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Box weight (kg)',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  onChanged: (_) => setState(() => _dirty = true),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // The thickness, falling out of what they just typed — the same formula the server
-          // uses, so what they see here is what gets stored.
-          Builder(builder: (_) {
-            final band = thicknessRangeLabel(
-                _size,
-                int.tryParse(_piecesCtrl.text.trim()) ?? 0,
-                double.tryParse(_weightCtrl.text.trim()) ?? 0,
-                _tileType);
-            return Text(
-              band == null
-                  ? 'Thickness is worked out from the pieces and box weight.'
-                  : 'Thickness: $band',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: band == null ? FontWeight.normal : FontWeight.w600,
-                color: band == null
-                    ? Colors.grey.shade600
-                    : Colors.teal.shade700,
-              ),
-            );
-          }),
-          const SizedBox(height: 12),
-        ],
-        _dropdown('Restock type', _stockTypes, _stockType,
-            (v) => setState(() {
-                  _stockType = v ?? _stockType;
-                  _dirty = true;
-                })),
-        const SizedBox(height: 12),
-        // Pieces / box + box weight are NOT here any more. They are BOX facts (product ×
-        // brand) — the same print may ship 4/box under one brand and 6/box under another —
-        // and this form has only one value for the whole product, so it could not express
-        // that. They live on the Library card's BOX CHIP, per brand. Thickness is derived
-        // from them and never typed. (docs/BOX_AND_DERIVED_THICKNESS_PLAN.md)
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.grey.shade50,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: Colors.grey.shade300),
-          ),
-          child: Row(children: [
-            Icon(Icons.inventory_2_outlined,
-                size: 15, color: Colors.grey.shade600),
-            const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                  'Pieces / box, box weight and thickness are set per BRAND — tap the box '
-                  'chip on this design in your Library.',
-                  style:
-                      TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+              child: list.isEmpty
+                  ? const Center(
+                      child: Text('No artwork matches.',
+                          style: TextStyle(color: Colors.grey)))
+                  : ListView.separated(
+                      controller: scroll,
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                      itemCount: list.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) => _row(list[i]),
+                    ),
             ),
-          ]),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _colourCtrl,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (_) => setState(() => _dirty = true),
-          decoration: const InputDecoration(
-              labelText: 'Colour (optional)',
-              isDense: true,
-              border: OutlineInputBorder()),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _finishCtrl,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (_) => setState(() => _dirty = true),
-          decoration: const InputDecoration(
-              labelText: 'Your finish word (optional)',
-              helperText: 'e.g. Carving, Lustra, Punch Ghr — shown on the design',
-              helperMaxLines: 2,
-              isDense: true,
-              border: OutlineInputBorder()),
-        ),
-      ],
-    );
-  }
-
-  Widget _dropdown(String label, List<String> items, String value,
-      ValueChanged<String?> onChanged) {
-    final v = items.contains(value) ? value : (items.isEmpty ? null : items.first);
-    return DropdownButtonFormField<String>(
-      initialValue: v,
-      isExpanded: true,
-      decoration: InputDecoration(
-          labelText: label, isDense: true, border: const OutlineInputBorder()),
-      items: items
-          .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-          .toList(),
-      onChanged: onChanged,
-    );
-  }
-
-  Widget _aliasField(Brand b) {
-    final isDefault = b.id == _defaultBrand.id;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: TextField(
-        controller: _aliasCtrls[b.id],
-        textCapitalization: TextCapitalization.words,
-        onChanged: isDefault
-            ? _onDefaultAliasChanged
-            : (_) => _dirty = true,
-        decoration: InputDecoration(
-          labelText: isDefault ? '${b.name} (default)' : b.name,
-          isDense: true,
-          border: const OutlineInputBorder(),
-          prefixIcon: const Icon(Icons.sell_outlined, size: 18),
+          ],
         ),
       ),
+    );
+  }
+
+  Widget _row(Map<String, dynamic> a) {
+    final img = (a['image_url'] ?? '').toString();
+    final tiles = (a['tiles'] as num?)?.toInt() ?? 0;
+    return ListTile(
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: img.isEmpty
+              ? Container(
+                  color: Colors.grey.shade100,
+                  child: Icon(Icons.image_outlined,
+                      size: 18, color: Colors.grey.shade400))
+              : CachedNetworkImage(
+                  imageUrl: CloudinaryService.thumbUrl(img, width: 120),
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(color: Colors.grey.shade200),
+                  errorWidget: (_, __, ___) =>
+                      Container(color: Colors.grey.shade200)),
+        ),
+      ),
+      title: Text((a['name'] ?? '').toString(),
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+      subtitle: Text(
+          '${(a['size'] ?? '').toString().replaceAll(' mm', '')}'
+          '${tiles == 0 ? '  ·  no design yet' : '  ·  $tiles design${tiles == 1 ? '' : 's'}'}',
+          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+      onTap: () => Navigator.pop(context, a),
     );
   }
 }

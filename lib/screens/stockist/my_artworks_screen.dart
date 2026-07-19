@@ -44,6 +44,9 @@ class _State extends State<MyArtworksScreen> {
 
   List<Map<String, dynamic>> _artworks = [];
 
+  /// The admin size list, for the "+ New Artwork" dialog.
+  List<String> _sizes = [];
+
   /// The IMAGE DNA attributes, parent-first so the cascade reads top-down (Look Type, then its
   /// child Natural Name).
   List<DnaAttribute> _attrs = [];
@@ -63,6 +66,7 @@ class _State extends State<MyArtworksScreen> {
     setState(() => _loading = true);
     final artworks = await _data.myArtworks();
     final catalog = await _data.dnaCatalog();
+    final sizes = await _data.getActiveSizeNames();
     if (!mounted) return;
 
     // Only the IMAGE DNA. Everything else describes the TILE (Punch, Application, Series) and has
@@ -81,6 +85,7 @@ class _State extends State<MyArtworksScreen> {
 
     setState(() {
       _artworks = artworks;
+      _sizes = sizes;
       _attrs = image;
       _loading = false;
     });
@@ -240,6 +245,13 @@ class _State extends State<MyArtworksScreen> {
             ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _loading ? null : _addArtwork,
+        backgroundColor: _navy,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('New Artwork'),
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -250,7 +262,7 @@ class _State extends State<MyArtworksScreen> {
                       ? _empty()
                       : ListView.separated(
                           padding: EdgeInsets.fromLTRB(12, 4, 12,
-                              24 + MediaQuery.viewPaddingOf(context).bottom),
+                              90 + MediaQuery.viewPaddingOf(context).bottom),
                           itemCount: list.length,
                           separatorBuilder: (_, __) =>
                               const SizedBox(height: 8),
@@ -260,6 +272,192 @@ class _State extends State<MyArtworksScreen> {
               ],
             ),
     );
+  }
+
+  /// Add ONE artwork by hand — the manual twin of the folder import. Size + name + image, and that
+  /// is all an artwork is. Idempotent on (name, size): re-adding an existing one just adopts it.
+  Future<void> _addArtwork() async {
+    final nameCtrl = TextEditingController();
+    String? size = _sizes.isNotEmpty ? _sizes.first : null;
+    String? imageUrl;
+    var uploading = false;
+    var saving = false;
+
+    Future<String?> pickAndUpload() async {
+      ImageSource? source = ImageSource.gallery;
+      if (!isWindowsDesktop) {
+        source = await showModalBottomSheet<ImageSource>(
+          context: context,
+          builder: (ctx) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading:
+                      const Icon(Icons.photo_camera_outlined, color: _navy),
+                  title: const Text('Take a photo'),
+                  onTap: () => Navigator.pop(ctx, ImageSource.camera),
+                ),
+                ListTile(
+                  leading:
+                      const Icon(Icons.photo_library_outlined, color: _navy),
+                  title: const Text('Choose from gallery'),
+                  onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+      if (source == null) return null;
+      final x =
+          await _picker.pickImage(source: source, maxWidth: 1600, imageQuality: 88);
+      if (x == null) return null;
+      return CloudinaryService.uploadImage(x.path);
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setLocal) {
+        Future<void> save() async {
+          final name = nameCtrl.text.trim();
+          if (name.isEmpty || size == null) {
+            _snack('Give the artwork a name and a size.', error: true);
+            return;
+          }
+          setLocal(() => saving = true);
+          try {
+            await _data.artworkImport(
+                size: size!, name: name, imageUrl: imageUrl ?? '');
+            if (!ctx.mounted) return;
+            Navigator.pop(ctx);
+            _snack('Artwork added.');
+            await _load();
+          } catch (e) {
+            setLocal(() => saving = false);
+            _snack('$e', error: true);
+          }
+        }
+
+        return AlertDialog(
+          title: const Text('New artwork'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'An artwork is a picture: a name, a size, and the image. Nothing else — the '
+                  'surface and body come later, when you cut a design from it.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // The picture.
+                    InkWell(
+                      onTap: (uploading || saving)
+                          ? null
+                          : () async {
+                              setLocal(() => uploading = true);
+                              final url = await pickAndUpload();
+                              if (!ctx.mounted) return;
+                              setLocal(() {
+                                uploading = false;
+                                if (url != null) imageUrl = url;
+                              });
+                              if (url == null) return;
+                            },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        width: 84,
+                        height: 84,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.shade300),
+                          color: Colors.grey.shade50,
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: uploading
+                            ? const Center(
+                                child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2)))
+                            : imageUrl == null
+                                ? Column(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.add_a_photo_outlined,
+                                          color: Colors.grey.shade500),
+                                      const SizedBox(height: 3),
+                                      Text('Add photo',
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.grey.shade600)),
+                                    ],
+                                  )
+                                : CachedNetworkImage(
+                                    imageUrl: CloudinaryService.thumbUrl(
+                                        imageUrl!, width: 220),
+                                    fit: BoxFit.cover),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          TextField(
+                            controller: nameCtrl,
+                            enabled: !saving,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: const InputDecoration(
+                                labelText: 'Artwork name *',
+                                border: OutlineInputBorder(),
+                                isDense: true),
+                          ),
+                          const SizedBox(height: 10),
+                          DropdownButtonFormField<String>(
+                            initialValue: size,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                                labelText: 'Size *',
+                                border: OutlineInputBorder(),
+                                isDense: true),
+                            items: [
+                              for (final s in _sizes)
+                                DropdownMenuItem(
+                                    value: s,
+                                    child: Text(s.replaceAll(' mm', '')))
+                            ],
+                            onChanged: saving
+                                ? null
+                                : (v) => setLocal(() => size = v),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: saving ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: (saving || uploading) ? null : save,
+                child: Text(saving ? 'Adding…' : 'Add')),
+          ],
+        );
+      }),
+    );
+    nameCtrl.dispose();
   }
 
   Widget _empty() => Center(

@@ -1066,12 +1066,52 @@ class SupabaseDataService {
     required String printId,
     required String surface,
     String? tileType,
+    String? bodyColourId,
   }) async {
     try {
       final res = await supabase.rpc('tile_add', params: {
         'p_print_id': printId,
         'p_surface': surface,
         'p_tile_type': tileType,
+        'p_body_colour_id': bodyColourId,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// The stockist's reusable BODY-COLOUR palette: `[{id, name, l, a, b, hex}]`. The NAME is a
+  /// Full/Colour Body design's identity; L·a·b (preferred) or hex is the accuracy spec.
+  Future<List<Map<String, dynamic>>> myBodyColours() async {
+    try {
+      final res = await supabase.rpc('my_body_colours');
+      return [
+        for (final c in (res as List?) ?? const [])
+          Map<String, dynamic>.from(c as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myBodyColours failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Find-or-create a body colour by name (the stockist's own word) with its L·a·b / hex. Returns
+  /// the body_colour id to hang on the design. L·a·b wins over hex.
+  Future<String> bodyColourUpsert({
+    required String name,
+    double? l,
+    double? a,
+    double? b,
+    String? hex,
+  }) async {
+    try {
+      final res = await supabase.rpc('body_colour_upsert', params: {
+        'p_name': name,
+        'p_l': l,
+        'p_a': a,
+        'p_b': b,
+        'p_hex': hex,
       });
       return (res ?? '').toString();
     } catch (e) {
@@ -1332,6 +1372,53 @@ class SupabaseDataService {
         'p_surface': surface,
         'p_label': label,
       });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Change a design's BODY (+ body colour). Identity, so the server refuses it while the design
+  /// holds stock, and raises a plain-English error on a collision.
+  Future<void> librarySetBody(
+      String libraryId, String? tileType, String? bodyColourId) async {
+    try {
+      await supabase.rpc('library_set_body', params: {
+        'p_library_id': libraryId,
+        'p_tile_type': tileType,
+        'p_body_colour_id': bodyColourId,
+      });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Edit a body colour (rename + L·a·b / hex). Raises if the new name clashes with another.
+  Future<void> bodyColourUpdate({
+    required String id,
+    required String name,
+    double? l,
+    double? a,
+    double? b,
+    String? hex,
+  }) async {
+    try {
+      await supabase.rpc('body_colour_update', params: {
+        'p_id': id,
+        'p_name': name,
+        'p_l': l,
+        'p_a': a,
+        'p_b': b,
+        'p_hex': hex,
+      });
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Delete a body colour — refused (with a plain message) when a design still uses it.
+  Future<void> bodyColourDelete(String id) async {
+    try {
+      await supabase.rpc('body_colour_delete', params: {'p_id': id});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }

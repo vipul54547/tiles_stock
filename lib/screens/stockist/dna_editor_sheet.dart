@@ -22,14 +22,20 @@ import 'manage_my_dna_values_screen.dart';
 /// Null shows everything (the old behaviour). The server routes the write either way — the scope
 /// here only decides what is worth *offering*, so the two icons don't both present the same list.
 Future<void> showDnaEditor(BuildContext context,
-    {required String libraryId, required String designName, String? scope}) {
+    {required String libraryId,
+    required String designName,
+    String? scope,
+    String? tileType}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-    builder: (_) =>
-        _DnaEditor(libraryId: libraryId, designName: designName, scope: scope),
+    builder: (_) => _DnaEditor(
+        libraryId: libraryId,
+        designName: designName,
+        scope: scope,
+        tileType: tileType),
   );
 }
 
@@ -37,8 +43,14 @@ class _DnaEditor extends StatefulWidget {
   final String libraryId;
   final String designName;
   final String? scope;
+
+  /// The tile's body, so a body-gated attribute (Body Colour) is only offered when it applies.
+  final String? tileType;
   const _DnaEditor(
-      {required this.libraryId, required this.designName, this.scope});
+      {required this.libraryId,
+      required this.designName,
+      this.scope,
+      this.tileType});
 
   @override
   State<_DnaEditor> createState() => _DnaEditorState();
@@ -76,9 +88,13 @@ class _DnaEditorState extends State<_DnaEditor> {
     final all = await _data.dnaCatalog();
     // Offer only the DNA this editor is for. The image DNA belongs to the artwork and the rest to
     // the piece — showing both lists under both icons is how you end up tagging the wrong thing.
-    final attrs = widget.scope == null
-        ? all
-        : all.where((a) => a.scope == widget.scope).toList();
+    // A body-gated attribute (Body Colour) is offered only when the tile's body matches; if we
+    // don't know the body, don't hide it.
+    final attrs = all
+        .where((a) => widget.scope == null || a.scope == widget.scope)
+        .where((a) =>
+            widget.tileType == null || a.appliesToBody(widget.tileType!))
+        .toList();
     final cur = await _data.dnaForDesign(widget.libraryId);
     final words = await _data.dnaMyWords();
     if (!mounted) return;
@@ -572,7 +588,9 @@ class _DnaEditorState extends State<_DnaEditor> {
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => _FreeTextPickSheet(attribute: a, current: current),
+      // Series always has a value (defaults to Regular), so it is never cleared to None.
+      builder: (ctx) => _FreeTextPickSheet(
+          attribute: a, current: current, allowNone: a.name != 'Series'),
     );
     if (result == null) return;
     if (result.createNew) {
@@ -764,7 +782,12 @@ class _FreeTextPickSheet extends StatelessWidget {
   static const _navy = Color(0xFF1B4F72);
   final DnaAttribute attribute;
   final String? current;
-  const _FreeTextPickSheet({required this.attribute, required this.current});
+
+  /// Whether "— None —" (clear the value) is offered. Off for a field that always has a value,
+  /// like Series (it defaults to Regular and is never blank).
+  final bool allowNone;
+  const _FreeTextPickSheet(
+      {required this.attribute, required this.current, this.allowNone = true});
 
   @override
   Widget build(BuildContext context) {
@@ -780,13 +803,17 @@ class _FreeTextPickSheet extends StatelessWidget {
                 style:
                     const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
           ),
-          ListTile(
-            leading: Icon(
-                current == null ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: current == null ? _navy : Colors.grey),
-            title: const Text('— None —'),
-            onTap: () => Navigator.pop(context, const _FreeTextPick.value(null)),
-          ),
+          if (allowNone)
+            ListTile(
+              leading: Icon(
+                  current == null
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: current == null ? _navy : Colors.grey),
+              title: const Text('— None —'),
+              onTap: () =>
+                  Navigator.pop(context, const _FreeTextPick.value(null)),
+            ),
           ...options.map((v) => ListTile(
                 leading: Icon(
                     current == v.name

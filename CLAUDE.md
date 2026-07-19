@@ -105,9 +105,18 @@ Don't infer a function's signature from its call site.
   It has **no name, no size and no image of its own** — it points at a print (`print_id`, NOT NULL).
   Its identity is:
 
-      print_id + surface_type + tile_type
+      print_id + surface_type + tile_type + body_colour_id
       + thickness, which separates products ONLY when it differs by MORE THAN 1 mm
       (EXCLUDE stockist_library_thickness_apart · UNIQUE stockist_library_uniq_no_thickness)
+
+  🎨 **BODY COLOUR is IDENTITY, and compulsory, for a Full Body / Colour Body tile** (only those
+  two bodies). Same print+surface in body colour "Earth" vs "Milky Body" = **two products**. It is
+  the stockist's own WORD (a `body_colours` palette row: name + optional L·a·b / hex), keyed by
+  `stockist_library.body_colour_id` (NULL for glazed tiles). It is **NOT a DNA tag** — the old
+  "Body Colour" DNA attribute is retired. `tile_add` takes `p_body_colour_id` and enforces the rule;
+  `library_set_body` changes it (refused while the design holds stock). `bodyHasColour()` gates the
+  UI. 🔑 A DESIGN is made on ONE full-page form (`new_design_screen.dart`, create AND edit) —
+  surface · body · body colour · packing · per-design DNA · brand covers.
 
   It carries `surface_type` + `surface_label`, `tile_type`, `thickness_mm`, and the piece-side
   **DNA tags** (`library_dna`, via `library_id`).

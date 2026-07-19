@@ -62,6 +62,13 @@ class LibraryEntry {
   final String colour;
   final String? finishLabel;
 
+  /// 🎨 The body colour that identifies a Full/Colour Body design: `{id, name, l, a, b, hex}`.
+  /// Null for glazed tiles (they have no body colour).
+  final Map<String, dynamic>? bodyColour;
+
+  /// Boxes of stock held on this design. Edit mode locks the identity fields when this is > 0.
+  final int held;
+
   const LibraryEntry({
     required this.id,
     required this.size,
@@ -82,6 +89,8 @@ class LibraryEntry {
     this.createdAt,
     this.colour = '',
     this.finishLabel,
+    this.bodyColour,
+    this.held = 0,
   });
 
   /// Headline composed LIVE = current brand name + clean design name. Falls back
@@ -131,6 +140,10 @@ class LibraryEntry {
       finishLabel: (j['finish_label'] as String?)?.trim().isEmpty ?? true
           ? null
           : (j['finish_label'] as String).trim(),
+      bodyColour: j['body_colour'] == null
+          ? null
+          : Map<String, dynamic>.from(j['body_colour'] as Map),
+      held: (j['held'] as num?)?.toInt() ?? 0,
     );
   }
 }
