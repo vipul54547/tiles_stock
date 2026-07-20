@@ -157,6 +157,7 @@ class _StockistShellState extends State<StockistShell> {
                   '/stockist/book-orders'),
               _item(Icons.precision_manufacturing_outlined, 'Production',
                   '/stockist/production'),
+              _item(Icons.history, 'Runs & history', '/stockist/production/runs'),
             ],
             _item(Icons.play_circle_outline, 'My Videos', '/stockist/videos'),
             const Spacer(),

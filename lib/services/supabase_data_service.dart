@@ -3239,6 +3239,60 @@ class SupabaseDataService {
     }
   }
 
+  /// 🏭 **Material came off the line.** This is the moment it becomes STOCK.
+  ///
+  /// Settles in order: the lines TICKED into this run (⭐urgent first, then oldest), then any other
+  /// open demand for the same box, then free stock. 🚫 **Standard is never allocated** — it is a
+  /// by-product and goes straight to free stock. 🚫 Never across a brand.
+  /// Returns `{boxes, quality, to_this_run, to_other_orders, to_free_stock, orders_closed}`.
+  Future<Map<String, dynamic>> productionDeclareOutput({
+    required String runId,
+    required String boxId,
+    required int boxes,
+    String quality = 'Premium',
+  }) async {
+    try {
+      final res = await supabase.rpc('production_declare_output', params: {
+        'p_run_id': runId,
+        'p_box_id': boxId,
+        'p_boxes': boxes,
+        'p_quality': quality,
+      });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// The production runs, each with its per-cover target and what has been made against it.
+  Future<List<Map<String, dynamic>>> myProductionRuns() async {
+    try {
+      final res = await supabase.rpc('my_production_runs');
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myProductionRuns failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// 📜 **Which design went into production for which buyer, and when.** One row per
+  /// (run, design, buyer) — the question he asked for at the very start.
+  Future<List<Map<String, dynamic>>> myProductionHistory() async {
+    try {
+      final res = await supabase.rpc('my_production_history');
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myProductionHistory failed: $e\n$st');
+      return [];
+    }
+  }
+
   /// 📕 The stockist's booked orders (standing demand, no stock effect).
   Future<List<Map<String, dynamic>>> myBookOrders() async {
     try {
