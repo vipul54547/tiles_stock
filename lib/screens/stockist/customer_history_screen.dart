@@ -52,6 +52,98 @@ class _CustomerListState extends State<CustomerListScreen> {
     _open(created);
   }
 
+  /// ✏️ Correct a customer's details. `upsert_customer` has always taken an id and updated in
+  /// place — nothing in the app ever passed one, so a typo in a name was permanent.
+  Future<void> _editCustomer(Map<String, dynamic> c) async {
+    final name = TextEditingController(text: (c['name'] ?? '').toString());
+    final phone = TextEditingController(text: (c['phone'] ?? '').toString());
+    final city = TextEditingController(text: (c['city'] ?? '').toString());
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Edit customer'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+              controller: name,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Name *')),
+          const SizedBox(height: 8),
+          TextField(
+              controller: phone,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(labelText: 'Phone')),
+          const SizedBox(height: 8),
+          TextField(
+              controller: city,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'City / area')),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (name.text.trim().isEmpty) {
+      _snack('A customer needs a name.', error: true);
+      return;
+    }
+    try {
+      await _svc.upsertCustomer(
+        id: (c['id'] ?? '').toString(),
+        name: name.text.trim(),
+        phone: phone.text.trim().isEmpty ? null : phone.text.trim(),
+        city: city.text.trim().isEmpty ? null : city.text.trim(),
+      );
+      await _load();
+      _snack('Customer updated.');
+    } catch (e) {
+      _snack('$e', error: true);
+    }
+  }
+
+  /// 🗑️ Remove a customer. The server refuses once an order or dispatch is recorded against them
+  /// — that history is the whole reason to save a customer — and says so in plain English.
+  Future<void> _deleteCustomer(Map<String, dynamic> c) async {
+    final nm = (c['name'] ?? '').toString();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove customer?'),
+        content: Text('$nm will be removed from your customer list.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _svc.deleteCustomer((c['id'] ?? '').toString());
+      await _load();
+      _snack('$nm removed.');
+    } catch (e) {
+      _snack('$e', error: true);
+    }
+  }
+
+  void _snack(String m, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(m), backgroundColor: error ? Colors.red : _green));
+  }
+
   void _open(Map<String, dynamic> c) {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => CustomerHistoryScreen(
@@ -123,7 +215,26 @@ class _CustomerListState extends State<CustomerListScreen> {
                                   style: const TextStyle(
                                       fontWeight: FontWeight.w600)),
                               subtitle: where.isEmpty ? null : Text(where),
-                              trailing: const Icon(Icons.chevron_right),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Edit',
+                                    visualDensity: VisualDensity.compact,
+                                    icon: const Icon(Icons.edit_outlined,
+                                        size: 19, color: _navy),
+                                    onPressed: () => _editCustomer(c),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Remove',
+                                    visualDensity: VisualDensity.compact,
+                                    icon: const Icon(Icons.delete_outline,
+                                        size: 19, color: Colors.red),
+                                    onPressed: () => _deleteCustomer(c),
+                                  ),
+                                  const Icon(Icons.chevron_right),
+                                ],
+                              ),
                               onTap: () => _open(c),
                             );
                           },

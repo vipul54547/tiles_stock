@@ -371,6 +371,17 @@ class SupabaseDataService {
     }
   }
 
+  /// 🗑️ Removes a saved customer. **Refused once anything is recorded against them** — the orders
+  /// and dispatches ARE the reason to save a customer, so the server names the counts and keeps
+  /// the row rather than orphaning that history.
+  Future<void> deleteCustomer(String id) async {
+    try {
+      await supabase.rpc('customer_delete', params: {'p_id': id});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
   /// Commit a batch of manual-stock entries in one atomic call. Each entry:
   /// {library_id, quality, quantity, brand_id?, surface}. Adds to P_Stock only
   /// (no stock list). Returns {count, boxes}.
