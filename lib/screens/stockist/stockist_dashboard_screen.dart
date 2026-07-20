@@ -260,6 +260,27 @@ class _State extends State<StockistDashboardScreen> {
   Map<String, LibraryEntry> get _libById =>
       {for (final e in _library) e.id: e};
 
+  /// 🎁 **THE WORD ON THE DEFAULT BRAND'S BOX** for this design — `HG ALASKA BLACK`, not the
+  /// artwork's own name `ALASKA BLACK`.
+  ///
+  /// 🔑 The card is a thing he SELLS, and what he sells is a BOX with a word printed on it. The
+  /// artwork name is the name of the picture; it is his private word for the design and it is not
+  /// what the customer asks for. Falls back to the artwork name only when the default brand has no
+  /// word for this design yet — honest blank, never invented.
+  String _defaultCoverWord(String libraryId, String fallback) {
+    final lib = _libById[libraryId];
+    if (lib == null) return fallback;
+    final def = _brands.where((b) => b.isDefault).firstOrNull;
+    final w = def == null ? null : lib.aliases[def.id];
+    return (w != null && w.trim().isNotEmpty) ? w.trim() : fallback;
+  }
+
+  /// The word a given brand prints for this design, or '' when it has none.
+  String _coverWordOf(String libraryId, String? brandId) {
+    if (brandId == null) return '';
+    return (_libById[libraryId]?.aliases[brandId] ?? '').trim();
+  }
+
   // Whether a HOLDING belongs to [brandId]. Stock is per-brand now, so a holding
   // shows only under its OWN brand — NOT under every brand whose name the master
   // carries (that would show FAMOUS boxes under ANUJ). Legacy holdings with no
@@ -566,7 +587,10 @@ class _State extends State<StockistDashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(first.name, // master name
+                // 🎁 The word on the DEFAULT brand's box — what he actually sells and what a
+                // customer asks for. NOT the artwork's own name, which is his private word for
+                // the picture. (Falls back to it only when the default brand has no word yet.)
+                Text(_defaultCoverWord(first.libraryId, first.name),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -588,7 +612,8 @@ class _State extends State<StockistDashboardScreen> {
                 ),
                 const SizedBox(height: 6),
                 // One row per brand: chip + P(prem+std) + F(prem+std=total).
-                ...brandOrder.map((bId) => _brandStockRow(bId, byBrand[bId]!)),
+                ...brandOrder.map((bId) =>
+                    _brandStockRow(bId, byBrand[bId]!, first.libraryId)),
                 const SizedBox(height: 4),
                 _familyChip(first.libraryId),
               ],
@@ -602,7 +627,7 @@ class _State extends State<StockistDashboardScreen> {
   // One brand's row on the All-brands card. Premium + Standard holdings of that
   // brand are shown inline (amber + blue). Tap → edit; if both qualities exist,
   // ask which one first. (per-brand + quality)
-  Widget _brandStockRow(String? bId, List<TileDesign> holds) {
+  Widget _brandStockRow(String? bId, List<TileDesign> holds, String libraryId) {
     // Resolve the brand label. A brand-agnostic holding (no brand_id at all) is an
     // M "shared box" → label it with the main (default) brand rather than blank.
     final resolved = _brandNm(bId);
@@ -659,6 +684,7 @@ class _State extends State<StockistDashboardScreen> {
                             color: Colors.white)),
                   ),
                 ),
+                _coverWordMark(libraryId, bId),
               ],
             ),
             const SizedBox(height: 3),
@@ -687,6 +713,57 @@ class _State extends State<StockistDashboardScreen> {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 🏷️ **Does this brand print its OWN word, or the default brand's?**
+  ///
+  /// The card title already shows the DEFAULT brand's word. For every other brand there are only
+  /// two interesting answers, and he must be able to tell them apart at a glance without the card
+  /// growing a second column of names:
+  ///
+  ///   • **`(default)`** — this brand prints the same word. Nothing to look up. Grey, quiet.
+  ///   • **🏷️ tag** — this brand has a word of its OWN. Tap it and the word appears.
+  ///
+  /// The default brand itself gets no mark — its word IS the title.
+  Widget _coverWordMark(String libraryId, String? brandId) {
+    if (brandId == null) return const SizedBox.shrink();
+    final def = _brands.where((b) => b.isDefault).firstOrNull;
+    if (def != null && brandId == def.id) return const SizedBox.shrink();
+
+    final mine = _coverWordOf(libraryId, brandId);
+    if (mine.isEmpty) return const SizedBox.shrink(); // no word of its own — say nothing
+
+    final defWord = def == null ? '' : _coverWordOf(libraryId, def.id);
+    final same = defWord.isNotEmpty &&
+        mine.toLowerCase() == defWord.toLowerCase();
+
+    if (same) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 5),
+        child: Text('(default)',
+            style: TextStyle(fontSize: 9.5, color: Colors.grey.shade500)),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: InkWell(
+        onTap: () {
+          final brand = _brandNm(brandId);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            duration: const Duration(seconds: 4),
+            backgroundColor: const Color(0xFF1B4F72),
+            content: Text('$brand prints:  $mine',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ));
+        },
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.all(2),
+          child: Icon(Icons.sell_outlined,
+              size: 13, color: Colors.orange.shade800),
         ),
       ),
     );
