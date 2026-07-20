@@ -48,6 +48,14 @@ class _BookOrdersListScreenState extends State<BookOrdersListScreen> {
 
   int _int(Map<String, dynamic> o, String k) => (o[k] as num?)?.toInt() ?? 0;
 
+  static String _statusLabel(String s) => switch (s) {
+        'open' => 'Open',
+        'in_production' => 'In production',
+        'closed' => 'Closed',
+        'cancelled' => 'Cancelled',
+        _ => 'All',
+      };
+
   List<Map<String, dynamic>> get _filtered {
     final q = _q.trim().toLowerCase();
     return _orders.where((o) {
@@ -110,20 +118,26 @@ class _BookOrdersListScreenState extends State<BookOrdersListScreen> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Row(children: [
-                    for (final s in const ['open', 'closed', 'cancelled', 'all'])
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text(
-                              s == 'all' ? 'All' : '${s[0].toUpperCase()}${s.substring(1)}',
-                              style: const TextStyle(fontSize: 11.5)),
-                          selected: _status == s,
-                          visualDensity: VisualDensity.compact,
-                          onSelected: (_) => setState(() => _status = s),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      // 🔪 A sliced order MOVES TAB — it never vanishes. "It will not show in
+                      // booked order" means not in the OPEN list, not gone.
+                      for (final s in const [
+                        'open', 'in_production', 'closed', 'cancelled', 'all'
+                      ])
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: ChoiceChip(
+                            label: Text(_statusLabel(s),
+                                style: const TextStyle(fontSize: 11.5)),
+                            selected: _status == s,
+                            visualDensity: VisualDensity.compact,
+                            onSelected: (_) => setState(() => _status = s),
+                          ),
                         ),
-                      ),
-                  ]),
+                    ]),
+                  ),
                 ]),
               ),
               Padding(
@@ -216,6 +230,41 @@ class _BookOrdersListScreenState extends State<BookOrdersListScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
             ),
+            // 🔪 A SLICE says where it came from; a PARENT says where its work went. The customer's
+            // own number never changes — only slices take a letter.
+            if ((o['slice'] ?? '').toString().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(children: [
+                  const Icon(Icons.call_split, size: 13, color: _purple),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                        'Slice ${o['slice']} of ${o['parent_token'] ?? ''} — in production',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w600, color: _purple)),
+                  ),
+                ]),
+              ),
+            if (((o['slices'] as List?) ?? const []).isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Wrap(spacing: 6, runSpacing: 4, children: [
+                  for (final sl in (o['slices'] as List))
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFFF3E8F8),
+                          borderRadius: BorderRadius.circular(20)),
+                      child: Text(
+                          '${(sl as Map)['token']} · ${(sl)['boxes']} boxes in production',
+                          style: const TextStyle(
+                              fontSize: 10, fontWeight: FontWeight.w700, color: _purple)),
+                    ),
+                ]),
+              ),
             const SizedBox(height: 8),
             // ordered → made → still to make. No stock figure here on purpose: a booked order has
             // nothing to do with the godown until it is produced.

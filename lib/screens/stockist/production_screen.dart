@@ -393,7 +393,11 @@ class _ProductionScreenState extends State<ProductionScreen> {
       final res = await _data.productionTakeIntoRun(
           name: nameCtl.text.trim(), boxes: boxes, demand: demand);
       if (!mounted) return;
-      _snack('${res['name']} — ${res['boxes']} boxes for ${res['orders']} order(s).');
+      // 🔪 Say when an order was SLICED — the remainder is still in Booked orders under the
+      // customer's own number, and the part taken now lives under a letter.
+      final sliced = (res['slices'] as num?)?.toInt() ?? 0;
+      _snack('${res['name']} — ${res['boxes']} boxes for ${res['orders']} order(s).'
+          '${sliced > 0 ? '  $sliced order(s) split; the rest stays in Booked orders.' : ''}');
       _ticked.clear();
       _plan.clear();
       _picked.clear();
