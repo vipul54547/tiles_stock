@@ -548,13 +548,20 @@ class _State extends State<InquiriesScreen> {
   Widget _orderCard(InquiryOrder o) {
     final (fg, bg) = _statusColors(o.status);
     final expanded = _expandedId == o.id;
+    // 👥 WHO the order is for, best answer first: the app buyer's company, else the SAVED
+    // customer, else the free note. The saved customer used to be skipped entirely, so an order
+    // booked for "pratap ceramic, gorakhpur" showed as just the note he happened to type.
     final buyerName = o.company.trim().isNotEmpty
         ? o.company.trim()
-        : (o.customerHint.trim().isNotEmpty ? o.customerHint.trim() : '');
+        : (o.customerName.trim().isNotEmpty
+            ? o.customerName.trim()
+            : o.customerHint.trim());
     // Primary line = buyer name if we have one, else the order number. Secondary
-    // (small grey) = INQ + #C code.
+    // (small grey) = the note (when it is not already the title) + INQ + #C code.
     final primary = buyerName.isNotEmpty ? buyerName : o.token;
+    final note = o.customerHint.trim();
     final secondary = [
+      if (note.isNotEmpty && note != buyerName) note,
       if (buyerName.isNotEmpty) o.token,
       if (o.connectionCode.isNotEmpty) '#${o.connectionCode}',
     ].join('  ·  ');
@@ -599,6 +606,24 @@ class _State extends State<InquiriesScreen> {
                                       fontWeight: FontWeight.bold,
                                       color: fg)),
                             ),
+                            // 📕 TO MAKE. Book lines and stock lines sit in one list because they
+                            // are one promise to one customer — an order may hold both. This is
+                            // what tells them apart: how much of it does not exist yet.
+                            if (o.bookBoxes > 0) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                    color: const Color(0xFFF3E5F5),
+                                    borderRadius: BorderRadius.circular(20)),
+                                child: Text('📕 ${o.bookBoxes} to make',
+                                    style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF6A1B9A))),
+                              ),
+                            ],
                           ],
                         ),
                         if (secondary.isNotEmpty)
