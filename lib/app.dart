@@ -71,6 +71,7 @@ import 'screens/stockist/all_dispatches_screen.dart';
 import 'screens/stockist/stock_lists_screen.dart';
 import 'screens/stockist/stockist_profile_screen.dart';
 import 'screens/stockist/customer_history_screen.dart';
+import 'screens/stockist/production_screen.dart';
 import 'screens/stockist/stockist_my_videos_screen.dart';
 import 'widgets/stockist_shell.dart';
 import 'services/supabase_auth_service.dart';
@@ -287,6 +288,10 @@ final GoRouter _router = GoRouter(
         GoRoute(
             path: '/stockist/customers',
             builder: (_, __) => const CustomerListScreen()),
+        // 🏭 The FACTORY view of booked demand — what the line has to make.
+        GoRoute(
+            path: '/stockist/production',
+            builder: (_, __) => const ProductionScreen()),
 
 
     GoRoute(path: '/admin', builder: (_, __) => const AdminPanelScreen()),

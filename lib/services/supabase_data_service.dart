@@ -3198,6 +3198,37 @@ class SupabaseDataService {
     }
   }
 
+  /// 🏭 What the line has to make: every OPEN booked line, rolled up per BOX and joined to its
+  /// tile, artwork and DNA. Returns `{as_of, rows[]}`.
+  ///
+  /// ⚠️ `in_stock_now` on each row is **information read at `as_of`, never a reservation** and
+  /// **never subtracted from `remaining_boxes`**. A booked order does not touch stock — he looks at
+  /// "500 ordered" and "120 in the godown right now" and decides himself, on the day.
+  /// (docs/PRODUCTION_PLANNING_PLAN.md)
+  Future<Map<String, dynamic>> myProductionDemand() async {
+    try {
+      final res = await supabase.rpc('my_production_demand');
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('myProductionDemand failed: $e\n$st');
+      return {'as_of': null, 'rows': []};
+    }
+  }
+
+  /// 📕 The stockist's booked orders (standing demand, no stock effect).
+  Future<List<Map<String, dynamic>>> myBookOrders() async {
+    try {
+      final res = await supabase.rpc('my_book_orders');
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myBookOrders failed: $e\n$st');
+      return [];
+    }
+  }
+
   // ── Dispatch link (login-free, read-only dispatch receipt on the web) ───────
 
   /// Stockist mints (or reuses) a share link for one dispatch note; returns its
