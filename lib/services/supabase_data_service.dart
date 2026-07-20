@@ -331,7 +331,7 @@ class SupabaseDataService {
       });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -387,7 +387,7 @@ class SupabaseDataService {
       });
       return res?.toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -412,7 +412,7 @@ class SupabaseDataService {
           .rpc('add_inventory_batch', params: {'p_entries': entries});
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -447,7 +447,7 @@ class SupabaseDataService {
       });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -470,7 +470,7 @@ class SupabaseDataService {
       });
       return res?.toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -509,7 +509,7 @@ class SupabaseDataService {
       await supabase.rpc('set_design_lists',
           params: {'p_design_id': designId, 'p_catalog_ids': catalogIds});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -517,7 +517,7 @@ class SupabaseDataService {
     try {
       await supabase.from('designs').update(data).eq('id', designId);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -525,7 +525,7 @@ class SupabaseDataService {
     try {
       await supabase.from('designs').delete().eq('id', designId);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -542,7 +542,7 @@ class SupabaseDataService {
           params: {'p_token': token, 'p_lines': lines});
       return res == null ? null : Map<String, dynamic>.from(res as Map);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -840,7 +840,7 @@ class SupabaseDataService {
       final res = await supabase.rpc('create_brand', params: {'p_name': name});
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -848,7 +848,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('rename_brand', params: {'p_id': id, 'p_name': name});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -915,7 +915,7 @@ class SupabaseDataService {
       });
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -962,7 +962,7 @@ class SupabaseDataService {
       });
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -995,7 +995,7 @@ class SupabaseDataService {
       });
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1052,7 +1052,7 @@ class SupabaseDataService {
         'p_value_ids': valueIds,
       });
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1069,7 +1069,7 @@ class SupabaseDataService {
         'p_image_url': imageUrl,
       });
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1078,7 +1078,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('print_face_delete', params: {'p_face_id': faceId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1104,7 +1104,7 @@ class SupabaseDataService {
       });
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1142,7 +1142,7 @@ class SupabaseDataService {
       });
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1176,7 +1176,7 @@ class SupabaseDataService {
       });
       return res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1184,7 +1184,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('packing_remove', params: {'p_packing_id': packingId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1216,7 +1216,7 @@ class SupabaseDataService {
           params: {'p_packing_id': packingId, 'p_brand_id': brandId});
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1226,7 +1226,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('box_remove_cover', params: {'p_box_id': boxId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1249,7 +1249,7 @@ class SupabaseDataService {
         'p_name': name,
       });
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1274,7 +1274,7 @@ class SupabaseDataService {
       });
       return (res as num?)?.toInt() ?? 0;
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1316,7 +1316,7 @@ class SupabaseDataService {
       });
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1324,7 +1324,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('library_delete_master', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1338,7 +1338,7 @@ class SupabaseDataService {
       await supabase.rpc('library_merge_masters',
           params: {'p_keep_id': keepId, 'p_drop_id': dropId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1400,7 +1400,7 @@ class SupabaseDataService {
         'p_label': label,
       });
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1415,7 +1415,7 @@ class SupabaseDataService {
         'p_body_colour_id': bodyColourId,
       });
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1438,7 +1438,7 @@ class SupabaseDataService {
         'p_hex': hex,
       });
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1447,7 +1447,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('body_colour_delete', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1457,7 +1457,7 @@ class SupabaseDataService {
       await supabase
           .rpc('set_brand_logo', params: {'p_id': id, 'p_logo': logoUrl});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1466,7 +1466,7 @@ class SupabaseDataService {
       await supabase
           .rpc('set_brand_active', params: {'p_id': id, 'p_active': active});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1523,7 +1523,7 @@ class SupabaseDataService {
       await supabase.rpc('admin_set_brand_status',
           params: {'p_brand_id': brandId, 'p_status': status});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1533,7 +1533,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('admin_delete_brand', params: {'p_brand_id': brandId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1544,7 +1544,7 @@ class SupabaseDataService {
       await supabase.rpc('stockist_set_brand_hidden',
           params: {'p_brand_id': brandId, 'p_hidden': hidden});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1555,7 +1555,7 @@ class SupabaseDataService {
       await supabase.rpc('stockist_set_brand_uses_design_name',
           params: {'p_brand_id': brandId, 'p_on': on});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1567,7 +1567,7 @@ class SupabaseDataService {
           params: {'p_brand_id': brandId});
       return DateTime.parse(res.toString()).toLocal();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1577,7 +1577,7 @@ class SupabaseDataService {
       await supabase.rpc('stockist_cancel_brand_delete',
           params: {'p_brand_id': brandId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1588,7 +1588,7 @@ class SupabaseDataService {
       await supabase.rpc('stockist_set_list_hidden',
           params: {'p_catalog_id': catalogId, 'p_hidden': hidden});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1600,7 +1600,7 @@ class SupabaseDataService {
           params: {'p_catalog_id': catalogId});
       return DateTime.parse(res.toString()).toLocal();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1610,7 +1610,7 @@ class SupabaseDataService {
       await supabase.rpc('stockist_cancel_list_delete',
           params: {'p_catalog_id': catalogId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1622,7 +1622,7 @@ class SupabaseDataService {
           params: {'p_seq': sequentialId, 'p_name': name});
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1635,7 +1635,7 @@ class SupabaseDataService {
           params: {'p_brand_id': brandId, 'p_name': name});
       return (res ?? '').toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -1731,7 +1731,7 @@ class SupabaseDataService {
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
       // Surface the RPC's raise-exception message cleanly to the UI.
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2273,7 +2273,7 @@ class SupabaseDataService {
       final id = res?.toString() ?? '';
       return id.isEmpty ? null : id;
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2322,7 +2322,7 @@ class SupabaseDataService {
           ? Map<String, dynamic>.from(res)
           : <String, dynamic>{};
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2634,7 +2634,7 @@ class SupabaseDataService {
       await supabase.rpc('create_catalog_share_link',
           params: {'p_catalog_id': catalogId, 'p_duration': duration});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2647,7 +2647,7 @@ class SupabaseDataService {
       final map = res is Map ? Map<String, dynamic>.from(res) : null;
       return map?['token'] as String?;
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2656,7 +2656,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('revoke_share_link', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2711,7 +2711,7 @@ class SupabaseDataService {
           .update({'is_active': active})
           .eq('sequential_id', sequentialId);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2870,7 +2870,7 @@ class SupabaseDataService {
           .update({'is_active': active})
           .eq('id', uuid);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -2995,7 +2995,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('hold_order', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3006,7 +3006,7 @@ class SupabaseDataService {
       await supabase.rpc('hold_order_items',
           params: {'p_id': id, 'p_items': items});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3016,7 +3016,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('unhold_order', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3026,7 +3026,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('reject_order', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3036,7 +3036,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('delete_inquiry', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3090,7 +3090,7 @@ class SupabaseDataService {
       });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3101,7 +3101,7 @@ class SupabaseDataService {
       await supabase.rpc('set_inquiry_hint',
           params: {'p_id': inquiryId, 'p_hint': hint});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3122,7 +3122,7 @@ class SupabaseDataService {
       });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3156,7 +3156,7 @@ class SupabaseDataService {
       });
       return Map<String, dynamic>.from(res as Map);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3167,7 +3167,7 @@ class SupabaseDataService {
       await supabase.rpc('book_line_set_urgent',
           params: {'p_item_id': itemId, 'p_urgent': urgent});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3178,7 +3178,7 @@ class SupabaseDataService {
       await supabase.rpc('customer_set_default_brand',
           params: {'p_customer_id': customerId, 'p_brand_id': brandId});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3188,7 +3188,7 @@ class SupabaseDataService {
       await supabase.rpc('admin_set_stockist_book_orders',
           params: {'p_seq': sequentialId, 'p_enabled': enabled});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3202,7 +3202,7 @@ class SupabaseDataService {
           params: {'p_note': dispatchNoteId, 'p_days': days});
       return (Map<String, dynamic>.from(res as Map)['token'])?.toString();
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3226,7 +3226,7 @@ class SupabaseDataService {
       await supabase.rpc('update_order_items',
           params: {'p_id': id, 'p_hint': hint, 'p_lines': lines});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3585,7 +3585,7 @@ class SupabaseDataService {
       }).select().single();
       return row['id'] as String?;
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3596,7 +3596,7 @@ class SupabaseDataService {
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', id);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3607,7 +3607,7 @@ class SupabaseDataService {
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', id);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3615,7 +3615,7 @@ class SupabaseDataService {
     try {
       await supabase.from('stockist_groups').delete().eq('id', id);
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3686,7 +3686,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('reject_registration_request', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -3727,7 +3727,7 @@ class SupabaseDataService {
       await supabase.rpc('set_admin_active',
           params: {'p_uuid': uuid, 'p_active': active});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
@@ -4085,7 +4085,7 @@ class SupabaseDataService {
         }, onConflict: 'stockist_id,raw_text');
       }
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 

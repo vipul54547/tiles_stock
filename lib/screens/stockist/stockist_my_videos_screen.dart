@@ -373,9 +373,9 @@ class _EditSheetState extends State<_EditSheet> {
       if (mounted) {
         setState(() => _saving = false);
         // Surface the server's friendly message (e.g. the 5-shown / 50-library
-        // cap) without the PostgrestException wrapper.
+        // cap) WHOLE — the old `.split(',').first` cut it at its first comma.
         final msg = e.toString().contains('message:')
-            ? e.toString().split('message:').last.split(',').first.trim()
+            ? serverMessage(e)
             : 'Could not save. Please try again.';
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(msg), backgroundColor: Colors.red));
