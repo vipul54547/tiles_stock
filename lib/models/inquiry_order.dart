@@ -20,10 +20,6 @@ class InquiryOrder {
   /// is only a walk-in note. It was being stored all along but never returned, so an order booked
   /// for a real customer showed in the list as just its note.
   final String customerName;
-
-  /// 📕 Boxes on this order still TO BE MADE — the sum of its BOOK lines' outstanding quantity.
-  /// 0 on a pure stock order, which is what tells the two apart in the list.
-  final int bookBoxes;
   /// Where the order came from: app | web | walkin | stockist.
   final String source;
   final String status;
@@ -69,7 +65,6 @@ class InquiryOrder {
     this.connectionCode = '',
     this.customerHint = '',
     this.customerName = '',
-    this.bookBoxes = 0,
     this.source = 'app',
     required this.status,
     required this.createdAt,
@@ -105,7 +100,6 @@ class InquiryOrder {
         connectionCode: (j['connection_code'] ?? '').toString(),
         customerHint:   (j['customer_hint'] ?? '').toString(),
         customerName:   (j['customer_name'] ?? '').toString(),
-        bookBoxes:      (j['book_boxes'] as num?)?.toInt() ?? 0,
         source:         (j['source'] ?? 'app').toString(),
         status:       (j['status'] ?? 'draft').toString(),
         createdAt:    _dt(j['created_at']),

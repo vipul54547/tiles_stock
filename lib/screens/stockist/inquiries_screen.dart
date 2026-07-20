@@ -606,24 +606,6 @@ class _State extends State<InquiriesScreen> {
                                       fontWeight: FontWeight.bold,
                                       color: fg)),
                             ),
-                            // 📕 TO MAKE. Book lines and stock lines sit in one list because they
-                            // are one promise to one customer — an order may hold both. This is
-                            // what tells them apart: how much of it does not exist yet.
-                            if (o.bookBoxes > 0) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                    color: const Color(0xFFF3E5F5),
-                                    borderRadius: BorderRadius.circular(20)),
-                                child: Text('📕 ${o.bookBoxes} to make',
-                                    style: const TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF6A1B9A))),
-                              ),
-                            ],
                           ],
                         ),
                         if (secondary.isNotEmpty)

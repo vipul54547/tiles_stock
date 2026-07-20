@@ -3130,8 +3130,12 @@ class SupabaseDataService {
 
   /// 📕 Books an order against **designs he has not made yet**.
   ///
-  /// [lines] = `[{library_id, brand_id, quantity, quality?, is_urgent?, packing_id?}]` — the TILE,
-  /// the BRAND and how many BOXES, **never a box id**.
+  /// [lines] = `[{library_id, brand_id, quantity, is_urgent?, packing_id?}]` — the TILE, the
+  /// BRAND and how many BOXES, **never a box id**.
+  ///
+  /// 🚫 **No quality.** Production is planned for PREMIUM only; standard is a by-product of the run
+  /// and goes to free stock, allocated to nobody. The grade is a fact about OUTPUT, not about
+  /// demand. (20260720n)
   ///
   /// 🔑 **The brand is PER LINE, not per order.** A BOX is `(packing, brand)` and a line points at
   /// one, so a line has always carried its own brand. One order may mix FAMOUS lines and KHAKHI
@@ -3164,10 +3168,10 @@ class SupabaseDataService {
 
   /// ⭐ Flips one booked line's urgency. **Settable at booking or long after** — a line taken last
   /// week can become urgent today. Production sorts on it; the customer never sees it.
-  Future<void> bookLineSetUrgent(String itemId, bool urgent) async {
+  Future<void> bookLineSetUrgent(String lineId, bool urgent) async {
     try {
       await supabase.rpc('book_line_set_urgent',
-          params: {'p_item_id': itemId, 'p_urgent': urgent});
+          params: {'p_line_id': lineId, 'p_urgent': urgent});
     } catch (e) {
       throw serverMessage(e);
     }

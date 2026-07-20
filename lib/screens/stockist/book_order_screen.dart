@@ -41,7 +41,6 @@ class _Line {
   final LibraryEntry tile;
   String brandId;
   int qty;
-  String? quality; // null = Premium — the grade is settled at the packing line
   bool urgent = false;
 }
 
@@ -293,7 +292,6 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
               'library_id': l.tile.id,
               'brand_id': l.brandId,
               'quantity': l.qty,
-              if (l.quality != null) 'quality': l.quality,
               'is_urgent': l.urgent,
             }
         ],
@@ -561,22 +559,6 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
               keyboardType: TextInputType.number,
               decoration: _dec('Boxes *'),
               onChanged: (v) => l.qty = int.tryParse(v.trim()) ?? 0,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              key: ValueKey('q-${l.tile.id}-${l.brandId}'),
-              initialValue: l.quality,
-              isExpanded: true,
-              decoration: _dec('Quality'),
-              hint: const Text('Premium', style: TextStyle(fontSize: 13)),
-              items: const [
-                DropdownMenuItem(value: null, child: Text('Premium')),
-                DropdownMenuItem(value: 'Standard', child: Text('Standard')),
-                DropdownMenuItem(value: 'Economy', child: Text('Economy')),
-              ],
-              onChanged: _saving ? null : (v) => setState(() => l.quality = v),
             ),
           ),
         ]),
