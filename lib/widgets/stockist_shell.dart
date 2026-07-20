@@ -150,10 +150,14 @@ class _StockistShellState extends State<StockistShell> {
             if (currentStockistCustomersEnabled)
               _item(Icons.people_alt_outlined, 'Customers',
                   '/stockist/customers'),
-            // 🏭 Booked demand, as the factory sees it. Same opt-in as Book Order.
-            if (currentStockistBookOrders)
+            // 📕 Booked demand, twice: who asked (Booked orders) and what the
+            // line must make (Production). Same admin opt-in.
+            if (currentStockistBookOrders) ...[
+              _item(Icons.menu_book_outlined, 'Booked orders',
+                  '/stockist/book-orders'),
               _item(Icons.precision_manufacturing_outlined, 'Production',
                   '/stockist/production'),
+            ],
             _item(Icons.play_circle_outline, 'My Videos', '/stockist/videos'),
             const Spacer(),
             const Divider(

@@ -3229,6 +3229,37 @@ class SupabaseDataService {
     }
   }
 
+  /// One booked order with its lines (`ordered / produced / remaining` per line).
+  Future<Map<String, dynamic>> bookOrderDetail(String id) async {
+    try {
+      final res = await supabase.rpc('book_order_detail', params: {'p_id': id});
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// `open` · `closed` · `cancelled`. Closing by hand is for an order he will never finish —
+  /// producing every line closes it on its own.
+  Future<void> bookOrderSetStatus(String id, String status) async {
+    try {
+      await supabase.rpc('book_order_set_status',
+          params: {'p_id': id, 'p_status': status});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Deletes a booked order. **Refused once anything has been produced against it** — that is
+  /// history, so the server says "cancel it instead".
+  Future<void> bookOrderDelete(String id) async {
+    try {
+      await supabase.rpc('book_order_delete', params: {'p_id': id});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   // ── Dispatch link (login-free, read-only dispatch receipt on the web) ───────
 
   /// Stockist mints (or reuses) a share link for one dispatch note; returns its

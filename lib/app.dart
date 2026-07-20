@@ -71,6 +71,7 @@ import 'screens/stockist/all_dispatches_screen.dart';
 import 'screens/stockist/stock_lists_screen.dart';
 import 'screens/stockist/stockist_profile_screen.dart';
 import 'screens/stockist/customer_history_screen.dart';
+import 'screens/stockist/book_orders_list_screen.dart';
 import 'screens/stockist/production_screen.dart';
 import 'screens/stockist/stockist_my_videos_screen.dart';
 import 'widgets/stockist_shell.dart';
@@ -288,7 +289,11 @@ final GoRouter _router = GoRouter(
         GoRoute(
             path: '/stockist/customers',
             builder: (_, __) => const CustomerListScreen()),
-        // 🏭 The FACTORY view of booked demand — what the line has to make.
+        // 📕 The CUSTOMER view of booked demand — who asked for what.
+        GoRoute(
+            path: '/stockist/book-orders',
+            builder: (_, __) => const BookOrdersListScreen()),
+        // 🏭 The FACTORY view of the same demand — what the line has to make.
         GoRoute(
             path: '/stockist/production',
             builder: (_, __) => const ProductionScreen()),
