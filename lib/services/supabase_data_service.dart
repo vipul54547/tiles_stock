@@ -2730,6 +2730,7 @@ class SupabaseDataService {
         mapUrl:     s['map_url'] ?? '',
         tdShow:     s['td_show'] ?? false,
         customersEnabled: s['customers_enabled'] ?? false,
+        bookOrdersEnabled: s['book_orders_enabled'] ?? false,
         createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
             DateTime.now(),
       );
@@ -3089,6 +3090,72 @@ class SupabaseDataService {
         if (customerId != null) 'p_customer_id': customerId,
       });
       return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  // ── 📕 BOOK ORDER (order a tile that has not been made) ─────────────────────
+
+  /// 📕 Books an order against **designs he has not made yet**.
+  ///
+  /// [lines] = `[{library_id, quantity, quality?, is_urgent?, packing_id?}]` — the TILE and how
+  /// many BOXES, **never a box id**. One [brandId] for the whole order: a customer takes his
+  /// material under one cover, and that cover IS the box.
+  ///
+  /// 🚫 The server RESOLVES the box and **raises** when that brand has no cover on a design
+  /// ("ANUJ has no cover for «ALASKA BLACK» — … tick ANUJ on it first"). Booking may not invent a
+  /// cover, exactly as adding stock may not. Declare it in the Design Library first.
+  ///
+  /// 🏷️ When [customerId] is given and that customer has no brand yet, the brand is remembered on
+  /// him so it prefills next time — it never overwrites one already set.
+  /// Returns `{id, token, connection_code, lines}`. (docs/BOOK_ORDER_PLAN.md)
+  Future<Map<String, dynamic>> createBookOrder({
+    required String hint,
+    required String brandId,
+    required List<Map<String, dynamic>> lines,
+    String? customerId,
+  }) async {
+    try {
+      final res = await supabase.rpc('create_book_order', params: {
+        'p_hint': hint,
+        'p_brand_id': brandId,
+        'p_lines': lines,
+        if (customerId != null) 'p_customer_id': customerId,
+      });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// ⭐ Flips one booked line's urgency. **Settable at booking or long after** — a line taken last
+  /// week can become urgent today. Production sorts on it; the customer never sees it.
+  Future<void> bookLineSetUrgent(String itemId, bool urgent) async {
+    try {
+      await supabase.rpc('book_line_set_urgent',
+          params: {'p_item_id': itemId, 'p_urgent': urgent});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// 🏷️ The cover this customer usually takes. Prefills the brand when booking; never forces it.
+  /// Pass null to clear.
+  Future<void> customerSetDefaultBrand(String customerId, String? brandId) async {
+    try {
+      await supabase.rpc('customer_set_default_brand',
+          params: {'p_customer_id': customerId, 'p_brand_id': brandId});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// Admin: switch Book Order on for a stockist. Same shape as [setStockistCustomers].
+  Future<void> setStockistBookOrders(String sequentialId, bool enabled) async {
+    try {
+      await supabase.rpc('admin_set_stockist_book_orders',
+          params: {'p_seq': sequentialId, 'p_enabled': enabled});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }

@@ -94,6 +94,11 @@ class Stockist {
   /// (project_unified_dispatch_customers)
   final bool customersEnabled;
 
+  /// 📕 Admin opt-in: this stockist BOOKS PRODUCTION ORDERS — orders for tiles that have not been
+  /// made yet — and gets the production planning screen. Off by default; only a manufacturer who
+  /// really takes made-to-order work needs it. (docs/BOOK_ORDER_PLAN.md)
+  final bool bookOrdersEnabled;
+
   final DateTime createdAt;
 
 
@@ -156,6 +161,7 @@ class Stockist {
 
     this.tdShow = false,
     this.customersEnabled = false,
+    this.bookOrdersEnabled = false,
 
     required this.createdAt,
 
@@ -223,6 +229,7 @@ class Stockist {
 
     tdShow: json['td_show'] ?? false,
     customersEnabled: json['customers_enabled'] ?? false,
+    bookOrdersEnabled: json['book_orders_enabled'] ?? false,
 
     createdAt: DateTime.parse(json['created_at']),
 

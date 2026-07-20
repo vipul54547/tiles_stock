@@ -459,6 +459,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   bool _canPrivate = false; // may create private (Most Exclusive) catalogs
   bool _tdShow = false; // show the TilesDesign mark on this stockist's banners
   bool _customersEnabled = false; // may save customers on dispatch (opt-in)
+  bool _bookOrders = false; // 📕 books production orders (opt-in)
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   // Per-stockist cap on brand-free stock lists (v2 — lists are no longer under a
@@ -502,6 +503,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _canPrivate = s.canCreatePrivateCatalog;
       _tdShow = s.tdShow;
       _customersEnabled = s.customersEnabled;
+      _bookOrders = s.bookOrdersEnabled;
       _deviceLimit.text = '${s.deviceLimit}';
       _stockLists.text = '${s.stockListLimit}';
       _brandColor = s.brandColor;
@@ -780,6 +782,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
         await _dataSvc.setStockistTd(widget.existing!.id, _tdShow);
         await _dataSvc.setStockistCustomers(
             widget.existing!.id, _customersEnabled);
+        await _dataSvc.setStockistBookOrders(widget.existing!.id, _bookOrders);
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -1016,6 +1019,25 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                             : 'Off — the Customer field on dispatch is plain optional text and nothing is stored.',
                         style: const TextStyle(fontSize: 11)),
                     onChanged: (v) => setState(() => _customersEnabled = v),
+                  ),
+                ),
+              // 📕 Book Order: he takes orders for tiles that have not been made,
+              // and plans production from them. Off by default — only a real
+              // made-to-order manufacturer needs it. (docs/BOOK_ORDER_PLAN.md)
+              if (_isEdit)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _bookOrders,
+                    activeThumbColor: const Color(0xFF2E7D32),
+                    title: const Text('Book Order (production orders)'),
+                    subtitle: Text(
+                        _bookOrders
+                            ? 'Can book orders for designs with no stock, and plan production from them.'
+                            : 'Off — orders can only be taken against stock he already holds.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _bookOrders = v),
                   ),
                 ),
               if (_isEdit) _brandingSection(),
