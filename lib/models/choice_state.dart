@@ -33,35 +33,6 @@ String currentStockistBusinessType = 'M';
 bool get currentStockistIsImporter =>
     isImporterType(currentStockistBusinessType);
 
-/// How this stockist's BOXES ARE STAMPED — 'attribute' or 'in_name'. Loaded at login.
-///
-/// It describes the physical box, nothing else:
-///   * 'attribute' — the stamp carries the design name AND the surface as two separate
-///     fields (e.g. famous ceramic: `ANT BIANCO | GLOSSY`). One stamped name therefore
-///     covers several surfaces, so **stock entry must ask which surface** — that question
-///     is really "which product". These stockists are RARE.
-///   * 'in_name'  — the stamp carries the name only. The name alone already identifies one
-///     product: they make a single surface, or they encode it in the number range
-///     (10001-19999 = Glossy, 20001-29999 = Matt). **Stock entry must NOT ask** — the
-///     product already knows its surface and the stock inherits it.
-///
-/// It has NO influence on identity. (Surface is always part of the product key.)
-String currentStockistSurfaceMode = 'in_name';
-
-/// 🚫 **DEAD — nothing reads this, and nothing should.** Add Stock no longer asks for a surface
-/// from anyone. It used to, for an `attribute` stockist, because the design picker showed only the
-/// PRINT's name (`1001`) and could not tell that print's several pieces apart — so the surface
-/// dropdown was really asking **which product**. The picker now names the PIECE (`1001 — MATTE`),
-/// so the question is answered at the point of choosing, and asking it twice let the two answers
-/// DISAGREE: the surface silently moved the stock to a different product, and could even MINT one.
-///
-/// The stock inherits the piece's surface. Surface is still product identity — the question just
-/// belongs in the Library, where a product is made, not at the stock counter.
-/// (20260714c_stock_add_holding_never_creates_a_product)
-@Deprecated('Add Stock never asks for a surface. The piece already knows it.')
-bool get currentStockistAsksSurface =>
-    currentStockistSurfaceMode == 'attribute';
-
 /// The logged-in stockist has opted into saving customers on dispatch/order
 /// (admin-set `customers_enabled`). Loaded at login. Gates the Customers entry
 /// + history screens. (project_customer_history)

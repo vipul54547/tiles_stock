@@ -569,7 +569,7 @@ class SupabaseDataService {
       return await supabase
           .from('stockists')
           .select(
-              'name, logo_url, brand_color, tagline, pincode, state, district, city, customers_enabled, surface_mode, business_type')
+              'name, logo_url, brand_color, tagline, pincode, state, district, city, customers_enabled, business_type')
           .eq('user_id', uid)
           .maybeSingle();
     } catch (e, st) {
@@ -812,10 +812,6 @@ class SupabaseDataService {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
   }
-
-  // setBrandSurfaceMode removed: a brand has no surface convention any more (see
-  // Brand.surfaceMode). The admin_set_brand_surface_mode RPC and the column are
-  // left in the database, unused. (project_per_brand_surface_mode)
 
   Future<void> renameBrand(String id, String name) async {
     try {
@@ -1516,6 +1512,17 @@ class SupabaseDataService {
     try {
       await supabase.rpc('stockist_set_brand_hidden',
           params: {'p_brand_id': brandId, 'p_hidden': hidden});
+    } catch (e) {
+      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+    }
+  }
+
+  /// 🎁 "This brand prints the same design name as the default brand." Prefills the cover word in
+  /// New Design; it never writes one. (20260720b_brand_uses_design_name)
+  Future<void> setBrandUsesDesignName(String brandId, bool on) async {
+    try {
+      await supabase.rpc('stockist_set_brand_uses_design_name',
+          params: {'p_brand_id': brandId, 'p_on': on});
     } catch (e) {
       throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
     }
@@ -2341,18 +2348,6 @@ class SupabaseDataService {
         params: {'p_seq': sequentialId, 'p_enabled': enabled});
   }
 
-  /// Admin: an M stockist's surface convention ('attribute' | 'in_name'). M IS
-  /// the factory, so the convention is company-wide. T/W has no convention at
-  /// all — its Add Stock picker is always optional. (project_per_brand_surface_mode)
-  Future<void> setStockistSurfaceMode(String sequentialId, String mode) async {
-    try {
-      await supabase.rpc('admin_set_stockist_surface_mode',
-          params: {'p_seq': sequentialId, 'p_mode': mode});
-    } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
-    }
-  }
-
   // ─── Banner Video (admin) ───────────────────────────────────────────────
   // A "▶ Watch" video system shown in the top banner of a stockist's /s/ page.
   // Admin manages GLOBAL learning videos + sets each stockist's 4-step display
@@ -2735,7 +2730,6 @@ class SupabaseDataService {
         mapUrl:     s['map_url'] ?? '',
         tdShow:     s['td_show'] ?? false,
         customersEnabled: s['customers_enabled'] ?? false,
-        surfaceMode: (s['surface_mode'] ?? 'in_name').toString(),
         createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
             DateTime.now(),
       );

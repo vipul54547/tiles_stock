@@ -26,12 +26,11 @@ class Brand {
   /// (the stockist can cancel until then).
   final DateTime? deleteScheduledAt;
 
-  /// Vestigial. A brand no longer has a surface convention — a T/W carries other
-  /// factories' brands and simply records whichever surface the dispatch note
-  /// carried, so Add Stock always offers the picker with a 'None' choice. Only an
-  /// M has a mode, on the stockist. Column and payload kept; nothing reads this.
-  /// (project_per_brand_surface_mode)
-  final String surfaceMode;
+  /// 🎁 This brand prints the SAME design name as the default brand — it has no code of its own.
+  /// Declared by the stockist on the Brands page, and used to **prefill** the cover word in New
+  /// Design: the default brand's word for this design, or failing that the artwork's own name.
+  /// Prefill only — a blank field, always editable. It never writes a cover name by itself.
+  final bool usesDesignName;
 
   const Brand({
     required this.id,
@@ -44,7 +43,7 @@ class Brand {
     this.status = 'live',
     this.hiddenByStockist = false,
     this.deleteScheduledAt,
-    this.surfaceMode = 'in_name',
+    this.usesDesignName = false,
   });
 
   /// Admin flagged this brand: buyers can't see it until corrected.
@@ -66,6 +65,6 @@ class Brand {
         deleteScheduledAt: j['delete_scheduled_at'] == null
             ? null
             : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
-        surfaceMode: (j['surface_mode'] ?? 'in_name').toString(),
+        usesDesignName: j['uses_design_name'] as bool? ?? false,
       );
 }

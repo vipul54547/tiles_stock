@@ -149,6 +149,35 @@ Don't infer a function's signature from its call site.
   stamped on that brand's box (`brand_design_name`) plus **how that brand packs it**
   (`pieces_per_box`, `box_weight_kg`). One print under two brands packs two ways, independently.
   `library_set_box` is the **only** writer of the packing.
+  - 🚫🎁 **ADDING STOCK MAY NEVER CREATE A BOX. `box_put_cover` is the ONLY writer of `boxes`.**
+    (20 Jul 2026) `_box_for` used to **INSERT** a missing box, so the stock counter could invent a
+    cover: pick the wrong brand and the server silently declared *"ANUJ wraps this tile"* — a fact
+    nobody decided, which then showed on the Library card and the public page as if it were real.
+    🔑 Same law as the product (this is how the **444** happened): **a stock path must never create
+    identity or the structure round it.** Two callers, two answers — the pair this codebase already
+    uses for products (`library_map_upsert` ↔ `library_map_resolve`):
+    - **`stock_add_holding` → `_box_for` RAISES** in plain English (*"ANUJ has no cover for
+      «ALASKA BLACK» — open the design in your Design Library and tick ANUJ on it first"*). A human
+      is standing there; tell him.
+    - **`import_stock_batch` → `_box_resolve` returns NULL**, and the row goes to `unmatched_rows`
+      with a `reason`. One uncovered row must **not** throw the batch — same rule as an unresolved
+      product. Both are **REPORTED, never minted**.
+    - 🚪 **The PRODUCT door therefore BUILDS the box**: after the row's pieces+weight make the
+      packing, the door puts each named brand's cover on it. It is the door that MAKES a product, so
+      it must finish the job — a product imported without a cover would be **unstockable**.
+      (Add Stock's picker also filters on the BOX: `my_library.cover_brand_ids`, never the cover
+      WORD — a brand may wrap a design and print nothing on it.)
+  - 🎁 **The cover word is HIS to give — but he may give it ONCE, for a brand.**
+    `brands.uses_design_name` = *"this brand prints the same design name as the default brand"*.
+    When it is on, New Design **prefills** that brand's cover field: the **default brand's word for
+    this design**, or — failing that — the **artwork's own name**. Writer
+    `stockist_set_brand_uses_design_name`; shown on non-default brands only (the default is what the
+    others copy, so it has nothing to copy from).
+    ⚠️ **PREFILL ONLY, into a BLANK field.** It never writes a cover name by itself, never
+    overwrites what he typed, and never touches a word already saved on a design. This is **not** a
+    hole in the rule below: a filename is *his word for the ARTWORK* and a machine passing it off as
+    a factory's box label is a forgery — here **he declared it**, per brand, with the box in front
+    of him.
 - 📏 **THICKNESS IS DERIVED — NEVER TYPED, AND THERE IS NO PICKER.**
   - `thickness_mm` = `box_weight / (pieces × area × density)`, written **by trigger** from the BOX.
     Unknown is `NULL`, never `0` (a tile is never 0 mm thick).

@@ -40,6 +40,13 @@ class LibraryEntry {
   /// (docs/PACKING_BOX_HOLD_PLAN.md)
   final List<({String id, int pieces, double weightKg})> packings;
 
+  /// 🎁 The brands that actually WRAP this design — one box each (`boxes.brand_id`).
+  ///
+  /// ⚠️ This, not [aliases], is the truth about which brands carry a design: a brand may cover it
+  /// and print **no word** on it (a blank cover name is explicitly allowed), and [brandId] is only
+  /// a stale first-seen hint. Add Stock filters its design list on this.
+  final Set<String> coverBrandIds;
+
   // ── Identity attributes (describe the DESIGN; set once, here in the Library).
   // The stock row (designs) carries only quality + quantity. (identity split)
   final String surfaceType;
@@ -79,6 +86,7 @@ class LibraryEntry {
     this.brandName = '',
     this.aliases = const {},
     this.packings = const [],
+    this.coverBrandIds = const {},
     this.surfaceType = 'None',
     this.surfaceLabel = '',
     this.stockType = 'Uncertain',
@@ -126,6 +134,10 @@ class LibraryEntry {
       brandName: (j['brand_name'] ?? '').toString(),
       aliases: aliases,
       packings: packings,
+      coverBrandIds: {
+        for (final b in (j['cover_brand_ids'] as List?) ?? const [])
+          if ((b ?? '').toString().isNotEmpty) b.toString()
+      },
       surfaceType: (j['surface_type'] ?? 'None').toString(),
       surfaceLabel: (j['surface_label'] ?? '').toString(),
       stockType: (j['stock_type'] ?? 'Uncertain').toString(),

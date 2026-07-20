@@ -587,8 +587,10 @@ class _StockListsScreenState extends State<StockListsScreen> {
         // _runBrand updates _brands in the parent; setSheet rebuilds this sheet.
         builder: (ctx, setSheet) => DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.55,
-          maxChildSize: 0.9,
+          // A brand card grew a row ("Same design name as default"), so 0.55 cut the last brand's
+          // "Visible to buyers" off the bottom fold.
+          initialChildSize: 0.78,
+          maxChildSize: 0.95,
           builder: (_, scroll) => Column(
             children: [
               const Padding(
@@ -681,8 +683,45 @@ class _StockListsScreenState extends State<StockListsScreen> {
                 ),
               ],
             ),
-            // Non-default brands: hide-from-buyers + 24h soft-delete.
+            // 🎁 Non-default brands only: the default brand is what the others COPY, so it has
+            // nothing to copy from. Prefill only — New Design fills a blank cover field with the
+            // default brand's word for that design (or the artwork's name), and he can type over
+            // it. (20260720b_brand_uses_design_name)
             if (!b.isDefault) ...[
+              const Divider(height: 14),
+              Row(
+                children: [
+                  const Icon(Icons.drive_file_rename_outline,
+                      size: 18, color: _navy),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Same design name as default',
+                            style: TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w600)),
+                        Text(
+                            b.usesDesignName
+                                ? 'New Design pre-fills this brand\'s cover word.'
+                                : 'This brand prints its own code.',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade600)),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: b.usesDesignName,
+                    onChanged: _busy
+                        ? null
+                        : (v) async {
+                            await _runBrand(
+                                () => _data.setBrandUsesDesignName(b.id, v));
+                            refresh();
+                          },
+                  ),
+                ],
+              ),
               const Divider(height: 14),
               Row(
                 children: [

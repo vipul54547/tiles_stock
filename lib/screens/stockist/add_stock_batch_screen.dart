@@ -211,12 +211,19 @@ class _State extends State<AddStockBatchScreen> {
     return '$name${_pieceSuffix[m.id] ?? ''}';
   }
 
+  /// 🎁 Which brand the design list is for: the one he has PICKED (M shows the field), else the
+  /// brand this screen was opened from. Filtering on `_brandFilter` alone left the list unfiltered
+  /// whenever he arrived without a brand context and then chose one here.
+  String? get _designBrand => _isM ? _selBrandId : _brandFilter;
+
   List<LibraryEntry> _filteredMasters(String query, String? brandFilter) {
     final q = query.trim().toLowerCase();
     return _masters.where((m) {
-      if (brandFilter != null &&
-          m.brandId != brandFilter &&
-          !m.aliases.containsKey(brandFilter)) {
+      // 🔑 A brand can only be stocked on a design it actually COVERS — the BOX is the truth.
+      // Not the cover WORD (a brand may wrap a design and print nothing on it) and not
+      // `brandId` (a stale first-seen hint). Offering an uncovered design here was worse than
+      // cosmetic: `_box_for` MINTS a missing box, so adding stock invented a cover.
+      if (brandFilter != null && !m.coverBrandIds.contains(brandFilter)) {
         return false;
       }
       if (q.isEmpty) return true;
@@ -250,7 +257,7 @@ class _State extends State<AddStockBatchScreen> {
         String query = '';
         return StatefulBuilder(
           builder: (ctx, setSheet) {
-            final results = _filteredMasters(query, _brandFilter);
+            final results = _filteredMasters(query, _designBrand);
             return Padding(
               padding: EdgeInsets.only(
                   bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -782,7 +789,16 @@ class _State extends State<AddStockBatchScreen> {
                   labelOf: (b) => b.name,
                   hint: 'Select brand',
                   hasError: _selBrandId == null,
-                  onSelected: (b) => setState(() => _selBrandId = b.id),
+                  onSelected: (b) => setState(() {
+                    _selBrandId = b.id;
+                    // The chosen design may not be covered by the new brand — drop it rather
+                    // than carry a pick the list no longer offers.
+                    if (_selMaster != null &&
+                        !_selMaster!.coverBrandIds.contains(b.id)) {
+                      _selMaster = null;
+                      _selPackingId = null;
+                    }
+                  }),
                 ),
                 width: 150,
               ),
@@ -791,7 +807,7 @@ class _State extends State<AddStockBatchScreen> {
               ComboField<LibraryEntry>(
                 focusNode: _fDesign,
                 value: _selMaster,
-                options: _filteredMasters('', _brandFilter),
+                options: _filteredMasters('', _designBrand),
                 labelOf: (m) => _displayName(m, _isM ? _selBrandId : null),
                 detailOf: (m) => m.size.replaceAll(' mm', ''),
                 hint: 'Type to search design',

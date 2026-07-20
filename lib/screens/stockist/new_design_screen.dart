@@ -82,6 +82,14 @@ class _NewDesignScreenState extends State<NewDesignScreen> {
       ? null
       : _brands.firstWhere((b) => b.isDefault, orElse: () => _brands.first);
 
+  /// 🎁 The word to PREFILL for a brand that prints the same design name as the default brand
+  /// (`Brand.usesDesignName`): the default brand's word for THIS design, or — if he has not given
+  /// one — the artwork's own name. Prefill only; the field stays his to overwrite.
+  String get _inheritedCoverWord {
+    final fromDefault = _defaultCoverCtrl.text.trim();
+    return fromDefault.isNotEmpty ? fromDefault : _artName;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -336,14 +344,18 @@ class _NewDesignScreenState extends State<NewDesignScreen> {
         if (libId.isEmpty) throw 'Could not create the design.';
       }
 
-      // Packing — skip when editing and it is unchanged.
+      // Packing — skip when editing and it is unchanged. Either way we must come out holding its
+      // id: a cover goes round a PACKING, and that is what makes the BOX that stock hangs off.
       final oldPk = _isEdit && widget.existing!.packings.isNotEmpty
           ? widget.existing!.packings.first
           : null;
+      String packingId = oldPk?.id ?? '';
       if (oldPk == null ||
           oldPk.pieces != pieces ||
           (oldPk.weightKg - weight).abs() > 0.001) {
-        await _data.packingAdd(libraryId: libId, pieces: pieces, weightKg: weight);
+        final pk = await _data.packingAdd(
+            libraryId: libId, pieces: pieces, weightKg: weight);
+        packingId = (pk['packing_id'] ?? '').toString();
       }
 
       // Per-design DNA — set OR clear the current selection.
@@ -370,19 +382,23 @@ class _NewDesignScreenState extends State<NewDesignScreen> {
             _series.trim().isNotEmpty ? [_series.trim()] : []);
       }
 
-      // Covers — each brand + the word it stamps = a BOX.
-      if (_defaultBrand != null && _defaultCoverCtrl.text.trim().isNotEmpty) {
-        await _data.coverNameSet(
-            libraryId: libId,
-            brandId: _defaultBrand!.id,
-            name: _defaultCoverCtrl.text.trim());
-      }
-      for (final c in _extraCovers) {
-        final bid = c.brandId;
-        final word = c.ctrl.text.trim();
-        if (bid != null && word.isNotEmpty) {
-          await _data.coverNameSet(libraryId: libId, brandId: bid, name: word);
+      // 🎁 Covers. A brand listed here WRAPS this packing, and that cover is the BOX — so it must
+      // be CREATED (`box_put_cover`), not merely named. `cover_name_set` only records the word the
+      // brand prints, which is optional; on its own it leaves `boxes` empty, and then there is
+      // nothing for a HOLD (`designs.box_id`) to point at — stock could be entered and would never
+      // appear. Box FIRST, then the word.
+      final covered = <String, String>{ // brandId -> word (may be blank)
+        if (_defaultBrand != null)
+          _defaultBrand!.id: _defaultCoverCtrl.text.trim(),
+        for (final c in _extraCovers)
+          if (c.brandId != null) c.brandId!: c.ctrl.text.trim(),
+      };
+      for (final e in covered.entries) {
+        if (packingId.isNotEmpty) {
+          await _data.boxPutCover(packingId: packingId, brandId: e.key);
         }
+        await _data.coverNameSet(
+            libraryId: libId, brandId: e.key, name: e.value);
       }
 
       if (!mounted) return;
@@ -1122,8 +1138,19 @@ class _NewDesignScreenState extends State<NewDesignScreen> {
             ],
             onChanged: _saving
                 ? null
-                : (v) => setState(
-                    () => _extraCovers[i] = (brandId: v, ctrl: row.ctrl)),
+                : (v) => setState(() {
+                      _extraCovers[i] = (brandId: v, ctrl: row.ctrl);
+                      // A brand that prints the same design name as the default gets its cover
+                      // word filled in for him — but only into a BLANK field, so nothing he
+                      // typed (or a word already saved on this design) is ever overwritten.
+                      final picked =
+                          _brands.where((b) => b.id == v).firstOrNull;
+                      if (picked != null &&
+                          picked.usesDesignName &&
+                          row.ctrl.text.trim().isEmpty) {
+                        row.ctrl.text = _inheritedCoverWord;
+                      }
+                    }),
           ),
         ),
         const SizedBox(width: 8),
