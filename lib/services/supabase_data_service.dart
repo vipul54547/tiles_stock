@@ -3130,9 +3130,13 @@ class SupabaseDataService {
 
   /// 📕 Books an order against **designs he has not made yet**.
   ///
-  /// [lines] = `[{library_id, quantity, quality?, is_urgent?, packing_id?}]` — the TILE and how
-  /// many BOXES, **never a box id**. One [brandId] for the whole order: a customer takes his
-  /// material under one cover, and that cover IS the box.
+  /// [lines] = `[{library_id, brand_id, quantity, quality?, is_urgent?, packing_id?}]` — the TILE,
+  /// the BRAND and how many BOXES, **never a box id**.
+  ///
+  /// 🔑 **The brand is PER LINE, not per order.** A BOX is `(packing, brand)` and a line points at
+  /// one, so a line has always carried its own brand. One order may mix FAMOUS lines and KHAKHI
+  /// lines — which is what a real order looks like. (A single brand for the whole order silently
+  /// rewrote which brand the boxes were for when it changed: 20260720l.)
   ///
   /// 🚫 The server RESOLVES the box and **raises** when that brand has no cover on a design
   /// ("ANUJ has no cover for «ALASKA BLACK» — … tick ANUJ on it first"). Booking may not invent a
@@ -3143,14 +3147,12 @@ class SupabaseDataService {
   /// Returns `{id, token, connection_code, lines}`. (docs/BOOK_ORDER_PLAN.md)
   Future<Map<String, dynamic>> createBookOrder({
     required String hint,
-    required String brandId,
     required List<Map<String, dynamic>> lines,
     String? customerId,
   }) async {
     try {
       final res = await supabase.rpc('create_book_order', params: {
         'p_hint': hint,
-        'p_brand_id': brandId,
         'p_lines': lines,
         if (customerId != null) 'p_customer_id': customerId,
       });

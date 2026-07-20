@@ -32,9 +32,14 @@ class BookOrderScreen extends StatefulWidget {
 }
 
 /// One booked line, before it is sent.
+///
+/// 🔑 **The BRAND lives here, on the line — not on the order.** A BOX is `(packing, brand)`, and a
+/// line points at one, so the brand has always belonged to the line. Holding it on the order made
+/// changing it silently rewrite which brand every line's boxes were for. (20260720l)
 class _Line {
-  _Line(this.tile, this.qty);
+  _Line(this.tile, this.brandId, this.qty);
   final LibraryEntry tile;
+  String brandId;
   int qty;
   String? quality; // null = Premium — the grade is settled at the packing line
   bool urgent = false;
@@ -66,14 +71,17 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
   final _hint = TextEditingController();
   final _lines = <_Line>[];
 
-  Brand? get _brand =>
-      _brands.where((b) => b.id == _brandId).firstOrNull;
+  String _brandName(String id) =>
+      _brands.where((b) => b.id == id).firstOrNull?.name ?? '—';
 
-  /// Only the tiles this brand really covers — a BOX must already exist, because booking may not
-  /// create one. An empty list is honest: tick the brand on some designs first.
-  List<LibraryEntry> get _coveredTiles => _brandId == null
-      ? const []
-      : _tiles.where((t) => t.coverBrandIds.contains(_brandId)).toList();
+  /// Every tile ANY brand covers — a BOX must already exist, because booking may not create one.
+  /// Which brand a given line goes under is chosen on the line itself.
+  List<LibraryEntry> get _bookableTiles =>
+      _tiles.where((t) => t.coverBrandIds.isNotEmpty).toList();
+
+  /// The brands that cover this particular design, in the sidebar's order.
+  List<Brand> _brandsFor(LibraryEntry t) =>
+      _brands.where((b) => t.coverBrandIds.contains(b.id)).toList();
 
   @override
   void initState() {
@@ -135,32 +143,25 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
     });
   }
 
-  /// Changing the brand can strand lines whose tile that brand does not cover — drop those rather
-  /// than carry a line the server would refuse.
-  void _onBrand(String? id) {
-    setState(() {
-      _brandId = id;
-      _lines.removeWhere((l) => id == null || !l.tile.coverBrandIds.contains(id));
-    });
-  }
+  /// 🔑 This brand only SEEDS THE NEXT LINE. It must never touch a line already on the order —
+  /// doing that silently rewrote which brand 200 booked boxes belonged to, and dropped every line
+  /// the new brand did not cover.
+  void _onBrand(String? id) => setState(() => _brandId = id);
 
   Future<void> _addLine() async {
-    final opts = _coveredTiles.where((t) => !_lines.any((l) => l.tile.id == t.id)).toList();
+    // A design may appear once PER BRAND, so only a (design, brand) pair already on the order is
+    // excluded — the same tile under two covers is two real lines.
+    final opts = _bookableTiles
+        .where((t) => _brandsFor(t).any((b) =>
+            !_lines.any((l) => l.tile.id == t.id && l.brandId == b.id)))
+        .toList();
     if (opts.isEmpty) {
-      // 🔑 Three different situations, and only one of them is a problem. Saying "covers no other
-      // design" for all three read like an error when in fact everything that brand carries was
-      // already on the order.
-      final name = _brand?.name ?? 'That brand';
-      if (_brandId == null) {
-        _snack('Pick a brand first.', error: true);
-      } else if (_coveredTiles.isEmpty) {
-        _snack('$name does not cover any design yet. '
-            'Open a design in your Design Library and tick $name on it.',
-            error: true);
+      if (_bookableTiles.isEmpty) {
+        _snack('No design has a brand cover yet. Open a design in your '
+            'Design Library and tick a brand on it.', error: true);
       } else {
-        // Not an error at all — he has simply added everything it carries.
-        _snack('All ${_coveredTiles.length} of $name\'s design(s) '
-            'are already on this order.');
+        // Not an error — everything he can book is already booked.
+        _snack('Every design and brand is already on this order.');
       }
       return;
     }
@@ -228,14 +229,22 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
         });
       },
     );
-    if (picked != null) setState(() => _lines.add(_Line(picked, 0)));
+    if (picked == null) return;
+    setState(() {
+      // Seed the line's brand from the header when that brand covers this design and the pair is
+      // not already on the order; otherwise the first free brand that does cover it.
+      final free = _brandsFor(picked)
+          .where((b) =>
+              !_lines.any((l) => l.tile.id == picked.id && l.brandId == b.id))
+          .toList();
+      final seed = free.any((b) => b.id == _brandId)
+          ? _brandId!
+          : (free.isNotEmpty ? free.first.id : _brandsFor(picked).first.id);
+      _lines.add(_Line(picked, seed, 0));
+    });
   }
 
   Future<void> _save() async {
-    if (_brandId == null) {
-      _snack('Pick the brand — a box is its cover.', error: true);
-      return;
-    }
     final good = _lines.where((l) => l.qty > 0).toList();
     if (good.isEmpty) {
       _snack('Add at least one design with a quantity.', error: true);
@@ -245,12 +254,12 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
     try {
       final res = await _data.createBookOrder(
         hint: _hint.text.trim(),
-        brandId: _brandId!,
         customerId: _customerId,
         lines: [
           for (final l in good)
             {
               'library_id': l.tile.id,
+              'brand_id': l.brandId,
               'quantity': l.qty,
               if (l.quality != null) 'quality': l.quality,
               'is_urgent': l.urgent,
@@ -318,20 +327,21 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
                   const Row(children: [
                     Icon(Icons.sell_outlined, size: 18, color: _navy),
                     SizedBox(width: 8),
-                    Text('Under which brand',
+                    Text('Brand for new lines',
                         style: TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 14)),
                   ]),
                   const SizedBox(height: 4),
                   Text(
-                      'The cover this material ships in. It decides which designs you can book.',
+                      'Only fills in the brand when you add a design. Each line keeps its own '
+                      'brand — one order can mix them.',
                       style: TextStyle(
                           fontSize: 11, color: Colors.grey.shade600)),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     initialValue: _brandId,
                     isExpanded: true,
-                    decoration: _dec('Brand *'),
+                    decoration: _dec('Brand'),
                     hint: const Text('Pick a brand'),
                     items: [
                       for (final b in _brands)
@@ -356,16 +366,16 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
                       label: const Text('Add design'),
                     ),
                   ]),
-                  if (_brandId != null && _coveredTiles.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+                  if (_bookableTiles.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 10),
                       child: Text(
-                          '${_brand?.name ?? "This brand"} does not cover any design yet. '
-                          'Open a design in your Design Library and tick this brand on it first.',
-                          style: const TextStyle(
+                          'No design has a brand cover yet. Open a design in your '
+                          'Design Library and tick a brand on it first.',
+                          style: TextStyle(
                               fontSize: 12, color: Colors.redAccent)),
                     ),
-                  if (_lines.isEmpty && _coveredTiles.isNotEmpty)
+                  if (_lines.isEmpty && _bookableTiles.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       child: Text('No designs yet — press Add design.',
@@ -435,9 +445,43 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
           ),
         ]),
         Row(children: [
+          // 🎁 THIS line's cover. A design may be booked under two brands in one order — they are
+          // two different boxes, so they are two real lines.
           SizedBox(
-            width: 110,
+            width: 130,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('brand-${l.tile.id}-$i'),
+              initialValue: l.brandId,
+              isExpanded: true,
+              decoration: _dec('Brand *'),
+              items: [
+                for (final b in _brandsFor(l.tile))
+                  DropdownMenuItem(
+                      value: b.id,
+                      child: Text(b.name,
+                          style: const TextStyle(fontSize: 13),
+                          overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (v) {
+                      if (v == null) return;
+                      // The same design under the same brand twice would collide on the server.
+                      if (_lines.any((o) =>
+                          o != l && o.tile.id == l.tile.id && o.brandId == v)) {
+                        _snack('${_brandName(v)} is already on this order for '
+                            '${_label(l.tile)}.', error: true);
+                        return;
+                      }
+                      setState(() => l.brandId = v);
+                    },
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 100,
             child: TextFormField(
+              key: ValueKey('qty-${l.tile.id}-${l.brandId}'),
               initialValue: l.qty == 0 ? '' : '${l.qty}',
               enabled: !_saving,
               keyboardType: TextInputType.number,
