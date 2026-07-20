@@ -70,6 +70,7 @@ import 'screens/stockist/manual_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
 import 'screens/stockist/stock_lists_screen.dart';
 import 'screens/stockist/stockist_profile_screen.dart';
+import 'screens/stockist/customer_history_screen.dart';
 import 'screens/stockist/stockist_my_videos_screen.dart';
 import 'widgets/stockist_shell.dart';
 import 'services/supabase_auth_service.dart';
@@ -280,6 +281,12 @@ final GoRouter _router = GoRouter(
         GoRoute(
             path: '/stockist/videos',
             builder: (_, __) => const StockistMyVideosScreen()),
+        // 👥 The customer directory. It had NO route at all — it was reachable
+        // only from the phone-layout account menu, so on the desktop shell
+        // (which navigates by path) it could not be opened at all.
+        GoRoute(
+            path: '/stockist/customers',
+            builder: (_, __) => const CustomerListScreen()),
 
 
     GoRoute(path: '/admin', builder: (_, __) => const AdminPanelScreen()),

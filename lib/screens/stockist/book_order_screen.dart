@@ -5,6 +5,7 @@ import '../../models/choice_state.dart';
 import '../../models/library_entry.dart';
 import '../../services/supabase_data_service.dart';
 import '../../utils/piece_label.dart';
+import '../../widgets/customer_picker.dart';
 
 /// 📕 **BOOK ORDER — an order for a tile that has NOT BEEN MADE YET.**
 ///
@@ -61,6 +62,7 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
 
   String? _brandId;
   String? _customerId;
+  String _customerName = '';
   final _hint = TextEditingController();
   final _lines = <_Line>[];
 
@@ -111,17 +113,25 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
         content: Text(m), backgroundColor: error ? Colors.red : _green));
   }
 
-  /// 🏷️ Picking the customer PREFILLS his brand — the cover he usually takes. Only into a blank:
-  /// a brand he has already chosen for this order is his, and is never overwritten.
-  void _onCustomer(String? id) {
+  /// 👥 PICK **or ADD** — the same sheet Dispatch and Add Order use, so a customer who walks in
+  /// today can be booked without leaving the screen.
+  ///
+  /// 🏷️ Picking him PREFILLS his brand — the cover he usually takes. Only into a blank: a brand
+  /// already chosen for this order is his, and is never overwritten.
+  Future<void> _pickCustomer() async {
+    final picked =
+        await CustomerPicker.show(context, customers: _customers, svc: _data);
+    if (picked == null) return;
+    final id = (picked['id'] ?? '').toString();
+    if (id.isEmpty) return;
     setState(() {
-      _customerId = id;
-      if (id == null) return;
-      final c = _customers.where((x) => x['id'] == id).firstOrNull;
-      final def = (c?['default_brand_id'] ?? '').toString();
-      if (def.isNotEmpty && _brandId == null) {
-        _brandId = def;
+      if (!_customers.any((c) => (c['id'] ?? '').toString() == id)) {
+        _customers = [..._customers, picked];
       }
+      _customerId = id;
+      _customerName = (picked['name'] ?? '').toString();
+      final def = (picked['default_brand_id'] ?? '').toString();
+      if (def.isNotEmpty && _brandId == null) _brandId = def;
     });
   }
 
@@ -265,23 +275,28 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
                   const Text('Who it is for',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 10),
-                  if (currentStockistCustomersEnabled && _customers.isNotEmpty)
-                    DropdownButtonFormField<String>(
-                      initialValue: _customerId,
-                      isExpanded: true,
-                      decoration: _dec('Customer'),
-                      hint: const Text('Pick a customer'),
-                      items: [
-                        for (final c in _customers)
-                          DropdownMenuItem(
-                              value: (c['id'] ?? '').toString(),
-                              child: Text((c['name'] ?? '').toString(),
-                                  overflow: TextOverflow.ellipsis)),
-                      ],
-                      onChanged: _saving ? null : _onCustomer,
+                  if (currentStockistCustomersEnabled) ...[
+                    InkWell(
+                      onTap: _saving ? null : _pickCustomer,
+                      borderRadius: BorderRadius.circular(10),
+                      child: InputDecorator(
+                        decoration: _dec('Customer').copyWith(
+                          suffixIcon: const Icon(Icons.arrow_drop_down),
+                        ),
+                        child: Text(
+                          _customerName.isEmpty
+                              ? 'Pick or add a customer'
+                              : _customerName,
+                          style: TextStyle(
+                              fontSize: 14,
+                              color: _customerName.isEmpty
+                                  ? Colors.grey.shade500
+                                  : Colors.black87),
+                        ),
+                      ),
                     ),
-                  if (currentStockistCustomersEnabled && _customers.isNotEmpty)
                     const SizedBox(height: 10),
+                  ],
                   TextField(
                     controller: _hint,
                     enabled: !_saving,

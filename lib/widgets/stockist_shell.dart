@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/choice_state.dart';
 import '../services/supabase_data_service.dart';
 
 /// The router's current location, set at the top of the app's redirect (runs on
@@ -142,6 +143,13 @@ class _StockistShellState extends State<StockistShell> {
             _item(Icons.local_shipping_outlined, 'Dispatches',
                 '/stockist/dispatches'),
             _item(Icons.link, 'Stock Lists', '/stockist/lists'),
+            // 👥 Opt-in (customers_enabled). It was missing from this sidebar
+            // entirely — the only way in was the phone-layout account menu, so
+            // on the desktop shell the directory was UNREACHABLE and a customer
+            // could only be added as a side effect of a dispatch or an order.
+            if (currentStockistCustomersEnabled)
+              _item(Icons.people_alt_outlined, 'Customers',
+                  '/stockist/customers'),
             _item(Icons.play_circle_outline, 'My Videos', '/stockist/videos'),
             const Spacer(),
             const Divider(
