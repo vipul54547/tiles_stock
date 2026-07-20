@@ -147,12 +147,21 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
   Future<void> _addLine() async {
     final opts = _coveredTiles.where((t) => !_lines.any((l) => l.tile.id == t.id)).toList();
     if (opts.isEmpty) {
-      _snack(
-          _brandId == null
-              ? 'Pick a brand first.'
-              : '${_brand?.name ?? "That brand"} covers no other design. '
-                  'Tick it on a design in your Design Library.',
-          error: true);
+      // 🔑 Three different situations, and only one of them is a problem. Saying "covers no other
+      // design" for all three read like an error when in fact everything that brand carries was
+      // already on the order.
+      final name = _brand?.name ?? 'That brand';
+      if (_brandId == null) {
+        _snack('Pick a brand first.', error: true);
+      } else if (_coveredTiles.isEmpty) {
+        _snack('$name does not cover any design yet. '
+            'Open a design in your Design Library and tick $name on it.',
+            error: true);
+      } else {
+        // Not an error at all — he has simply added everything it carries.
+        _snack('All ${_coveredTiles.length} of $name\'s design(s) '
+            'are already on this order.');
+      }
       return;
     }
     final picked = await showModalBottomSheet<LibraryEntry>(

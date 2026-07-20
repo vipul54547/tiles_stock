@@ -134,7 +134,23 @@ class _CustomerListState extends State<CustomerListScreen> {
       await _load();
       _snack('$nm removed.');
     } catch (e) {
-      _snack('$e', error: true);
+      // 🔴 A REFUSAL IS NOT A SNACKBAR. It is the answer to what he just asked for, it names how
+      // many orders and dispatches stand in the way, and it tells him what to do instead — so it
+      // gets a dialog he has to read, not a red bar that slides away.
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: const Icon(Icons.info_outline, color: _navy, size: 30),
+          title: const Text('Cannot remove this customer'),
+          content: Text('$e', style: const TextStyle(fontSize: 13.5)),
+          actions: [
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK')),
+          ],
+        ),
+      );
     }
   }
 

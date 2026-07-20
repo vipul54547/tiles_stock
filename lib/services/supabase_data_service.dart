@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart'; // debugPrint
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 import '../models/tile_design.dart';
 import '../models/stockist.dart';
 import '../models/end_user.dart';
@@ -46,6 +47,25 @@ String normalizeSizeKey(String size) {
 /// Joined "nameKey|sizeKey" used as the map key returned by [lookupDesignImages].
 String designImageKey(String name, String size) =>
     '${normalizeDesignNameKey(name)}|${normalizeSizeKey(size)}';
+
+/// The server's own sentence out of a thrown error, **whole**.
+///
+/// ⚠️ The old idiom all over this file is
+/// `'$e'.replaceAll('PostgrestException:','').split(',').first.trim()` — and `.split(',').first`
+/// **CUTS THE MESSAGE AT ITS FIRST COMMA**. Every plain-English error we raise is written for the
+/// stockist to read, and plenty of them contain a comma; a customer *named* `Maruti ceramics, Nasik`
+/// turned a full refusal into the two words `PostgrestException(message: Maruti ceramics`. The
+/// reason he needed was thrown away.
+///
+/// A `PostgrestException` already carries `.message` as a field, so there is nothing to parse.
+String serverMessage(Object e) {
+  if (e is PostgrestException) return e.message;
+  // Fallback for anything else: strip the wrapper, but NEVER cut at a comma.
+  final s = '$e';
+  final m = RegExp(r'message:\s*(.*?)(?:,\s*code:|,\s*details:|,\s*hint:|\)$)')
+      .firstMatch(s);
+  return (m?.group(1) ?? s).trim();
+}
 
 class SupabaseDataService {
 
@@ -378,7 +398,7 @@ class SupabaseDataService {
     try {
       await supabase.rpc('customer_delete', params: {'p_id': id});
     } catch (e) {
-      throw '$e'.replaceAll('PostgrestException:', '').split(',').first.trim();
+      throw serverMessage(e);
     }
   }
 
