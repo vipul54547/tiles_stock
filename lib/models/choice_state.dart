@@ -38,6 +38,11 @@ bool get currentStockistIsImporter =>
 /// + history screens. (project_customer_history)
 bool currentStockistCustomersEnabled = false;
 
+/// 📕 The logged-in stockist BOOKS PRODUCTION ORDERS — orders for tiles that have not been made
+/// (admin-set `book_orders_enabled`). Loaded at login. Gates Book Order + production planning.
+/// (docs/BOOK_ORDER_PLAN.md)
+bool currentStockistBookOrders = false;
+
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID
 // Admin-set: may this buyer add (claim) catalog links? Drives whether the

@@ -21,6 +21,7 @@ import '../../models/dna.dart';
 import 'dna_editor_sheet.dart';
 import 'stock_control_screen.dart';
 import 'stock_lists_screen.dart';
+import 'book_order_screen.dart';
 import 'stockist_add_order_screen.dart';
 import 'customer_history_screen.dart';
 import 'stockist_profile_screen.dart';
@@ -2070,6 +2071,18 @@ class _State extends State<StockistDashboardScreen> {
                   MaterialPageRoute(
                       builder: (_) => const StockistAddOrderScreen()));
             }),
+            // 📕 The other kind of order: for tiles he has NOT made. Gated on the
+            // admin opt-in, because only a real made-to-order manufacturer takes
+            // them. (docs/BOOK_ORDER_PLAN.md)
+            if (currentStockistBookOrders) ...[
+              const Divider(height: 1),
+              _sheetItem(ctx, Icons.menu_book_outlined, const Color(0xFF6A1B9A),
+                  'Book Order', 'Order a design you have not made yet',
+                  () async {
+                await Navigator.of(context).push<Map<String, dynamic>>(
+                    MaterialPageRoute(builder: (_) => const BookOrderScreen()));
+              }),
+            ],
             // Customers is NOT here — it's a directory, not an order action, so
             // it lives in the account menu under "Edit profile" (gated on
             // customers_enabled). (project_customer_history)
