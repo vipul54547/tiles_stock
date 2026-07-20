@@ -3215,6 +3215,30 @@ class SupabaseDataService {
     }
   }
 
+  /// 🏭 Commits a production run. [boxes] = `[{box_id, target_boxes}]` (what to run, per cover);
+  /// [demand] = `[{book_order_line_id, planned_boxes}]` (the booked lines he TICKED).
+  ///
+  /// 🚫 **Writes nothing to stock.** No hold, no `box_quantity`, and it does **not** raise
+  /// `produced_qty` — planning to make something is not making it. Only declaring output does.
+  Future<Map<String, dynamic>> productionTakeIntoRun({
+    required String name,
+    required List<Map<String, dynamic>> boxes,
+    required List<Map<String, dynamic>> demand,
+    String? note,
+  }) async {
+    try {
+      final res = await supabase.rpc('production_take_into_run', params: {
+        'p_name': name,
+        'p_boxes': boxes,
+        'p_demand': demand,
+        if (note != null) 'p_note': note,
+      });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   /// 📕 The stockist's booked orders (standing demand, no stock effect).
   Future<List<Map<String, dynamic>>> myBookOrders() async {
     try {
