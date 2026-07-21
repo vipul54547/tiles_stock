@@ -73,7 +73,7 @@ import 'screens/stockist/stockist_profile_screen.dart';
 import 'screens/stockist/customer_history_screen.dart';
 import 'screens/stockist/book_orders_list_screen.dart';
 import 'screens/stockist/production_runs_screen.dart';
-import 'screens/stockist/production_screen.dart';
+import 'screens/stockist/production_choose_screen.dart';
 import 'screens/stockist/stockist_my_videos_screen.dart';
 import 'widgets/stockist_shell.dart';
 import 'services/supabase_auth_service.dart';
@@ -297,7 +297,7 @@ final GoRouter _router = GoRouter(
         // 🏭 The FACTORY view of the same demand — what the line has to make.
         GoRoute(
             path: '/stockist/production',
-            builder: (_, __) => const ProductionScreen()),
+            builder: (_, __) => const ProductionChooseScreen()),
         // 🏭 What was taken into production, what came off the line, and the history:
         // which design, for which buyer, when.
         GoRoute(
