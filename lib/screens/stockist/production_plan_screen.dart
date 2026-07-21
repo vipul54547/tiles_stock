@@ -82,8 +82,19 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   Set<String> get _picked => widget.draft.pickedIds;
   List<Map<String, dynamic>> get _orders => widget.draft.orders;
 
-  /// 🔑 The booked lines he has committed. `book_order_line_id`.
-  final Set<String> _ticked = {};
+  /// 🔑 The booked lines he has committed → **how many boxes of each** goes into production. A line
+  /// may go in PART (300 of 500 now, the rest stays pending). Absent from the map = not ticked.
+  /// `book_order_line_id` → planned boxes.
+  final Map<String, int> _lineQty = {};
+
+  bool _isTicked(dynamic lineId) => _lineQty.containsKey('$lineId');
+
+  /// The effective ticked quantity of a line — clamped to what is currently free (demand may have
+  /// shrunk since it was ticked). 0 when the line is not ticked.
+  int _tq(Map l) {
+    final q = _lineQty['${l['line_id']}'];
+    return q == null ? 0 : q.clamp(0, _free(l));
+  }
 
   /// box_id → boxes he typed. Absent = follow the ticks.
   final Map<String, int> _plan = {};
@@ -123,22 +134,26 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
           Map<String, dynamic>.from(r as Map)
       ];
       _asOf = DateTime.tryParse((res['as_of'] ?? '').toString())?.toLocal();
-      _ticked.clear();
+      _lineQty.clear();
       _plan.clear();
 
       final saved = widget.draft.savedLines;
       if (saved != null) {
-        // ♻️ Reopen — restore the saved ticks + makes, intersected with LIVE demand so a line or
-        // cover that has since gone is dropped rather than resurrected.
-        final live = <String>{};
+        // ♻️ Reopen — restore the saved ticks (with their quantity) + makes, intersected with LIVE
+        // demand so a line or cover that has since gone is dropped rather than resurrected. A saved
+        // quantity is clamped to what is currently free.
+        final freeById = <String, int>{};
         for (final r in _rows) {
           for (final l in _linesOf(r)) {
-            if (_free(l) > 0) live.add('${l['line_id']}');
+            if (_free(l) > 0) freeById['${l['line_id']}'] = _free(l);
           }
         }
         for (final s in saved) {
           final id = '${s['line_id']}';
-          if (live.contains(id)) _ticked.add(id);
+          final free = freeById[id];
+          if (free == null) continue;
+          final q = (s['planned_boxes'] as num?)?.toInt() ?? free;
+          _lineQty[id] = q.clamp(1, free);
         }
         for (final m in widget.draft.savedMakes ?? const []) {
           final box = '${m['box_id']}';
@@ -147,11 +162,11 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
           }
         }
       } else {
-        // Fresh draft — tick every free line of the picked orders (the common case).
+        // Fresh draft — tick every free line of the picked orders at its full remaining quantity.
         for (final r in _rows) {
           for (final l in _linesOf(r)) {
             if (_picked.contains(l['order_id']) && _free(l) > 0) {
-              _ticked.add(l['line_id']);
+              _lineQty['${l['line_id']}'] = _free(l);
             }
           }
         }
@@ -171,9 +186,8 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
     final lines = <Map<String, dynamic>>[];
     for (final r in _rows) {
       for (final l in _linesOf(r)) {
-        if (_ticked.contains(l['line_id']) && _free(l) > 0) {
-          lines.add({'line_id': l['line_id'], 'planned_boxes': _free(l)});
-        }
+        final q = _tq(l);
+        if (q > 0) lines.add({'line_id': l['line_id'], 'planned_boxes': q});
       }
     }
     final makes = [
@@ -214,9 +228,8 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   int _free(Map l) =>
       (_i(l, 'remaining') - _i(l, 'planned')).clamp(0, 1 << 30);
 
-  int _tickedQty(Map<String, dynamic> r) => _linesOf(r)
-      .where((l) => _ticked.contains(l['line_id']))
-      .fold(0, (s, l) => s + _free(l));
+  int _tickedQty(Map<String, dynamic> r) =>
+      _linesOf(r).fold(0, (s, l) => s + _tq(l));
 
   int _planOf(Map<String, dynamic> r) => _plan[r['box_id']] ?? _tickedQty(r);
 
@@ -250,16 +263,23 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   }
 
   // ── the tick list ───────────────────────────────────────────────────────────────────────────
+  /// 🔑 **Each line carries a quantity box** — a line may go into production in PART (300 of 500 now,
+  /// 200 stays pending). Ticking prefills the whole remaining; type down to send less.
   Future<void> _openTickList(Map<String, dynamic> r, bool mine) async {
     final lines = mine ? _mine(r) : _others(r);
     if (lines.isEmpty) return;
+    // One controller per line, seeded with the current (or default) quantity.
+    final ctrls = <String, TextEditingController>{
+      for (final l in lines)
+        '${l['line_id']}':
+            TextEditingController(text: '${_tq(l) > 0 ? _tq(l) : _free(l)}'),
+    };
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
-        final on = lines.where((l) => _ticked.contains(l['line_id']));
-        final onQ = on.fold<int>(0, (s, l) => s + _free(l));
+        final onQ = lines.fold<int>(0, (s, l) => s + _tq(l));
         final allQ = lines.fold<int>(0, (s, l) => s + _free(l));
-        final allOn = on.length == lines.length;
+        final allOn = lines.every((l) => _isTicked(l['line_id']));
         return AlertDialog(
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -273,17 +293,21 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
           ),
           contentPadding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
           content: SizedBox(
-            width: 380,
+            width: 400,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: () => setD(() => setState(() {
                         for (final l in lines) {
+                          final id = '${l['line_id']}';
+                          final free = _free(l);
                           if (allOn) {
-                            _ticked.remove(l['line_id']);
-                          } else if (_free(l) > 0) {
-                            _ticked.add(l['line_id']);
+                            _lineQty.remove(id);
+                          } else if (free > 0) {
+                            _lineQty[id] =
+                                (int.tryParse(ctrls[id]!.text.trim()) ?? free).clamp(1, free);
+                            ctrls[id]!.text = '${_lineQty[id]}';
                           }
                         }
                         _plan.remove(r['box_id']);
@@ -297,7 +321,7 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
                 child: ListView(
                   shrinkWrap: true,
                   children: [
-                    for (final l in lines) _tickRow(l, r, setD),
+                    for (final l in lines) _tickRow(l, r, setD, ctrls),
                   ],
                 ),
               ),
@@ -305,7 +329,7 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Row(children: [
-                  const Text('Ticked',
+                  const Text('Going in',
                       style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                   const Spacer(),
                   Text('$onQ of $allQ boxes',
@@ -317,7 +341,8 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
                 child: Text(
-                    'Unticked lines stay pending on that order and come back next time.',
+                    'What you leave off — a whole line or part of one — stays pending on that order '
+                    'and comes back next time.',
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
               ),
             ]),
@@ -329,55 +354,102 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
         );
       }),
     );
+    for (final c in ctrls.values) {
+      c.dispose();
+    }
     setState(() {});
     _scheduleSave();
   }
 
-  Widget _tickRow(Map<String, dynamic> l, Map<String, dynamic> r, StateSetter setD) {
+  Widget _tickRow(Map<String, dynamic> l, Map<String, dynamic> r, StateSetter setD,
+      Map<String, TextEditingController> ctrls) {
     final free = _free(l);
+    final id = '${l['line_id']}';
     final made = _i(l, 'produced');
     final planned = _i(l, 'planned');
-    final on = _ticked.contains(l['line_id']);
-    return CheckboxListTile(
-      value: on,
-      dense: true,
-      controlAffinity: ListTileControlAffinity.leading,
-      activeColor: _green,
-      onChanged: free == 0
-          ? null
-          : (v) => setD(() => setState(() {
-                if (v == true) {
-                  _ticked.add(l['line_id']);
-                } else {
-                  _ticked.remove(l['line_id']);
-                }
-                _plan.remove(r['box_id']);
-              })),
-      title: Row(children: [
-        if (l['urgent'] == true)
-          const Padding(
-            padding: EdgeInsets.only(right: 4),
-            child: Icon(Icons.star, size: 14, color: Colors.amber),
-          ),
-        Expanded(
-          child: Text('${l['customer']}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+    final on = _isTicked(id);
+    final ctrl = ctrls[id]!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(children: [
+        Checkbox(
+          value: on,
+          activeColor: _green,
+          visualDensity: VisualDensity.compact,
+          onChanged: free == 0
+              ? null
+              : (v) => setD(() => setState(() {
+                    if (v == true) {
+                      _lineQty[id] =
+                          (int.tryParse(ctrl.text.trim()) ?? free).clamp(1, free);
+                      ctrl.text = '${_lineQty[id]}';
+                    } else {
+                      _lineQty.remove(id);
+                    }
+                    _plan.remove(r['box_id']);
+                  })),
         ),
-        Text('$free',
-            style: const TextStyle(
-                fontSize: 13.5, fontWeight: FontWeight.w800)),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              if (l['urgent'] == true)
+                const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Icon(Icons.star, size: 13, color: Colors.amber),
+                ),
+              Expanded(
+                child: Text('${l['customer']}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ]),
+            Text(
+                [
+                  '${l['note']}'.trim().isEmpty ? '${l['token']}' : '${l['note']} · ${l['token']}',
+                  if (made > 0) 'made $made',
+                  if (planned > 0) 'planned $planned',
+                ].join('  ·  '),
+                style: TextStyle(
+                    fontSize: 10.5, color: made > 0 ? _green : Colors.grey.shade600)),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 58,
+          child: TextField(
+            controller: ctrl,
+            enabled: on,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.right,
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+              border: OutlineInputBorder(),
+            ),
+            style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+                color: on ? _green : Colors.grey),
+            onChanged: (v) {
+              final parsed = int.tryParse(v.trim()) ?? 0;
+              final clamped = parsed.clamp(1, free);
+              setD(() => setState(() {
+                    _lineQty[id] = clamped;
+                    _plan.remove(r['box_id']);
+                  }));
+              if (parsed > free) {
+                ctrl.text = '$clamped';
+                ctrl.selection =
+                    TextSelection.collapsed(offset: ctrl.text.length);
+              }
+            },
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text('/ $free',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
       ]),
-      subtitle: Text(
-          [
-            '${l['note']}'.trim().isEmpty ? '${l['token']}' : '${l['note']} · ${l['token']}',
-            if (made > 0) 'made $made',
-            if (planned > 0) 'planned $planned',
-          ].join('  ·  '),
-          style: TextStyle(
-              fontSize: 10.5,
-              color: made > 0 ? _green : Colors.grey.shade600)),
     );
   }
 
@@ -390,8 +462,9 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
       final p = _planOf(r);
       if (p > 0) boxes.add({'box_id': r['box_id'], 'target_boxes': p});
       for (final l in _linesOf(r)) {
-        if (_ticked.contains(l['line_id']) && _free(l) > 0) {
-          demand.add({'book_order_line_id': l['line_id'], 'planned_boxes': _free(l)});
+        final q = _tq(l);
+        if (q > 0) {
+          demand.add({'book_order_line_id': l['line_id'], 'planned_boxes': q});
         }
       }
     }
@@ -416,9 +489,8 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
       var left = 0;
       for (final r in _rows) {
         for (final l in _linesOf(r)) {
-          if (l['order_id'] == id &&
-              _free(l) > 0 &&
-              !_ticked.contains(l['line_id'])) {
+          // A line not FULLY taken (unticked, or ticked in part) keeps something pending.
+          if (l['order_id'] == id && _free(l) > 0 && _tq(l) < _free(l)) {
             left++;
           }
         }
@@ -450,7 +522,7 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
                         fontSize: 12, fontWeight: FontWeight.w800, color: _amber)),
                 const SizedBox(height: 4),
                 for (final e in pending.entries)
-                  Text('${e.key} — ${e.value} design(s) not ticked',
+                  Text('${e.key} — ${e.value} design(s) not fully taken',
                       style: const TextStyle(fontSize: 11.5)),
               ]),
             ),
@@ -518,15 +590,13 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
     final entries = <({Map<String, dynamic> r, Map<String, dynamic> l})>[];
     for (final r in _rows) {
       for (final l in _linesOf(r)) {
-        if (_ticked.contains(l['line_id']) && _free(l) > 0) {
-          entries.add((r: r, l: l));
-        }
+        if (_tq(l) > 0) entries.add((r: r, l: l));
       }
     }
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(builder: (ctx, setD) {
-        final total = entries.fold<int>(0, (s, e) => s + _free(e.l));
+        final total = entries.fold<int>(0, (s, e) => s + _tq(e.l));
         Widget body;
         if (entries.isEmpty) {
           body = const Padding(
@@ -542,10 +612,10 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
               _reviewGroup(
                 title: '${g[k]!.first.r['cover_word']}',
                 sub: '${g[k]!.first.r['brand']} · ${g[k]!.first.r['surface']} · ${g[k]!.first.r['size']}',
-                total: g[k]!.fold<int>(0, (s, e) => s + _free(e.l)),
+                total: g[k]!.fold<int>(0, (s, e) => s + _tq(e.l)),
                 lines: [
                   for (final e in g[k]!)
-                    (label: '${e.l['customer']}', sub: '${e.l['token']}', qty: _free(e.l))
+                    (label: '${e.l['customer']}', sub: '${e.l['token']}', qty: _tq(e.l))
                 ],
               ),
           ]);
@@ -559,10 +629,10 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
               _reviewGroup(
                 title: '${g[k]!.first.l['customer']}',
                 sub: '${g[k]!.first.l['note']} · ${g[k]!.first.l['token']}',
-                total: g[k]!.fold<int>(0, (s, e) => s + _free(e.l)),
+                total: g[k]!.fold<int>(0, (s, e) => s + _tq(e.l)),
                 lines: [
                   for (final e in g[k]!)
-                    (label: '${e.r['cover_word']}', sub: '${e.r['brand']} · ${e.r['surface']}', qty: _free(e.l))
+                    (label: '${e.r['cover_word']}', sub: '${e.r['brand']} · ${e.r['surface']}', qty: _tq(e.l))
                 ],
               ),
           ]);
@@ -891,11 +961,9 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   /// field sits in its own labelled place instead of crowding onto the name line. Stacks on narrow.
   Widget _row(Map<String, dynamic> r) {
     final mine = _mine(r), others = _others(r);
-    final mineOnQ =
-        mine.where((l) => _ticked.contains(l['line_id'])).fold<int>(0, (s, l) => s + _free(l));
+    final mineOnQ = mine.fold<int>(0, (s, l) => s + _tq(l));
     final mineAllQ = mine.fold<int>(0, (s, l) => s + _free(l));
-    final othOnQ =
-        others.where((l) => _ticked.contains(l['line_id'])).fold<int>(0, (s, l) => s + _free(l));
+    final othOnQ = others.fold<int>(0, (s, l) => s + _tq(l));
     final othAllQ = others.fold<int>(0, (s, l) => s + _free(l));
     final made = _i(r, 'produced_boxes');
     final p = _i(r, 'p_stock'), f = _i(r, 'f_stock');
@@ -1077,7 +1145,7 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
         for (final l in _linesOf(r)) {
           if (l['order_id'] != id || _free(l) == 0) continue;
           total++;
-          if (!_ticked.contains(l['line_id'])) left++;
+          if (_tq(l) < _free(l)) left++;
         }
       }
       if (total == 0) continue;
