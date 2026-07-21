@@ -3239,6 +3239,79 @@ class SupabaseDataService {
     }
   }
 
+  // ── 📝 draft plans — a named/dated plan he can save and come back to ─────────────────────────
+  /// Create a draft from the picked orders; the server seeds the default ticks. Returns its id.
+  Future<String?> productionPlanCreate({
+    required String name,
+    required DateTime date,
+    required List<String> orderIds,
+  }) async {
+    try {
+      final res = await supabase.rpc('production_plan_create', params: {
+        'p_name': name,
+        'p_date': date.toIso8601String().substring(0, 10),
+        'p_order_ids': orderIds,
+      });
+      return res?.toString();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Replace a draft's picked orders / ticks / makes wholesale (the Plan page autosaves).
+  /// [lines] = `[{line_id, planned_boxes}]`, [makes] = `[{box_id, target_boxes}]`.
+  Future<void> productionPlanSave({
+    required String planId,
+    required List<String> orderIds,
+    required List<Map<String, dynamic>> lines,
+    required List<Map<String, dynamic>> makes,
+  }) async {
+    try {
+      await supabase.rpc('production_plan_save', params: {
+        'p_id': planId,
+        'p_order_ids': orderIds,
+        'p_lines': lines,
+        'p_makes': makes,
+      });
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// The saved drafts: `{id, name, plan_date, order_count, box_count, created_at, updated_at}`.
+  Future<List<Map<String, dynamic>>> myProductionPlans() async {
+    try {
+      final res = await supabase.rpc('my_production_plans');
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myProductionPlans failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// One draft's full state: `{id, name, plan_date, order_ids, lines, makes}`, or null.
+  Future<Map<String, dynamic>?> productionPlanLoad(String id) async {
+    try {
+      final res = await supabase.rpc('production_plan_load', params: {'p_id': id});
+      return res == null ? null : Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('productionPlanLoad failed: $e\n$st');
+      return null;
+    }
+  }
+
+  /// Remove a draft (also called after it is taken into production).
+  Future<void> productionPlanDelete(String id) async {
+    try {
+      await supabase.rpc('production_plan_delete', params: {'p_id': id});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   /// 🏭 **Material came off the line.** This is the moment it becomes STOCK.
   ///
   /// Settles in order: the lines TICKED into this run (⭐urgent first, then oldest), then any other

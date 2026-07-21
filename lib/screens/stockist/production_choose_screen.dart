@@ -26,6 +26,7 @@ class _ProductionChooseScreenState extends State<ProductionChooseScreen> {
 
   bool _loading = true;
   List<Map<String, dynamic>> _orders = [];
+  List<Map<String, dynamic>> _drafts = [];
   final Set<String> _picked = {};
   String _q = '';
 
@@ -38,14 +39,22 @@ class _ProductionChooseScreenState extends State<ProductionChooseScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     final orders = await _data.myBookOrders();
+    final drafts = await _data.myProductionPlans();
     if (!mounted) return;
     setState(() {
       _orders = orders.where((o) => (o['status'] ?? '') == 'open').toList();
+      _drafts = drafts;
       // Drop any picks that are no longer open (e.g. taken while we were away).
       _picked.retainWhere(
           (id) => _orders.any((o) => (o['id'] ?? '').toString() == id));
       _loading = false;
     });
+  }
+
+  void _snack(String m, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(m), backgroundColor: error ? Colors.red : _navy));
   }
 
   int _i(Map m, String k) => (m[k] as num?)?.toInt() ?? 0;
@@ -139,7 +148,18 @@ class _ProductionChooseScreenState extends State<ProductionChooseScreen> {
     final name = nameCtl.text.trim().isEmpty
         ? 'Plan ${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}'
         : nameCtl.text.trim();
+    // Persist the draft the moment it's named — it survives an app-close from here on.
+    String? id;
+    try {
+      id = await _data.productionPlanCreate(
+          name: name, date: date, orderIds: _picked.toList());
+    } catch (e) {
+      _snack('$e', error: true);
+      return;
+    }
+    if (id == null || !mounted) return;
     final draft = PlanDraft(
+      id: id,
       name: name,
       date: date,
       pickedIds: {..._picked},
@@ -151,6 +171,70 @@ class _ProductionChooseScreenState extends State<ProductionChooseScreen> {
     // Taking into production moves orders to In production — refresh so they drop out, and clear
     // the picks that were just committed.
     if (took == true) _picked.clear();
+    await _load();
+  }
+
+  // ── ♻️ resume a saved draft ─────────────────────────────────────────────────────────────────
+  Future<void> _openDraft(Map<String, dynamic> d) async {
+    final id = (d['id'] ?? '').toString();
+    final loaded = await _data.productionPlanLoad(id);
+    if (!mounted) return;
+    if (loaded == null) {
+      _snack('Could not open that draft.', error: true);
+      return;
+    }
+    final orderIds = [
+      for (final x in (loaded['order_ids'] as List?) ?? const []) x.toString()
+    ];
+    final lines = [
+      for (final x in (loaded['lines'] as List?) ?? const [])
+        Map<String, dynamic>.from(x as Map)
+    ];
+    final makes = [
+      for (final x in (loaded['makes'] as List?) ?? const [])
+        Map<String, dynamic>.from(x as Map)
+    ];
+    final date =
+        DateTime.tryParse((loaded['plan_date'] ?? '').toString()) ?? DateTime.now();
+    final draft = PlanDraft(
+      id: id,
+      name: (loaded['name'] ?? '').toString(),
+      date: date,
+      pickedIds: orderIds.toSet(),
+      orders: _orders,
+      savedLines: lines,
+      savedMakes: makes,
+    );
+    await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => ProductionPlanScreen(draft: draft)));
+    if (!mounted) return;
+    await _load();
+  }
+
+  Future<void> _deleteDraft(Map<String, dynamic> d) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Discard this draft?'),
+        content: Text('"${(d['name'] ?? '').toString()}" will be removed.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Discard')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await _data.productionPlanDelete((d['id'] ?? '').toString());
+    } catch (e) {
+      _snack('$e', error: true);
+      return;
+    }
     await _load();
   }
 
@@ -176,6 +260,7 @@ class _ProductionChooseScreenState extends State<ProductionChooseScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Column(children: [
+              if (_drafts.isNotEmpty) _draftsBand(),
               Container(
                 color: Colors.white,
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -238,6 +323,66 @@ class _ProductionChooseScreenState extends State<ProductionChooseScreen> {
                   ]),
                 ),
             ]),
+    );
+  }
+
+  String _draftDate(String? iso) {
+    final d = DateTime.tryParse(iso ?? '');
+    if (d == null) return '';
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
+  Widget _draftsBand() => Container(
+        width: double.infinity,
+        color: const Color(0xFFF1ECF7),
+        padding: const EdgeInsets.fromLTRB(14, 10, 8, 8),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(
+            padding: const EdgeInsets.only(right: 6, bottom: 4),
+            child: Row(children: [
+              const Icon(Icons.drafts_outlined, size: 16, color: _purple),
+              const SizedBox(width: 6),
+              Text('Resume a draft (${_drafts.length})',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: _purple)),
+            ]),
+          ),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 132),
+            child: ListView(
+              shrinkWrap: true,
+              children: [for (final d in _drafts) _draftTile(d)],
+            ),
+          ),
+        ]),
+      );
+
+  Widget _draftTile(Map<String, dynamic> d) {
+    final orders = _i(d, 'order_count'), boxes = _i(d, 'box_count');
+    return Card(
+      margin: const EdgeInsets.only(bottom: 4, right: 6),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(9),
+          side: BorderSide(color: Colors.purple.shade100)),
+      child: ListTile(
+        dense: true,
+        onTap: () => _openDraft(d),
+        title: Text((d['name'] ?? '').toString(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+        subtitle: Text(
+            '${_draftDate((d['plan_date'] ?? '').toString())} · $orders order(s) · $boxes boxes',
+            style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
+        trailing: IconButton(
+          icon: Icon(Icons.delete_outline, size: 18, color: Colors.grey.shade500),
+          tooltip: 'Discard draft',
+          onPressed: () => _deleteDraft(d),
+        ),
+      ),
     );
   }
 

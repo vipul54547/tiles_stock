@@ -1,19 +1,27 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../services/supabase_data_service.dart';
 import 'production_packing_screen.dart';
 
-/// 📝 **A plan in progress.** Named + dated on the Choose-orders page, carried here to be finished.
-/// For now it lives only in memory; sub-step 2 gives it server persistence (a real draft you can
-/// close the app and return to) — this shape gains an `id` then, nothing else changes.
+/// 📝 **A plan in progress.** Named + dated on the Choose-orders page, and persisted server-side as a
+/// draft (`production_plans`) so he can close the app and come back to it. Reopening carries the
+/// saved ticks + makes in [savedLines] / [savedMakes]; a fresh draft leaves them null and the Plan
+/// page seeds the defaults.
 class PlanDraft {
   PlanDraft({
+    required this.id,
     required this.name,
     required this.date,
     required this.pickedIds,
     required this.orders,
+    this.savedLines,
+    this.savedMakes,
   });
 
+  /// `production_plans.id` — the draft's server home.
+  final String id;
   final String name;
   final DateTime date;
 
@@ -23,6 +31,11 @@ class PlanDraft {
   /// The open booked-order metadata (from `my_book_orders`) — for the party bar, the pending
   /// warning and the per-order outcome. The picked SET is fixed here; picking happens one page back.
   final List<Map<String, dynamic>> orders;
+
+  /// Reopen only — the saved ticks `[{line_id, planned_boxes}]` and per-cover make overrides
+  /// `[{box_id, target_boxes}]`. Null on a fresh draft (then the Plan page defaults everything).
+  final List<Map<String, dynamic>>? savedLines;
+  final List<Map<String, dynamic>>? savedMakes;
 }
 
 /// 🏭 **PLAN WHAT TO RUN — the factory view of the orders he picked.**
@@ -82,10 +95,22 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   /// The View-plan review toggles between grouping by ORDER (default) and by DESIGN.
   bool _reviewByDesign = false;
 
+  /// Autosave the draft a beat after the last change, and a flag so a taken draft is not re-saved.
+  Timer? _saveTimer;
+  bool _taken = false;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    // A clean save on the way out, unless the draft was just taken into production (then it's gone).
+    if (!_taken) _saveDraft();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -98,18 +123,72 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
           Map<String, dynamic>.from(r as Map)
       ];
       _asOf = DateTime.tryParse((res['as_of'] ?? '').toString())?.toLocal();
-      // Picking an order ticks its lines by default — doing nothing is the common case.
       _ticked.clear();
-      for (final r in _rows) {
-        for (final l in _linesOf(r)) {
-          if (_picked.contains(l['order_id']) && _free(l) > 0) {
-            _ticked.add(l['line_id']);
+      _plan.clear();
+
+      final saved = widget.draft.savedLines;
+      if (saved != null) {
+        // ♻️ Reopen — restore the saved ticks + makes, intersected with LIVE demand so a line or
+        // cover that has since gone is dropped rather than resurrected.
+        final live = <String>{};
+        for (final r in _rows) {
+          for (final l in _linesOf(r)) {
+            if (_free(l) > 0) live.add('${l['line_id']}');
+          }
+        }
+        for (final s in saved) {
+          final id = '${s['line_id']}';
+          if (live.contains(id)) _ticked.add(id);
+        }
+        for (final m in widget.draft.savedMakes ?? const []) {
+          final box = '${m['box_id']}';
+          if (_rows.any((r) => '${r['box_id']}' == box)) {
+            _plan[box] = (m['target_boxes'] as num?)?.toInt() ?? 0;
+          }
+        }
+      } else {
+        // Fresh draft — tick every free line of the picked orders (the common case).
+        for (final r in _rows) {
+          for (final l in _linesOf(r)) {
+            if (_picked.contains(l['order_id']) && _free(l) > 0) {
+              _ticked.add(l['line_id']);
+            }
           }
         }
       }
-      _plan.clear();
       _loading = false;
     });
+  }
+
+  // ── 💾 autosave the draft ───────────────────────────────────────────────────────────────────
+  void _scheduleSave() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 700), _saveDraft);
+  }
+
+  Future<void> _saveDraft() async {
+    if (_taken) return;
+    final lines = <Map<String, dynamic>>[];
+    for (final r in _rows) {
+      for (final l in _linesOf(r)) {
+        if (_ticked.contains(l['line_id']) && _free(l) > 0) {
+          lines.add({'line_id': l['line_id'], 'planned_boxes': _free(l)});
+        }
+      }
+    }
+    final makes = [
+      for (final e in _plan.entries) {'box_id': e.key, 'target_boxes': e.value}
+    ];
+    try {
+      await _data.productionPlanSave(
+          planId: widget.draft.id,
+          orderIds: _picked.toList(),
+          lines: lines,
+          makes: makes);
+    } catch (e) {
+      // Best-effort: a transient autosave miss retries on the next change / on leave.
+      debugPrint('draft autosave failed: $e');
+    }
   }
 
   void _snack(String m, {bool error = false}) {
@@ -251,6 +330,7 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
       }),
     );
     setState(() {});
+    _scheduleSave();
   }
 
   Widget _tickRow(Map<String, dynamic> l, Map<String, dynamic> r, StateSetter setD) {
@@ -403,6 +483,15 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
     try {
       final res = await _data.productionTakeIntoRun(
           name: widget.draft.name, boxes: boxes, demand: demand);
+      if (!mounted) return;
+      // The draft has become a run — retire it so it leaves the "resume a draft" list.
+      _taken = true;
+      _saveTimer?.cancel();
+      try {
+        await _data.productionPlanDelete(widget.draft.id);
+      } catch (e) {
+        debugPrint('draft delete after take failed: $e');
+      }
       if (!mounted) return;
       // 🔪 Say when an order was SLICED — the remainder is still in Booked orders under the
       // customer's own number, and the part taken now lives under a letter.
@@ -945,8 +1034,10 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
         ),
         style: const TextStyle(
             fontWeight: FontWeight.w800, fontSize: 15, color: _purple),
-        onChanged: (v) =>
-            setState(() => _plan[r['box_id']] = int.tryParse(v.trim()) ?? 0),
+        onChanged: (v) {
+          setState(() => _plan[r['box_id']] = int.tryParse(v.trim()) ?? 0);
+          _scheduleSave();
+        },
       ),
       if (d != 0)
         Padding(
