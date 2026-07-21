@@ -43,6 +43,12 @@ bool currentStockistCustomersEnabled = false;
 /// (docs/BOOK_ORDER_PLAN.md)
 bool currentStockistBookOrders = false;
 
+/// 🧱 The logged-in stockist TRACKS BATCH (=shade) / LOCATION on his stock (admin-set
+/// `track_batches` / `track_locations`). Loaded at login. They only decide whether the batch /
+/// location fields SHOW on the stock forms — the lot layer is always underneath. (docs/LOT_LAYER_PLAN)
+bool currentStockistTrackBatches = false;
+bool currentStockistTrackLocations = false;
+
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID
 // Admin-set: may this buyer add (claim) catalog links? Drives whether the

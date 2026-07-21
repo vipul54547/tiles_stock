@@ -99,6 +99,11 @@ class Stockist {
   /// really takes made-to-order work needs it. (docs/BOOK_ORDER_PLAN.md)
   final bool bookOrdersEnabled;
 
+  /// 🧱 Admin opt-in (independent): this stockist tracks BATCH (=shade) / LOCATION on his stock.
+  /// Off by default; only decides whether the batch / location fields show. (docs/LOT_LAYER_PLAN)
+  final bool trackBatches;
+  final bool trackLocations;
+
   final DateTime createdAt;
 
 
@@ -162,6 +167,8 @@ class Stockist {
     this.tdShow = false,
     this.customersEnabled = false,
     this.bookOrdersEnabled = false,
+    this.trackBatches = false,
+    this.trackLocations = false,
 
     required this.createdAt,
 
@@ -230,6 +237,8 @@ class Stockist {
     tdShow: json['td_show'] ?? false,
     customersEnabled: json['customers_enabled'] ?? false,
     bookOrdersEnabled: json['book_orders_enabled'] ?? false,
+    trackBatches: json['track_batches'] ?? false,
+    trackLocations: json['track_locations'] ?? false,
 
     createdAt: DateTime.parse(json['created_at']),
 

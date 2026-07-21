@@ -55,6 +55,11 @@ class _Entry {
   double? boxWeightKg;
   bool get hasBoxOverride => boxPieces != null && boxWeightKg != null;
 
+  /// 🧱 LOT — the shade (=batch) off the carton, and the godown location CODE (resolved to an id on
+  /// Save). Both optional; blank means one plain lot. Only captured when the stockist tracks them.
+  final String? batch;
+  final String? locationCode;
+
   _Entry({
     required this.master,
     required this.brandId,
@@ -64,6 +69,8 @@ class _Entry {
     this.packingId,
     this.boxPieces,
     this.boxWeightKg,
+    this.batch,
+    this.locationCode,
   });
 
   /// Same BOX + quality = the same holding — and the box is the PACKING in a brand's COVER.
@@ -72,7 +79,11 @@ class _Entry {
   /// 4-piece one are different amounts of tile, and merging them into one row of "20 boxes" says
   /// nothing. (The surface is not in the key — it belongs to the piece, and `master.id` already IS
   /// the piece.)
-  String get key => '${master.id}|${brandId ?? ''}|${packingId ?? ''}|$quality';
+  /// 🧱 Batch + location join the key: same design+brand+quality but a different shade or spot is a
+  /// different LOT, not a quantity to merge — so those rows must stay apart in the list too.
+  String get key =>
+      '${master.id}|${brandId ?? ''}|${packingId ?? ''}|$quality'
+      '|${(batch ?? '').trim().toLowerCase()}|${(locationCode ?? '').trim().toLowerCase()}';
 }
 
 class _State extends State<AddStockBatchScreen> {
@@ -105,6 +116,9 @@ class _State extends State<AddStockBatchScreen> {
   /// more than one packing is chosen — with a single packing there is nothing to ask.
   String? _selPackingId;
   final _qtyCtrl = TextEditingController();
+  // 🧱 LOT entry — shade (=batch) off the carton + godown location code. Shown only when tracked.
+  final _batchCtrl = TextEditingController();
+  final _locCtrl = TextEditingController();
 
   // Desktop entry bar: one focus node per field, so Tab walks Brand → Design → Quality → Qty and
   // Enter on Qty adds the line. (Size is read-only and takes no focus, so Tab flows straight past
@@ -147,6 +161,8 @@ class _State extends State<AddStockBatchScreen> {
   @override
   void dispose() {
     _qtyCtrl.dispose();
+    _batchCtrl.dispose();
+    _locCtrl.dispose();
     _fBrand.dispose();
     _fDesign.dispose();
     _fQuality.dispose();
@@ -419,7 +435,9 @@ class _State extends State<AddStockBatchScreen> {
     // The box override belongs to the design that was just added — never carry it onto the next.
     _selBoxPieces = null;
     _selBoxWeight = null;
-    // brand + quality + surface kept for faster repeated entry.
+    // 🧱 Shade is off THIS carton — clear it. Location usually holds for the delivery, so keep it.
+    _batchCtrl.clear();
+    // brand + quality + surface + location kept for faster repeated entry.
   }
 
   void _addEntry() {
@@ -445,6 +463,8 @@ class _State extends State<AddStockBatchScreen> {
       packingId: _selPackingId,
       boxPieces: _selBoxPieces,
       boxWeightKg: _selBoxWeight,
+      batch: currentStockistTrackBatches ? _batchCtrl.text.trim() : null,
+      locationCode: currentStockistTrackLocations ? _locCtrl.text.trim() : null,
     );
     final idx = _entries.indexWhere((x) => x.key == e.key);
     if (idx >= 0) {
@@ -552,6 +572,15 @@ class _State extends State<AddStockBatchScreen> {
 
     setState(() => _saving = true);
     try {
+      // 🧱 Resolve each distinct location CODE to its id (get-or-create), once, before the batch.
+      final locIds = <String, String>{};
+      for (final e in _entries) {
+        final code = (e.locationCode ?? '').trim();
+        if (code.isEmpty || locIds.containsKey(code.toLowerCase())) continue;
+        final id = await _svc.stockLocationAdd(code);
+        if (id != null) locIds[code.toLowerCase()] = id;
+      }
+
       // An entry whose box is packed differently must first be told WHICH product it belongs to.
       // The server compares the thickness this box implies against the design's: within 1 mm it is
       // the same tile (ordinary drift), beyond it the design forks into a different one. Resolve
@@ -576,6 +605,10 @@ class _State extends State<AddStockBatchScreen> {
           'quality': e.quality,
           'quantity': e.qty,
           'brand_id': e.brandId,
+          // 🧱 the shade off the carton + the resolved location id — decompose the holding into lots.
+          if ((e.batch ?? '').trim().isNotEmpty) 'batch': e.batch!.trim(),
+          if ((e.locationCode ?? '').trim().isNotEmpty)
+            'location_id': locIds[e.locationCode!.trim().toLowerCase()],
           // 📦 WHICH PACKING these boxes are. The server turns (design + brand + packing) into a
           // BOX — a packing in that brand's cover — and the hold points at it. Null = the tile's
           // first packing. (docs/PACKING_BOX_HOLD_PLAN.md)
@@ -852,6 +885,11 @@ class _State extends State<AddStockBatchScreen> {
               ),
               width: 130,
             ),
+            if (currentStockistTrackBatches)
+              _hField('Batch / shade', _lotField(_batchCtrl, 'shade A'),
+                  width: 120),
+            if (currentStockistTrackLocations)
+              _hField('Location', _lotField(_locCtrl, 'B1'), width: 100),
             _hField('Qty (boxes)', _qtyField(), width: 100),
             SizedBox(
               height: 44,
@@ -922,6 +960,22 @@ class _State extends State<AddStockBatchScreen> {
                 color: Colors.grey.shade700)),
       );
 
+  /// 🧱 A plain lot text field (batch / location) for the entry bar — matches the qty field's height.
+  Widget _lotField(TextEditingController c, String hint) => SizedBox(
+        height: 44,
+        child: TextField(
+          controller: c,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            hintText: hint,
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      );
+
   /// Desktop quantity. The last field of the line, so Enter here means Add.
   Widget _qtyField() => SizedBox(
         height: 44,
@@ -986,10 +1040,14 @@ class _State extends State<AddStockBatchScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       child: _tableRow(
         // The design carries its PACKING, because that is what he is counting boxes of. Without it
-        // a row saying "10 boxes" does not say how much tile.
-        design: _packingShown(e).isEmpty
-            ? _displayName(e.master, e.brandId)
-            : '${_displayName(e.master, e.brandId)}   ·   ${_packingShown(e)}',
+        // a row saying "10 boxes" does not say how much tile. 🧱 The shade + location ride along too.
+        design: [
+          _packingShown(e).isEmpty
+              ? _displayName(e.master, e.brandId)
+              : '${_displayName(e.master, e.brandId)}   ·   ${_packingShown(e)}',
+          if ((e.batch ?? '').trim().isNotEmpty) 'shade ${e.batch!.trim()}',
+          if ((e.locationCode ?? '').trim().isNotEmpty) '@ ${e.locationCode!.trim()}',
+        ].join('   ·   '),
         brand: e.brandName?.isNotEmpty == true ? e.brandName! : '—',
         size: e.master.size.replaceAll(' mm', ''),
         surface: _surfShown(e).isEmpty ? '—' : _surfShown(e),

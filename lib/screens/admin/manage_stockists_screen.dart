@@ -460,6 +460,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   bool _tdShow = false; // show the TilesDesign mark on this stockist's banners
   bool _customersEnabled = false; // may save customers on dispatch (opt-in)
   bool _bookOrders = false; // 📕 books production orders (opt-in)
+  bool _trackBatches = false; // 🧱 tracks batch (=shade) on stock (opt-in, independent)
+  bool _trackLocations = false; // 🧱 tracks godown location on stock (opt-in, independent)
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   // Per-stockist cap on brand-free stock lists (v2 — lists are no longer under a
@@ -504,6 +506,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _tdShow = s.tdShow;
       _customersEnabled = s.customersEnabled;
       _bookOrders = s.bookOrdersEnabled;
+      _trackBatches = s.trackBatches;
+      _trackLocations = s.trackLocations;
       _deviceLimit.text = '${s.deviceLimit}';
       _stockLists.text = '${s.stockListLimit}';
       _brandColor = s.brandColor;
@@ -783,6 +787,8 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
         await _dataSvc.setStockistCustomers(
             widget.existing!.id, _customersEnabled);
         await _dataSvc.setStockistBookOrders(widget.existing!.id, _bookOrders);
+        await _dataSvc.setStockistTrackBatches(widget.existing!.id, _trackBatches);
+        await _dataSvc.setStockistTrackLocations(widget.existing!.id, _trackLocations);
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -1038,6 +1044,36 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                             : 'Off — orders can only be taken against stock he already holds.',
                         style: const TextStyle(fontSize: 11)),
                     onChanged: (v) => setState(() => _bookOrders = v),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _trackBatches,
+                    activeThumbColor: const Color(0xFF2E7D32),
+                    title: const Text('Track batch / shade on stock'),
+                    subtitle: Text(
+                        _trackBatches
+                            ? 'Stock forms show a Batch (shade) field; stock decomposes into lots by batch.'
+                            : 'Off — no batch field; one lot per holding.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _trackBatches = v),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _trackLocations,
+                    activeThumbColor: const Color(0xFF2E7D32),
+                    title: const Text('Track godown location on stock'),
+                    subtitle: Text(
+                        _trackLocations
+                            ? 'Stock forms show a Location picker (his own code list); lots carry a location.'
+                            : 'Off — no location field.',
+                        style: const TextStyle(fontSize: 11)),
+                    onChanged: (v) => setState(() => _trackLocations = v),
                   ),
                 ),
               if (_isEdit) _brandingSection(),

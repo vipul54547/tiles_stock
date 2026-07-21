@@ -43,6 +43,12 @@ class _State extends State<AddEditStockScreen> {
   final _qtyCtrl = TextEditingController();
   final _controlCtrl = TextEditingController();
 
+  // 🧱 LOT layer — the opening stock's batch (=shade) + godown location. Shown only when the
+  // stockist tracks them; blank means one plain lot. (docs/LOT_LAYER_PLAN)
+  final _batchCtrl = TextEditingController();
+  String? _locationId;
+  List<Map<String, dynamic>> _locations = [];
+
   // Identity (read-only here — sourced from the Library master).
   String _designName = '';
   String _size       = '';
@@ -117,6 +123,10 @@ class _State extends State<AddEditStockScreen> {
     await _loadCatalogs();
     if (!isEdit) await _loadMasters();
     if (isEdit) await _loadExisting();
+    if (!isEdit && currentStockistTrackLocations) {
+      final locs = await _service.myStockLocations();
+      if (mounted) setState(() => _locations = locs);
+    }
   }
 
   Future<void> _loadCatalogs() async {
@@ -157,6 +167,7 @@ class _State extends State<AddEditStockScreen> {
   void dispose() {
     _qtyCtrl.dispose();
     _controlCtrl.dispose();
+    _batchCtrl.dispose();
     super.dispose();
   }
 
@@ -325,6 +336,8 @@ class _State extends State<AddEditStockScreen> {
           catalogId:    _catalogId, // publishes the design into this list (membership)
           brandId:      _isM ? _designBrandId : null, // M: stock is per-brand
           surface:      master.surfaceType,
+          batch:        currentStockistTrackBatches ? _batchCtrl.text : null,
+          locationId:   currentStockistTrackLocations ? _locationId : null,
         );
       }
     } catch (e) {
@@ -455,6 +468,7 @@ class _State extends State<AddEditStockScreen> {
                       _buildQualityPicker(),
                       const SizedBox(height: 16),
                       _buildQtyField(),
+                      if (!isEdit) ..._buildLotFields(),
                       if (isEdit) ...[
                         const SizedBox(height: 16),
                         _buildControlQtyField(),
@@ -917,6 +931,96 @@ class _State extends State<AddEditStockScreen> {
             style: const TextStyle(fontSize: 16)),
       ),
     );
+  }
+
+  /// 🧱 Batch (=shade) + location for the opening stock — shown only when the stockist tracks them.
+  List<Widget> _buildLotFields() {
+    final w = <Widget>[];
+    if (currentStockistTrackBatches) {
+      w.add(const SizedBox(height: 16));
+      w.add(TextFormField(
+        controller: _batchCtrl,
+        textCapitalization: TextCapitalization.characters,
+        onChanged: (_) {
+          if (!_dirty) setState(() => _dirty = true);
+        },
+        decoration: const InputDecoration(
+          labelText: 'Batch / shade (optional)',
+          helperText: "Off the carton — leave blank if you don't track it",
+          border: OutlineInputBorder(),
+        ),
+      ));
+    }
+    if (currentStockistTrackLocations) {
+      w.add(const SizedBox(height: 16));
+      w.add(Row(children: [
+        Expanded(
+          child: DropdownButtonFormField<String?>(
+            initialValue: _locationId,
+            isExpanded: true,
+            decoration: const InputDecoration(
+                labelText: 'Location (optional)', border: OutlineInputBorder()),
+            items: [
+              const DropdownMenuItem(value: null, child: Text('— none —')),
+              for (final l in _locations)
+                DropdownMenuItem(
+                    value: (l['id']).toString(),
+                    child: Text((l['code'] ?? '').toString())),
+            ],
+            onChanged: (v) => setState(() {
+              _locationId = v;
+              _dirty = true;
+            }),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton.filledTonal(
+          tooltip: 'Add a location',
+          onPressed: _saving ? null : _addLocation,
+          icon: const Icon(Icons.add_location_alt_outlined),
+        ),
+      ]));
+    }
+    return w;
+  }
+
+  Future<void> _addLocation() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New location'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+              labelText: 'Location code',
+              hintText: 'e.g. B1, a1C2',
+              border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true), child: const Text('Add')),
+        ],
+      ),
+    );
+    if (ok != true || ctrl.text.trim().isEmpty) return;
+    try {
+      final id = await _service.stockLocationAdd(ctrl.text.trim());
+      final locs = await _service.myStockLocations();
+      if (!mounted) return;
+      setState(() {
+        _locations = locs;
+        _locationId = id;
+        _dirty = true;
+      });
+    } catch (e) {
+      if (mounted) _snack('$e', Colors.red);
+    }
   }
 
   Widget _buildControlQtyField() {

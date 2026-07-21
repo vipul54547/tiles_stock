@@ -59,25 +59,41 @@ his and override the mockup.
 6. **Packing plan page** — after take, show the run's pack list: cover → boxes → pieces → *for
    whom*, with Print/share. (`window.print` on web; a plain printable layout elsewhere.)
 
-### Phase 2 — Runs page rebuilt BY ORDER
-- The RUNS tab is regrouped from *by run/cover* to *by order*: each booked order that has material
-  in production shows its covers, planned/made, and the buyer. Remove the inline **"Made"**
-  (declare-output) button from here.
-- Decide where declaring output now lives. Under the new flow, **adding stock is the output
-  declaration** and happens on the Stock page — so `production_declare_output`'s role shrinks to
-  *recording what a run produced*, and allocation moves to the JOIN. Re-read `production_declare_output`
-  live before changing it.
+### Phase 2–3 — MADE → POSITION → ORDER FROM STOCK (redesigned 21 Jul with him; supersedes the old
+###                "Runs by order, no Made button" sketch). Depends on the LOT layer (docs/LOT_LAYER_PLAN).
+The flow he locked: **booked → planned → taken into production → MADE → *Order from stock* (held by
+default) → dispatch (whenever the truck comes).** "Made" is NOT dispatch — the ship date is unknown,
+so the material is HELD for the customer and waits.
 
-### Phase 3 — THE JOIN (old #4)
-- Flow: **Add stock (Stock page) → Runs page (by order) → per-order "Order from stock"**.
-- Server: an allocation ledger tying a run's produced boxes to orders, and
-  `book_order_to_stock_order(run, order)` that puts the boxes on hold for the customer and creates
-  an ordinary stock order. Converted qty is DERIVED (no column). Clamp-and-report on short free
-  stock. The index on the conversion is **not** unique on `(run, order)` so late output can convert.
-- Guard: `customer_delete` must also refuse when a booked order exists (a hole left on 20 Jul —
-  today it only checks inquiries/dispatches).
-- Two-way traceability: from an order see the run(s) that fed it; from a run see the orders it
-  settled.
+**A. The Made dialog stays ON the Runs page (keep the button).** Two rows for the SAME design:
+- **Row 1 — Premium:** brand *(fixed = the run's brand)* · design *(fixed)* · quantity · batch · location.
+  → stock under that brand's cover, **earmarked to the run's booked orders** (`produced_qty`).
+- **Row 2 — Standard:** grade *(fixed)* · **brand ▾** *(auto = the default brand if the brand's toggle
+  is on, else the produced brand — always overridable)* · design *(auto = Row 1)* · quantity · batch ·
+  location. → **free stock** under the chosen brand's cover.
+- One **transactional** submit (both or neither). The Row-2 brand ▾ lists only brands that **cover**
+  the design. Batch/location columns show only if the stockist tracks them (LOT flags).
+- 🔒 **#2 Standard → free stock, NEVER auto-allocated.** 🔒 **#3 run progress = PREMIUM only** (standard
+  is extra, never completes a target). This solves his (D): the default brand need not appear on the
+  Runs page — its standard is entered from the produced brand's Made action and routed automatically.
+
+**B. Per-brand toggle** `brands.standard_in_default` — *"this brand's standard is packed in the default
+brand."* Set at brand create + editable. Drives the Row-2 default only; nothing is ever compulsory (his
+rule C: an all-standard run may be sold under the real brand).
+
+**C. NEW page after Runs — the PRODUCTION POSITION, by design.** Per design: **Program** (ticked into
+production) · **Premium made** · **Standard made**. Gives him the true position of the run. We do NOT
+track/enforce the remaining gap — the stockist handles any shortfall manually. From here he **sends
+ready orders → Order from stock**, and a **PARTIAL send is allowed** (hold what's ready, leave the rest).
+
+**D. Order from stock (the JOIN, as a HELD staging area).** Sent orders land here with the produced
+material **HELD** for the customer by default (reserved — out of free stock — so it can't be sold away
+while it waits). **Standard is NEVER held** (stays free). Dispatch runs from here whenever the vehicle
+arrives → the existing `/d/` receipt. Reuse the hold + dispatch mechanism; the booked order becomes an
+ordinary held stock order at this point (the promise ends where the material begins).
+- Guard: `customer_delete` must also refuse when a booked order exists (hole left 20 Jul).
+- Two-way traceability + HISTORY: per run·design·buyer — Ordered → Planned → Premium made → Dispatched,
+  with **batch·location** (real audit trail); standard shown separately as free stock.
 
 ### Phase 4 — Edit-order facility (old #3)
 - `book_order_update`, `book_order_line_set/add/delete` — all refuse unless the order is `open`

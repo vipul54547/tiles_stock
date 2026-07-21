@@ -458,6 +458,8 @@ class SupabaseDataService {
     String? catalogId,
     String? brandId,
     String? surface,
+    String? batch,
+    String? locationId,
   }) async {
     try {
       final res = await supabase.rpc('stock_add_holding', params: {
@@ -467,8 +469,42 @@ class SupabaseDataService {
         'p_catalog_id': catalogId,
         if (surface != null) 'p_surface': surface,
         'p_brand_id':   brandId,
+        if (batch != null && batch.trim().isNotEmpty) 'p_batch': batch.trim(),
+        if (locationId != null) 'p_location_id': locationId,
       });
       return res?.toString();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  // ── 🧱 stock locations — his own pick-list (LOT layer) ───────────────────────────────────────
+  Future<List<Map<String, dynamic>>> myStockLocations() async {
+    try {
+      final res = await supabase.rpc('my_stock_locations');
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myStockLocations failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Add (or reuse) a location code; returns its id.
+  Future<String?> stockLocationAdd(String code) async {
+    try {
+      final res = await supabase.rpc('stock_location_add', params: {'p_code': code});
+      return res?.toString();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> stockLocationDelete(String id) async {
+    try {
+      await supabase.rpc('stock_location_delete', params: {'p_id': id});
     } catch (e) {
       throw serverMessage(e);
     }
@@ -2762,6 +2798,8 @@ class SupabaseDataService {
         tdShow:     s['td_show'] ?? false,
         customersEnabled: s['customers_enabled'] ?? false,
         bookOrdersEnabled: s['book_orders_enabled'] ?? false,
+        trackBatches: s['track_batches'] ?? false,
+        trackLocations: s['track_locations'] ?? false,
         createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
             DateTime.now(),
       );
@@ -3192,6 +3230,25 @@ class SupabaseDataService {
   Future<void> setStockistBookOrders(String sequentialId, bool enabled) async {
     try {
       await supabase.rpc('admin_set_stockist_book_orders',
+          params: {'p_seq': sequentialId, 'p_enabled': enabled});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Admin: switch batch (=shade) / location tracking on for a stockist (LOT layer). Independent.
+  Future<void> setStockistTrackBatches(String sequentialId, bool enabled) async {
+    try {
+      await supabase.rpc('admin_set_stockist_track_batches',
+          params: {'p_seq': sequentialId, 'p_enabled': enabled});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> setStockistTrackLocations(String sequentialId, bool enabled) async {
+    try {
+      await supabase.rpc('admin_set_stockist_track_locations',
           params: {'p_seq': sequentialId, 'p_enabled': enabled});
     } catch (e) {
       throw serverMessage(e);

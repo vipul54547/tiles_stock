@@ -124,7 +124,7 @@ class SupabaseAuthService {
       final stockist = await supabase
           .from('stockists')
           .select(
-              'id, sequential_id, is_active, business_type, customers_enabled, book_orders_enabled')
+              'id, sequential_id, is_active, business_type, customers_enabled, book_orders_enabled, track_batches, track_locations')
           .eq('user_id', userId)
           .single();
       await _ensureActive(stockist['is_active']);
@@ -136,6 +136,10 @@ class SupabaseAuthService {
           stockist['customers_enabled'] as bool? ?? false;
       currentStockistBookOrders =
           stockist['book_orders_enabled'] as bool? ?? false;
+      currentStockistTrackBatches =
+          stockist['track_batches'] as bool? ?? false;
+      currentStockistTrackLocations =
+          stockist['track_locations'] as bool? ?? false;
       _role = UserRole.stockist;
       return _role;
     }
@@ -305,6 +309,8 @@ class SupabaseAuthService {
     currentStockistBusinessType = 'M';
     currentStockistCustomersEnabled = false;
     currentStockistBookOrders = false;
+    currentStockistTrackBatches = false;
+    currentStockistTrackLocations = false;
     currentEndUserId    = '';
     currentEndUserCanClaimPrivate = false;
     publicMarketLive = false;
