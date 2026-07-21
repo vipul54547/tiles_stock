@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../models/brand.dart';
 import '../services/supabase_data_service.dart';
 import '../utils/india_geo.dart';
 
@@ -15,10 +16,16 @@ class CustomerPicker {
   /// (`{id, name, city, district, phone, …}`), or null if dismissed.
   /// [customers] is the caller's current `listCustomers()` result; a freshly
   /// created customer is returned even though it is not yet in that list.
+  /// 🏷️ [brands] — when non-empty, the New-customer form offers an optional
+  /// "Usual brand" dropdown (the cover this customer usually takes), prefilled
+  /// from [initialBrandId]. Callers that don't care about brand (Dispatch,
+  /// Add Order) leave both blank and no dropdown shows.
   static Future<Map<String, dynamic>?> show(
     BuildContext context, {
     required List<Map<String, dynamic>> customers,
     required SupabaseDataService svc,
+    List<Brand> brands = const [],
+    String? initialBrandId,
   }) async {
     final action = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
@@ -91,7 +98,7 @@ class CustomerPicker {
     if (action == null) return null;
     if (action['_new'] == true) {
       if (!context.mounted) return null;
-      return _newCustomerForm(context, svc);
+      return _newCustomerForm(context, svc, brands, initialBrandId);
     }
     return action;
   }
@@ -103,8 +110,8 @@ class CustomerPicker {
   /// place is useless in the directory, and the pincode lookup can't be relied
   /// on to supply it (it needs the network and a valid pin). So both are real
   /// dropdowns off the bundled offline list; the lookup only pre-fills them.
-  static Future<Map<String, dynamic>?> _newCustomerForm(
-      BuildContext context, SupabaseDataService svc) async {
+  static Future<Map<String, dynamic>?> _newCustomerForm(BuildContext context,
+      SupabaseDataService svc, List<Brand> brands, String? initialBrandId) async {
     final nameCtl = TextEditingController();
     final phoneCtl = TextEditingController();
     final pinCtl = TextEditingController();
@@ -117,6 +124,14 @@ class CustomerPicker {
     bool looking = false;
     bool saving = false;
     Map<String, dynamic>? created;
+    // 🏷️ The cover he usually takes — optional, and only offered when the caller
+    // passed a brand list. Prefill from the entry-row brand; never force.
+    String? brandId =
+        brands.any((b) => b.id == initialBrandId) ? initialBrandId : null;
+    // Reuse the created id on a retry so a second Save updates rather than
+    // minting a duplicate (the brand write below could fail after the customer
+    // is already created).
+    String? savedId;
 
     await showModalBottomSheet<bool>(
       context: context,
@@ -240,6 +255,20 @@ class CustomerPicker {
                   controller: cityCtl,
                   textCapitalization: TextCapitalization.words,
                   decoration: dec('City (optional)')),
+              if (brands.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String?>(
+                  initialValue: brandId,
+                  isExpanded: true,
+                  decoration: dec('Usual brand (optional)'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('— none —')),
+                    for (final b in brands)
+                      DropdownMenuItem(value: b.id, child: Text(b.name)),
+                  ],
+                  onChanged: (v) => setSheet(() => brandId = v),
+                ),
+              ],
               const SizedBox(height: 16),
               Row(children: [
                 Expanded(
@@ -257,6 +286,7 @@ class CustomerPicker {
                       setSheet(() => saving = true);
                       try {
                         final id = await svc.upsertCustomer(
+                          id: savedId,
                           name: nameCtl.text.trim(),
                           phone: phoneCtl.text.trim().isEmpty
                               ? null
@@ -270,6 +300,10 @@ class CustomerPicker {
                               ? null
                               : cityCtl.text.trim(),
                         );
+                        savedId = id;
+                        if (id != null && brandId != null) {
+                          await svc.customerSetDefaultBrand(id, brandId);
+                        }
                         if (!ctx.mounted) return;
                         if (id != null) {
                           created = {
@@ -280,6 +314,7 @@ class CustomerPicker {
                             'district': district,
                             'pincode': pinCtl.text.trim(),
                             'city': cityCtl.text.trim(),
+                            'default_brand_id': brandId ?? '',
                           };
                         }
                         Navigator.pop(ctx, true);

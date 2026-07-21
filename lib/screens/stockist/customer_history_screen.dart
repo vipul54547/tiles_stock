@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../models/brand.dart';
 import '../../services/supabase_data_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../widgets/customer_picker.dart';
@@ -21,6 +22,7 @@ class CustomerListScreen extends StatefulWidget {
 class _CustomerListState extends State<CustomerListScreen> {
   final _svc = SupabaseDataService();
   List<Map<String, dynamic>> _customers = [];
+  List<Brand> _brands = [];
   bool _loading = true;
   String _q = '';
 
@@ -31,17 +33,22 @@ class _CustomerListState extends State<CustomerListScreen> {
   }
 
   Future<void> _load() async {
-    final c = await _svc.listCustomers();
+    final results = await Future.wait([
+      _svc.listCustomers(),
+      _svc.getMyBrands(),
+    ]);
     if (!mounted) return;
     setState(() {
-      _customers = c;
+      _customers = results[0] as List<Map<String, dynamic>>;
+      _brands = (results[1] as List<Brand>).toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
       _loading = false;
     });
   }
 
   Future<void> _addCustomer() async {
-    final created =
-        await CustomerPicker.show(context, customers: _customers, svc: _svc);
+    final created = await CustomerPicker.show(context,
+        customers: _customers, svc: _svc, brands: _brands);
     // Only the New-customer path adds a row we don't have; a plain pick just
     // opens that customer's history.
     if (created == null) return;
@@ -58,35 +65,54 @@ class _CustomerListState extends State<CustomerListScreen> {
     final name = TextEditingController(text: (c['name'] ?? '').toString());
     final phone = TextEditingController(text: (c['phone'] ?? '').toString());
     final city = TextEditingController(text: (c['city'] ?? '').toString());
+    final origBrand = (c['default_brand_id'] ?? '').toString();
+    // 🏷️ Only offer a brand it actually is one of ours; a stale id shows as none.
+    String? brandId = _brands.any((b) => b.id == origBrand) ? origBrand : null;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit customer'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-              controller: name,
-              autofocus: true,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: 'Name *')),
-          const SizedBox(height: 8),
-          TextField(
-              controller: phone,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Phone')),
-          const SizedBox(height: 8),
-          TextField(
-              controller: city,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: 'City / area')),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Save')),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          title: const Text('Edit customer'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+                controller: name,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'Name *')),
+            const SizedBox(height: 8),
+            TextField(
+                controller: phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Phone')),
+            const SizedBox(height: 8),
+            TextField(
+                controller: city,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'City / area')),
+            if (_brands.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String?>(
+                initialValue: brandId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Usual brand'),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('— none —')),
+                  for (final b in _brands)
+                    DropdownMenuItem(value: b.id, child: Text(b.name)),
+                ],
+                onChanged: (v) => setDlg(() => brandId = v),
+              ),
+            ],
+          ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Save')),
+          ],
+        ),
       ),
     );
     if (ok != true) return;
@@ -101,6 +127,10 @@ class _CustomerListState extends State<CustomerListScreen> {
         phone: phone.text.trim().isEmpty ? null : phone.text.trim(),
         city: city.text.trim().isEmpty ? null : city.text.trim(),
       );
+      if (_brands.isNotEmpty && (brandId ?? '') != origBrand) {
+        await _svc.customerSetDefaultBrand(
+            (c['id'] ?? '').toString(), brandId);
+      }
       await _load();
       _snack('Customer updated.');
     } catch (e) {

@@ -130,8 +130,11 @@ class _BookOrderScreenState extends State<BookOrderScreen> {
   /// 🏷️ Picking him PREFILLS his brand — the cover he usually takes. Only into a blank: a brand
   /// already chosen for this order is his, and is never overwritten.
   Future<void> _pickCustomer() async {
-    final picked =
-        await CustomerPicker.show(context, customers: _customers, svc: _data);
+    final picked = await CustomerPicker.show(context,
+        customers: _customers,
+        svc: _data,
+        brands: _brands,
+        initialBrandId: _entryBrandId);
     if (picked == null) return;
     final id = (picked['id'] ?? '').toString();
     if (id.isEmpty) return;
