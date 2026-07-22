@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/supabase_data_service.dart';
 
-/// 🏭 **PRODUCTION POSITION — the true state of a run.**
+/// 🏭 **PRODUCTION POSITION.**
 ///
-/// **By design** — the run's grade split: Program · Premium made · Standard made
-/// · Left (progress is premium only; the gap isn't enforced).
+/// **By design** — the run's grade split (Program · Premium · Standard · Left).
 ///
-/// **By order** — where he SENDS ready material to *Order from stock*: per booked
-/// line, Ticked · Make · Godown(F_Stock) · Made · **Ready** (= min(ticked−sent,
-/// F_Stock)). Sending reserves it from F_Stock into a held Ready order — partial
-/// by editing the qty; F_Stock is a shared pool, so a shared design is flagged.
-/// (docs/PRODUCTION_REDESIGN_PLAN.md §Phase 3 · order_from_stock artifact)
+/// **Allocate** — when a design is wanted by more than one order and there isn't
+/// enough F_Stock for everyone, the stockist divides the shared stock among the
+/// parties here (a box each). It goes **green** once the split fits F_Stock.
+///
+/// **By order** — send the allocated material to a held Ready order. An order's
+/// Send unlocks only once its shared designs are green; a design with enough for
+/// all is auto-allocated its full Ready. (PRODUCTION_REDESIGN §Phase 3 · order_from_stock)
 class ProductionPositionScreen extends StatefulWidget {
   final Map<String, dynamic> run;
   const ProductionPositionScreen({super.key, required this.run});
@@ -29,8 +30,17 @@ class _State extends State<ProductionPositionScreen> {
   bool _loading = true;
   bool _saving = false;
   List<Map<String, dynamic>> _orders = [];
-  final _qty = <String, TextEditingController>{}; // line_id -> boxes to send
-  final _sharedFStock = <String, int>{}; // design_id shared across orders -> F_Stock
+
+  /// A design wanted by >1 order whose combined Ready exceeds its F_Stock → it
+  /// must be split by hand. design_id → its F_Stock.
+  final Map<String, int> _short = {};
+
+  /// The claimants of a short design: each carries its order + the split box.
+  final Map<String, List<Map<String, dynamic>>> _claims = {};
+
+  /// line_id → the boxes to send. Real controllers only for SHORT lines (edited
+  /// in Allocate); a non-short line just sends its full Ready.
+  final Map<String, TextEditingController> _split = {};
 
   int _i(Map<String, dynamic> m, String k) => (m[k] as num?)?.toInt() ?? 0;
 
@@ -42,7 +52,7 @@ class _State extends State<ProductionPositionScreen> {
 
   @override
   void dispose() {
-    for (final c in _qty.values) {
+    for (final c in _split.values) {
       c.dispose();
     }
     super.dispose();
@@ -52,40 +62,44 @@ class _State extends State<ProductionPositionScreen> {
     final orders =
         await _svc.productionPositionOrders((widget.run['id'] ?? '').toString());
     if (!mounted) return;
-    // A design is only SHORT — and worth a warning — when it sits in more than
-    // one order AND the combined demand (ticked − sent) exceeds its shared
-    // F_Stock. If F_Stock covers everyone, there's no conflict, so no warning.
-    final count = <String, int>{};
-    final demand = <String, int>{};
+    // Group the run's order lines by design: combined Ready vs the shared F_Stock.
+    final byDesign = <String, List<Map<String, dynamic>>>{};
     final fstockOf = <String, int>{};
     for (final o in orders) {
       for (final raw in (o['lines'] as List?) ?? const []) {
         final l = Map<String, dynamic>.from(raw as Map);
         final d = (l['design_id'] ?? '').toString();
         if (d.isEmpty) continue;
-        count[d] = (count[d] ?? 0) + 1;
-        demand[d] =
-            (demand[d] ?? 0) + (_i(l, 'ticked') - _i(l, 'sent')).clamp(0, 1 << 30);
+        (byDesign[d] ??= []).add({
+          ...l,
+          '_customer': o['customer'],
+          '_token': o['token'],
+          '_order_id': o['order_id'],
+        });
         fstockOf[d] = _i(l, 'f_stock');
       }
     }
-    _sharedFStock.clear();
-    for (final d in count.keys) {
-      if ((count[d] ?? 0) > 1 && (demand[d] ?? 0) > (fstockOf[d] ?? 0)) {
-        _sharedFStock[d] = fstockOf[d] ?? 0;
-      }
-    }
-    // Fresh qty controllers, each defaulting to the line's ready.
-    for (final c in _qty.values) {
+    for (final c in _split.values) {
       c.dispose();
     }
-    _qty.clear();
-    for (final o in orders) {
-      for (final raw in (o['lines'] as List?) ?? const []) {
-        final l = Map<String, dynamic>.from(raw as Map);
-        final ready = _i(l, 'ready');
-        _qty[(l['line_id']).toString()] =
-            TextEditingController(text: ready == 0 ? '' : '$ready');
+    _split.clear();
+    _short.clear();
+    _claims.clear();
+    for (final e in byDesign.entries) {
+      final ready = e.value.fold(0, (s, l) => s + _i(l, 'ready'));
+      final f = fstockOf[e.key] ?? 0;
+      // Short = its claimants together want more than there is.
+      if (e.value.length > 1 && ready > f) {
+        _short[e.key] = f;
+        _claims[e.key] = e.value;
+        // Greedy default split — oldest-first up to F_Stock, so it opens green.
+        var left = f;
+        for (final l in e.value) {
+          final take = _i(l, 'ready').clamp(0, left);
+          left -= take;
+          _split[(l['line_id']).toString()] =
+              TextEditingController(text: take == 0 ? '' : '$take');
+        }
       }
     }
     setState(() {
@@ -94,15 +108,40 @@ class _State extends State<ProductionPositionScreen> {
     });
   }
 
-  Future<void> _send(List<Map<String, dynamic>> lines) async {
+  // The boxes a line will send: the typed split (short design) or its full Ready.
+  int _allocOf(Map<String, dynamic> l) {
+    final id = (l['line_id']).toString();
+    if (_split.containsKey(id)) {
+      return int.tryParse(_split[id]!.text.trim()) ?? 0;
+    }
+    return _i(l, 'ready');
+  }
+
+  int _allocated(String designId) =>
+      (_claims[designId] ?? const []).fold(0, (s, l) => s + _allocOf(l));
+
+  bool _greenDesign(String designId) =>
+      _allocated(designId) <= (_short[designId] ?? 0);
+
+  /// An order can send once every SHORT design it touches is green.
+  bool _orderSendable(Map<String, dynamic> o) {
+    for (final raw in (o['lines'] as List?) ?? const []) {
+      final d = (Map<String, dynamic>.from(raw as Map)['design_id'] ?? '')
+          .toString();
+      if (_short.containsKey(d) && !_greenDesign(d)) return false;
+    }
+    return true;
+  }
+
+  Future<void> _send(Map<String, dynamic> o) async {
     final payload = <Map<String, dynamic>>[];
-    for (final l in lines) {
-      final id = (l['line_id']).toString();
-      final q = int.tryParse(_qty[id]?.text.trim() ?? '') ?? 0;
-      if (q > 0) payload.add({'line_id': id, 'boxes': q});
+    for (final raw in (o['lines'] as List?) ?? const []) {
+      final l = Map<String, dynamic>.from(raw as Map);
+      final q = _allocOf(l);
+      if (q > 0) payload.add({'line_id': (l['line_id']).toString(), 'boxes': q});
     }
     if (payload.isEmpty) {
-      _snack('Nothing to send.', _red);
+      _snack('Nothing ready to send.', _amber);
       return;
     }
     setState(() => _saving = true);
@@ -114,8 +153,8 @@ class _State extends State<ProductionPositionScreen> {
       if (mounted) {
         _snack(
             sent > 0
-                ? '$sent boxes reserved → Ready order ${token.isEmpty ? '' : '($token)'}'
-                : 'Nothing sent — no free stock available.',
+                ? '$sent boxes reserved → Ready order${token.isEmpty ? '' : ' ($token)'}'
+                : 'Nothing sent — no free stock.',
             sent > 0 ? _green : _amber);
       }
     } catch (e) {
@@ -147,10 +186,15 @@ class _State extends State<ProductionPositionScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
               children: [
-                _sectionTitle('By design — the run\'s totals'),
+                _title('By design — the run\'s totals'),
                 for (final b in boxes) _designCard(b),
+                if (_short.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _title('Allocate — shared stock is short; divide it'),
+                  for (final d in _short.keys) _allocateCard(d),
+                ],
                 const SizedBox(height: 16),
-                _sectionTitle('By order — send ready material from here'),
+                _title('By order — send ready material from here'),
                 if (_orders.isEmpty)
                   Padding(
                     padding: const EdgeInsets.all(16),
@@ -164,7 +208,7 @@ class _State extends State<ProductionPositionScreen> {
     );
   }
 
-  Widget _sectionTitle(String s) => Padding(
+  Widget _title(String s) => Padding(
         padding: const EdgeInsets.fromLTRB(2, 4, 2, 8),
         child: Text(s.toUpperCase(),
             style: TextStyle(
@@ -204,12 +248,99 @@ class _State extends State<ProductionPositionScreen> {
     );
   }
 
+  Widget _allocateCard(String designId) {
+    final claims = _claims[designId] ?? const [];
+    final f = _short[designId] ?? 0;
+    final used = _allocated(designId);
+    final green = used <= f;
+    final head = claims.isEmpty ? '' : '${claims.first['cover_word']}';
+    final sub = claims.isEmpty
+        ? ''
+        : '${claims.first['brand']} · ${claims.first['surface']} · ${claims.first['size']}';
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: green ? _green : _red, width: 1.4)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(head,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+          Text(sub,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+          const SizedBox(height: 8),
+          for (final l in claims) _claimRow(l),
+          const Divider(height: 16),
+          Row(children: [
+            Icon(green ? Icons.check_circle : Icons.error_outline,
+                size: 16, color: green ? _green : _red),
+            const SizedBox(width: 6),
+            Text('Allocated $used of $f in stock',
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: green ? _green : _red)),
+            const Spacer(),
+            if (!green)
+              Text('${used - f} over — lower a box',
+                  style: const TextStyle(fontSize: 11, color: _red)),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _claimRow(Map<String, dynamic> l) {
+    final id = (l['line_id']).toString();
+    final want = _i(l, 'ticked') - _i(l, 'sent');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(children: [
+        const Icon(Icons.person_outline, size: 14, color: _navy),
+        const SizedBox(width: 5),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${l['_customer']}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w600)),
+              Text('wants $want · ${l['_token']}',
+                  style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+            ],
+          ),
+        ),
+        SizedBox(
+          width: 56,
+          child: TextField(
+            controller: _split[id],
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+                hintText: '0', isDense: true, border: OutlineInputBorder()),
+          ),
+        ),
+      ]),
+    );
+  }
+
   Widget _orderCard(Map<String, dynamic> o) {
     final lines = [
       for (final l in (o['lines'] as List?) ?? const [])
         Map<String, dynamic>.from(l as Map)
     ];
-    final anyReady = lines.any((l) => _i(l, 'ready') > 0);
+    final sendable = _orderSendable(o);
+    final total = lines.fold(0, (s, l) => s + _allocOf(l));
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -231,100 +362,76 @@ class _State extends State<ProductionPositionScreen> {
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
             ]),
             const SizedBox(height: 4),
-            for (final l in lines) _lineRow(l),
-            if (anyReady)
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: FilledButton.icon(
-                    onPressed: _saving ? null : () => _send(lines),
-                    icon: const Icon(Icons.playlist_add_check, size: 18),
-                    label: const Text('Send all ready'),
-                    style: FilledButton.styleFrom(backgroundColor: _green),
-                  ),
+            for (final l in lines) _sendLine(l),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(children: [
+                if (!sendable)
+                  const Expanded(
+                    child: Text('Allocate the shared design(s) above first',
+                        style: TextStyle(fontSize: 11, color: _red)),
+                  )
+                else
+                  const Spacer(),
+                FilledButton.icon(
+                  onPressed: (_saving || !sendable || total == 0)
+                      ? null
+                      : () => _send(o),
+                  icon: const Icon(Icons.playlist_add_check, size: 18),
+                  label: Text(total > 0 ? 'Send $total → stock' : 'Send'),
+                  style: FilledButton.styleFrom(backgroundColor: _green),
                 ),
-              ),
+              ]),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _lineRow(Map<String, dynamic> l) {
-    final lineId = (l['line_id']).toString();
-    final designId = (l['design_id'] ?? '').toString();
-    final ready = _i(l, 'ready');
-    final shared = _sharedFStock.containsKey(designId);
+  Widget _sendLine(Map<String, dynamic> l) {
+    final alloc = _allocOf(l);
+    final shared = _short.containsKey((l['design_id'] ?? '').toString());
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('${l['cover_word']}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-          Text('${l['brand']} · ${l['surface']} · ${l['size']}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
-          const SizedBox(height: 6),
-          Row(children: [
-            Expanded(
-              child: Wrap(spacing: 14, runSpacing: 4, children: [
-                _mini('Ticked', _i(l, 'ticked'), Colors.grey.shade700),
-                _mini('Make', _i(l, 'make'), _navy),
-                _mini('Godown', _i(l, 'f_stock'), _amber),
-                _mini('Made', _i(l, 'made'), _green),
-                _mini('Ready', ready, ready > 0 ? _green : Colors.grey.shade500),
-              ]),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 58,
-              child: TextField(
-                controller: _qty[lineId],
-                enabled: ready > 0,
-                textAlign: TextAlign.center,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                    hintText: '0', isDense: true, border: OutlineInputBorder()),
-              ),
-            ),
-            const SizedBox(width: 6),
-            FilledButton.tonal(
-              onPressed: (_saving || ready == 0) ? null : () => _send([l]),
-              style: FilledButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 12)),
-              child: const Text('Send', style: TextStyle(fontSize: 12)),
-            ),
-          ]),
-          if (shared)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                  '⚠ Shared stock — F_Stock ${_sharedFStock[designId]} covers this design across orders; sending one reduces the others.',
-                  style: const TextStyle(fontSize: 10.5, color: _amber)),
-            ),
-        ],
-      ),
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${l['cover_word']}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13)),
+              Text([
+                'ticked ${_i(l, 'ticked')}',
+                'made ${_i(l, 'made')}',
+                'godown ${_i(l, 'f_stock')}',
+                if (shared) 'shared',
+              ].join('  ·  '),
+                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('$alloc',
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: alloc > 0 ? _green : Colors.grey.shade500)),
+            const Text('to send',
+                style: TextStyle(fontSize: 9, color: Colors.grey)),
+          ],
+        ),
+      ]),
     );
   }
-
-  Widget _mini(String label, int n, Color c) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text('$n',
-              style:
-                  TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: c)),
-          Text(label,
-              style: TextStyle(fontSize: 9, color: Colors.grey.shade600)),
-        ],
-      );
 
   Widget _fig(String label, int n, Color c) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
