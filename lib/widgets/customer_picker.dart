@@ -117,6 +117,10 @@ class CustomerPicker {
     final pinCtl = TextEditingController();
     final cityCtl = TextEditingController();
     final states = await IndiaGeo.states();
+    // 🏷️ The "Usual brand" option belongs to the FORM, not the caller. Screens
+    // that open this without a brand list (Dispatch, Add Order, Loading List)
+    // still get it — so the option is there on every path, not just Customers.
+    if (brands.isEmpty) brands = await svc.getMyBrands();
     if (!context.mounted) return null;
     List<String> districts = const [];
     String state = '';
