@@ -67,6 +67,14 @@ class _State extends State<StockistDashboardScreen> {
   bool _loading = true;
   String get _myStockistId => currentStockistUUID;
 
+  // 🧱 LOT L4 — a holding's batch/location breakdown, for HIS card only (never
+  // buyer-facing: these tiles are the stockist dashboard's own, and the RPC is
+  // stockist-authed). holding id → its lots; which cards have the strip expanded.
+  Map<String, List<Map<String, dynamic>>> _stockLots = {};
+  final Set<String> _lotsOpen = {};
+  bool get _lotsTracked =>
+      currentStockistTrackBatches || currentStockistTrackLocations;
+
   // Multi-select / delete mode
   bool _selectMode = false;
   final Set<String> _selectedIds = {};
@@ -217,6 +225,10 @@ class _State extends State<StockistDashboardScreen> {
     // This stockist's own alias words per canonical value — widens both the
     // card-tag label (own wording) and search matching beyond the admin name.
     final myWords = await _service.dnaMyWords();
+    // 🧱 The batch/location lots behind each holding (stockist-only). Only when he
+    // tracks batch or location; otherwise there's nothing to break down.
+    final stockLots =
+        _lotsTracked ? await _service.myStockLots() : <String, List<Map<String, dynamic>>>{};
     if (!mounted) return;
     final dnaFill = _computeDnaFill(data, dnaAttrs, dnaVals);
     // my_stock() doesn't return image_url — fill missing images from the
@@ -232,6 +244,7 @@ class _State extends State<StockistDashboardScreen> {
     }).toList();
     setState(() {
       _designs = enriched;
+      _stockLots = stockLots;
       _forkLabels = thicknessForkLabels(enriched);
       _inquiries = inquiries;
       _newOrders = orders.where((o) => o.status == 'sent').length;
@@ -696,6 +709,7 @@ class _State extends State<StockistDashboardScreen> {
                 _pfCluster('F', prem?.fStock, std?.fStock, showTotal: true),
               ],
             ),
+            _lotSection(prem, std),
             // Control (hidden) + Held (booked) — shown only when there's something
             // to show, so plain in-stock tiles stay clean. (desktop detail set)
             if (((prem?.controlQuantity ?? 0) + (std?.controlQuantity ?? 0) +
@@ -785,6 +799,75 @@ class _State extends State<StockistDashboardScreen> {
 
   // "P(8+2)" / "F(6+2=8)" — premium amber, standard blue; frame + total in gray.
   // A single quality shows just its own coloured number, no "+".
+  /// 🧱 LOT L4 — the batch/location breakdown for a card's holding(s), as an
+  /// expandable strip. Shown only when he tracks batch/location AND there's more
+  /// than one real lot to see. This lives on HIS dashboard tiles alone; buyers
+  /// never see it. Combines the Premium and Standard holdings of the card.
+  Widget _lotSection(TileDesign? prem, TileDesign? std) {
+    if (!_lotsTracked) return const SizedBox.shrink();
+    final lots = <Map<String, dynamic>>[];
+    for (final id in [prem?.id, std?.id]) {
+      if (id != null) lots.addAll(_stockLots[id] ?? const []);
+    }
+    final real = lots
+        .where((l) =>
+            (l['batch'] ?? '').toString().isNotEmpty ||
+            (l['location'] ?? '').toString().isNotEmpty)
+        .toList();
+    if (real.length < 2) return const SizedBox.shrink();
+    final key = prem?.id ?? std?.id ?? '';
+    final open = _lotsOpen.contains(key);
+    const navy = Color(0xFF1B4F72);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(
+                () => open ? _lotsOpen.remove(key) : _lotsOpen.add(key)),
+            borderRadius: BorderRadius.circular(4),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.inventory_2_outlined, size: 12, color: navy),
+              const SizedBox(width: 3),
+              Text('${real.length} batches',
+                  style: const TextStyle(
+                      fontSize: 10.5, fontWeight: FontWeight.w700, color: navy)),
+              Icon(open ? Icons.arrow_drop_up : Icons.arrow_drop_down,
+                  size: 16, color: navy),
+            ]),
+          ),
+          if (open)
+            for (final l in real) _lotLine(l),
+        ],
+      ),
+    );
+  }
+
+  Widget _lotLine(Map<String, dynamic> l) {
+    final batch = (l['batch'] ?? '').toString();
+    final loc = (l['location'] ?? '').toString();
+    final n = (l['box_quantity'] as num?)?.toInt() ?? 0;
+    final label = [
+      if (batch.isNotEmpty) 'Batch $batch',
+      if (loc.isNotEmpty) '📍 $loc',
+    ].join('  ·  ');
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, left: 2),
+      child: Row(children: [
+        Expanded(
+          child: Text(label.isEmpty ? 'No batch' : label,
+              style: const TextStyle(fontSize: 10.5)),
+        ),
+        Text('$n',
+            style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFFC62828))),
+      ]),
+    );
+  }
+
   Widget _pfCluster(String label, int? prem, int? std, {bool showTotal = false}) {
     final gray = TextStyle(fontSize: 10.5, color: Colors.grey.shade600);
     final spans = <InlineSpan>[TextSpan(text: '$label(', style: gray)];
@@ -1994,6 +2077,7 @@ class _State extends State<StockistDashboardScreen> {
                               showTotal: true),
                         ],
                       ),
+                      _lotSection(prem, std),
                     ],
                   ),
                 ),
