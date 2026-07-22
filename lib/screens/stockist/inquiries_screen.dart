@@ -39,6 +39,7 @@ const _months = [
 // Filter-chip / status display name. In the Hold model, a 'locked' order is one
 // the stockist has HELD (boxes reserved off buyer-facing stock).
 String _statusName(String s) => switch (s) {
+      'ready'       => 'Ready orders',
       'sent'        => 'Sent',
       'locked'      => 'Held',
       'dispatching' => 'Dispatching',
@@ -65,7 +66,7 @@ class _State extends State<InquiriesScreen> {
   // Completed orders are kept only under the dedicated "Completed" tab (a record),
   // and hidden from every other tab.
   static const _statuses = [
-    'all', 'sent', 'locked', 'dispatching', 'completed', 'rejected'
+    'all', 'ready', 'sent', 'locked', 'dispatching', 'completed', 'rejected'
   ];
 
   @override
@@ -113,6 +114,7 @@ class _State extends State<InquiriesScreen> {
     var list = _orders.where((o) {
       if (_status == 'completed') return o.status == 'completed';
       if (o.status == 'completed') return false;
+      if (_status == 'ready') return o.isReadyOrder;
       if (_status != 'all') return o.status == _status;
       return true;
     }).toList();
@@ -171,7 +173,7 @@ class _State extends State<InquiriesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Inquiries'),
+        title: const Text('Inq/Ready Order'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -226,7 +228,11 @@ class _State extends State<InquiriesScreen> {
     String count(String s) {
       final n = s == 'all'
           ? _orders.where((o) => o.status != 'completed').length
-          : _orders.where((o) => o.status == s).length;
+          : s == 'ready'
+              ? _orders
+                  .where((o) => o.isReadyOrder && o.status != 'completed')
+                  .length
+              : _orders.where((o) => o.status == s).length;
       return n == 0 ? '' : ' $n';
     }
 
@@ -593,6 +599,23 @@ class _State extends State<InquiriesScreen> {
                                       fontWeight: FontWeight.w700,
                                       fontSize: 14)),
                             ),
+                            // 🔖 Minted from a booked order (order-from-stock).
+                            if (o.isReadyOrder) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                    color: const Color(0xFF6A1B9A)
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(6)),
+                                child: const Text('Ready order',
+                                    style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF6A1B9A))),
+                              ),
+                            ],
                             const SizedBox(width: 8),
                             Container(
                               padding: const EdgeInsets.symmetric(

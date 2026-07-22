@@ -137,7 +137,7 @@ class _StockistShellState extends State<StockistShell> {
             _item(Icons.image_outlined, 'My Artworks', '/stockist/artworks'),
             _item(Icons.collections_bookmark_outlined, 'Design Library',
                 '/stockist/library'),
-            _item(Icons.receipt_long_outlined, 'Inquiries',
+            _item(Icons.receipt_long_outlined, 'Inq/Ready Order',
                 '/stockist/inquiries',
                 badge: _newOrders),
             _item(Icons.local_shipping_outlined, 'Dispatches',

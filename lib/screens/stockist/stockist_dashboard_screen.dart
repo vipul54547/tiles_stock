@@ -2242,7 +2242,7 @@ class _State extends State<StockistDashboardScreen> {
                 ctx,
                 Icons.receipt_long_outlined,
                 const Color(0xFF1B4F72),
-                'Inquiries',
+                'Inq/Ready Order',
                 interestCount > 0
                     ? '$interestCount new — orders placed with you'
                     : 'Orders placed with you', () async {

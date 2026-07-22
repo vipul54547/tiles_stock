@@ -20,6 +20,10 @@ class InquiryOrder {
   /// is only a walk-in note. It was being stored all along but never returned, so an order booked
   /// for a real customer showed in the list as just its note.
   final String customerName;
+  /// 🔖 Set when this held order was minted from a BOOKED order (order-from-stock).
+  /// Empty for a normal inquiry. Drives the "Ready order" badge/filter. (MADE M4c)
+  final String bookOrderId;
+  bool get isReadyOrder => bookOrderId.isNotEmpty;
   /// Where the order came from: app | web | walkin | stockist.
   final String source;
   final String status;
@@ -65,6 +69,7 @@ class InquiryOrder {
     this.connectionCode = '',
     this.customerHint = '',
     this.customerName = '',
+    this.bookOrderId = '',
     this.source = 'app',
     required this.status,
     required this.createdAt,
@@ -100,6 +105,7 @@ class InquiryOrder {
         connectionCode: (j['connection_code'] ?? '').toString(),
         customerHint:   (j['customer_hint'] ?? '').toString(),
         customerName:   (j['customer_name'] ?? '').toString(),
+        bookOrderId:    (j['book_order_id'] ?? '').toString(),
         source:         (j['source'] ?? 'app').toString(),
         status:       (j['status'] ?? 'draft').toString(),
         createdAt:    _dt(j['created_at']),
