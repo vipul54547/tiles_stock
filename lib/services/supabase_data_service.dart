@@ -3389,6 +3389,22 @@ class SupabaseDataService {
     }
   }
 
+  /// Every cover the stockist can run — same row shape as [myProductionDemand]'s
+  /// rows but with 0 ordered / no lines — for Plan's "Add design" (running a
+  /// design for STOCK, or the remaining, chosen by what's on the line).
+  Future<List<Map<String, dynamic>>> myAddableBoxes() async {
+    try {
+      final res = await supabase.rpc('my_addable_boxes');
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myAddableBoxes failed: $e\n$st');
+      return [];
+    }
+  }
+
   /// 🏭 Commits a production run. [boxes] = `[{box_id, target_boxes}]` (what to run, per cover);
   /// [demand] = `[{book_order_line_id, planned_boxes}]` (the booked lines he TICKED).
   ///

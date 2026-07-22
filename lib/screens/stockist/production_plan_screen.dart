@@ -78,6 +78,10 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   DateTime? _asOf;
   List<Map<String, dynamic>> _rows = [];
 
+  /// 🏭 Every cover he can run, for "Add design" (produce for stock / the remaining,
+  /// picked by what's on the line). Fetched lazily, once. (stock production)
+  List<Map<String, dynamic>>? _addable;
+
   /// The orders being planned — fixed, chosen one page back.
   Set<String> get _picked => widget.draft.pickedIds;
   List<Map<String, dynamic>> get _orders => widget.draft.orders;
@@ -122,6 +126,85 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
     // A clean save on the way out, unless the draft was just taken into production (then it's gone).
     if (!_taken) _saveDraft();
     super.dispose();
+  }
+
+  /// 🏭 Add a design to run for STOCK (or the remaining) — pick a cover the run
+  /// isn't already making and drop it in with a Make quantity. It carries no
+  /// order, so its output goes to free stock. Session-only (not saved in the
+  /// draft) — add it and take the run in.
+  Future<void> _addDesign() async {
+    _addable ??= await _data.myAddableBoxes();
+    if (!mounted) return;
+    final taken = _rows.map((r) => '${r['box_id']}').toSet();
+    final pool = _addable!
+        .where((b) => !taken.contains('${b['box_id']}'))
+        .toList();
+    if (pool.isEmpty) {
+      _snack('Every design is already on the plan.');
+      return;
+    }
+    final chosen = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) {
+        String q = '';
+        return StatefulBuilder(builder: (ctx, setSheet) {
+          final ql = q.trim().toLowerCase();
+          final res = ql.isEmpty
+              ? pool
+              : pool.where((b) => [
+                    b['cover_word'], b['print_name'], b['brand'],
+                    b['surface'], b['size']
+                  ].map((x) => '$x'.toLowerCase()).any((s) => s.contains(ql)))
+                  .toList();
+          return SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.75,
+            child: Column(children: [
+              const SizedBox(height: 12),
+              const Text('Add a design to run',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                      hintText: 'Search design / brand / surface',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder()),
+                  onChanged: (v) => setSheet(() => q = v),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: res.length,
+                  itemBuilder: (_, i) {
+                    final b = res[i];
+                    final f = (b['f_stock'] as num?)?.toInt() ?? 0;
+                    return ListTile(
+                      title: Text('${b['cover_word']}',
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text([
+                        b['brand'], b['surface'], b['size'],
+                        'godown $f'
+                      ].where((x) => '$x'.trim().isNotEmpty).join('  ·  ')),
+                      onTap: () => Navigator.pop(ctx, b),
+                    );
+                  },
+                ),
+              ),
+            ]),
+          );
+        });
+      },
+    );
+    if (chosen != null) {
+      // Mark it so _visible keeps it — a stock design has no order line behind it.
+      chosen['_added'] = true;
+      setState(() => _rows.insert(0, chosen));
+      _snack('${chosen['cover_word']} added — set its Make quantity.');
+    }
   }
 
   Future<void> _load() async {
@@ -249,7 +332,9 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   List<Map<String, dynamic>> get _visible {
     final q = _q.trim().toLowerCase();
     return _rows.where((r) {
-      if (_mine(r).isEmpty) return false;
+      // An added stock design has no order line, so it isn't "mine" by demand —
+      // keep it anyway; every other (order) row must have a picked line.
+      if (r['_added'] != true && _mine(r).isEmpty) return false;
       if (_urgentOnly && r['urgent'] != true) return false;
       if (q.isNotEmpty) {
         final hay = [
@@ -474,9 +559,11 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
   /// 🔒 The safety gate. **Cancel · Verify · Yes** — Verify opens the plan review, Yes commits.
   Future<void> _openVerify() async {
     final c = _collect();
-    if (c.demand.isEmpty) {
-      _snack('Tick at least one customer line — the run has to know who it is for.',
-          error: true);
+    // A run needs a Make quantity somewhere — either against a ticked order line
+    // or an added stock design (which carries no customer). Demand may be empty
+    // for a pure stock run.
+    if (c.boxes.isEmpty) {
+      _snack('Set a Make quantity on at least one design.', error: true);
       return;
     }
     final totalBoxes = c.boxes.fold<int>(0, (s, b) => s + (b['target_boxes'] as int));
@@ -749,6 +836,12 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
         foregroundColor: Colors.white,
         title: const Text('Plan what to run'),
         actions: [
+          TextButton.icon(
+            onPressed: _saving ? null : _addDesign,
+            icon: const Icon(Icons.add, size: 18, color: Colors.white),
+            label: const Text('Add design',
+                style: TextStyle(color: Colors.white, fontSize: 13)),
+          ),
           IconButton(
               icon: const Icon(Icons.refresh), tooltip: 'Refresh', onPressed: _load),
         ],
