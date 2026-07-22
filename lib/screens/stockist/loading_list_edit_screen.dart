@@ -439,21 +439,18 @@ class _State extends State<LoadingListEditScreen> {
     if (loc.isNotEmpty) bits.add('📍 $loc');
     final label = bits.isEmpty ? 'No batch' : bits.join(' · ');
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600)),
-              Text('$avail avail',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-            ],
-          ),
+          child: Text(label,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         ),
+        // Available boxes in BOLD right beside the box, so he sees the ceiling
+        // as he types how many to load.
+        Text('Avail: $avail',
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w800, color: _navy)),
+        const SizedBox(width: 10),
         SizedBox(
           width: 62,
           child: TextField(
