@@ -1037,7 +1037,13 @@ class _State extends State<StockistDashboardScreen> {
                 PopupMenuButton<String>(
                   tooltip: 'Account',
                   onSelected: (v) async {
-                    if (v == 'profile') {
+                    if (v == 'production') {
+                      await context.push('/stockist/production');
+                      if (mounted) _load();
+                    } else if (v == 'runs') {
+                      await context.push('/stockist/production/runs');
+                      if (mounted) _load();
+                    } else if (v == 'profile') {
                       await Navigator.of(context).push<bool>(MaterialPageRoute(
                           builder: (_) => const StockistProfileScreen()));
                       if (mounted) _load();
@@ -1054,14 +1060,26 @@ class _State extends State<StockistDashboardScreen> {
                     }
                   },
                   itemBuilder: (_) => [
-                    const PopupMenuItem(
-                        value: 'profile',
-                        child: ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.person_outline),
-                          title: Text('Edit profile'),
-                        )),
+                    // 🏭 The factory side lives here (not in the Orders sheet),
+                    // gated on the same admin opt-in as the desktop sidebar.
+                    if (currentStockistBookOrders) ...[
+                      const PopupMenuItem(
+                          value: 'production',
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.precision_manufacturing_outlined),
+                            title: Text('Production'),
+                          )),
+                      const PopupMenuItem(
+                          value: 'runs',
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.history),
+                            title: Text('Runs & history'),
+                          )),
+                    ],
                     // Opt-in: only stockists the admin switched on ("save
                     // customers on dispatch") get the directory + per-customer
                     // dispatch history. (project_customer_history)
@@ -1083,6 +1101,14 @@ class _State extends State<StockistDashboardScreen> {
                           title: Text('My Videos'),
                         )),
                     const PopupMenuDivider(),
+                    const PopupMenuItem(
+                        value: 'profile',
+                        child: ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.person_outline),
+                          title: Text('Edit profile'),
+                        )),
                     const PopupMenuItem(
                         value: 'logout',
                         child: ListTile(
@@ -2137,6 +2163,13 @@ class _State extends State<StockistDashboardScreen> {
                     ? '$interestCount new — orders placed with you'
                     : 'Orders placed with you', () async {
               await context.push('/stockist/inquiries');
+            }),
+            const Divider(height: 1),
+            // 📋 Prepare a truck's pull sheet (batch + location) before dispatch.
+            _sheetItem(ctx, Icons.playlist_add_check_outlined,
+                const Color(0xFF1B4F72), 'Loading Lists',
+                'Prepare a truck before dispatch', () async {
+              await context.push('/stockist/loading-lists');
             }),
             const Divider(height: 1),
             _sheetItem(ctx, Icons.post_add_outlined, const Color(0xFF2E7D32),
