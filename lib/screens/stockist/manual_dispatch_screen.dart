@@ -370,10 +370,28 @@ class _State extends State<ManualDispatchScreen> {
     _qtyCtrl.clear();
   }
 
-  /// The mobile path: a design in `_sel`, a quantity typed in `_qtyCtrl`.
+  /// The batches of the selected design, and whether there's a real choice — the
+  /// mobile add-flow branches on this the way the desktop entry bar does.
+  bool get _selMultiBatch {
+    if (_sel == null) return false;
+    final lots = _lotsOf(_sel!);
+    return lots.length > 1 &&
+        lots.any((l) =>
+            (l['batch'] ?? '').toString().isNotEmpty ||
+            (l['location'] ?? '').toString().isNotEmpty);
+  }
+
+  /// The mobile path: a design in `_sel`, a quantity typed in `_qtyCtrl`. A design
+  /// held in more than one batch instead opens a per-batch box entry, so the
+  /// phone picks WHICH batch ships — same as the desktop entry bar.
   Future<void> _addLine() async {
     if (_sel == null) {
       _snack('Pick a design first.', _red);
+      return;
+    }
+    final d = _sel!;
+    if (_selMultiBatch) {
+      await _mobileBatchEntry(d);
       return;
     }
     final qty = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
@@ -381,7 +399,103 @@ class _State extends State<ManualDispatchScreen> {
       _snack('Enter a quantity.', _red);
       return;
     }
-    if (await _addLineFor(_sel!, qty)) setState(_resetRow);
+    // One real batch → carry it so the line records its batch/location; untracked
+    // → no lot, server takes the only lot.
+    final lots = _lotsOf(d);
+    final lot = (lots.length == 1 &&
+            ((lots.first['batch'] ?? '').toString().isNotEmpty ||
+                (lots.first['location'] ?? '').toString().isNotEmpty))
+        ? lots.first
+        : null;
+    if (await _addLineFor(d, qty, lot)) setState(_resetRow);
+  }
+
+  /// Per-batch box entry for the phone: every batch with an empty box, type the
+  /// boxes to dispatch from each, one Add creates a line per batch. (mobile L3)
+  Future<void> _mobileBatchEntry(TileDesign d) async {
+    final lots = _lotsOf(d);
+    final ctrls = {
+      for (final l in lots) (l['lot_id']).toString(): TextEditingController()
+    };
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Batches — ${_dispName(d)}'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Type boxes to dispatch from each batch',
+                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+              ),
+              const SizedBox(height: 8),
+              for (final l in lots)
+                _mobileLotRow(l, ctrls[(l['lot_id']).toString()]!),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: _navy, foregroundColor: Colors.white),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      var any = false;
+      for (final l in lots) {
+        final q =
+            int.tryParse(ctrls[(l['lot_id']).toString()]!.text.trim()) ?? 0;
+        if (q > 0 && await _addLineFor(d, q, l)) any = true;
+      }
+      if (any && mounted) setState(_resetRow);
+    }
+    for (final c in ctrls.values) {
+      c.dispose();
+    }
+  }
+
+  Widget _mobileLotRow(Map<String, dynamic> l, TextEditingController ctrl) {
+    final batch = (l['batch'] ?? '').toString();
+    final loc = (l['location'] ?? '').toString();
+    final avail = (l['box_quantity'] as num?)?.toInt() ?? 0;
+    final label = [
+      if (batch.isNotEmpty) 'Batch $batch',
+      if (loc.isNotEmpty) '📍 $loc',
+    ].join(' · ');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(children: [
+        Expanded(
+          child: Text(label.isEmpty ? 'No batch' : label,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        ),
+        Text('Avail: $avail',
+            style: const TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w800, color: _navy)),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 62,
+          child: TextField(
+            controller: ctrl,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(
+                hintText: '0', isDense: true, border: OutlineInputBorder()),
+          ),
+        ),
+      ]),
+    );
   }
 
   /// Put [qty] boxes of [d] on the note, from batch [lot] (null when the stockist
@@ -1810,21 +1924,37 @@ class _State extends State<ManualDispatchScreen> {
                               fontSize: 11.5, color: Colors.grey.shade600)),
                     ),
                   const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(child: _qtyField()),
-                    const SizedBox(width: 10),
+                  // A design in several batches picks boxes per batch; otherwise a
+                  // single quantity, as before.
+                  if (_selMultiBatch)
                     SizedBox(
+                      width: double.infinity,
                       height: 48,
                       child: ElevatedButton.icon(
                         onPressed: _addLine,
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('Add'),
+                        icon: const Icon(Icons.inventory_2_outlined, size: 18),
+                        label: const Text('Set batches & add'),
                         style: ElevatedButton.styleFrom(
                             backgroundColor: _navy,
                             foregroundColor: Colors.white),
                       ),
-                    ),
-                  ]),
+                    )
+                  else
+                    Row(children: [
+                      Expanded(child: _qtyField()),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        height: 48,
+                        child: ElevatedButton.icon(
+                          onPressed: _addLine,
+                          icon: const Icon(Icons.add, size: 18),
+                          label: const Text('Add'),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: _navy,
+                              foregroundColor: Colors.white),
+                        ),
+                      ),
+                    ]),
                 ],
               ),
             ),
