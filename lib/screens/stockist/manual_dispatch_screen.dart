@@ -829,6 +829,10 @@ class _State extends State<ManualDispatchScreen> {
     setState(() {
       _order = o;
       _busyOrder = false;
+      // 🏭 A full-software stockist (book orders on) tracks stock IN the app, so a
+      // dispatch ALWAYS reduces it — "release hold only" would leave phantom boxes.
+      // Force reduce and hide the choice (below). External-count stockists still pick.
+      if (currentStockistBookOrders) _reduceStock = true;
       // The order names the buyer; a customer would be collected and dropped.
       _custId = null;
       _custNameCtrl.clear();
@@ -910,7 +914,8 @@ class _State extends State<ManualDispatchScreen> {
     // send the stockist straight back to the chips.
     if (_order != null) {
       final missing = <String>[
-        if (_reduceStock == null) 'stock',
+        // Full-software stockists never see the stock chips (always reduce).
+        if (_reduceStock == null && !currentStockistBookOrders) 'stock',
         if (_remainingAfter > 0 && _close == null) 'leftovers',
       ];
       if (missing.isNotEmpty) {
@@ -968,7 +973,8 @@ class _State extends State<ManualDispatchScreen> {
           transporter: _transporterCtrl.text.trim(),
           note: _noteCtrl.text.trim(),
           date: _date,
-          reduceStock: _reduceStock!,
+          // Full-software stockists always reduce (no chips shown).
+          reduceStock: currentStockistBookOrders ? true : _reduceStock!,
           // A full dispatch always closes; a partial uses the chosen fate.
           close: _remainingAfter == 0 ? true : _close!,
           prune: false, // these rows are the truck, not the whole order
@@ -1721,7 +1727,10 @@ class _State extends State<ManualDispatchScreen> {
                 controller: _noteCtrl,
                 maxLines: 2,
                 decoration: dec('Note (optional)')),
-            if (attached) ...[
+            // "Release hold only" is for stockists who keep their real count in
+            // OTHER software. A full-software (book orders) stockist tracks stock
+            // here, so a dispatch always reduces it — no choice, no foot-gun.
+            if (attached && !currentStockistBookOrders) ...[
               const SizedBox(height: 14),
               Text('What this does to stock',
                   style: TextStyle(
@@ -1748,35 +1757,37 @@ class _State extends State<ManualDispatchScreen> {
                       onTap: () => setState(() => _reduceStock = false)),
                 ),
               ]),
-              // Only asked when boxes would actually be left over.
-              if (_remainingAfter > 0) ...[
-                const SizedBox(height: 14),
-                Text('Boxes left on the order ($_remainingAfter)',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.grey.shade600)),
-                const SizedBox(height: 6),
-                Row(children: [
-                  Expanded(
-                    child: _fateChip(
-                        label: 'Keep open',
-                        sub: 'stay reserved',
-                        selected: _close == false,
-                        color: _navy,
-                        onTap: () => setState(() => _close = false)),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _fateChip(
-                        label: 'Close order',
-                        sub: 'released',
-                        selected: _close == true,
-                        color: _red,
-                        onTap: () => setState(() => _close = true)),
-                  ),
-                ]),
-              ],
+            ],
+            // The order's fate (the boxes still on it) is a SEPARATE question
+            // from the stock reduction, so it shows for every attached order —
+            // full-software ones included.
+            if (attached && _remainingAfter > 0) ...[
+              const SizedBox(height: 14),
+              Text('Boxes left on the order ($_remainingAfter)',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey.shade600)),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: _fateChip(
+                      label: 'Keep open',
+                      sub: 'stay reserved',
+                      selected: _close == false,
+                      color: _navy,
+                      onTap: () => setState(() => _close = false)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _fateChip(
+                      label: 'Close order',
+                      sub: 'released',
+                      selected: _close == true,
+                      color: _red,
+                      onTap: () => setState(() => _close = true)),
+                ),
+              ]),
             ],
           ],
         ),
