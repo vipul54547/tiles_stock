@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/supabase_data_service.dart';
 import '../../models/choice_state.dart';
+import 'production_position_screen.dart';
 
 /// 🏭 **RUNS & HISTORY.**
 ///
@@ -365,6 +366,16 @@ class _ProductionRunsScreenState extends State<ProductionRunsScreen>
             _fig('Made', made, _green),
             const SizedBox(width: 18),
             _fig('Left', (target - made).clamp(0, 1 << 30), _amber),
+            const Spacer(),
+            // The run's true position, by design (Program · Premium · Standard).
+            TextButton.icon(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ProductionPositionScreen(run: r))),
+              icon: const Icon(Icons.assessment_outlined, size: 16),
+              label: const Text('Position'),
+              style: TextButton.styleFrom(
+                  foregroundColor: _navy, visualDensity: VisualDensity.compact),
+            ),
           ]),
           const Divider(height: 18),
           for (final b in boxes) _boxRow(r, b),
