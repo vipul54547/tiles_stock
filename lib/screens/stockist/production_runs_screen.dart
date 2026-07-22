@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../services/supabase_data_service.dart';
+import '../../models/choice_state.dart';
 
 /// 🏭 **RUNS & HISTORY.**
 ///
@@ -76,90 +77,197 @@ class _ProductionRunsScreenState extends State<ProductionRunsScreen>
     return '${d.day} ${mo[d.month - 1]}';
   }
 
-  // ── declare output ──────────────────────────────────────────────────────────────────────────
-  Future<void> _declare(Map<String, dynamic> run, Map<String, dynamic> b) async {
+  // ── MADE — two grades in one submit ───────────────────────────────────────────────────────────
+  // Premium (the run's cover) settles this run's booked lines; Standard (a chosen cover) goes to
+  // free stock. Batch/location appear only when the stockist tracks lots. (PRODUCTION_REDESIGN §MADE)
+  Future<void> _made(Map<String, dynamic> run, Map<String, dynamic> b) async {
+    final runId = (run['id'] ?? '').toString();
+    final producedBoxId = (b['box_id'] ?? '').toString();
     final target = _i(b, 'target'), made = _i(b, 'made');
-    final ctl = TextEditingController(
-        text: '${(target - made).clamp(0, 1 << 30)}');
-    var quality = 'Premium';
+
+    final covers = await _data.myCoversForDesign(producedBoxId);
+    if (!mounted) return;
+
+    // Standard's default cover: the default brand IF the produced brand's toggle is on, else the
+    // produced brand's own cover. Always overridable.
+    final produced = covers.firstWhere(
+        (c) => (c['box_id'] ?? '').toString() == producedBoxId,
+        orElse: () => <String, dynamic>{});
+    String stdBoxId = producedBoxId;
+    if (produced['standard_in_default'] == true) {
+      final def = covers.firstWhere((c) => c['is_default'] == true,
+          orElse: () => produced);
+      stdBoxId = (def['box_id'] ?? producedBoxId).toString();
+    }
+
+    final tb = currentStockistTrackBatches, tl = currentStockistTrackLocations;
+    final premBoxes =
+        TextEditingController(text: '${(target - made).clamp(0, 1 << 30)}');
+    final premBatch = TextEditingController();
+    final premLoc = TextEditingController();
+    final stdBoxes = TextEditingController();
+    final stdBatch = TextEditingController();
+    final stdLoc = TextEditingController();
+
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx, setD) => AlertDialog(
-            title: const Text('Material came off the line'),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setD) => AlertDialog(
+          title: const Text('Material came off the line'),
+          content: SizedBox(
+            width: 380,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text('${b['cover_word']}',
                       style: const TextStyle(
                           fontWeight: FontWeight.w800, fontSize: 14)),
                   Text('${b['brand']} · ${b['surface']} · ${b['size']}',
-                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-                  const SizedBox(height: 2),
+                      style:
+                          TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
                   Text('planned $target · made $made so far',
-                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
-                ]),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: ctl,
-                autofocus: true,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Boxes made', border: OutlineInputBorder()),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: quality,
-                decoration: const InputDecoration(
-                    labelText: 'Grade', border: OutlineInputBorder()),
-                items: const [
-                  DropdownMenuItem(value: 'Premium', child: Text('Premium')),
-                  DropdownMenuItem(value: 'Standard', child: Text('Standard — by-product')),
+                      style:
+                          TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                  const SizedBox(height: 12),
+                  // ── PREMIUM (run's cover, fixed) ──
+                  _gradeChip('Premium · ${b['brand']}', _amber),
+                  _boxField(premBoxes, 'Boxes made'),
+                  if (tb || tl) _lotFields(tb ? premBatch : null, tl ? premLoc : null),
+                  // ── STANDARD (chosen cover → free stock) ── only when the
+                  // design actually has covers to choose from.
+                  if (covers.isNotEmpty) ...[
+                    const Divider(height: 22),
+                    _gradeChip('Standard → free stock', _navy),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: stdBoxId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                          labelText: 'Brand', border: OutlineInputBorder(),
+                          isDense: true),
+                      items: [
+                        for (final c in covers)
+                          DropdownMenuItem(
+                              value: (c['box_id']).toString(),
+                              child: Text(
+                                  '${c['brand']}${c['is_default'] == true ? '  (default)' : ''}')),
+                      ],
+                      onChanged: (v) => setD(() => stdBoxId = v ?? stdBoxId),
+                    ),
+                    _boxField(stdBoxes, 'Boxes made'),
+                    if (tb || tl)
+                      _lotFields(tb ? stdBatch : null, tl ? stdLoc : null),
+                  ],
+                  const SizedBox(height: 10),
+                  Text(
+                      'Premium settles this run\'s booked lines. Standard goes to free stock.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
                 ],
-                onChanged: (v) => setD(() => quality = v ?? 'Premium'),
               ),
-              const SizedBox(height: 8),
-              Text(
-                  quality == 'Premium'
-                      ? 'Premium settles this run\'s customers first, then any other open order for this cover.'
-                      : 'Standard is a by-product — it goes to free stock and settles nobody\'s order.',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-            ]),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel')),
-              FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: _green),
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Add to stock')),
-            ],
-          )),
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: _green),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Add to stock')),
+          ],
+        ),
+      ),
     );
-    if (ok != true) return;
-    final n = int.tryParse(ctl.text.trim()) ?? 0;
-    if (n <= 0) {
-      _snack('How many boxes came off the line?', error: true);
-      return;
+
+    if (ok == true) {
+      final pB = int.tryParse(premBoxes.text.trim()) ?? 0;
+      final sB = int.tryParse(stdBoxes.text.trim()) ?? 0;
+      if (pB <= 0 && sB <= 0) {
+        _snack('How many boxes came off the line?', error: true);
+      } else {
+        try {
+          final res = await _data.productionMade(
+            runId: runId,
+            premium: pB > 0
+                ? {
+                    'box_id': producedBoxId,
+                    'boxes': pB,
+                    'batch': premBatch.text.trim(),
+                    'location': premLoc.text.trim(),
+                  }
+                : null,
+            standard: sB > 0
+                ? {
+                    'box_id': stdBoxId,
+                    'boxes': sB,
+                    'batch': stdBatch.text.trim(),
+                    'location': stdLoc.text.trim(),
+                  }
+                : null,
+          );
+          await _load();
+          final parts = <String>[
+            if (_i(res, 'premium_boxes') > 0)
+              '${res['premium_boxes']} premium (${_i(res, 'to_this_run')} to this run)',
+            if (_i(res, 'standard_boxes') > 0)
+              '${res['standard_boxes']} standard → free stock',
+          ];
+          _snack(parts.join('  ·  '));
+        } catch (e) {
+          _snack('$e', error: true);
+        }
+      }
     }
-    try {
-      final res = await _data.productionDeclareOutput(
-          runId: (run['id'] ?? '').toString(),
-          boxId: (b['box_id'] ?? '').toString(),
-          boxes: n,
-          quality: quality);
-      await _load();
-      final parts = <String>[
-        if (_i(res, 'to_this_run') > 0) '${res['to_this_run']} to this run',
-        if (_i(res, 'to_other_orders') > 0) '${res['to_other_orders']} to other orders',
-        if (_i(res, 'to_free_stock') > 0) '${res['to_free_stock']} to free stock',
-      ];
-      _snack('$n boxes added — ${parts.join(', ')}.'
-          '${_i(res, 'orders_closed') > 0 ? '  ${res['orders_closed']} order(s) closed.' : ''}');
-    } catch (e) {
-      _snack('$e', error: true);
+    for (final c in [premBoxes, premBatch, premLoc, stdBoxes, stdBatch, stdLoc]) {
+      c.dispose();
     }
+  }
+
+  Widget _gradeChip(String label, Color c) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+            color: c.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(6)),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 11.5, fontWeight: FontWeight.w800, color: c)),
+      );
+
+  Widget _boxField(TextEditingController c, String label) => Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: TextField(
+          controller: c,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+              labelText: label, border: const OutlineInputBorder(), isDense: true),
+        ),
+      );
+
+  Widget _lotFields(TextEditingController? batch, TextEditingController? loc) {
+    final fields = <Widget>[];
+    if (batch != null) {
+      fields.add(Expanded(
+        child: TextField(
+          controller: batch,
+          decoration: const InputDecoration(
+              labelText: 'Batch', border: OutlineInputBorder(), isDense: true),
+        ),
+      ));
+    }
+    if (loc != null) {
+      if (fields.isNotEmpty) fields.add(const SizedBox(width: 8));
+      fields.add(Expanded(
+        child: TextField(
+          controller: loc,
+          decoration: const InputDecoration(
+              labelText: 'Location', border: OutlineInputBorder(), isDense: true),
+        ),
+      ));
+    }
+    return Padding(
+        padding: const EdgeInsets.only(top: 8), child: Row(children: fields));
   }
 
   @override
@@ -294,7 +402,7 @@ class _ProductionRunsScreenState extends State<ProductionRunsScreen>
           style: FilledButton.styleFrom(
               visualDensity: VisualDensity.compact,
               padding: const EdgeInsets.symmetric(horizontal: 12)),
-          onPressed: () => _declare(run, b),
+          onPressed: () => _made(run, b),
           child: Text(done ? 'Add more' : 'Made', style: const TextStyle(fontSize: 12)),
         ),
       ]),
