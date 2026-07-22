@@ -821,9 +821,13 @@ class _State extends State<InquiriesScreen> {
         else
           _actionChip('Hold', Icons.lock_outline, const Color(0xFF6A1B9A),
               () => _hold(o)),
-      if (o.status == 'locked' || o.status == 'dispatching')
+      if (o.status == 'locked' || o.status == 'dispatching') ...[
+        // Prepare the truck's pull sheet first; Dispatch records it after loading.
+        _actionChip('Loading list', Icons.playlist_add_check_outlined, _navy,
+            () => _loadingList(o)),
         _actionChip('Dispatch', Icons.local_shipping_outlined,
             const Color(0xFF00695C), () => _dispatch(o)),
+      ],
     ];
     final canEdit =
         (o.status == 'draft' || o.status == 'sent') && o.endUserId.isEmpty;
@@ -1109,6 +1113,13 @@ class _State extends State<InquiriesScreen> {
       'id': o.id,
     });
     if (changed == true && mounted) _load();
+  }
+
+  /// Prepare a loading list for this order — its designs prefill, and the
+  /// stockist sets batches + boxes before the truck loads. (Loading List · LL4)
+  Future<void> _loadingList(InquiryOrder o) async {
+    await context.push('/stockist/loading-lists/edit', extra: {'inquiry_id': o.id});
+    if (mounted) _load();
   }
 
 
