@@ -31,7 +31,11 @@ class _State extends State<LoadingListScreen> {
     final lists = await _svc.myLoadingLists();
     if (!mounted) return;
     setState(() {
-      _lists = lists;
+      // Only lists still awaiting a truck. Once dispatched, the record lives in
+      // Dispatches (as its dispatch note) — no need to linger here too.
+      _lists = lists
+          .where((l) => (l['status'] ?? 'draft').toString() == 'draft')
+          .toList();
       _loading = false;
     });
   }
