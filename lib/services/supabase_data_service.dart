@@ -3534,6 +3534,38 @@ class SupabaseDataService {
     }
   }
 
+  /// A run's booked orders for the Position "by order" section — `[{order_id,
+  /// token, customer, lines:[{line_id, design_id, design, cover_word, brand,
+  /// surface, size, ticked, made, sent, f_stock, ready}]}]`. Ready = min(ticked −
+  /// sent, F_Stock). (docs/PRODUCTION_REDESIGN_PLAN.md · Order from stock)
+  Future<List<Map<String, dynamic>>> productionPositionOrders(String runId) async {
+    try {
+      final res = await supabase
+          .rpc('production_position_orders', params: {'p_run_id': runId});
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('productionPositionOrders failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Send ready material → a held Ready order. [lines] = `[{line_id, boxes}]`;
+  /// each take is capped at min(ticked − sent, F_Stock). Returns `{sent,
+  /// inquiry_id, token}`. Reserves the boxes out of free stock for the customer.
+  Future<Map<String, dynamic>> bookOrderSendToStock(
+      List<Map<String, dynamic>> lines) async {
+    try {
+      final res = await supabase
+          .rpc('book_order_send_to_stock', params: {'p_lines': lines});
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   /// The brands that cover a design (= the box's library) — `[{box_id, brand_id,
   /// brand, is_default, standard_in_default}]`, default brand first. Feeds the
   /// Made dialog's Standard brand ▾.
