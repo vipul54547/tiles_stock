@@ -3511,6 +3511,57 @@ class SupabaseDataService {
     }
   }
 
+  // ── MADE flow (two-grade output) ─────────────────────────────────────────────
+
+  /// Record a run's output in ONE transactional submit — Premium (run's cover,
+  /// bumps the run's booked lines) and/or Standard (chosen cover → free stock).
+  /// Each grade is `{box_id, boxes, batch, location}` (location = code) or null.
+  /// (docs/PRODUCTION_REDESIGN_PLAN.md · MADE)
+  Future<Map<String, dynamic>> productionMade({
+    required String runId,
+    Map<String, dynamic>? premium,
+    Map<String, dynamic>? standard,
+  }) async {
+    try {
+      final res = await supabase.rpc('production_made', params: {
+        'p_run_id': runId,
+        'p_premium': premium,
+        'p_standard': standard,
+      });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// The brands that cover a design (= the box's library) — `[{box_id, brand_id,
+  /// brand, is_default, standard_in_default}]`, default brand first. Feeds the
+  /// Made dialog's Standard brand ▾.
+  Future<List<Map<String, dynamic>>> myCoversForDesign(String boxId) async {
+    try {
+      final res =
+          await supabase.rpc('my_covers_for_design', params: {'p_box_id': boxId});
+      return [
+        for (final e in (res as List?) ?? const [])
+          Map<String, dynamic>.from(e as Map)
+      ];
+    } catch (e, st) {
+      debugPrint('myCoversForDesign failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Toggle "this brand's standard is packed in the default brand" — drives the
+  /// Made dialog's Standard-brand default; never compulsory.
+  Future<void> setBrandStandardInDefault(String brandId, bool on) async {
+    try {
+      await supabase.rpc('stockist_set_brand_standard_in_default',
+          params: {'p_brand_id': brandId, 'p_on': on});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   /// The production runs, each with its per-cover target and what has been made against it.
   Future<List<Map<String, dynamic>>> myProductionRuns() async {
     try {
