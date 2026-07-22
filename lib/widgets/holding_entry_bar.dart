@@ -38,9 +38,18 @@ class HoldingEntryBar extends StatefulWidget {
   /// The number that matters on THIS screen — shelf stock, or free stock.
   final int Function(TileDesign) boxesOf;
 
-  /// Added the line. Return false if it was rejected (over-stock declined, say)
-  /// and the row should stay as the stockist left it.
-  final Future<bool> Function(TileDesign design, int qty) onAdd;
+  /// Added the line. [lot] is the batch this line ships from (dispatch only) —
+  /// null when the screen doesn't track lots or the design has just one. Return
+  /// false if it was rejected (over-stock declined, say) and the row should stay
+  /// as the stockist left it.
+  final Future<bool> Function(TileDesign design, int qty, Map<String, dynamic>? lot)
+      onAdd;
+
+  /// The batches of one holding — `[{lot_id, batch, location, box_quantity}]`,
+  /// oldest first — when the screen wants a batch chosen AT ENTRY (dispatch's
+  /// loading list). null = no batch field at all (orders, or untracked stock).
+  /// More than one → a Batch dropdown appears; exactly one fills in read-only.
+  final List<Map<String, dynamic>> Function(TileDesign)? lotsOf;
 
   /// Optional second way in — the browse/multi-select picker a screen already has.
   final VoidCallback? onBrowse;
@@ -52,6 +61,7 @@ class HoldingEntryBar extends StatefulWidget {
     required this.brands,
     required this.boxesOf,
     required this.onAdd,
+    this.lotsOf,
     this.onBrowse,
     this.browseLabel = 'Browse',
   });
@@ -75,6 +85,11 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
   String? _surf;
   String? _qual;
 
+  /// One boxes-to-load field per batch (lot_id -> controller), for a holding
+  /// held in more than one batch. Filled straight in the batch list so the whole
+  /// design is entered ONCE — no re-picking it per batch. (dispatch loading list)
+  final Map<String, TextEditingController> _batchCtrls = {};
+
   late List<HoldingPrint> _prints = groupHoldingsByPrint(widget.designs);
 
   @override
@@ -93,6 +108,9 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
     _fSurface.dispose();
     _fQuality.dispose();
     _fQty.dispose();
+    for (final c in _batchCtrls.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -177,6 +195,7 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
       _brand = null;
       _surf = null;
       _qual = null;
+      _syncBatchCtrls();
     });
   }
 
@@ -186,6 +205,60 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
     _surf = null;
     _qual = null;
     _qtyCtrl.clear();
+    _clearBatchCtrls();
+  }
+
+  // ── Batch (dispatch loading list) ────────────────────────────────────────────
+  // The lots of the holding the choices have landed on. Empty when the screen
+  // asks for no batch, or nothing is resolved yet.
+  List<Map<String, dynamic>> get _lots {
+    final d = _resolved;
+    if (d == null || widget.lotsOf == null) return const [];
+    return widget.lotsOf!(d);
+  }
+
+  /// Real = the lot carries a batch or a location (untracked stock is one blank
+  /// lot, which is no real batch at all).
+  bool get _hasRealBatch => _lots.any((l) =>
+      (l['batch'] ?? '').toString().isNotEmpty ||
+      (l['location'] ?? '').toString().isNotEmpty);
+
+  /// More than one real batch → the stockist loads boxes-per-batch inline (one
+  /// entry, no re-picking the design). Exactly one → a plain single quantity.
+  bool get _multiBatch => _lots.length > 1 && _hasRealBatch;
+  Map<String, dynamic>? get _singleLot =>
+      _lots.length == 1 && _hasRealBatch ? _lots.first : null;
+
+  String _lotLabel(Map<String, dynamic> l) {
+    final b = (l['batch'] ?? '').toString();
+    return b.isEmpty ? 'No batch' : 'Batch $b';
+  }
+
+  String _lotDetail(Map<String, dynamic> l) {
+    final loc = (l['location'] ?? '').toString();
+    final n = (l['box_quantity'] as num?)?.toInt() ?? 0;
+    return [if (loc.isNotEmpty) loc, '$n avail'].join('  ·  ');
+  }
+
+  /// Give each batch of a multi-batch holding a quantity field, and drop any left
+  /// over from a previously resolved holding. Called whenever the resolution changes.
+  void _syncBatchCtrls() {
+    final wanted = _multiBatch
+        ? _lots.map((l) => l['lot_id'].toString()).toSet()
+        : <String>{};
+    for (final k in _batchCtrls.keys.toList()) {
+      if (!wanted.contains(k)) _batchCtrls.remove(k)!.dispose();
+    }
+    for (final id in wanted) {
+      _batchCtrls.putIfAbsent(id, () => TextEditingController());
+    }
+  }
+
+  void _clearBatchCtrls() {
+    for (final c in _batchCtrls.values) {
+      c.dispose();
+    }
+    _batchCtrls.clear();
   }
 
   Future<void> _add() async {
@@ -196,12 +269,41 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
           : 'This design is in stock in more than one version — pick which.');
       return;
     }
+
+    // Multi-batch: boxes typed against each batch → one line per batch, entered
+    // ONCE. A batch left blank is simply not loaded.
+    if (_multiBatch) {
+      final picks = <(Map<String, dynamic>, int)>[];
+      for (final lot in _lots) {
+        final q =
+            int.tryParse(_batchCtrls[lot['lot_id'].toString()]?.text.trim() ?? '') ??
+                0;
+        if (q > 0) picks.add((lot, q));
+      }
+      if (picks.isEmpty) {
+        _snack('Enter boxes for at least one batch.');
+        return;
+      }
+      var any = false;
+      for (final (lot, q) in picks) {
+        final ok = await widget.onAdd(d, q, lot);
+        if (!mounted) return;
+        if (ok) any = true;
+      }
+      if (any) {
+        setState(_reset);
+        _fDesign.requestFocus();
+      }
+      return;
+    }
+
+    // Single batch (or untracked): one quantity, the only lot (or none).
     final qty = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
     if (qty <= 0) {
       _snack('Enter a quantity.');
       return;
     }
-    final added = await widget.onAdd(d, qty);
+    final added = await widget.onAdd(d, qty, _singleLot);
     if (!mounted || !added) return;
     setState(_reset);
     _fDesign.requestFocus();
@@ -220,7 +322,13 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
     final surfOpts = _opts('surface');
     final qualOpts = _opts('quality');
     final d = _resolved;
-    final stock = d == null ? null : widget.boxesOf(d);
+    // The single Qty field's "of N": the one batch when there's just one, else
+    // the whole holding. (Multi-batch has a count per batch, not this.)
+    final singleStock = d == null
+        ? null
+        : (_singleLot != null
+            ? (_singleLot!['box_quantity'] as num?)?.toInt() ?? 0
+            : widget.boxesOf(d));
 
     return Card(
       margin: EdgeInsets.zero,
@@ -264,7 +372,10 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
                 labelOf: _brandName,
                 detailOf: (b) => '${_boxesFor('brand', b)} boxes',
                 hint: '—',
-                onSelected: (b) => setState(() => _brand = b),
+                onSelected: (b) => setState(() {
+                  _brand = b;
+                  _syncBatchCtrls();
+                }),
               ),
               width: 140,
             ),
@@ -278,7 +389,10 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
                 labelOf: _surfName,
                 detailOf: (s) => '${_boxesFor('surface', s)} boxes',
                 hint: '—',
-                onSelected: (s) => setState(() => _surf = s),
+                onSelected: (s) => setState(() {
+                  _surf = s;
+                  _syncBatchCtrls();
+                }),
               ),
               width: 170,
             ),
@@ -292,38 +406,61 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
                 labelOf: (q) => q,
                 detailOf: (q) => '${_boxesFor('quality', q)} boxes',
                 hint: '—',
-                onSelected: (q) => setState(() => _qual = q),
+                onSelected: (q) => setState(() {
+                  _qual = q;
+                  _syncBatchCtrls();
+                }),
               ),
               width: 150,
             ),
-            _field(
-              'Qty (boxes)',
-              SizedBox(
-                height: 44,
-                child: TextField(
-                  controller: _qtyCtrl,
-                  focusNode: _fQty,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.done,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  onSubmitted: (_) => _add(),
-                  decoration: InputDecoration(
-                    hintText: '0',
-                    isDense: true,
-                    // The count for the exact holding they landed on. This is
-                    // the last thing they see before typing a number into it.
-                    helperText: stock == null ? null : 'of $stock',
-                    helperStyle:
-                        TextStyle(fontSize: 10.5, color: Colors.grey.shade700),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 12),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8)),
+            // Multi-batch → boxes-per-batch, entered inline so the whole design
+            // goes on in ONE Add. Exactly one batch → shown read-only beside a
+            // single Qty. Untracked → no batch field at all.
+            if (_multiBatch)
+              _field(
+                'Batches — boxes to load',
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [for (final lot in _lots) _batchQtyRow(lot)],
+                ),
+                width: 300,
+              )
+            else if (_singleLot != null)
+              _field(
+                'Batch',
+                _readonly(
+                    '${_lotLabel(_singleLot!)}  ·  ${_lotDetail(_singleLot!)}'),
+                width: 200,
+              ),
+            if (!_multiBatch)
+              _field(
+                'Qty (boxes)',
+                SizedBox(
+                  height: 44,
+                  child: TextField(
+                    controller: _qtyCtrl,
+                    focusNode: _fQty,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onSubmitted: (_) => _add(),
+                    decoration: InputDecoration(
+                      hintText: '0',
+                      isDense: true,
+                      // The count for the exact holding they landed on. This is
+                      // the last thing they see before typing a number into it.
+                      helperText: singleStock == null ? null : 'of $singleStock',
+                      helperStyle: TextStyle(
+                          fontSize: 10.5, color: Colors.grey.shade700),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 12),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
                   ),
                 ),
+                width: 104,
               ),
-              width: 104,
-            ),
             SizedBox(
               height: 44,
               child: ElevatedButton.icon(
@@ -347,6 +484,49 @@ class _HoldingEntryBarState extends State<HoldingEntryBar> {
           ],
         ),
       ),
+    );
+  }
+
+  /// One batch of a multi-batch holding: its label + a boxes-to-load field.
+  Widget _batchQtyRow(Map<String, dynamic> lot) {
+    final ctrl = _batchCtrls[lot['lot_id'].toString()];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_lotLabel(lot),
+                  style: const TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w600)),
+              Text(_lotDetail(lot),
+                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 60,
+          height: 42,
+          child: TextField(
+            controller: ctrl,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onSubmitted: (_) => _add(),
+            decoration: InputDecoration(
+              hintText: '0',
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ),
+      ]),
     );
   }
 

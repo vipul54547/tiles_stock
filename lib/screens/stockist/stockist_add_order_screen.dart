@@ -190,7 +190,9 @@ class _State extends State<StockistAddOrderScreen> {
   /// One line from the keyboard bar. An existing line for the same holding is
   /// REPLACED, not summed — the stockist is correcting the number they can see
   /// sitting in the list, not adding a second helping of it.
-  Future<bool> _addPick(TileDesign d, int qty) async {
+  // The trailing lot is a dispatch-only concept (which batch ships); an order
+  // promises free stock and never picks a batch, so it's ignored here.
+  Future<bool> _addPick(TileDesign d, int qty, [Map<String, dynamic>? lot]) async {
     setState(() {
       final p = _picks[d.id];
       if (p != null) {

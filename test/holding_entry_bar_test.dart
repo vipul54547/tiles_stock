@@ -95,7 +95,7 @@ void main() {
             designs: stock,
             brands: brands,
             boxesOf: (d) => d.boxQuantity,
-            onAdd: (d, qty) async {
+            onAdd: (d, qty, lot) async {
               added.add((d.id, qty));
               return true;
             },

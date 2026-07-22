@@ -38,10 +38,15 @@ class ManualDispatchScreen extends StatefulWidget {
   /// screen opens empty and the order, if any, is attached by hand.
   final String? orderId;
 
+  /// When opened from a Loading List: its lines (design · batch · boxes) prefill
+  /// the truck, and recording marks the list dispatched. (LOT layer · Loading List)
+  final String? loadingListId;
+
   /// Stock mode chosen by the caller, if it wants to preselect one.
   final bool? reduceStock;
 
-  const ManualDispatchScreen({super.key, this.orderId, this.reduceStock});
+  const ManualDispatchScreen(
+      {super.key, this.orderId, this.reduceStock, this.loadingListId});
   @override
   State<ManualDispatchScreen> createState() => _State();
 }
@@ -66,10 +71,35 @@ class _Line {
   /// Boxes held by THIS order alone.
   final int lineHeld;
 
+  /// The batch this line ships from — one line = one (design, batch) picking
+  /// instruction for the supervisor. All null when the stockist tracks no lots.
+  /// (LOT layer L3 · dispatch loading list)
+  final String? lotId;
+  final String? batch;
+  final String? location;
+
+  /// Boxes in that batch, for the over-count warning (you load from the lot).
+  final int lotQty;
+
   _Line(this.d, this.qty,
-      {this.ordered, this.done = 0, this.held = 0, this.lineHeld = 0});
+      {this.ordered,
+      this.done = 0,
+      this.held = 0,
+      this.lineHeld = 0,
+      this.lotId,
+      this.batch,
+      this.location,
+      this.lotQty = 0});
 
   bool get onOrder => ordered != null;
+
+  /// The batch/location as one short string for a row, or '' when untracked.
+  String get lotLabel {
+    final b = (batch ?? '').trim();
+    final l = (location ?? '').trim();
+    if (b.isEmpty && l.isEmpty) return '';
+    return [if (b.isNotEmpty) 'Batch $b', if (l.isNotEmpty) l].join(' · ');
+  }
 
   /// Boxes promised to OTHER buyers' orders. Dispatching past what's left over
   /// after these is allowed, but the stockist is warned.
@@ -131,6 +161,19 @@ class _State extends State<ManualDispatchScreen> {
 
   final _lines = <_Line>[];
 
+  /// holding id -> its lots (batch · location · boxes), oldest first. Loaded once
+  /// so the entry bar can offer a batch per design without a call each. (L3)
+  Map<String, List<Map<String, dynamic>>> _stockLots = {};
+
+  /// Lots only exist to be chosen between when the stockist tracks batch or
+  /// location. Off → one NULL lot per holding → no batch field, dispatch as before.
+  bool get _lotsTracked =>
+      currentStockistTrackBatches || currentStockistTrackLocations;
+
+  /// The batches of a holding, for the entry bar's Batch field. (L3)
+  List<Map<String, dynamic>> _lotsOf(TileDesign d) =>
+      _lotsTracked ? (_stockLots[d.id] ?? const []) : const [];
+
   // Dispatch details.
   final _invoiceCtrl = TextEditingController();
   final _vehicleCtrl = TextEditingController();
@@ -165,9 +208,15 @@ class _State extends State<ManualDispatchScreen> {
     final profile = await _svc.getMyProfile();
     final enabled = (profile?['customers_enabled'] as bool?) ?? false;
     final customers = enabled ? await _svc.listCustomers() : <Map<String, dynamic>>[];
+    // The batches behind each holding, so the entry bar can offer a batch per
+    // design with no call each. Only fetched when the stockist tracks lots.
+    final lots = _lotsTracked
+        ? await _svc.myStockLots()
+        : <String, List<Map<String, dynamic>>>{};
     if (!mounted) return;
     setState(() {
       _all = all;
+      _stockLots = lots;
       _designs = all.where((d) => d.boxQuantity > 0).toList()
         ..sort((a, b) => a.name.compareTo(b.name));
       // A print carried in two thicknesses is two products with the SAME name. Without this the
@@ -184,6 +233,49 @@ class _State extends State<ManualDispatchScreen> {
     // designs above to be loaded first, so it runs after the setState.
     final id = widget.orderId;
     if (id != null && _order == null) await _attachOrderById(id);
+
+    // From a Loading List: overlay its batch lines onto the (now attached) order.
+    if (widget.loadingListId != null) await _prefillFromLoadingList(widget.loadingListId!);
+  }
+
+  /// Fill the truck from a saved loading list — each item is a (design, batch,
+  /// boxes) already decided at loading time. Fills the matching order row where
+  /// there is one, else adds a line; a design loaded from two batches becomes two
+  /// lines. Stock always moves for a real truck, so reduce-stock defaults on.
+  Future<void> _prefillFromLoadingList(String id) async {
+    final data = await _svc.loadingListGet(id);
+    if (data == null || !mounted) return;
+    final items = (data['items'] as List?) ?? const [];
+    setState(() {
+      for (final raw in items) {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final did = (m['design_id']).toString();
+        final d = _designById(did);
+        if (d == null) continue;
+        final boxes = (m['boxes'] as num?)?.toInt() ?? 0;
+        if (boxes <= 0) continue;
+        final lotId = (m['lot_id'])?.toString();
+        final batch = (m['batch'] ?? '').toString();
+        final loc = (m['location'] ?? '').toString();
+        final lots = _stockLots[did] ?? const [];
+        final match = lots.where((l) => (l['lot_id']).toString() == lotId).toList();
+        final avail =
+            match.isEmpty ? boxes : (match.first['box_quantity'] as num?)?.toInt() ?? boxes;
+
+        final orderIdx = _lines
+            .indexWhere((l) => l.d.id == did && l.onOrder && l.qty == 0);
+        if (orderIdx >= 0) {
+          final o = _lines[orderIdx];
+          _lines[orderIdx] = _Line(d, boxes,
+              ordered: o.ordered, done: o.done, held: o.held, lineHeld: o.lineHeld,
+              lotId: lotId, batch: batch, location: loc, lotQty: avail);
+        } else {
+          _lines.insert(0,
+              _Line(d, boxes, lotId: lotId, batch: batch, location: loc, lotQty: avail));
+        }
+      }
+      _reduceStock ??= true;
+    });
   }
 
   Future<void> _attachOrderById(String id) async {
@@ -292,37 +384,64 @@ class _State extends State<ManualDispatchScreen> {
     if (await _addLineFor(_sel!, qty)) setState(_resetRow);
   }
 
-  /// Put [qty] boxes of [d] on the note. Shared by the mobile picker and the
-  /// desktop keyboard bar. Returns false when the line was NOT added, so the
-  /// caller leaves the row exactly as the stockist left it.
-  Future<bool> _addLineFor(TileDesign d, int qty) async {
-    // More boxes than the godown holds. Over-dispatch stays ALLOWED (dispatch is
-    // the final truth and the system count is often stale) — but it must be a
-    // deliberate choice, not a typo that slips through. Cancel leaves the design
-    // and the quantity exactly as they are, so the number can just be corrected.
-    if (qty > d.boxQuantity) {
-      final allow = await _confirmOverStock(d, qty);
+  /// Put [qty] boxes of [d] on the note, from batch [lot] (null when the stockist
+  /// tracks no lots). One line = one (design, batch) picking instruction, so a
+  /// second batch of the same design is a NEW line, not a duplicate. Shared by
+  /// the mobile picker and the desktop keyboard bar. Returns false when the line
+  /// was NOT added, so the caller leaves the row exactly as it was.
+  Future<bool> _addLineFor(TileDesign d, int qty,
+      [Map<String, dynamic>? lot]) async {
+    // Over-count is against the BATCH you load from (or the whole holding when
+    // untracked). Over-dispatch stays ALLOWED — the truck is the final truth —
+    // but it must be a deliberate yes, not a typo. Cancel leaves the row as is.
+    final avail =
+        lot != null ? (lot['box_quantity'] as num?)?.toInt() ?? 0 : d.boxQuantity;
+    if (qty > avail) {
+      final allow = await _confirmOverStock(d, qty, avail, lot);
       if (!allow) return false;
     }
-    final idx = _lines.indexWhere((l) => l.d.id == d.id);
-    if (idx >= 0) {
-      // An order row waiting at 0 boxes isn't a duplicate — it's the line the
-      // stockist is filling in. Set it, and lift it like any other add.
-      if (_lines[idx].qty == 0) {
-        setState(() {
-          _lines[idx].qty = qty;
-          _lift(idx);
-        });
-        return true;
-      }
-      await _resolveDuplicate(idx, qty);
+    final lotId = lot?['lot_id'] as String?;
+
+    // An order row waiting at 0 boxes isn't a duplicate — it's the line being
+    // filled in. Adopt its order numbers and attach the chosen batch.
+    final orderIdx = _lines
+        .indexWhere((l) => l.d.id == d.id && l.onOrder && l.qty == 0);
+    if (orderIdx >= 0) {
+      final o = _lines[orderIdx];
+      setState(() {
+        _lines[orderIdx] = _Line(d, qty,
+            ordered: o.ordered,
+            done: o.done,
+            held: o.held,
+            lineHeld: o.lineHeld,
+            lotId: lotId,
+            batch: lot?['batch'] as String?,
+            location: lot?['location'] as String?,
+            lotQty: avail);
+        _lift(orderIdx);
+      });
       return true;
     }
+
+    // Same design AND same batch already on the note = a real duplicate.
+    final dupIdx = _lines
+        .indexWhere((l) => l.d.id == d.id && l.lotId == lotId && l.qty > 0);
+    if (dupIdx >= 0) {
+      await _resolveDuplicate(dupIdx, qty);
+      return true;
+    }
+
     setState(() {
       // Newest on top: the design-selection bar is pinned above the list, so the
       // row you just added lands right under it instead of off-screen below the
       // order's pre-filled rows.
-      _lines.insert(0, _Line(d, qty));
+      _lines.insert(
+          0,
+          _Line(d, qty,
+              lotId: lotId,
+              batch: lot?['batch'] as String?,
+              location: lot?['location'] as String?,
+              lotQty: avail));
     });
     return true;
   }
@@ -339,13 +458,16 @@ class _State extends State<ManualDispatchScreen> {
   /// can be held in several surfaces/qualities, and the wrong one is precisely
   /// the mistake this screen is trying to prevent), shows both numbers, and
   /// makes the stockist say yes. Returns true = add the line anyway.
-  Future<bool> _confirmOverStock(TileDesign d, int qty) async {
-    final stock = d.boxQuantity;
-    final short = qty - stock;
+  Future<bool> _confirmOverStock(TileDesign d, int qty, int avail,
+      [Map<String, dynamic>? lot]) async {
+    // When a batch is chosen the ceiling is that batch, not the whole holding.
+    final batch = (lot?['batch'] ?? '').toString();
+    final inLabel = batch.isEmpty ? 'In godown' : 'In batch $batch';
+    final short = qty - avail;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('More than godown stock'),
+        title: Text(batch.isEmpty ? 'More than godown stock' : 'More than this batch'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -358,8 +480,8 @@ class _State extends State<ManualDispatchScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('In godown', style: TextStyle(fontSize: 13)),
-                Text('$stock boxes',
+                Text(inLabel, style: const TextStyle(fontSize: 13)),
+                Text('$avail boxes',
                     style: const TextStyle(
                         fontSize: 13, fontWeight: FontWeight.w600)),
               ],
@@ -704,8 +826,21 @@ class _State extends State<ManualDispatchScreen> {
       // Only what's actually on the truck. Order rows left at 0 are omitted —
       // prune=false means the server leaves them, and their remaining, alone.
       final sent = _lines.where((l) => l.qty > 0).toList();
-      final lines =
-          sent.map((l) => {'design_id': l.d.id, 'dispatch': l.qty}).toList();
+      // One line = one (design, batch), but the server takes a design ONCE with a
+      // per-batch `lots` array. Group same-design lines: sum the boxes, collect
+      // the batches. A line with no batch (untracked) sends no lots → oldest-first.
+      final byDesign = <String, Map<String, dynamic>>{};
+      for (final l in sent) {
+        final m = byDesign.putIfAbsent(
+            l.d.id, () => {'design_id': l.d.id, 'dispatch': 0});
+        m['dispatch'] = (m['dispatch'] as int) + l.qty;
+        if (l.lotId != null) {
+          final lots = (m['lots'] as List?) ?? <Map<String, dynamic>>[];
+          lots.add({'lot_id': l.lotId, 'qty': l.qty});
+          m['lots'] = lots;
+        }
+      }
+      final lines = byDesign.values.toList();
       final total = _totalBoxes;
 
       final order = _order;
@@ -743,6 +878,10 @@ class _State extends State<ManualDispatchScreen> {
       final outstanding = (res['outstanding'] as num?)?.toInt() ?? 0;
 
       final noteId = (res['note_id'] ?? '').toString();
+      // Close the loop back to the loading list this dispatch came from.
+      if (widget.loadingListId != null && noteId.isNotEmpty) {
+        await _svc.loadingListMarkDispatched(widget.loadingListId!, noteId);
+      }
       final report = _buildReport(no, sent, total, outstanding, status);
       await _showReportSheet(report, status,
           outstanding: outstanding,
@@ -1099,10 +1238,12 @@ class _State extends State<ManualDispatchScreen> {
         : 'Balance $outstanding boxes: reserved for you, coming in a later dispatch.';
   }
 
-  /// The dispatch note as printable PDF bytes.
+  /// The dispatch note as printable PDF bytes. [loadingList] = the supervisor's
+  /// pre-load copy: titled LOADING LIST, no dispatch number, and no order-balance
+  /// line (nothing has shipped yet). Batch · location print on both. (LOT L3)
   Future<Uint8List> _dispatchPdfBytes(
       List<_Line> sent, int total, String dispatchNo, String status,
-      int outstanding) async {
+      int outstanding, {bool loadingList = false}) async {
     final bytes = await buildDispatchPdf(DispatchPdfData(
       stockistName: _stockistName,
       who: _order != null ? _buyerLabel : _custNameCtrl.text.trim(),
@@ -1120,12 +1261,34 @@ class _State extends State<ManualDispatchScreen> {
             surface: l.d.hasSurface ? l.d.surfaceCardLabel : '',
             quality: l.d.quality,
             boxes: l.qty,
+            brand: _brandName(l.d.brandId),
+            batch: l.batch ?? '',
+            location: l.location ?? '',
           )
       ],
       total: total,
-      balanceLine: _balanceLine(status, outstanding),
+      balanceLine: loadingList ? '' : _balanceLine(status, outstanding),
+      title: loadingList ? 'LOADING LIST' : 'DISPATCH NOTE',
+      totalLabel: loadingList ? 'Total to load' : 'Total dispatched',
     ));
     return Uint8List.fromList(bytes);
+  }
+
+  /// Print the loading list a stockist hands the supervisor BEFORE the truck is
+  /// loaded — from the current draft, nothing saved, no stock moved. (LOT L3)
+  Future<void> _printLoadingList() async {
+    final sent = _lines.where((l) => l.qty > 0).toList();
+    if (sent.isEmpty) {
+      _snack('Add designs to the list first.', _red);
+      return;
+    }
+    try {
+      final bytes =
+          await _dispatchPdfBytes(sent, _totalBoxes, '', '', 0, loadingList: true);
+      await Printing.layoutPdf(onLayout: (_) async => bytes);
+    } catch (e) {
+      if (mounted) _snack('$e', _red);
+    }
   }
 
   /// Preview the report, then act on it: Copy, WhatsApp, Print, PDF, Send Link.
@@ -1297,15 +1460,44 @@ class _State extends State<ManualDispatchScreen> {
         foregroundColor: Colors.white,
         title: const Text('Dispatch'),
       ),
-      bottomNavigationBar: SaveBar(
-        label: _lines.isEmpty
-            ? 'Record Dispatch'
-            : 'Record Dispatch ($_totalBoxes boxes)',
-        icon: Icons.local_shipping_outlined,
-        color: _red,
-        onPressed: _record,
-        saving: _saving,
-        dirty: _lines.isNotEmpty,
+      bottomNavigationBar: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // The supervisor's loading list — printed BEFORE the truck loads, so it
+          // sits ahead of Record. Nothing is saved; it's just the pull sheet.
+          // Hidden until there's something to load. (LOT layer L3)
+          if (_lines.any((l) => l.qty > 0))
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: OutlinedButton.icon(
+                  onPressed: _saving ? null : _printLoadingList,
+                  icon: const Icon(Icons.print_outlined, size: 18),
+                  label: const Text('Print loading list',
+                      style: TextStyle(fontSize: 15)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _navy,
+                    side: BorderSide(color: _navy.withValues(alpha: 0.5)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ),
+          SaveBar(
+            label: _lines.isEmpty
+                ? 'Record Dispatch'
+                : 'Record Dispatch ($_totalBoxes boxes)',
+            icon: Icons.local_shipping_outlined,
+            color: _red,
+            onPressed: _record,
+            saving: _saving,
+            dirty: _lines.isNotEmpty,
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -1744,10 +1936,33 @@ class _State extends State<ManualDispatchScreen> {
     return parts.join('  ·  ');
   }
 
+  /// The batch/location this line ships from, as a small tag for a row. Empty
+  /// string → nothing (untracked stock). (LOT layer L3)
+  Widget? _batchTag(_Line l) {
+    final label = l.lotLabel;
+    if (label.isEmpty) return null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: _navy.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: _navy.withValues(alpha: 0.25)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.inventory_2_outlined, size: 13, color: _navy),
+        const SizedBox(width: 4),
+        Text(label,
+            style: const TextStyle(
+                fontSize: 11.5, color: _navy, fontWeight: FontWeight.w600)),
+      ]),
+    );
+  }
+
   Widget _lineTile(int i) {
     final l = _lines[i];
     final over = l.qty > l.d.boxQuantity;
     final idle = l.qty == 0; // an order row not on this truck
+    final lotChip = _batchTag(l);
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
@@ -1781,6 +1996,10 @@ class _State extends State<ManualDispatchScreen> {
                     style: TextStyle(
                         fontSize: 11.5,
                         color: over ? _red : Colors.grey.shade600)),
+                if (lotChip != null) ...[
+                  const SizedBox(height: 6),
+                  Align(alignment: Alignment.centerLeft, child: lotChip),
+                ],
               ],
             ),
           ),
@@ -1855,6 +2074,7 @@ class _State extends State<ManualDispatchScreen> {
         designs: _designs, // in-stock only
         brands: _brands,
         boxesOf: (d) => d.boxQuantity, // dispatch counts what is on the shelf
+        lotsOf: _lotsOf, // batch chosen at entry (loading list)
         onAdd: _addLineFor,
       );
 
@@ -1966,6 +2186,7 @@ class _State extends State<ManualDispatchScreen> {
                       if (l.otherHeld > 0)
                         Text('${l.otherHeld} booked',
                             style: dim.copyWith(fontSize: 11)),
+                      if (_batchTag(l) case final tag?) tag,
                     ]),
               ),
       ),

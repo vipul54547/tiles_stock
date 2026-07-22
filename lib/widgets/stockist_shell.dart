@@ -142,6 +142,10 @@ class _StockistShellState extends State<StockistShell> {
                 badge: _newOrders),
             _item(Icons.local_shipping_outlined, 'Dispatches',
                 '/stockist/dispatches'),
+            // 📋 The truck-loading step: prepare a pull sheet (batch + location)
+            // before loading, record the dispatch after. (Loading List)
+            _item(Icons.playlist_add_check_outlined, 'Loading Lists',
+                '/stockist/loading-lists'),
             _item(Icons.link, 'Stock Lists', '/stockist/lists'),
             // 👥 Opt-in (customers_enabled). It was missing from this sidebar
             // entirely — the only way in was the phone-layout account menu, so

@@ -335,6 +335,123 @@ class SupabaseDataService {
     }
   }
 
+  /// The lots of one holding, oldest first — `[{lot_id, batch, location,
+  /// box_quantity}]` — for the dispatch lot-picker. Empty when the design has
+  /// no lots (or isn't the caller's). A holding with batch/location tracking OFF
+  /// has a single NULL lot, so this returns 0–1 rows and no split is offered.
+  /// (docs/LOT_LAYER_PLAN.md · L3)
+  Future<List<Map<String, dynamic>>> myHoldingLots(String designId) async {
+    try {
+      final res =
+          await supabase.rpc('my_holding_lots', params: {'p_design': designId});
+      return (res as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('myHoldingLots failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Every one of the stockist's lots, grouped by holding id — for the dispatch
+  /// entry bar's batch picker (so it needs no call per design). Each value is a
+  /// list of `{lot_id, batch, location, box_quantity}`, oldest first. A holding
+  /// with tracking off has a single NULL-batch lot. (docs/LOT_LAYER_PLAN.md · L3)
+  Future<Map<String, List<Map<String, dynamic>>>> myStockLots() async {
+    try {
+      final res = await supabase.rpc('my_stock_lots');
+      final out = <String, List<Map<String, dynamic>>>{};
+      for (final e in (res as List)) {
+        final m = Map<String, dynamic>.from(e as Map);
+        (out[(m['holding_id']).toString()] ??= []).add(m);
+      }
+      return out;
+    } catch (e, st) {
+      debugPrint('myStockLots failed: $e\n$st');
+      return {};
+    }
+  }
+
+  // ── Loading lists (the HOLD → LOADING LIST → DISPATCH step) ──────────────────
+
+  /// Create or update a loading-list DRAFT with its lines, returning its id.
+  /// [items] = `[{design_id, lot_id, batch, location, boxes}]`, one per (design,
+  /// batch). Pass [id] null to create. (docs/LOT_LAYER_PLAN.md · Loading List)
+  Future<String> loadingListUpsert({
+    String? id,
+    String? customerId,
+    String? inquiryId,
+    String partyOrderNo = '',
+    String truck = '',
+    String transporter = '',
+    DateTime? date,
+    String note = '',
+    required List<Map<String, dynamic>> items,
+  }) async {
+    try {
+      final res = await supabase.rpc('loading_list_upsert', params: {
+        'p_id': id,
+        'p_customer': customerId,
+        'p_inquiry': inquiryId,
+        'p_party_order_no': partyOrderNo,
+        'p_truck': truck,
+        'p_transporter': transporter,
+        'p_date': (date ?? DateTime.now()).toIso8601String().split('T').first,
+        'p_note': note,
+        'p_items': items,
+      });
+      return res.toString();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// The stockist's loading lists — drafts first, then dispatched. Each is
+  /// `{id, status, customer, order_token, truck_no, party_order_no, loading_date,
+  /// lines, boxes, updated_at}`.
+  Future<List<Map<String, dynamic>>> myLoadingLists() async {
+    try {
+      final res = await supabase.rpc('my_loading_lists');
+      return (res as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('myLoadingLists failed: $e\n$st');
+      return [];
+    }
+  }
+
+  /// Full detail of one loading list for reopening — header + `items`
+  /// (`[{design_id, lot_id, batch, location, boxes}]`). Null if not the caller's.
+  Future<Map<String, dynamic>?> loadingListGet(String id) async {
+    try {
+      final res = await supabase.rpc('loading_list_get', params: {'p_id': id});
+      return res == null ? null : Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('loadingListGet failed: $e\n$st');
+      return null;
+    }
+  }
+
+  /// Discard a draft loading list (no effect once dispatched).
+  Future<void> loadingListDelete(String id) async {
+    try {
+      await supabase.rpc('loading_list_delete', params: {'p_id': id});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Mark a loading list dispatched, linking it to the dispatch note just made.
+  Future<void> loadingListMarkDispatched(String id, String noteId) async {
+    try {
+      await supabase.rpc('loading_list_mark_dispatched',
+          params: {'p_id': id, 'p_note_id': noteId});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   /// The stockist's saved customers (empty when the feature is off / none saved).
   Future<List<Map<String, dynamic>>> listCustomers() async {
     try {

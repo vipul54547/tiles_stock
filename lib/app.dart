@@ -68,6 +68,8 @@ import 'screens/stockist/import_excel_stock_screen.dart';
 import 'screens/stockist/my_artworks_screen.dart';
 import 'screens/stockist/manual_dispatch_screen.dart';
 import 'screens/stockist/all_dispatches_screen.dart';
+import 'screens/stockist/loading_list_screen.dart';
+import 'screens/stockist/loading_list_edit_screen.dart';
 import 'screens/stockist/stock_lists_screen.dart';
 import 'screens/stockist/stockist_profile_screen.dart';
 import 'screens/stockist/customer_history_screen.dart';
@@ -261,12 +263,27 @@ final GoRouter _router = GoRouter(
             return ManualDispatchScreen(
               orderId: e['id']?.toString(),
               reduceStock: e['reduce_stock'] as bool?,
+              loadingListId: e['loading_list_id']?.toString(),
             );
           },
         ),
         GoRoute(
           path: '/stockist/dispatches',
           builder: (_, __) => const AllDispatchesScreen(),
+        ),
+        GoRoute(
+          path: '/stockist/loading-lists',
+          builder: (_, __) => const LoadingListScreen(),
+        ),
+        GoRoute(
+          path: '/stockist/loading-lists/edit',
+          builder: (_, state) {
+            final e = (state.extra as Map?) ?? const {};
+            return LoadingListEditScreen(
+              listId: e['id']?.toString(),
+              inquiryId: e['inquiry_id']?.toString(),
+            );
+          },
         ),
         GoRoute(
           path: '/stockist/stock/history/:designId/:designName',
