@@ -145,6 +145,10 @@ class _State extends State<AddStockBatchScreen> {
   // Top brand filter — narrows the Design picker (M).
   String? _brandFilter;
 
+  /// 🧱 His saved godown locations `{id, code}` — the pick-list behind the Location dropdown, so a
+  /// spot is chosen once and reused, not retyped every entry. Loaded only when he tracks locations.
+  List<Map<String, dynamic>> _locations = [];
+
   final _entries = <_Entry>[];
 
   @override
@@ -173,11 +177,15 @@ class _State extends State<AddStockBatchScreen> {
   Future<void> _load() async {
     final masters = await _svc.getMyLibrary();
     final brands = await _svc.getMyBrands();
+    final locs = currentStockistTrackLocations
+        ? await _svc.myStockLocations()
+        : const <Map<String, dynamic>>[];
     if (!mounted) return;
     setState(() {
       _masters = masters;
       _pieceSuffix = pieceSuffixes(masters);
       _brands = brands;
+      _locations = locs;
       _loading = false;
     });
   }
@@ -889,7 +897,7 @@ class _State extends State<AddStockBatchScreen> {
               _hField('Batch / shade', _lotField(_batchCtrl, 'shade A'),
                   width: 120),
             if (currentStockistTrackLocations)
-              _hField('Location', _lotField(_locCtrl, 'B1'), width: 100),
+              _hField('Location', _locationField(), width: 150),
             _hField('Qty (boxes)', _qtyField(), width: 100),
             SizedBox(
               height: 44,
@@ -960,7 +968,7 @@ class _State extends State<AddStockBatchScreen> {
                 color: Colors.grey.shade700)),
       );
 
-  /// 🧱 A plain lot text field (batch / location) for the entry bar — matches the qty field's height.
+  /// 🧱 A plain lot text field (batch / shade) for the entry bar — matches the qty field's height.
   Widget _lotField(TextEditingController c, String hint) => SizedBox(
         height: 44,
         child: TextField(
@@ -975,6 +983,105 @@ class _State extends State<AddStockBatchScreen> {
           ),
         ),
       );
+
+  /// 🧱 Location as a SAVED-location dropdown, not free text — a spot is picked once and reused.
+  /// Drives `_locCtrl` (the save path still resolves the code to an id), so nothing downstream
+  /// changes. The last item opens the add-a-location dialog. Shared by both layouts.
+  Widget _locationField() {
+    final codes = [for (final l in _locations) (l['code'] ?? '').toString()];
+    final current = _locCtrl.text.trim();
+    final value = codes.contains(current) ? current : '';
+    return SizedBox(
+      height: 44,
+      child: DropdownButtonFormField<String>(
+        initialValue: value,
+        isExpanded: true,
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        style: const TextStyle(fontSize: 13, color: Colors.black87),
+        items: [
+          const DropdownMenuItem(value: '', child: Text('— none —')),
+          for (final c in codes) DropdownMenuItem(value: c, child: Text(c)),
+          const DropdownMenuItem(
+              value: '__add__', child: Text('➕ New location…')),
+        ],
+        onChanged: (v) {
+          if (v == '__add__') {
+            _addLocation();
+            return;
+          }
+          setState(() => _locCtrl.text = v ?? '');
+        },
+      ),
+    );
+  }
+
+  /// 🧱 The stacked LOT section for the phone builder — batch (text) + location (dropdown), each
+  /// gated on its tracking flag, with a small "LABEL" above each. Empty when he tracks neither.
+  List<Widget> _mobileLotFields() {
+    if (!currentStockistTrackBatches && !currentStockistTrackLocations) {
+      return const [];
+    }
+    const labelStyle = TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
+    return [
+      if (currentStockistTrackBatches) ...[
+        const SizedBox(height: 12),
+        const Text('Batch / shade', style: labelStyle),
+        const SizedBox(height: 4),
+        _lotField(_batchCtrl, 'shade A'),
+      ],
+      if (currentStockistTrackLocations) ...[
+        const SizedBox(height: 12),
+        const Text('Location', style: labelStyle),
+        const SizedBox(height: 4),
+        _locationField(),
+      ],
+    ];
+  }
+
+  /// Add (or reuse) a godown location, then select it. Refreshes the pick-list so it shows next time.
+  Future<void> _addLocation() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New location'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+              labelText: 'Location code',
+              hintText: 'e.g. B1, a1C2',
+              border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Add')),
+        ],
+      ),
+    );
+    if (ok != true || ctrl.text.trim().isEmpty) return;
+    try {
+      await _svc.stockLocationAdd(ctrl.text.trim());
+      final locs = await _svc.myStockLocations();
+      if (!mounted) return;
+      setState(() {
+        _locations = locs;
+        _locCtrl.text = ctrl.text.trim();
+      });
+    } catch (e) {
+      _snack('$e', Colors.red);
+    }
+  }
 
   /// Desktop quantity. The last field of the line, so Enter here means Add.
   Widget _qtyField() => SizedBox(
@@ -1235,6 +1342,10 @@ class _State extends State<AddStockBatchScreen> {
                 ),
               ),
             ],
+            // 🧱 LOT — the shade off the carton + the godown spot. Stacked so a phone shows the
+            // same fields the desktop bar does; the desktop only omitted them for width. Location
+            // is the saved-location dropdown, batch a per-carton text. Gated on the tracking flags.
+            ..._mobileLotFields(),
             // 🚫 NO SURFACE FIELD — see the desktop bar. The piece is already chosen.
             // Each control sits beside the button it belongs with: pick the
             // quality of a design you may still need to create, then type the
