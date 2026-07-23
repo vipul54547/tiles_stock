@@ -211,16 +211,41 @@ class _ProductionPlanScreenState extends State<ProductionPlanScreen> {
     setState(() => _loading = true);
     final res = await _data.myProductionDemand();
     if (!mounted) return;
-    setState(() {
-      _rows = [
-        for (final r in (res['rows'] as List?) ?? const [])
-          Map<String, dynamic>.from(r as Map)
+
+    final rows = [
+      for (final r in (res['rows'] as List?) ?? const [])
+        Map<String, dynamic>.from(r as Map)
+    ];
+    final saved = widget.draft.savedLines;
+
+    // ♻️ Rebuild ADDED STOCK designs on reopen. They carry no order demand, so
+    // they aren't in the rows above — but their Make quantity was saved. Any
+    // saved make whose box is missing here is such a design: pull it from the
+    // addable-box pool and re-insert it, marked _added, so the makes loop below
+    // restores its quantity. A box that's since gone unaddable is dropped.
+    if (saved != null) {
+      final present = rows.map((r) => '${r['box_id']}').toSet();
+      final missing = [
+        for (final m in widget.draft.savedMakes ?? const [])
+          if (!present.contains('${m['box_id']}')) '${m['box_id']}'
       ];
+      if (missing.isNotEmpty) {
+        _addable ??= await _data.myAddableBoxes();
+        if (!mounted) return;
+        for (final id in missing) {
+          final b = _addable!.firstWhere((x) => '${x['box_id']}' == id,
+              orElse: () => <String, dynamic>{});
+          if (b.isNotEmpty) rows.insert(0, {...b, '_added': true});
+        }
+      }
+    }
+
+    setState(() {
+      _rows = rows;
       _asOf = DateTime.tryParse((res['as_of'] ?? '').toString())?.toLocal();
       _lineQty.clear();
       _plan.clear();
 
-      final saved = widget.draft.savedLines;
       if (saved != null) {
         // ♻️ Reopen — restore the saved ticks (with their quantity) + makes, intersected with LIVE
         // demand so a line or cover that has since gone is dropped rather than resurrected. A saved
