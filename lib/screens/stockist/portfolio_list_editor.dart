@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 import '../../models/brand.dart';
 import '../../models/stock_catalog.dart';
+import '../../models/choice_state.dart';
 import '../../services/supabase_data_service.dart';
 
 /// 🖼️ Create / edit a PORTFOLIO catalogue (project_media_portfolio_ddpi
-/// #13/#15/#21). A catalogue is stock-blind and scoped to exactly ONE brand:
-/// the buyer sees that brand's designs under that brand's cover word, plus the
-/// media (rooms/360/video). "Upload once, brand many" — send buyer A a "Bianco
-/// Tera" catalogue and buyer B an "Anuj" one over the same designs + media.
+/// #13/#15/#21). Stock-blind, scoped to exactly ONE brand — the buyer sees that
+/// brand's designs under that brand's cover word, plus the media.
 ///
-/// v1 = name + one brand (the essential scope). Facet narrowing (surface/size/
-/// space/DNA) is a later refinement — a brand catalogue shows all the brand's
-/// designs by default.
+/// Optional FACETS narrow which designs appear: surface · size · tile type ·
+/// space (the mockup/360 room tag). Empty = the brand's whole range.
 class PortfolioListEditor extends StatefulWidget {
   final StockCatalog? existing;
   final List<Brand> brands;
@@ -29,6 +27,19 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
   String? _brandId;
   bool _saving = false;
 
+  // facets
+  final Set<String> _fSurfaces = {};
+  final Set<String> _fSizes = {};
+  final Set<String> _fTileTypes = {};
+  final Set<String> _fSpaces = {};
+
+  List<String> _surfaces = const [];
+  Map<String, String> _surfLabels = const {}; // canonical → stockist word
+  List<String> _sizes = const [];
+  List<Map<String, dynamic>> _spaces = const []; // {value,label}
+  static const _tileTypes = ['Ceramic', 'PGVT & GVT', 'Porcelain'];
+  bool _loadingFacets = true;
+
   bool get _isEdit => widget.existing != null;
 
   @override
@@ -37,11 +48,37 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
     final ex = widget.existing;
     _name.text = ex?.name ?? '';
     _desc.text = ex?.description ?? '';
-    // Prefill: the existing catalogue's brand, else the default brand.
     _brandId = ex?.catalogueBrandId ??
         (widget.brands.where((b) => b.isDefault).isNotEmpty
             ? widget.brands.firstWhere((b) => b.isDefault).id
             : (widget.brands.isNotEmpty ? widget.brands.first.id : null));
+    if (ex != null) {
+      _fSurfaces.addAll(ex.filterSurfaces);
+      _fSizes.addAll(ex.filterSizes);
+      _fTileTypes.addAll(ex.filterTileTypes);
+      _fSpaces.addAll(ex.filterSpaces);
+    }
+    _loadFacets();
+  }
+
+  Future<void> _loadFacets() async {
+    try {
+      final designs = await _data.getDesignsByStockist(currentStockistUUID);
+      final sizes = designs.map((d) => d.size).toSet().toList()..sort();
+      final finishes = await _data.getActiveFinishNames();
+      final labels = await _data.getMySurfaceLabels();
+      final spaces = await _data.lookupValues('space');
+      if (!mounted) return;
+      setState(() {
+        _sizes = sizes;
+        _surfaces = finishes.where((f) => f.toLowerCase() != 'none').toList();
+        _surfLabels = labels;
+        _spaces = spaces;
+        _loadingFacets = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingFacets = false);
+    }
   }
 
   @override
@@ -68,6 +105,10 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
         name: name,
         brandId: _brandId!,
         description: _desc.text.trim(),
+        filterSurfaces: _fSurfaces.toList(),
+        filterSizes: _fSizes.toList(),
+        filterTileTypes: _fTileTypes.toList(),
+        filterSpaces: _fSpaces.toList(),
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -98,8 +139,8 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
             ),
             child: const Text(
               'A portfolio catalogue shows this brand\'s designs and their media '
-              '(rooms · 360 · video) — no stock or price. Share its link like any '
-              'stock list.',
+              '(rooms · 360 · video) — no stock or price. Facets below are '
+              'optional; leave them empty to show the brand\'s whole range.',
               style: TextStyle(fontSize: 12, color: Colors.black54),
             ),
           ),
@@ -124,10 +165,7 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text('Brand *',
-              style: TextStyle(
-                  fontWeight: FontWeight.bold, fontSize: 13, color: _navy)),
-          const SizedBox(height: 2),
+          _label('Brand *'),
           const Text(
               'The catalogue is scoped to one brand and shows each design under '
               'that brand\'s name.',
@@ -148,6 +186,29 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
                   ),
               ],
             ),
+          const Divider(height: 32),
+          const Text('Narrow the range (optional)',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 13, color: _navy)),
+          const SizedBox(height: 8),
+          if (_loadingFacets)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else ...[
+            _facetGroup('Surface', _surfaces, _fSurfaces, labels: _surfLabels),
+            _facetGroup('Size', _sizes, _fSizes),
+            _facetGroup('Tile type', _tileTypes, _fTileTypes),
+            _facetGroup(
+                'Space',
+                [for (final s in _spaces) s['value'] as String],
+                _fSpaces,
+                labels: {
+                  for (final s in _spaces)
+                    s['value'] as String: s['label'] as String
+                }),
+          ],
           const SizedBox(height: 28),
           SizedBox(
             height: 48,
@@ -165,6 +226,43 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.bold)),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _label(String s) => Text(s,
+      style: const TextStyle(
+          fontWeight: FontWeight.bold, fontSize: 13, color: _navy));
+
+  // A multi-select chip group. [labels] maps a stored value → its display word.
+  Widget _facetGroup(String title, List<String> options, Set<String> selected,
+      {Map<String, String> labels = const {}}) {
+    if (options.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade700)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final o in options)
+                FilterChip(
+                  label: Text(labels[o] ?? o),
+                  selected: selected.contains(o),
+                  onSelected: (on) => setState(
+                      () => on ? selected.add(o) : selected.remove(o)),
+                ),
+            ],
           ),
         ],
       ),
