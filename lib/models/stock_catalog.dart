@@ -47,6 +47,14 @@ class StockCatalog {
   /// 'temporary' = manually picked designs via catalog_designs.
   final String listType;
 
+  /// 'stock' (commerce — price/stock) | 'portfolio' (media catalogue, stock-blind,
+  /// one brand). Both are shareable Link Lists on the same table. (media portfolio #13)
+  final String kind;
+
+  /// The ONE brand a portfolio catalogue is scoped to + shown under. Null on a
+  /// stock list (which may span brands via [filterBrandIds]). (media portfolio #11/#15)
+  final String? catalogueBrandId;
+
   /// Multi-select filters — empty list = no filter (show all).
   final List<String> filterBrandIds;
   final List<String> filterQualities;
@@ -54,6 +62,9 @@ class StockCatalog {
   final List<String> filterSizes;
   final List<String> filterTileTypes;
   final List<String> filterStockTypes;
+  /// Portfolio-only facets — room tag (Space) + the DNA value ids. (media portfolio #13)
+  final List<String> filterSpaces;
+  final List<String> filterDna;
 
   /// F-stock box range filter — null = no bound.
   final int? filterBoxMin;
@@ -87,12 +98,16 @@ class StockCatalog {
     this.hiddenByStockist = false,
     this.deleteScheduledAt,
     this.listType = 'permanent',
+    this.kind = 'stock',
+    this.catalogueBrandId,
     this.filterBrandIds = const [],
     this.filterQualities = const [],
     this.filterSurfaces = const [],
     this.filterSizes = const [],
     this.filterTileTypes = const [],
     this.filterStockTypes = const [],
+    this.filterSpaces = const [],
+    this.filterDna = const [],
     this.filterBoxMin,
     this.filterBoxMax,
   });
@@ -100,6 +115,7 @@ class StockCatalog {
   bool get isPrivate => visibility == 'private';
   bool get isPermanent => listType == 'permanent';
   bool get isTemporary => listType == 'temporary';
+  bool get isPortfolio => kind == 'portfolio';
 
   /// True when this list carries its own banner (rich layout or legacy image).
   bool get hasOwnBanner => bannerSource.isNotEmpty || bannerUrl.isNotEmpty;
@@ -137,6 +153,10 @@ class StockCatalog {
             ? null
             : DateTime.tryParse(j['delete_scheduled_at'].toString())?.toLocal(),
         listType: (j['list_type'] as String?) ?? 'permanent',
+        kind: (j['kind'] as String?) ?? 'stock',
+        catalogueBrandId: j['catalogue_brand_id'] as String?,
+        filterSpaces:      (j['filter_spaces']      as List?)?.cast<String>() ?? const [],
+        filterDna:         (j['filter_dna']         as List?)?.cast<String>() ?? const [],
         filterBrandIds:    (j['filter_brand_ids']   as List?)?.cast<String>() ?? const [],
         filterQualities:   (j['filter_qualities']   as List?)?.cast<String>() ?? const [],
         filterSurfaces:    (j['filter_surfaces']    as List?)?.cast<String>() ?? const [],

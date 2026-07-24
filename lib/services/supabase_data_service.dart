@@ -915,6 +915,42 @@ class SupabaseDataService {
     return (res ?? '').toString();
   }
 
+  /// Create ([id] null) or edit a PORTFOLIO catalogue (media, stock-blind, one
+  /// brand). Same table + banner/share machinery as a stock list; only the facets
+  /// differ (surface/size/tile-type/space/DNA, no quality/stock/box). [brandId] is
+  /// mandatory — the catalogue is scoped to and shown under that brand.
+  /// Returns the catalogue id. (media portfolio #13/#15)
+  Future<String> saveCatalogue({
+    String? id,
+    required String name,
+    required String brandId,
+    String description = '',
+    String listType = 'permanent',
+    List<String> filterSurfaces = const [],
+    List<String> filterSizes = const [],
+    List<String> filterTileTypes = const [],
+    List<String> filterSpaces = const [],
+    List<String> filterDna = const [],
+  }) async {
+    try {
+      final res = await supabase.rpc('catalogue_save', params: {
+        'p_id': id,
+        'p_name': name,
+        'p_brand_id': brandId,
+        'p_description': description,
+        'p_list_type': listType,
+        'p_filter_surfaces':   filterSurfaces,
+        'p_filter_sizes':      filterSizes,
+        'p_filter_tile_types': filterTileTypes,
+        'p_filter_spaces':     filterSpaces,
+        'p_filter_dna':        filterDna,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   /// Set (or clear, with '') a brand-free list's own banner image. (stocklists v2)
   Future<void> setListBanner(String catalogId, String bannerUrl) async {
     await supabase.rpc('set_list_banner',
@@ -2655,6 +2691,24 @@ class SupabaseDataService {
     } catch (e, st) {
       debugPrint('getPublicCatalog failed ($token): $e\n$st');
       return null;
+    }
+  }
+
+  /// Public (no login): a stockist's media portfolio for the `/s/` page, resolved
+  /// by the same share token. STOCK-BLIND — design identity + media only, no qty/
+  /// quality/price. Returns `{assets:[{id,type,url,space,space_label,sort_order,
+  /// artworks:[...], designs:[...]}]}`; the buyer app groups by type (media tabs)
+  /// and by library_id / print (the View modal + "+N variants").
+  /// (project_media_portfolio_ddpi #10/#14/#15)
+  Future<Map<String, dynamic>> getPublicPortfolio(String token) async {
+    try {
+      final res =
+          await supabase.rpc('public_portfolio', params: {'p_token': token});
+      if (res == null) return {'assets': const []};
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e, st) {
+      debugPrint('getPublicPortfolio failed ($token): $e\n$st');
+      return {'assets': const []};
     }
   }
 
