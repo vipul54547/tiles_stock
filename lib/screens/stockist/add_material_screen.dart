@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -398,9 +399,15 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
   // stockist picks the folder and it uploads; anywhere, a hosted index.html URL
   // can be pasted. (media portfolio P2)
   Future<void> _pick360Bundle() async {
-    final dir = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: 'Pick the Pano2VR bundle folder (with index.html)');
-    if (dir == null) return;
+    // The Windows folder-picker is unreliable, so pick the bundle's index.html
+    // and take its parent folder — the whole bundle uploads from there.
+    final res = await FilePicker.platform.pickFiles(
+        dialogTitle: 'Select index.html inside the 360 bundle folder',
+        type: FileType.custom,
+        allowedExtensions: ['html', 'htm']);
+    final path = res?.files.single.path;
+    if (path == null) return;
+    final dir = File(path).parent.path;
     setState(() {
       _uploading360 = true;
       _bundleStatus = 'Uploading…';
@@ -446,7 +453,9 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
                         height: 16,
                         child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.threesixty, size: 18),
-                label: Text(has ? 'Replace 360 bundle' : 'Upload 360 bundle folder'),
+                label: Text(has
+                    ? 'Replace 360 bundle'
+                    : 'Pick the 360 bundle (index.html)'),
               ),
               if (_bundleStatus != null) ...[
                 const SizedBox(width: 12),
@@ -476,8 +485,8 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-                'Pick the folder that contains index.html, pano.xml and the '
-                'tiles — it uploads and the link fills in.',
+                'Navigate into the bundle folder (e.g. cotton-white) and pick '
+                'its index.html — the whole bundle uploads and the link fills in.',
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
           ),
       ],
