@@ -45,6 +45,12 @@ Don't infer a function's signature from its call site.
   `(stockist_id, lower(print_name), size)`. It owns the **name**, the **size** and the **image**.
   **A print has no thickness and no weight — you cannot hold it.** It becomes a product only once a
   surface, a body and a box are declared. A print may exist with **no product**.
+  - 🚫 **SAME NAME ≠ SAME DESIGN ACROSS STOCKISTS. NEVER match designs between stockists by name.**
+    `stockist_id` is IN the key and `print_name` is the **stockist's OWN word** — two stockists both typing
+    "Calcutta Gold" are two unrelated artworks (like two people named "Vipul"). So there is **no cross-stockist
+    design identity**: everything that hangs off a print (media/portfolio, DNA, faces) is **strictly
+    per-stockist**, never shared or inferred across stockists. A manufacturer→dealer flow, if ever built, must be
+    an **explicit product link**, never guessed from names.
   🔑 `print_upsert()` is the **only** way one is created; the image is **first-writer-wins**.
   - 🖼️ **FACES** — a design ships with 2/3/4 different prints, its **faces**. `print_master.image_url`
     is **Faces-1** (the card/primary image); the **extra faces (2, 3, 4 …)** live in `print_faces`
