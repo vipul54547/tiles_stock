@@ -28,14 +28,21 @@ class PortfolioViewScreen extends StatefulWidget {
   State<PortfolioViewScreen> createState() => _PortfolioViewScreenState();
 }
 
-const _order = ['mockup', 'aligning', 'closelook', '360', 'video'];
+const _order = ['mockup', 'aligning', 'closelook', 'faces', '360', 'video'];
 const _typeLabel = {
   'mockup': 'Mockup',
   'aligning': 'Aligning',
   'closelook': 'Close-look',
+  'faces': 'Faces',
   '360': '360',
   'video': 'Video',
 };
+// Types whose asset.url is a still image shown inline (vs a 360/video link-out).
+bool _isImageType(String type) =>
+    type == 'mockup' ||
+    type == 'aligning' ||
+    type == 'closelook' ||
+    type == 'faces';
 
 /// Open the full-screen media viewer for a set of assets (e.g. one design's
 /// media, from a stock card's "View" button). Orders them in canonical type
@@ -145,7 +152,7 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen> {
   Widget _tile(List<Map<String, dynamic>> assets, int i) {
     final a = assets[i];
     final type = a['type'] as String? ?? '';
-    final isImage = type == 'mockup' || type == 'aligning' || type == 'closelook';
+    final isImage = _isImageType(type);
     final url = a['url'] as String? ?? '';
     final rep = _rep(a);
     final space = a['space_label'] as String?;
@@ -314,8 +321,7 @@ class _MediaViewerState extends State<_MediaViewer> {
   Widget _page(Map<String, dynamic> a) {
     final type = a['type'] as String? ?? '';
     final url = a['url'] as String? ?? '';
-    final isImage =
-        type == 'mockup' || type == 'aligning' || type == 'closelook';
+    final isImage = _isImageType(type);
     if (isImage && url.isNotEmpty) {
       return InteractiveViewer(
         minScale: 1,

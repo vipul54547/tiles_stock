@@ -2712,6 +2712,23 @@ class SupabaseDataService {
     }
   }
 
+  /// Public (no login): a design→faces map for the `/s/` page, by the same share
+  /// token. Each row = {library_id, faces:[url,…]} — the artwork's extra face
+  /// images (faces-2/3/4). The buyer app folds a design's faces into its View
+  /// viewer alongside its media. (media portfolio #14)
+  Future<List<Map<String, dynamic>>> getPublicFaces(String token) async {
+    try {
+      final res =
+          await supabase.rpc('public_faces', params: {'p_token': token});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e, st) {
+      debugPrint('getPublicFaces failed ($token): $e\n$st');
+      return [];
+    }
+  }
+
   /// Public (no login): the Banner Video list for a stockist's `/s/` page,
   /// resolved by the same share token. The server applies the stockist's
   /// 4-step mode (off/admin/mixed/stockist) + the mixed 2:1 interleave, so the

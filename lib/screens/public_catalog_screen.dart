@@ -56,6 +56,9 @@ class _State extends State<PublicCatalogScreen> {
   // True when THIS link is a portfolio catalogue → cards render stock-blind
   // (no price/stock/quality/selection). (media portfolio #10)
   bool _portfolioCatalog = false;
+  // 🖼️ library_id → the artwork's extra face image urls (faces-2/3/4), folded
+  // into that design's View viewer. (media portfolio #14)
+  Map<String, List<String>> _facesByLib = {};
 
   // Selection: designId -> box quantity wanted.
   final Map<String, int> _selected = {};
@@ -101,10 +104,12 @@ class _State extends State<PublicCatalogScreen> {
       _svc.getPublicCatalog(widget.token),
       _svc.getPublicVideos(widget.token),
       _svc.getPublicPortfolio(widget.token),
+      _svc.getPublicFaces(widget.token),
     ]);
     final data = results[0] as Map<String, dynamic>?;
     final videos = results[1] as List<Map<String, dynamic>>;
     final portfolio = results[2] as Map<String, dynamic>;
+    final faces = results[3] as List<Map<String, dynamic>>;
     if (!mounted) return;
     if (data == null) {
       setState(() {
@@ -133,6 +138,13 @@ class _State extends State<PublicCatalogScreen> {
           .toList();
       final cat = data['catalog'];
       _portfolioCatalog = cat is Map && cat['kind'] == 'portfolio';
+      _facesByLib = {
+        for (final f in faces)
+          (f['library_id'] ?? '').toString():
+              ((f['faces'] as List?) ?? const [])
+                  .map((e) => e.toString())
+                  .toList(),
+      };
       _loading = false;
     });
   }
@@ -177,15 +189,33 @@ class _State extends State<PublicCatalogScreen> {
   Set<String> _dnaOf(Map<String, dynamic> d) =>
       ((d['dna'] as List?) ?? const []).map((e) => e.toString()).toSet();
 
-  // 🖼️ The portfolio media that shows on THIS design (matched by library_id
-  // against public_portfolio's visible-tile list). Empty → no View button.
+  // 🖼️ Everything viewable for THIS design: its portfolio media (matched by
+  // library_id against public_portfolio) PLUS the artwork's extra faces as
+  // synthetic 'faces' assets. Empty → no View button. (media portfolio #14)
   List<Map<String, dynamic>> _mediaForDesign(Map<String, dynamic> d) {
     final lib = (d['library_id'] ?? '').toString();
-    if (lib.isEmpty || _portfolio.isEmpty) return const [];
-    return _portfolio
+    if (lib.isEmpty) return const [];
+    final media = _portfolio
         .where((a) => ((a['designs'] as List?) ?? const [])
             .any((des) => (des as Map)['library_id']?.toString() == lib))
         .toList();
+    final faces = _facesByLib[lib] ?? const [];
+    final name = (d['name'] ?? '').toString();
+    return [
+      ...media,
+      for (var i = 0; i < faces.length; i++)
+        {
+          'type': 'faces',
+          'url': faces[i],
+          'sort_order': i,
+          'artworks': [
+            {'name': name}
+          ],
+          'designs': [
+            {'library_id': lib, 'name': name}
+          ],
+        },
+    ];
   }
 
   // This design's DNA tags as parent › child breadcrumb chains grouped by the
