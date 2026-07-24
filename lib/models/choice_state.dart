@@ -49,6 +49,12 @@ bool currentStockistBookOrders = false;
 bool currentStockistTrackBatches = false;
 bool currentStockistTrackLocations = false;
 
+/// 🖼️ The logged-in stockist has at least one media-portfolio type enabled
+/// (admin-set `media_*_enabled`). Loaded at login. Gates the Catalogue sidebar
+/// entry — hidden entirely for stockists the admin hasn't switched on.
+/// (project_media_portfolio_ddpi #12/#20)
+bool currentStockistHasMedia = false;
+
 // Logged-in end user
 String currentEndUserId = '';  // Supabase UUID
 // Admin-set: may this buyer add (claim) catalog links? Drives whether the

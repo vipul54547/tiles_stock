@@ -148,9 +148,11 @@ class _StockistShellState extends State<StockistShell> {
                 '/stockist/loading-lists'),
             _item(Icons.link, 'Stock Lists', '/stockist/lists'),
             // 🖼️ Media portfolio management (upload rooms/360/video, tag designs,
-            // build catalogues). Windows-first. (project_media_portfolio_ddpi #20)
-            _item(Icons.photo_library_outlined, 'Catalogue',
-                '/stockist/catalogue'),
+            // build catalogues). Windows-first, and only when the admin has
+            // enabled at least one media type. (project_media_portfolio_ddpi #12/#20)
+            if (currentStockistHasMedia)
+              _item(Icons.photo_library_outlined, 'Catalogue',
+                  '/stockist/catalogue'),
             // 👥 Opt-in (customers_enabled). It was missing from this sidebar
             // entirely — the only way in was the phone-layout account menu, so
             // on the desktop shell the directory was UNREACHABLE and a customer

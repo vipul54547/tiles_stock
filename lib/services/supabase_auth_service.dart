@@ -124,7 +124,8 @@ class SupabaseAuthService {
       final stockist = await supabase
           .from('stockists')
           .select(
-              'id, sequential_id, is_active, business_type, customers_enabled, book_orders_enabled, track_batches, track_locations')
+              'id, sequential_id, is_active, business_type, customers_enabled, book_orders_enabled, track_batches, track_locations, '
+              'media_mockup_enabled, media_aligning_enabled, media_closelook_enabled, media_360_enabled, media_video_enabled')
           .eq('user_id', userId)
           .single();
       await _ensureActive(stockist['is_active']);
@@ -140,6 +141,11 @@ class SupabaseAuthService {
           stockist['track_batches'] as bool? ?? false;
       currentStockistTrackLocations =
           stockist['track_locations'] as bool? ?? false;
+      currentStockistHasMedia = (stockist['media_mockup_enabled'] as bool? ?? false) ||
+          (stockist['media_aligning_enabled'] as bool? ?? false) ||
+          (stockist['media_closelook_enabled'] as bool? ?? false) ||
+          (stockist['media_360_enabled'] as bool? ?? false) ||
+          (stockist['media_video_enabled'] as bool? ?? false);
       _role = UserRole.stockist;
       return _role;
     }
@@ -311,6 +317,7 @@ class SupabaseAuthService {
     currentStockistBookOrders = false;
     currentStockistTrackBatches = false;
     currentStockistTrackLocations = false;
+    currentStockistHasMedia = false;
     currentEndUserId    = '';
     currentEndUserCanClaimPrivate = false;
     publicMarketLive = false;
