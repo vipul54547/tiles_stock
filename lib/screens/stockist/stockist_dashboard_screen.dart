@@ -665,7 +665,11 @@ class _State extends State<StockistDashboardScreen> {
       }
     }
     final both = prem != null && std != null;
-    return InkWell(
+    // Wrapped in a transparent Material so the InkWell has a Material ancestor
+    // (the enclosing stock card is a plain Container, not a Card).
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
       onTap: () {
         if (both) {
           _showQualityChooser(prem!, std!);
@@ -729,6 +733,7 @@ class _State extends State<StockistDashboardScreen> {
             ],
           ],
         ),
+      ),
       ),
     );
   }

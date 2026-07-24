@@ -225,6 +225,17 @@ class _ManageLookupsScreenState extends State<ManageLookupsScreen> {
                           _load();
                         },
                 ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _busy ? null : _addDialog,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: _navy, foregroundColor: Colors.white),
+                    icon: const Icon(Icons.add),
+                    label: Text('Add ${_list.noun}'),
+                  ),
+                ),
               ],
             ),
           ),

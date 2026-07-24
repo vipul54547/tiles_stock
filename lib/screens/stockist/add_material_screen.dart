@@ -45,6 +45,7 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
   final _url = TextEditingController(); // image secure_url OR video/360 link
   String? _space; // space value ('kitchen', …) or null
   final Set<String> _prints = {}; // tagged artwork ids
+  String _artworkSearch = ''; // filters the tagging list
 
   List<Map<String, dynamic>> _artworks = [];
   List<Map<String, dynamic>> _spaces = [];
@@ -419,18 +420,56 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
     if (_artworks.isEmpty) {
       return const Text('No designs yet.', style: TextStyle(color: Colors.grey));
     }
-    return Container(
-      constraints: const BoxConstraints(maxHeight: 260),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ListView.builder(
-        shrinkWrap: true,
-        itemCount: _artworks.length,
-        itemBuilder: (_, i) {
-          final a = _artworks[i];
-          final pid = a['print_id'] as String;
+    final q = _artworkSearch.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? _artworks
+        : _artworks
+            .where((a) =>
+                (a['name']?.toString().toLowerCase() ?? '').contains(q) ||
+                (a['size']?.toString().toLowerCase() ?? '').contains(q))
+            .toList();
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                decoration: InputDecoration(
+                  hintText: 'Search designs…',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                onChanged: (v) => setState(() => _artworkSearch = v),
+              ),
+            ),
+            if (_prints.isNotEmpty) ...[
+              const SizedBox(width: 10),
+              Text('${_prints.length} selected',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600, color: _navy)),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          constraints: const BoxConstraints(maxHeight: 260),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade300),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: filtered.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No matches.',
+                      style: TextStyle(color: Colors.grey)))
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: filtered.length,
+                  itemBuilder: (_, i) {
+                    final a = filtered[i];
+                    final pid = a['print_id'] as String;
           final on = _prints.contains(pid);
           return CheckboxListTile(
             dense: true,
@@ -453,8 +492,10 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
                 style: const TextStyle(fontSize: 11)),
             onChanged: (v) => _toggleArtwork(pid, v ?? false),
           );
-        },
-      ),
+                  },
+                ),
+        ),
+      ],
     );
   }
 
