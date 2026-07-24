@@ -265,40 +265,28 @@ class _MediaViewerState extends State<_MediaViewer> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Stack(
+        // Controls live in a BAR above the media — a web 360 is an iframe that
+        // swallows pointer events, so overlaid buttons over it aren't clickable.
+        child: Column(
           children: [
-            PageView.builder(
-              controller: _pc,
-              onPageChanged: (v) => setState(() => _i = v),
-              itemCount: widget.assets.length,
-              itemBuilder: (_, i) => _page(widget.assets[i]),
-            ),
-            // close
-            Positioned(
-              top: 8,
-              right: 8,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                onPressed: () => Navigator.pop(context),
+            _controlBar(),
+            Expanded(
+              child: Stack(
+                children: [
+                  PageView.builder(
+                    controller: _pc,
+                    onPageChanged: (v) => setState(() => _i = v),
+                    itemCount: widget.assets.length,
+                    itemBuilder: (_, i) => _page(widget.assets[i]),
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: IgnorePointer(child: _caption(widget.assets[_i])),
+                  ),
+                ],
               ),
-            ),
-            // prev / next
-            if (_i > 0)
-              _navArrow(Alignment.centerLeft, Icons.chevron_left,
-                  () => _pc.previousPage(
-                      duration: const Duration(milliseconds: 250),
-                      curve: Curves.easeOut)),
-            if (_i < widget.assets.length - 1)
-              _navArrow(Alignment.centerRight, Icons.chevron_right,
-                  () => _pc.nextPage(
-                      duration: const Duration(milliseconds: 250),
-                      curve: Curves.easeOut)),
-            // caption
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: _caption(widget.assets[_i]),
             ),
           ],
         ),
@@ -360,19 +348,37 @@ class _MediaViewerState extends State<_MediaViewer> {
     );
   }
 
-  Widget _navArrow(Alignment a, IconData icon, VoidCallback onTap) => Align(
-        alignment: a,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: CircleAvatar(
-            backgroundColor: Colors.black45,
-            child: IconButton(
-              icon: Icon(icon, color: Colors.white),
-              onPressed: onTap,
-            ),
+  Widget _controlBar() {
+    final multi = widget.assets.length > 1;
+    void go(int delta) => _pc.animateToPage(_i + delta,
+        duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+    return Container(
+      color: Colors.black,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white, size: 26),
+            tooltip: 'Close',
+            onPressed: () => Navigator.pop(context),
           ),
-        ),
-      );
+          const Spacer(),
+          if (multi) ...[
+            IconButton(
+              icon: const Icon(Icons.chevron_left, color: Colors.white),
+              onPressed: _i > 0 ? () => go(-1) : null,
+            ),
+            Text('${_i + 1} / ${widget.assets.length}',
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            IconButton(
+              icon: const Icon(Icons.chevron_right, color: Colors.white),
+              onPressed: _i < widget.assets.length - 1 ? () => go(1) : null,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _page(Map<String, dynamic> a) {
     final type = a['type'] as String? ?? '';
