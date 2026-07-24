@@ -79,12 +79,10 @@ class _CatalogueListEditorState extends State<CatalogueListEditor> {
         _surfaces = finishes.where((f) => f.toLowerCase() != 'none').toList();
         _surfLabels = labels;
         _spaces = spaces;
-        // Full DNA set (#13): value-list attributes + free-text ones that opt
-        // into facets (e.g. Series). Only groups that actually have values show.
-        _dna = dna
-            .where((a) => !a.isFreeText || a.showInFacets)
-            .where((a) => a.values.isNotEmpty)
-            .toList();
+        // Full DNA set (#13) — the catalogue filter is RICHER than other views:
+        // EVERY attribute the stockist uses, incl. free-text ones like Series
+        // (show_in_facets gates other surfaces, not this). Only non-empty groups.
+        _dna = dna.where((a) => a.values.isNotEmpty).toList();
         _loadingFacets = false;
       });
     } catch (_) {
