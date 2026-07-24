@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/brand.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/choice_state.dart';
+import '../../models/dna.dart';
 import '../../services/supabase_data_service.dart';
 
 /// 🖼️ Create / edit a PORTFOLIO catalogue (project_media_portfolio_ddpi
@@ -32,11 +33,13 @@ class _CatalogueListEditorState extends State<CatalogueListEditor> {
   final Set<String> _fSizes = {};
   final Set<String> _fTileTypes = {};
   final Set<String> _fSpaces = {};
+  final Set<String> _fDna = {}; // selected dna_value ids (full DNA set, #13)
 
   List<String> _surfaces = const [];
   Map<String, String> _surfLabels = const {}; // canonical → stockist word
   List<String> _sizes = const [];
   List<Map<String, dynamic>> _spaces = const []; // {value,label}
+  List<DnaAttribute> _dna = const []; // the full DNA facet set (incl. Series)
   static const _tileTypes = ['Ceramic', 'PGVT & GVT', 'Porcelain'];
   bool _loadingFacets = true;
 
@@ -57,6 +60,7 @@ class _CatalogueListEditorState extends State<CatalogueListEditor> {
       _fSizes.addAll(ex.filterSizes);
       _fTileTypes.addAll(ex.filterTileTypes);
       _fSpaces.addAll(ex.filterSpaces);
+      _fDna.addAll(ex.filterDna);
     }
     _loadFacets();
   }
@@ -68,12 +72,19 @@ class _CatalogueListEditorState extends State<CatalogueListEditor> {
       final finishes = await _data.getActiveFinishNames();
       final labels = await _data.getMySurfaceLabels();
       final spaces = await _data.lookupValues('space');
+      final dna = await _data.dnaCatalog();
       if (!mounted) return;
       setState(() {
         _sizes = sizes;
         _surfaces = finishes.where((f) => f.toLowerCase() != 'none').toList();
         _surfLabels = labels;
         _spaces = spaces;
+        // Full DNA set (#13): value-list attributes + free-text ones that opt
+        // into facets (e.g. Series). Only groups that actually have values show.
+        _dna = dna
+            .where((a) => !a.isFreeText || a.showInFacets)
+            .where((a) => a.values.isNotEmpty)
+            .toList();
         _loadingFacets = false;
       });
     } catch (_) {
@@ -109,6 +120,7 @@ class _CatalogueListEditorState extends State<CatalogueListEditor> {
         filterSizes: _fSizes.toList(),
         filterTileTypes: _fTileTypes.toList(),
         filterSpaces: _fSpaces.toList(),
+        filterDna: _fDna.toList(),
       );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -208,6 +220,14 @@ class _CatalogueListEditorState extends State<CatalogueListEditor> {
                   for (final s in _spaces)
                     s['value'] as String: s['label'] as String
                 }),
+            // Full DNA set (#13): Look Type · Design Joint · Print Type · Colour ·
+            // Punch · Application · Use Type · Behaviour · Series …
+            for (final attr in _dna)
+              _facetGroup(
+                  attr.name,
+                  [for (final v in attr.values) v.id],
+                  _fDna,
+                  labels: {for (final v in attr.values) v.id: v.name}),
           ],
           const SizedBox(height: 28),
           SizedBox(
