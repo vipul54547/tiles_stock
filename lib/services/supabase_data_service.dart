@@ -2917,6 +2917,13 @@ class SupabaseDataService {
         bookOrdersEnabled: s['book_orders_enabled'] ?? false,
         trackBatches: s['track_batches'] ?? false,
         trackLocations: s['track_locations'] ?? false,
+        mediaMockupEnabled: s['media_mockup_enabled'] ?? false,
+        mediaAligningEnabled: s['media_aligning_enabled'] ?? false,
+        mediaCloselookEnabled: s['media_closelook_enabled'] ?? false,
+        media360Enabled: s['media_360_enabled'] ?? false,
+        mediaVideoEnabled: s['media_video_enabled'] ?? false,
+        media360Quota: s['media_360_quota'] ?? 0,
+        mediaVideoQuota: s['media_video_quota'] ?? 0,
         createdAt: DateTime.tryParse(s['created_at']?.toString() ?? '') ??
             DateTime.now(),
       );
@@ -3367,6 +3374,100 @@ class SupabaseDataService {
     try {
       await supabase.rpc('admin_set_stockist_track_locations',
           params: {'p_seq': sequentialId, 'p_enabled': enabled});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  // ─── 🖼️ Media portfolio: admin gating + generic lookups ─────────────────
+  // (project_media_portfolio_ddpi #12 gating, #18 Managed-lists)
+
+  /// Admin: turn one media type on/off for a stockist. [type] is one of
+  /// mockup · aligning · closelook · 360 · video.
+  Future<void> setStockistMedia(
+      String sequentialId, String type, bool enabled) async {
+    try {
+      await supabase.rpc('admin_set_stockist_media',
+          params: {'p_seq': sequentialId, 'p_type': type, 'p_enabled': enabled});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Admin: set the COUNT quota for a heavy media type (360 or video only).
+  Future<void> setStockistMediaQuota(
+      String sequentialId, String type, int quota) async {
+    try {
+      await supabase.rpc('admin_set_stockist_media_quota',
+          params: {'p_seq': sequentialId, 'p_type': type, 'p_quota': quota});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Admin: every value (active + hidden) of a managed lookup list, ordered.
+  /// Each row = {id, value, label, sort_order, active}. [listKey] e.g. 'space'
+  /// or 'placement'. Backs the Managed-lists editor.
+  Future<List<Map<String, dynamic>>> adminLookupsList(String listKey) async {
+    try {
+      final res =
+          await supabase.rpc('admin_lookups_list', params: {'p_list_key': listKey});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Admin: add a value to a managed list (the machine slug is derived from the
+  /// label). Returns the new row id.
+  Future<String> adminLookupAdd(String listKey, String label) async {
+    try {
+      final res = await supabase.rpc('admin_lookup_add',
+          params: {'p_list_key': listKey, 'p_label': label});
+      return res?.toString() ?? '';
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> adminLookupRename(String id, String label) async {
+    try {
+      await supabase
+          .rpc('admin_lookup_rename', params: {'p_id': id, 'p_label': label});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> adminLookupSetActive(String id, bool active) async {
+    try {
+      await supabase.rpc('admin_lookup_set_active',
+          params: {'p_id': id, 'p_active': active});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> adminLookupSetSort(String id, int sort) async {
+    try {
+      await supabase
+          .rpc('admin_lookup_set_sort', params: {'p_id': id, 'p_sort': sort});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Active values of a managed list, for pickers (Space / placement). Each row =
+  /// {value, label}. Anon-readable — usable on the buyer side too.
+  Future<List<Map<String, dynamic>>> lookupValues(String listKey) async {
+    try {
+      final res =
+          await supabase.rpc('lookup_values', params: {'p_list_key': listKey});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
     } catch (e) {
       throw serverMessage(e);
     }

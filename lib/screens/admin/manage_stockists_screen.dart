@@ -462,6 +462,15 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
   bool _bookOrders = false; // 📕 books production orders (opt-in)
   bool _trackBatches = false; // 🧱 tracks batch (=shade) on stock (opt-in, independent)
   bool _trackLocations = false; // 🧱 tracks godown location on stock (opt-in, independent)
+  // 🖼️ Media portfolio gating — 5 per-type flags + a count quota on the two heavy
+  // types (360, video). (project_media_portfolio_ddpi #12)
+  bool _mediaMockup = false;
+  bool _mediaAligning = false;
+  bool _mediaCloselook = false;
+  bool _media360 = false;
+  bool _mediaVideo = false;
+  final _media360Quota = TextEditingController(text: '0');
+  final _mediaVideoQuota = TextEditingController(text: '0');
   final _deviceLimit = TextEditingController(text: '1'); // concurrent devices
   int _deviceCount = 0; // devices currently registered for this user
   // Per-stockist cap on brand-free stock lists (v2 — lists are no longer under a
@@ -508,6 +517,13 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
       _bookOrders = s.bookOrdersEnabled;
       _trackBatches = s.trackBatches;
       _trackLocations = s.trackLocations;
+      _mediaMockup = s.mediaMockupEnabled;
+      _mediaAligning = s.mediaAligningEnabled;
+      _mediaCloselook = s.mediaCloselookEnabled;
+      _media360 = s.media360Enabled;
+      _mediaVideo = s.mediaVideoEnabled;
+      _media360Quota.text = '${s.media360Quota}';
+      _mediaVideoQuota.text = '${s.mediaVideoQuota}';
       _deviceLimit.text = '${s.deviceLimit}';
       _stockLists.text = '${s.stockListLimit}';
       _brandColor = s.brandColor;
@@ -526,6 +542,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     for (final c in [
       _name, _email, _password, _phone, _code, _city, _state, _address,
       _priority, _gst, _deviceLimit, _stockLists,
+      _media360Quota, _mediaVideoQuota,
       _mapUrl
     ]) {
       c.dispose();
@@ -672,6 +689,76 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
     );
   }
 
+  // 🖼️ Media portfolio gating — 5 per-type flags. The two heavy types (360,
+  // video) reveal a COUNT quota field when enabled (0 = none allowed).
+  // (project_media_portfolio_ddpi #12)
+  Widget _mediaSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        const Text('Media Portfolio',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        const SizedBox(height: 2),
+        Text(
+            'Which rich-media types this stockist may add to their catalogue. '
+            'Images (mockup/aligning/close-look) are cheap; 360 and video are '
+            'heavy, so they also carry a count cap.',
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        const SizedBox(height: 4),
+        _mediaToggle('Mockup (room shots)', _mediaMockup,
+            (v) => setState(() => _mediaMockup = v)),
+        _mediaToggle('Aligning (layout shots)', _mediaAligning,
+            (v) => setState(() => _mediaAligning = v)),
+        _mediaToggle('Close-look (finish detail)', _mediaCloselook,
+            (v) => setState(() => _mediaCloselook = v)),
+        _mediaToggle('360 walk-in', _media360,
+            (v) => setState(() => _media360 = v),
+            quota: _media360Quota),
+        _mediaToggle('Video', _mediaVideo,
+            (v) => setState(() => _mediaVideo = v),
+            quota: _mediaVideoQuota),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _mediaToggle(String label, bool value, ValueChanged<bool> onChanged,
+      {TextEditingController? quota}) {
+    return Row(
+      children: [
+        Expanded(
+          child: SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            value: value,
+            activeThumbColor: const Color(0xFF2E7D32),
+            title: Text(label, style: const TextStyle(fontSize: 14)),
+            onChanged: onChanged,
+          ),
+        ),
+        // Quota field for the heavy types — only meaningful when enabled.
+        if (quota != null && value)
+          SizedBox(
+            width: 70,
+            child: TextFormField(
+              controller: quota,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                  labelText: 'Cap', isDense: true, border: OutlineInputBorder()),
+              validator: (v) {
+                final t = (v ?? '').trim();
+                if (t.isEmpty) return null;
+                final n = int.tryParse(t);
+                if (n == null || n < 0) return '!';
+                return null;
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _brandingSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -789,6 +876,16 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
         await _dataSvc.setStockistBookOrders(widget.existing!.id, _bookOrders);
         await _dataSvc.setStockistTrackBatches(widget.existing!.id, _trackBatches);
         await _dataSvc.setStockistTrackLocations(widget.existing!.id, _trackLocations);
+        final seq = widget.existing!.id;
+        await _dataSvc.setStockistMedia(seq, 'mockup', _mediaMockup);
+        await _dataSvc.setStockistMedia(seq, 'aligning', _mediaAligning);
+        await _dataSvc.setStockistMedia(seq, 'closelook', _mediaCloselook);
+        await _dataSvc.setStockistMedia(seq, '360', _media360);
+        await _dataSvc.setStockistMedia(seq, 'video', _mediaVideo);
+        await _dataSvc.setStockistMediaQuota(
+            seq, '360', int.tryParse(_media360Quota.text.trim()) ?? 0);
+        await _dataSvc.setStockistMediaQuota(
+            seq, 'video', int.tryParse(_mediaVideoQuota.text.trim()) ?? 0);
         msg = 'Stockist updated.';
       } else {
         final seqId = await _dataSvc.addStockist(
@@ -1076,6 +1173,7 @@ class _AddStockistSheetState extends State<_AddStockistSheet> {
                     onChanged: (v) => setState(() => _trackLocations = v),
                   ),
                 ),
+              if (_isEdit) _mediaSection(),
               if (_isEdit) _brandingSection(),
               if (_isEdit) _deviceSection(),
               if (_isEdit) _brandSection(),

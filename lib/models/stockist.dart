@@ -104,6 +104,17 @@ class Stockist {
   final bool trackBatches;
   final bool trackLocations;
 
+  /// 🖼️ Admin per-type gating for the media portfolio (project_media_portfolio_ddpi #12).
+  /// Five independent on/off flags — nothing shows until the admin enables the type.
+  /// The two HEAVY types (360, video) additionally carry a COUNT quota (0 = none allowed).
+  final bool mediaMockupEnabled;
+  final bool mediaAligningEnabled;
+  final bool mediaCloselookEnabled;
+  final bool media360Enabled;
+  final bool mediaVideoEnabled;
+  final int media360Quota;
+  final int mediaVideoQuota;
+
   final DateTime createdAt;
 
 
@@ -169,6 +180,14 @@ class Stockist {
     this.bookOrdersEnabled = false,
     this.trackBatches = false,
     this.trackLocations = false,
+
+    this.mediaMockupEnabled = false,
+    this.mediaAligningEnabled = false,
+    this.mediaCloselookEnabled = false,
+    this.media360Enabled = false,
+    this.mediaVideoEnabled = false,
+    this.media360Quota = 0,
+    this.mediaVideoQuota = 0,
 
     required this.createdAt,
 
@@ -239,6 +258,14 @@ class Stockist {
     bookOrdersEnabled: json['book_orders_enabled'] ?? false,
     trackBatches: json['track_batches'] ?? false,
     trackLocations: json['track_locations'] ?? false,
+
+    mediaMockupEnabled: json['media_mockup_enabled'] ?? false,
+    mediaAligningEnabled: json['media_aligning_enabled'] ?? false,
+    mediaCloselookEnabled: json['media_closelook_enabled'] ?? false,
+    media360Enabled: json['media_360_enabled'] ?? false,
+    mediaVideoEnabled: json['media_video_enabled'] ?? false,
+    media360Quota: json['media_360_quota'] ?? 0,
+    mediaVideoQuota: json['media_video_quota'] ?? 0,
 
     createdAt: DateTime.parse(json['created_at']),
 
