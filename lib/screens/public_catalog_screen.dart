@@ -20,6 +20,7 @@ import '../widgets/video_lightbox.dart';
 import '../widgets/filter_section.dart';
 import '../widgets/dna_tag_expander.dart';
 import '../widgets/tile_card.dart' show TileImage;
+import 'portfolio_view_screen.dart';
 
 /// Public, login-free catalog opened via a stockist's private share link
 /// (`/s/<token>`). Shows that stockist's in-stock designs with search, filters,
@@ -49,6 +50,9 @@ class _State extends State<PublicCatalogScreen> {
   // mode + mixed interleave). Empty = no video → banner is unchanged.
   List<Map<String, dynamic>> _videos = [];
   List<Map<String, dynamic>> _all = [];
+  // 🖼️ Stock-blind media portfolio (public_portfolio). Empty = no media → the
+  // Portfolio entry is hidden. (project_media_portfolio_ddpi #14)
+  List<Map<String, dynamic>> _portfolio = [];
 
   // Selection: designId -> box quantity wanted.
   final Map<String, int> _selected = {};
@@ -93,9 +97,11 @@ class _State extends State<PublicCatalogScreen> {
     final results = await Future.wait([
       _svc.getPublicCatalog(widget.token),
       _svc.getPublicVideos(widget.token),
+      _svc.getPublicPortfolio(widget.token),
     ]);
     final data = results[0] as Map<String, dynamic>?;
     final videos = results[1] as List<Map<String, dynamic>>;
+    final portfolio = results[2] as Map<String, dynamic>;
     if (!mounted) return;
     if (data == null) {
       setState(() {
@@ -117,6 +123,9 @@ class _State extends State<PublicCatalogScreen> {
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
       _dnaFacets = ((data['dna_facets'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      _portfolio = ((portfolio['assets'] as List?) ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
       _loading = false;
@@ -1223,6 +1232,34 @@ class _State extends State<PublicCatalogScreen> {
               style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ),
+          // 🖼️ Portfolio — rooms/360/video the stockist has uploaded. Stock-blind,
+          // opens its own browser. Hidden when there's no media.
+          if (_portfolio.isNotEmpty) ...[
+            GestureDetector(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => PortfolioViewScreen(
+                        assets: _portfolio,
+                        brandColor: _brand,
+                        title: (_brandInfo['name'] ??
+                                _stockist['name'] ??
+                                'Portfolio')
+                            .toString(),
+                      ))),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.photo_library_outlined, size: 15, color: _brand),
+                  const SizedBox(width: 3),
+                  Text('Portfolio (${_portfolio.length})',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _brand)),
+                ],
+              ),
+            ),
+            if (mapUrl.isNotEmpty) const SizedBox(width: 14),
+          ],
           if (mapUrl.isNotEmpty)
             GestureDetector(
               onTap: () => launchUrl(Uri.parse(mapUrl),
