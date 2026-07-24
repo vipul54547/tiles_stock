@@ -37,14 +37,44 @@ const _typeLabel = {
   'video': 'Video',
 };
 
+/// Open the full-screen media viewer for a set of assets (e.g. one design's
+/// media, from a stock card's "View" button). Orders them in canonical type
+/// order so ‹ Prev / Next › walks mockup → aligning → close-look → 360 → video.
+void openPortfolioViewer(BuildContext context,
+    {required List<Map<String, dynamic>> assets, required Color brandColor}) {
+  if (assets.isEmpty) return;
+  final ordered = [...assets]..sort((a, b) {
+      final ta = _order.indexOf(a['type'] as String? ?? '');
+      final tb = _order.indexOf(b['type'] as String? ?? '');
+      if (ta != tb) return ta.compareTo(tb);
+      return ((a['sort_order'] as num?) ?? 0)
+          .compareTo((b['sort_order'] as num?) ?? 0);
+    });
+  Navigator.of(context).push(MaterialPageRoute(
+    fullscreenDialog: true,
+    builder: (_) =>
+        _MediaViewer(assets: ordered, start: 0, brandColor: brandColor),
+  ));
+}
+
 class _PortfolioViewScreenState extends State<PortfolioViewScreen> {
   late final List<String> _types; // present types, in canonical order
+  // The WHOLE playlist in canonical type order — the viewer's ‹ Prev / Next ›
+  // walks this across types (DDPI #14), not just the tapped tab.
+  late final List<Map<String, dynamic>> _ordered;
 
   @override
   void initState() {
     super.initState();
     final present = widget.assets.map((a) => a['type'] as String? ?? '').toSet();
     _types = _order.where(present.contains).toList();
+    _ordered = [...widget.assets]..sort((a, b) {
+        final ta = _order.indexOf(a['type'] as String? ?? '');
+        final tb = _order.indexOf(b['type'] as String? ?? '');
+        if (ta != tb) return ta.compareTo(tb);
+        return ((a['sort_order'] as num?) ?? 0)
+            .compareTo((b['sort_order'] as num?) ?? 0);
+      });
   }
 
   List<Map<String, dynamic>> _of(String type) =>
@@ -121,7 +151,12 @@ class _PortfolioViewScreenState extends State<PortfolioViewScreen> {
     final space = a['space_label'] as String?;
 
     return InkWell(
-      onTap: () => _openViewer(assets, i),
+      // Open the viewer on the WHOLE playlist, positioned at this asset, so
+      // Prev/Next walks every type in order.
+      onTap: () {
+        final gi = _ordered.indexWhere((x) => x['id'] == a['id']);
+        _openViewer(_ordered, gi < 0 ? 0 : gi);
+      },
       borderRadius: BorderRadius.circular(10),
       child: Container(
         decoration: BoxDecoration(

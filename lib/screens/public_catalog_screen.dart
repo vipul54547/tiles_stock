@@ -172,6 +172,17 @@ class _State extends State<PublicCatalogScreen> {
   Set<String> _dnaOf(Map<String, dynamic> d) =>
       ((d['dna'] as List?) ?? const []).map((e) => e.toString()).toSet();
 
+  // 🖼️ The portfolio media that shows on THIS design (matched by library_id
+  // against public_portfolio's visible-tile list). Empty → no View button.
+  List<Map<String, dynamic>> _mediaForDesign(Map<String, dynamic> d) {
+    final lib = (d['library_id'] ?? '').toString();
+    if (lib.isEmpty || _portfolio.isEmpty) return const [];
+    return _portfolio
+        .where((a) => ((a['designs'] as List?) ?? const [])
+            .any((des) => (des as Map)['library_id']?.toString() == lib))
+        .toList();
+  }
+
   // This design's DNA tags as parent › child breadcrumb chains grouped by the
   // root attribute, for the card's ▾ section. (project_dna_cascade_mapping)
   Map<String, List<String>> _dnaTagsFor(Map<String, dynamic> d) =>
@@ -1611,6 +1622,8 @@ class _State extends State<PublicCatalogScreen> {
         hasBoth ? _showQualityChoicePublic(d) : _toggle(id);
     final images = (d['images'] as List?) ?? const [];
     final img = images.isNotEmpty ? images.first.toString() : '';
+    // 🖼️ Rooms/360/video that show on this design → a "View" button (media #14).
+    final media = _mediaForDesign(d);
     // Show the stockist's own surface word, with the admin canonical in brackets
     // — "Raindrop (Sugar)" — collapsing to one word when they match (_surfaceCard).
     // Matches the detail row and the surface_label model, instead of the bare
@@ -1700,6 +1713,38 @@ class _State extends State<PublicCatalogScreen> {
                         color: Colors.white),
                   ),
                 ),
+                // 🖼️ "View" — shown only when this design has media. Opens the
+                // media viewer on just this design's rooms/360/video.
+                if (media.isNotEmpty)
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    child: GestureDetector(
+                      onTap: () => openPortfolioViewer(context,
+                          assets: media, brandColor: _brand),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.62),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.photo_library_outlined,
+                                size: 13, color: Colors.white),
+                            SizedBox(width: 4),
+                            Text('View',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
             Padding(
