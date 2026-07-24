@@ -312,18 +312,20 @@ class _MediaViewerState extends State<_MediaViewer> {
       child: GridView.builder(
         physics: const BouncingScrollPhysics(),
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 300,
+          maxCrossAxisExtent: 320,
           crossAxisSpacing: 8,
           mainAxisSpacing: 8,
-          childAspectRatio: 0.82,
+          // Portrait-leaning cells; BoxFit.contain shows the WHOLE tile (no
+          // crop), so any shape fits inside its cell.
+          childAspectRatio: 0.62,
         ),
         itemCount: urls.length,
         itemBuilder: (_, i) => GestureDetector(
           onTap: () => _zoom(urls[i]),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: Image.network(CloudinaryService.thumbUrl(urls[i], width: 600),
-                fit: BoxFit.cover),
+            child: Image.network(CloudinaryService.thumbUrl(urls[i], width: 700),
+                fit: BoxFit.contain),
           ),
         ),
       ),
