@@ -199,15 +199,22 @@ class _State extends State<PublicCatalogScreen> {
         .where((a) => ((a['designs'] as List?) ?? const [])
             .any((des) => (des as Map)['library_id']?.toString() == lib))
         .toList();
-    final faces = _facesByLib[lib] ?? const [];
+    final extras = _facesByLib[lib] ?? const [];
     final name = (d['name'] ?? '').toString();
+    // Faces are a COMPARISON GRID, not a carousel — one 'faces' asset carrying
+    // ALL images together: the MAIN design (Faces-1 = the card image) first,
+    // then the extra faces. Only when there are extras (a lone main isn't a
+    // comparison). (media portfolio #14)
+    final images = (d['images'] as List?) ?? const [];
+    final main = images.isNotEmpty ? images.first.toString() : '';
     return [
       ...media,
-      for (var i = 0; i < faces.length; i++)
+      if (extras.isNotEmpty)
         {
           'type': 'faces',
-          'url': faces[i],
-          'sort_order': i,
+          'url': main.isNotEmpty ? main : extras.first, // representative
+          'face_urls': [if (main.isNotEmpty) main, ...extras],
+          'sort_order': 0,
           'artworks': [
             {'name': name}
           ],

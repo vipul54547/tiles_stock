@@ -304,6 +304,58 @@ class _MediaViewerState extends State<_MediaViewer> {
     );
   }
 
+  // All faces side by side for comparison. Leaves room at the bottom for the
+  // caption; tap a face to zoom it to full/original resolution.
+  Widget _facesGrid(List<String> urls) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 96),
+      child: GridView.builder(
+        physics: const BouncingScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 300,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
+          childAspectRatio: 0.82,
+        ),
+        itemCount: urls.length,
+        itemBuilder: (_, i) => GestureDetector(
+          onTap: () => _zoom(urls[i]),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: Image.network(CloudinaryService.thumbUrl(urls[i], width: 600),
+                fit: BoxFit.cover),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Full/original-resolution zoom of one face (pinch/scroll). Original is the
+  // stored Cloudinary upload — untouched, reused later for auto room-mockups.
+  void _zoom(String url) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black,
+      builder: (ctx) => GestureDetector(
+        onTap: () => Navigator.pop(ctx),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              minScale: 1,
+              maxScale: 5,
+              child: Center(child: Image.network(url, fit: BoxFit.contain)),
+            ),
+            Positioned(
+              top: 24,
+              right: 16,
+              child: Icon(Icons.close, color: Colors.white.withValues(alpha: 0.85)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _navArrow(Alignment a, IconData icon, VoidCallback onTap) => Align(
         alignment: a,
         child: Padding(
@@ -321,6 +373,14 @@ class _MediaViewerState extends State<_MediaViewer> {
   Widget _page(Map<String, dynamic> a) {
     final type = a['type'] as String? ?? '';
     final url = a['url'] as String? ?? '';
+    // Faces are a COMPARISON GRID — the main design + extras, all together, no
+    // carousel. Tap any face to zoom it full / original. (media portfolio #14)
+    if (type == 'faces') {
+      final urls = ((a['face_urls'] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList();
+      return _facesGrid(urls);
+    }
     final isImage = _isImageType(type);
     if (isImage && url.isNotEmpty) {
       return InteractiveViewer(
