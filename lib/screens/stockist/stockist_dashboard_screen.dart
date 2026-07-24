@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../utils/platform_kind.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../models/tile_design.dart';
 import '../../models/stock_catalog.dart';
@@ -1652,12 +1653,21 @@ class _State extends State<StockistDashboardScreen> {
             // unread badge with it. (project_dashboard_ia)
             _tabPill('My Stock', Icons.inventory_2_outlined, true, () {}),
             const SizedBox(width: 6),
+            // Catalogue MANAGEMENT is a desktop task (upload, matrix, checklists),
+            // so it's Windows-first — Android shows "Soon". (media portfolio #20)
             _tabPill('Catalogue', Icons.collections_bookmark_outlined, false,
-                () => ScaffoldMessenger.of(context)
-                  ..hideCurrentSnackBar()
-                  ..showSnackBar(const SnackBar(
-                      content: Text('Catalogue is coming soon.'))),
-                soon: true),
+                () {
+                  if (isWindowsDesktop) {
+                    context.push('/stockist/catalogue');
+                  } else {
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(const SnackBar(
+                          content: Text('Catalogue management is on the '
+                              'Windows app for now — coming to Android soon.')));
+                  }
+                },
+                soon: !isWindowsDesktop),
             Container(
                 width: 1,
                 height: 22,

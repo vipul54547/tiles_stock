@@ -3527,6 +3527,128 @@ class SupabaseDataService {
     }
   }
 
+  // ─── 🖼️ Media portfolio: stockist authoring (Catalogue page) ─────────────
+  // (project_media_portfolio_ddpi #3/#14/#22)
+
+  /// The calling stockist's media config: which types are enabled + the 360/video
+  /// quota and how many are used. `{mockup,aligning,closelook,video_360...,used}`
+  /// (server shape). Drives which Add-Material type buttons are offered.
+  Future<Map<String, dynamic>> myMediaConfig() async {
+    try {
+      final res = await supabase.rpc('my_media_config');
+      return Map<String, dynamic>.from(res as Map);
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// The stockist's materials (optionally one [type]), each with tagged artworks
+  /// + tile overrides. Backs the Catalogue page material list.
+  Future<List<Map<String, dynamic>>> myMedia({String? type}) async {
+    try {
+      final res = await supabase.rpc('my_media',
+          params: type == null ? {} : {'p_type': type});
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Overview matrix — one row per artwork × media-type counts (spot gaps).
+  Future<List<Map<String, dynamic>>> myPortfolioMatrix() async {
+    try {
+      final res = await supabase.rpc('my_portfolio_matrix');
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// The hand-pick visibility grid: every tile of the given artworks (or, for an
+  /// existing [assetId], its saved tags), with effective shown/placement. Rows:
+  /// {library_id, print_id, name, size, image_url, surface_type, surface_label,
+  ///  tile_type, finish, body_colour, body_hex, shown, placement, placement_label}.
+  Future<List<Map<String, dynamic>>> myMediaGrid(
+      {List<String> printIds = const [], String? assetId}) async {
+    try {
+      final res = await supabase.rpc('my_media_grid', params: {
+        'p_print_ids': printIds,
+        'p_asset': assetId,
+      });
+      return ((res as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Create a material. [type] ∈ mockup·aligning·closelook·360·video. [printIds]
+  /// tags the artworks in the shot; [tiles] = optional visibility overrides
+  /// ([{library_id, shown, placement}]). Enforces the enable-flag + 360/video
+  /// quota server-side. Returns the new asset id.
+  Future<String> mediaAdd({
+    required String type,
+    required String url,
+    String? space,
+    List<String> printIds = const [],
+    List<Map<String, dynamic>> tiles = const [],
+  }) async {
+    try {
+      final res = await supabase.rpc('media_add', params: {
+        'p_type': type,
+        'p_url': url,
+        'p_space': space,
+        'p_print_ids': printIds,
+        'p_tiles': tiles,
+      });
+      return (res ?? '').toString();
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> mediaUpdate(String assetId, String url, String? space) async {
+    try {
+      await supabase.rpc('media_update',
+          params: {'p_asset': assetId, 'p_url': url, 'p_space': space});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> mediaSetArtworks(String assetId, List<String> printIds) async {
+    try {
+      await supabase.rpc('media_set_artworks',
+          params: {'p_asset': assetId, 'p_print_ids': printIds});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  /// Replace the asset's tile overrides. [tiles] = [{library_id, shown, placement}].
+  Future<void> mediaSetTiles(
+      String assetId, List<Map<String, dynamic>> tiles) async {
+    try {
+      await supabase.rpc('media_set_tiles',
+          params: {'p_asset': assetId, 'p_tiles': tiles});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
+  Future<void> mediaDelete(String assetId) async {
+    try {
+      await supabase.rpc('media_delete', params: {'p_asset': assetId});
+    } catch (e) {
+      throw serverMessage(e);
+    }
+  }
+
   /// 🏭 What the line has to make: every OPEN booked line, rolled up per BOX and joined to its
   /// tile, artwork and DNA. Returns `{as_of, rows[]}`.
   ///

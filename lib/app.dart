@@ -48,6 +48,7 @@ import 'screens/admin/manage_banners_screen.dart';
 import 'screens/admin/manage_banner_videos_screen.dart';
 import 'screens/admin/manage_stockists_screen.dart';
 import 'screens/admin/manage_lookups_screen.dart';
+import 'screens/stockist/catalogue_screen.dart';
 import 'screens/admin/manage_end_users_screen.dart';
 import 'screens/admin/manage_admins_screen.dart';
 import 'screens/admin/manage_registration_requests_screen.dart';
@@ -275,6 +276,10 @@ final GoRouter _router = GoRouter(
         GoRoute(
           path: '/stockist/loading-lists',
           builder: (_, __) => const LoadingListScreen(),
+        ),
+        GoRoute(
+          path: '/stockist/catalogue',
+          builder: (_, __) => const CatalogueScreen(),
         ),
         GoRoute(
           path: '/stockist/loading-lists/edit',
