@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/cloudinary_service.dart';
+import '../widgets/pano_embed.dart';
 
 /// 🖼️ Buyer-facing PORTFOLIO browser, opened from the login-free `/s/` page
 /// (project_media_portfolio_ddpi #14). Stock-blind — design identity + media
@@ -394,7 +396,10 @@ class _MediaViewerState extends State<_MediaViewer> {
         ),
       );
     }
-    // 360 / video → open the link (Pano2VR embedding is P2).
+    // 360 embeds INLINE on the web (iframe srcdoc); video and the app link out.
+    if (type == '360' && kIsWeb && url.isNotEmpty) {
+      return panoEmbed(url);
+    }
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
