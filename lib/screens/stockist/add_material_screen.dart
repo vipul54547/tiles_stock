@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import '../../models/choice_state.dart';
+import '../../utils/platform_kind.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/pano_upload.dart';
 import '../../services/supabase_data_service.dart';
 
 /// 🖼️ Add / edit a portfolio MATERIAL (project_media_portfolio_ddpi #3/#14).
@@ -56,6 +60,8 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
   bool _loading = true;
   bool _uploading = false;
   bool _saving = false;
+  bool _uploading360 = false; // a 360 bundle is uploading
+  String? _bundleStatus; // progress / done text for the 360 upload
   bool _gridLoading = false;
   String? _error;
 
@@ -323,17 +329,19 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
         const SizedBox(height: 16),
 
         // media
-        _label(_isImageType ? 'Image' : 'Link'),
+        _label(_isImageType
+            ? 'Image'
+            : (_type == '360' ? '360 walk-in' : 'Link')),
         if (_isImageType)
           _imageInput()
+        else if (_type == '360')
+          _bundle360Input()
         else
           TextField(
             controller: _url,
-            decoration: InputDecoration(
-              hintText: _type == '360'
-                  ? 'Pano2VR bundle URL (index.html)'
-                  : 'YouTube / video URL',
-              border: const OutlineInputBorder(),
+            decoration: const InputDecoration(
+              hintText: 'YouTube / video URL',
+              border: OutlineInputBorder(),
               isDense: true,
             ),
           ),
@@ -383,6 +391,96 @@ class _AddMaterialScreenState extends State<AddMaterialScreen> {
       padding: const EdgeInsets.only(top: 6),
       child: Text('Used ${u ?? 0} of ${q ?? 0}.',
           style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+    );
+  }
+
+  // 🌐 360 = a Pano2VR bundle FOLDER, hosted in Supabase Storage. On Windows the
+  // stockist picks the folder and it uploads; anywhere, a hosted index.html URL
+  // can be pasted. (media portfolio P2)
+  Future<void> _pick360Bundle() async {
+    final dir = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Pick the Pano2VR bundle folder (with index.html)');
+    if (dir == null) return;
+    setState(() {
+      _uploading360 = true;
+      _bundleStatus = 'Uploading…';
+    });
+    try {
+      final prefix =
+          '$currentStockistUUID/${DateTime.now().millisecondsSinceEpoch}';
+      final url = await PanoUpload.uploadBundle(dir, prefix: prefix,
+          onProgress: (done, total) {
+        if (mounted) {
+          setState(() => _bundleStatus = 'Uploading $done / $total…');
+        }
+      });
+      if (!mounted) return;
+      setState(() {
+        _uploading360 = false;
+        _bundleStatus = 'Uploaded ✓';
+        _url.text = url;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _uploading360 = false;
+        _bundleStatus = null;
+      });
+      _snack(e.toString(), error: true);
+    }
+  }
+
+  Widget _bundle360Input() {
+    final has = _url.text.trim().isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (isWindowsDesktop)
+          Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _uploading360 ? null : _pick360Bundle,
+                icon: _uploading360
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.threesixty, size: 18),
+                label: Text(has ? 'Replace 360 bundle' : 'Upload 360 bundle folder'),
+              ),
+              if (_bundleStatus != null) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(_bundleStatus!,
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: _bundleStatus == 'Uploaded ✓'
+                              ? const Color(0xFF2E7D32)
+                              : Colors.grey.shade600)),
+                ),
+              ],
+            ],
+          ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _url,
+          decoration: InputDecoration(
+            hintText: isWindowsDesktop
+                ? 'Hosted index.html URL (filled after upload)'
+                : 'Paste a hosted Pano2VR index.html URL',
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        if (isWindowsDesktop && !has)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+                'Pick the folder that contains index.html, pano.xml and the '
+                'tiles — it uploads and the link fills in.',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+          ),
+      ],
     );
   }
 
