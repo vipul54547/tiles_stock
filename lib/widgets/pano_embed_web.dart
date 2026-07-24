@@ -1,6 +1,7 @@
 // dart:html is the pragmatic way to embed an <iframe srcdoc> on Flutter web;
 // this file is web-only via the conditional export in pano_embed.dart.
 // ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
@@ -42,7 +43,23 @@ class _PanoEmbedState extends State<_PanoEmbed> {
       final resp = await http.get(Uri.parse(u));
       if (resp.statusCode != 200) throw 'HTTP ${resp.statusCode}';
       var doc = resp.body;
-      // Absolute base → the bundle's relative refs resolve to Storage.
+      // Storage serves pano.xml as text/plain, so the player's own XML load
+      // fails ("Error loading panorama XML"). Fetch it and inline it via
+      // readConfigString — tiles still resolve through the <base href> below.
+      final xml = await http.get(Uri.parse('${base}pano.xml'));
+      if (xml.statusCode == 200) {
+        final lit = jsonEncode(xml.body); // a valid JS string literal
+        for (final call in const [
+          'readConfigUrlAsync("pano.xml")',
+          "readConfigUrlAsync('pano.xml')",
+          'readConfigUrl("pano.xml")',
+          "readConfigUrl('pano.xml')",
+        ]) {
+          doc = doc.replaceAll(call, 'readConfigString($lit)');
+        }
+      }
+      // Absolute base → the bundle's relative refs (player.js, tiles) resolve
+      // to Storage.
       doc = doc.contains('<head>')
           ? doc.replaceFirst('<head>', '<head><base href="$base">')
           : '<!doctype html><head><base href="$base"></head>$doc';
