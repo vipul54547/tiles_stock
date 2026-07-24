@@ -10,16 +10,16 @@ import '../../services/supabase_data_service.dart';
 ///
 /// Optional FACETS narrow which designs appear: surface · size · tile type ·
 /// space (the mockup/360 room tag). Empty = the brand's whole range.
-class PortfolioListEditor extends StatefulWidget {
+class CatalogueListEditor extends StatefulWidget {
   final StockCatalog? existing;
   final List<Brand> brands;
-  const PortfolioListEditor({super.key, this.existing, required this.brands});
+  const CatalogueListEditor({super.key, this.existing, required this.brands});
 
   @override
-  State<PortfolioListEditor> createState() => _PortfolioListEditorState();
+  State<CatalogueListEditor> createState() => _CatalogueListEditorState();
 }
 
-class _PortfolioListEditorState extends State<PortfolioListEditor> {
+class _CatalogueListEditorState extends State<CatalogueListEditor> {
   static const _navy = Color(0xFF1B4F72);
   final _data = SupabaseDataService();
   final _name = TextEditingController();
@@ -127,7 +127,7 @@ class _PortfolioListEditorState extends State<PortfolioListEditor> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(_isEdit ? 'Edit Portfolio List' : 'New Portfolio List')),
+          title: Text(_isEdit ? 'Edit Catalogue List' : 'New Catalogue List')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
         children: [

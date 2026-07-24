@@ -7,7 +7,7 @@ import '../../config/app_config.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import 'list_banner_editor.dart';
-import 'portfolio_list_editor.dart';
+import 'catalogue_list_editor.dart';
 import '../../models/library_entry.dart';
 import '../../models/share_link.dart';
 import '../../models/choice_state.dart';
@@ -93,6 +93,13 @@ class _StockListsScreenState extends State<StockListsScreen> {
   final Map<String, TextEditingController> _daysCtrls = {}; // per-list days box
   bool _loading = true;
   bool _busy = false;
+  // Link List shows ONE kind at a time — Stock lists or Catalogue lists (media
+  // portfolio #21). The toggle also decides what "New list" creates.
+  String _kind = 'stock'; // 'stock' | 'catalogue'
+
+  List<StockCatalog> get _visibleLists => _lists
+      .where((c) => _kind == 'catalogue' ? c.isPortfolio : !c.isPortfolio)
+      .toList();
 
   @override
   void initState() {
@@ -224,62 +231,78 @@ class _StockListsScreenState extends State<StockListsScreen> {
     );
   }
 
-  // First fork (media portfolio #21): a commerce Stock List, or a stock-blind
-  // Portfolio List (media, one brand). Both become shareable /s/ links.
-  Future<String?> _pickListKind() => showDialog<String>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('What kind of list?'),
-          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
+  // Pick the one brand a Catalogue List is scoped to (media portfolio #15).
+  Future<String?> _pickCatalogueBrand() {
+    String? sel = _brands.where((b) => b.isDefault).isNotEmpty
+        ? _brands.firstWhere((b) => b.isDefault).id
+        : (_brands.isNotEmpty ? _brands.first.id : null);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) => AlertDialog(
+          title: const Text('Brand for this catalogue'),
+          content: Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              _typeCard(ctx, 'stock', _blue, Icons.inventory_2_outlined,
-                  'Stock List', 'Price & stock — what you have to sell'),
-              const SizedBox(height: 10),
-              _typeCard(ctx, 'portfolio', _orange,
-                  Icons.photo_library_outlined, 'Portfolio List',
-                  'Designs & media (rooms · 360 · video) under one brand — no stock'),
-              const SizedBox(height: 4),
+              for (final b in _brands)
+                ChoiceChip(
+                  label: Text(b.name),
+                  selected: sel == b.id,
+                  onSelected: (_) => setSt(() => sel = b.id),
+                ),
             ],
           ),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, sel),
+                child: const Text('Next')),
           ],
         ),
-      );
+      ),
+    );
+  }
 
   Future<void> _newList() async {
-    final kind = await _pickListKind();
-    if (kind == null || !mounted) return;
-    if (kind == 'portfolio') {
-      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
-          builder: (_) => PortfolioListEditor(brands: _brands)));
-      if (changed == true) _load();
-      return;
-    }
+    // The Stock|Catalogue toggle decides the kind; then Permanent | Temporary,
+    // exactly like a stock list. (media portfolio #21)
     final type = await _pickListType();
     if (type == null || !mounted) return;
+    final isCat = _kind == 'catalogue';
     if (type == 'permanent') {
       final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
-          builder: (_) => PermanentListEditorScreen(brands: _brands)));
+          builder: (_) => isCat
+              ? CatalogueListEditor(brands: _brands)
+              : PermanentListEditorScreen(brands: _brands)));
       if (changed == true) _load();
     } else {
+      final brandId = isCat ? await _pickCatalogueBrand() : null;
+      if (isCat && (brandId == null || !mounted)) return;
       final d = await editListDetails(context);
       if (d == null || !mounted) return;
       final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
           builder: (_) => StockListBuilderScreen(
-              createName: d.name, createDescription: d.description)));
+              createName: d.name,
+              createDescription: d.description,
+              catalogueBrandId: brandId)));
       if (changed == true) _load();
     }
   }
 
   Future<void> _open(StockCatalog list) async {
-    if (list.isPortfolio) {
+    if (list.isPortfolio && list.isPermanent) {
       final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
           builder: (_) =>
-              PortfolioListEditor(existing: list, brands: _brands)));
+              CatalogueListEditor(existing: list, brands: _brands)));
+      if (changed == true) _load();
+      return;
+    }
+    if (list.isPortfolio) {
+      // Temporary catalogue → edit its hand-picked designs.
+      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+          builder: (_) => StockListBuilderScreen(existing: list)));
       if (changed == true) _load();
       return;
     }
@@ -901,19 +924,51 @@ class _StockListsScreenState extends State<StockListsScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _lists.isEmpty
-              ? Center(
-                  child: Text('No stock lists yet. Tap "New list".',
-                      style: TextStyle(color: Colors.grey.shade600)))
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 90),
-                  children: [
-                    for (var i = 0; i < _lists.length; i++)
-                      _listCard(_lists[i], i)
-                  ],
+          : Column(
+              children: [
+                _kindToggle(),
+                Expanded(
+                  child: _visibleLists.isEmpty
+                      ? Center(
+                          child: Text(
+                              _kind == 'catalogue'
+                                  ? 'No catalogue lists yet. Tap "New list".'
+                                  : 'No stock lists yet. Tap "New list".',
+                              style: TextStyle(color: Colors.grey.shade600)))
+                      : ListView(
+                          padding: const EdgeInsets.fromLTRB(10, 10, 10, 90),
+                          children: [
+                            for (var i = 0; i < _visibleLists.length; i++)
+                              _listCard(_visibleLists[i], i)
+                          ],
+                        ),
                 ),
+              ],
+            ),
     );
   }
+
+  // Stock vs Catalogue — the two kinds of shareable list. (media portfolio #21)
+  Widget _kindToggle() => Padding(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
+        child: SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(
+                value: 'stock',
+                label: Text('Stock List'),
+                icon: Icon(Icons.inventory_2_outlined, size: 18)),
+            ButtonSegment(
+                value: 'catalogue',
+                label: Text('Catalogue List'),
+                icon: Icon(Icons.photo_library_outlined, size: 18)),
+          ],
+          selected: {_kind},
+          onSelectionChanged: (s) => setState(() {
+            _kind = s.first;
+            _openId = null;
+          }),
+        ),
+      );
 
   // Soft per-card backgrounds so adjacent lists read as separate blocks.
   static const _cardBgs = [
@@ -945,12 +1000,13 @@ class _StockListsScreenState extends State<StockListsScreen> {
     final typeColor = c.isPortfolio
         ? const Color(0xFF00897B)
         : (c.isPermanent ? _blue : _orange);
-    final typeLabel =
-        c.isPortfolio ? 'Portfolio' : (c.isPermanent ? 'Filtered' : 'Selected');
+    final typeLabel = c.isPortfolio
+        ? (c.isPermanent ? 'Catalogue' : 'Catalogue · Picked')
+        : (c.isPermanent ? 'Filtered' : 'Selected');
     _daysCtrls.putIfAbsent(c.id, () => TextEditingController(text: '60'));
-    final chips = (!c.isPortfolio && c.isPermanent)
-        ? _conditionChips(c)
-        : const <String>[];
+    final chips = c.isPortfolio
+        ? (c.isPermanent ? _catalogueChips(c) : const <String>[])
+        : (c.isPermanent ? _conditionChips(c) : const <String>[]);
     final perm = _permLink(c);
 
     return Card(
@@ -1211,6 +1267,23 @@ class _StockListsScreenState extends State<StockListsScreen> {
     return parts;
   }
 
+  // 🖼️ Catalogue (portfolio) condition chips: the one brand + its facets
+  // (surface · size · tile type · space). Stock-blind, so no quality/stock/box.
+  List<String> _catalogueChips(StockCatalog c) {
+    final parts = <String>[];
+    if (c.catalogueBrandId != null) {
+      final m = _brands.where((b) => b.id == c.catalogueBrandId);
+      if (m.isNotEmpty) parts.add(m.first.name);
+    }
+    parts.addAll(c.filterSurfaces);
+    parts.addAll(c.filterTileTypes);
+    parts.addAll(c.filterSizes.map((s) => s.replaceAll(' mm', '')));
+    parts.addAll(c.filterSpaces
+        .map((s) => s.isEmpty ? s : s[0].toUpperCase() + s.substring(1)));
+    if (parts.isEmpty) parts.add('All designs');
+    return parts;
+  }
+
   // The open row's links: permanent (copy + WhatsApp) + create timed (days box)
   // + live links with created date / days left (copy · WhatsApp · delete).
   Widget _linkPanel(StockCatalog c) {
@@ -1338,8 +1411,15 @@ class StockListBuilderScreen extends StatefulWidget {
   final StockCatalog? existing;
   final String? createName; // when creating: name/description from the dialog
   final String? createDescription;
+  /// When set (and creating), this builds a Temporary CATALOGUE list scoped to
+  /// this brand instead of a stock list. (media portfolio #21)
+  final String? catalogueBrandId;
   const StockListBuilderScreen(
-      {super.key, this.existing, this.createName, this.createDescription});
+      {super.key,
+      this.existing,
+      this.createName,
+      this.createDescription,
+      this.catalogueBrandId});
   @override
   State<StockListBuilderScreen> createState() => _StockListBuilderScreenState();
 }
@@ -1710,11 +1790,26 @@ class _StockListBuilderScreenState extends State<StockListBuilderScreen> {
     }
     setState(() => _saving = true);
     try {
-      final id = await _data.saveStockList(
-          id: widget.existing?.id,
-          name: name,
-          description: _descCtrl.text.trim(),
-          listType: 'temporary');
+      // Temporary CATALOGUE (kind='portfolio', one brand) vs temporary stock list.
+      final catBrand = widget.catalogueBrandId ??
+          (widget.existing?.isPortfolio == true
+              ? widget.existing!.catalogueBrandId
+              : null);
+      final String id;
+      if (catBrand != null) {
+        id = await _data.saveCatalogue(
+            id: widget.existing?.id,
+            name: name,
+            brandId: catBrand,
+            description: _descCtrl.text.trim(),
+            listType: 'temporary');
+      } else {
+        id = await _data.saveStockList(
+            id: widget.existing?.id,
+            name: name,
+            description: _descCtrl.text.trim(),
+            listType: 'temporary');
+      }
       await _data.setListDesigns(id, _selected.toList());
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
