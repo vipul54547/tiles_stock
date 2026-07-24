@@ -146,7 +146,7 @@ class _StockistShellState extends State<StockistShell> {
             // before loading, record the dispatch after. (Loading List)
             _item(Icons.playlist_add_check_outlined, 'Loading Lists',
                 '/stockist/loading-lists'),
-            _item(Icons.link, 'Stock Lists', '/stockist/lists'),
+            _item(Icons.link, 'Link List', '/stockist/lists'),
             // 🖼️ Media portfolio management (upload rooms/360/video, tag designs,
             // build catalogues). Windows-first, and only when the admin has
             // enabled at least one media type. (project_media_portfolio_ddpi #12/#20)

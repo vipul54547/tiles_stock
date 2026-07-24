@@ -7,6 +7,7 @@ import '../../config/app_config.dart';
 import '../../models/stock_catalog.dart';
 import '../../models/brand.dart';
 import 'list_banner_editor.dart';
+import 'portfolio_list_editor.dart';
 import '../../models/library_entry.dart';
 import '../../models/share_link.dart';
 import '../../models/choice_state.dart';
@@ -223,7 +224,41 @@ class _StockListsScreenState extends State<StockListsScreen> {
     );
   }
 
+  // First fork (media portfolio #21): a commerce Stock List, or a stock-blind
+  // Portfolio List (media, one brand). Both become shareable /s/ links.
+  Future<String?> _pickListKind() => showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('What kind of list?'),
+          contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _typeCard(ctx, 'stock', _blue, Icons.inventory_2_outlined,
+                  'Stock List', 'Price & stock — what you have to sell'),
+              const SizedBox(height: 10),
+              _typeCard(ctx, 'portfolio', _orange,
+                  Icons.photo_library_outlined, 'Portfolio List',
+                  'Designs & media (rooms · 360 · video) under one brand — no stock'),
+              const SizedBox(height: 4),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ],
+        ),
+      );
+
   Future<void> _newList() async {
+    final kind = await _pickListKind();
+    if (kind == null || !mounted) return;
+    if (kind == 'portfolio') {
+      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+          builder: (_) => PortfolioListEditor(brands: _brands)));
+      if (changed == true) _load();
+      return;
+    }
     final type = await _pickListType();
     if (type == null || !mounted) return;
     if (type == 'permanent') {
@@ -241,6 +276,13 @@ class _StockListsScreenState extends State<StockListsScreen> {
   }
 
   Future<void> _open(StockCatalog list) async {
+    if (list.isPortfolio) {
+      final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+          builder: (_) =>
+              PortfolioListEditor(existing: list, brands: _brands)));
+      if (changed == true) _load();
+      return;
+    }
     if (list.isPermanent) {
       final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
           builder: (_) =>
@@ -832,7 +874,7 @@ class _StockListsScreenState extends State<StockListsScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: const Text('Stock lists'),
+        title: const Text('Link List'),
         backgroundColor: _navy,
         foregroundColor: Colors.white,
         actions: [
@@ -898,10 +940,17 @@ class _StockListsScreenState extends State<StockListsScreen> {
   // a time. (stock-list card redesign)
   Widget _listCard(StockCatalog c, int index) {
     final open = _openId == c.id;
-    final typeColor = c.isPermanent ? _blue : _orange;
-    final typeLabel = c.isPermanent ? 'Filtered' : 'Selected';
+    // 🖼️ A portfolio catalogue (media, one brand) is a distinct kind — its own
+    // badge, and it carries no stock-condition chips. (media portfolio #21)
+    final typeColor = c.isPortfolio
+        ? const Color(0xFF00897B)
+        : (c.isPermanent ? _blue : _orange);
+    final typeLabel =
+        c.isPortfolio ? 'Portfolio' : (c.isPermanent ? 'Filtered' : 'Selected');
     _daysCtrls.putIfAbsent(c.id, () => TextEditingController(text: '60'));
-    final chips = c.isPermanent ? _conditionChips(c) : const <String>[];
+    final chips = (!c.isPortfolio && c.isPermanent)
+        ? _conditionChips(c)
+        : const <String>[];
     final perm = _permLink(c);
 
     return Card(

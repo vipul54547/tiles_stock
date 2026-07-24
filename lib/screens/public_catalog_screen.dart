@@ -53,6 +53,9 @@ class _State extends State<PublicCatalogScreen> {
   // 🖼️ Stock-blind media portfolio (public_portfolio). Empty = no media → the
   // Portfolio entry is hidden. (project_media_portfolio_ddpi #14)
   List<Map<String, dynamic>> _portfolio = [];
+  // True when THIS link is a portfolio catalogue → cards render stock-blind
+  // (no price/stock/quality/selection). (media portfolio #10)
+  bool _portfolioCatalog = false;
 
   // Selection: designId -> box quantity wanted.
   final Map<String, int> _selected = {};
@@ -128,6 +131,8 @@ class _State extends State<PublicCatalogScreen> {
       _portfolio = ((portfolio['assets'] as List?) ?? const [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
+      final cat = data['catalog'];
+      _portfolioCatalog = cat is Map && cat['kind'] == 'portfolio';
       _loading = false;
     });
   }
@@ -1618,8 +1623,11 @@ class _State extends State<PublicCatalogScreen> {
     final selected = (premId != null && _selected.containsKey(premId)) ||
         (stdId != null && _selected.containsKey(stdId));
     final qty = _selected[id] ?? 0;
-    void handleTap() =>
-        hasBoth ? _showQualityChoicePublic(d) : _toggle(id);
+    // A portfolio card is stock-blind — tapping it never selects for order.
+    void handleTap() {
+      if (_portfolioCatalog) return;
+      hasBoth ? _showQualityChoicePublic(d) : _toggle(id);
+    }
     final images = (d['images'] as List?) ?? const [];
     final img = images.isNotEmpty ? images.first.toString() : '';
     // 🖼️ Rooms/360/video that show on this design → a "View" button (media #14).
@@ -1694,25 +1702,28 @@ class _State extends State<PublicCatalogScreen> {
                     ),
                   ),
                 ),
-                Positioned(
-                  top: 6,
-                  right: 6,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? _brand
-                          : Colors.black.withValues(alpha: 0.35),
-                      shape: BoxShape.circle,
+                // Selection "+" is stock-only — a portfolio catalogue is
+                // stock-blind, so there is nothing to order.
+                if (!_portfolioCatalog)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? _brand
+                            : Colors.black.withValues(alpha: 0.35),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                          selected
+                              ? Icons.check_rounded
+                              : Icons.add_rounded,
+                          size: 16,
+                          color: Colors.white),
                     ),
-                    child: Icon(
-                        selected
-                            ? Icons.check_rounded
-                            : Icons.add_rounded,
-                        size: 16,
-                        color: Colors.white),
                   ),
-                ),
                 // 🖼️ "View" — shown only when this design has media. Opens the
                 // media viewer on just this design's rooms/360/video.
                 if (media.isNotEmpty)
@@ -1761,24 +1772,28 @@ class _State extends State<PublicCatalogScreen> {
                   Text(
                     [
                       (d['size'] ?? '').toString().replaceAll(' mm', ''),
-                      if (hasBoth)
-                        'Premium & Standard'
-                      else
-                        (d['quality'] ?? '').toString(),
+                      // Quality is a stock concept — omit it on a portfolio card.
+                      if (!_portfolioCatalog)
+                        if (hasBoth)
+                          'Premium & Standard'
+                        else
+                          (d['quality'] ?? '').toString(),
                     ].where((x) => x.isNotEmpty).join(' · '),
                     style: const TextStyle(fontSize: 11, color: Colors.grey),
                   ),
                   const SizedBox(height: 6),
-                  if (hasBoth)
-                    _mergedStockOrSel(d, premId, stdId, premBoxes, stdBoxes)
-                  else if (selected)
-                    _qtyStepper(id, qty)
-                  else
-                    Text('${d['boxes']} boxes in stock',
-                        style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF2E7D32))),
+                  // Price/stock/selection are hidden on a portfolio (stock-blind).
+                  if (!_portfolioCatalog)
+                    if (hasBoth)
+                      _mergedStockOrSel(d, premId, stdId, premBoxes, stdBoxes)
+                    else if (selected)
+                      _qtyStepper(id, qty)
+                    else
+                      Text('${d['boxes']} boxes in stock',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF2E7D32))),
                   DnaTagExpander(
                     tagsByAttribute: _dnaTagsFor(d),
                     isExpanded: _expandedDnaDesignId == id,
